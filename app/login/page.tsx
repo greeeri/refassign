@@ -13,14 +13,22 @@ export default function LoginPage() {
     setLoading(true)
     setMessage('')
 
-    const supabase = createClient()
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: `${window.location.origin}/` }
-    })
+    try {
+      const supabase = createClient()
+      const result = await Promise.race([
+        supabase.auth.signInWithOtp({
+          email,
+          options: { emailRedirectTo: `${window.location.origin}/` }
+        }),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Supabase did not respond within 12 seconds. Check the Supabase URL Configuration and Vercel environment variables.')), 12000))
+      ])
 
-    setLoading(false)
-    setMessage(error ? error.message : 'Check your email for your RefAssign sign-in link.')
+      setMessage(result.error ? result.error.message : 'Check your email for your RefAssign sign-in link.')
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Unable to send the sign-in link. Please try again.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return <main className="loginPage">
