@@ -12,7 +12,8 @@ create table sport_positions (
   id uuid primary key default gen_random_uuid(),
   sport_id uuid references sports(id) on delete cascade not null,
   name text not null,
-  sort_order int not null default 0
+  sort_order int not null default 0,
+  required boolean not null default true
 );
 
 create table organizations (
@@ -97,14 +98,16 @@ insert into sports(name,default_officials) values
  ('Soccer',3),('Football',5),('Basketball',2),('Baseball',2),('Softball',2),('Volleyball',2),('Wrestling',1),('Lacrosse',3),('Hockey',3),('Tennis',1)
 on conflict do nothing;
 
-insert into sport_positions(sport_id,name,sort_order)
-select id,'Center Referee',1 from sports where name='Soccer';
-insert into sport_positions(sport_id,name,sort_order)
-select id,'Assistant Referee 1',2 from sports where name='Soccer';
-insert into sport_positions(sport_id,name,sort_order)
-select id,'Assistant Referee 2',3 from sports where name='Soccer';
-insert into sport_positions(sport_id,name,sort_order)
-select id,'4th Official',4 from sports where name='Soccer';
+insert into sport_positions(sport_id,name,sort_order,required)
+select id,'Center Referee',1,true from sports where name='Soccer';
+insert into sport_positions(sport_id,name,sort_order,required)
+select id,'Assistant Referee 1',2,true from sports where name='Soccer';
+insert into sport_positions(sport_id,name,sort_order,required)
+select id,'Assistant Referee 2',3,true from sports where name='Soccer';
+insert into sport_positions(sport_id,name,sort_order,required)
+select id,'4th Official',4,false from sports where name='Soccer';
+insert into sport_positions(sport_id,name,sort_order,required)
+select id,'Mentor',5,false from sports where name='Soccer';
 
 alter table profiles enable row level security;
 alter table availability enable row level security;
