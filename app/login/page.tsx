@@ -18,7 +18,7 @@ export default function LoginPage() {
       const result = await Promise.race([
         supabase.auth.signInWithOtp({
           email,
-          options: { emailRedirectTo: `${window.location.origin}/` }
+          options: { emailRedirectTo: `${window.location.origin}/auth/callback` }
         }),
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Supabase did not respond within 12 seconds. Check the Supabase URL Configuration and Vercel environment variables.')), 12000))
       ])
