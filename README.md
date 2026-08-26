@@ -5,9 +5,10 @@ Production foundation for a multi-sport officials scheduling platform, designed 
 ## Current build
 - Responsive admin dashboard
 - Games, officials, assignments, calendar and sports/rules views
-- Soccer-specific CR / AR1 / AR2 / 4th official model
+- Soccer-specific CR / AR1 / AR2 / optional 4th Official / optional Mentor model
 - Multi-sport data model
 - Supabase schema for authentication, profiles, organizations, teams, venues, games, availability and assignments
+- Supabase magic-link login and initial administrator role setup
 - Vercel-ready Next.js project
 
 ## Deploy on Vercel
@@ -15,20 +16,18 @@ Production foundation for a multi-sport officials scheduling platform, designed 
 2. Framework preset: Next.js.
 3. Deploy.
 
-The current UI uses sample data so the first deployment works before Supabase is connected.
-
 ## Connect Supabase
 1. Create/open your Supabase project.
 2. Open SQL Editor and run `supabase/schema.sql`.
-3. In Vercel project settings, add:
+3. Run migrations in `supabase/migrations`.
+4. In Vercel project settings, add:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-4. Redeploy.
+5. Trigger a fresh production deployment so the public variables are included in the Next.js build.
 
 Do not commit private service-role keys or database passwords to GitHub.
 
 ## Next implementation phase
-- Supabase authentication and role-based portals
 - Live CRUD for games and officials
 - CSV schedule import
 - Official availability
@@ -36,3 +35,5 @@ Do not commit private service-role keys or database passwords to GitHub.
 - Conflict detection
 - Smart assignment scoring
 - Email notifications
+
+Deployment refresh marker: 2026-08-26
