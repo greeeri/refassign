@@ -38,12 +38,12 @@ $$;
 
 create table if not exists public.official_rankings (
   official_id uuid primary key references public.officials(id) on delete cascade,
-  rank numeric(3,1) not null default 10.0 check (rank >= 1.0 and rank <= 10.0),
+  rank numeric(3,1) not null default 1.0 check (rank >= 1.0 and rank <= 10.0),
   updated_at timestamptz not null default now()
 );
 
 insert into public.official_rankings (official_id, rank)
-select id, 10.0 from public.officials
+select id, 1.0 from public.officials
 on conflict (official_id) do nothing;
 
 create or replace function public.create_default_official_rank()
@@ -54,7 +54,7 @@ set search_path = public
 as $$
 begin
   insert into public.official_rankings (official_id, rank)
-  values (new.id, 10.0)
+  values (new.id, 1.0)
   on conflict (official_id) do nothing;
   return new;
 end;
