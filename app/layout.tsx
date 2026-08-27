@@ -6,5 +6,5 @@ export const metadata = {
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return <html lang="en"><body>{children}</body></html>
+  return <html lang="en"><body>{children}<footer className="globalCopyright">© 2026 Ref Pro Group, LLC. All rights reserved.</footer></body></html>
 }
