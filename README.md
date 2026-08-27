@@ -36,4 +36,4 @@ Do not commit private service-role keys or database passwords to GitHub.
 - Smart assignment scoring
 - Email notifications
 
-Deployment refresh marker: 2026-08-26-publishable-key-confirmed
+Deployment refresh marker: 2026-08-27-locations-separated
