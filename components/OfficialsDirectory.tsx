@@ -129,6 +129,14 @@ export default function OfficialsDirectory() {
     setForm(current => ({ ...current, [field]: current[field].includes(id) ? current[field].filter(x => x !== id) : [...current[field], id] }))
   }
 
+  function toggleAllChoices(field: 'league_ids' | 'level_ids', choices: Choice[]) {
+    setForm(current => {
+      const allIds = choices.map(choice => choice.id)
+      const allSelected = allIds.length > 0 && allIds.every(id => current[field].includes(id))
+      return { ...current, [field]: allSelected ? [] : allIds }
+    })
+  }
+
   function startAdd() {
     setEditingId(null)
     setForm(newForm())
@@ -235,6 +243,9 @@ export default function OfficialsDirectory() {
     return <label>{label}<input type="number" min="1" max="10" step="0.1" required value={form[key]} onChange={e => setForm(current => ({ ...current, [key]: e.target.value }))}/></label>
   }
 
+  const allLeaguesSelected = leagues.length > 0 && leagues.every(x => form.league_ids.includes(x.id))
+  const allLevelsSelected = levels.length > 0 && levels.every(x => form.level_ids.includes(x.id))
+
   return <>
     {canManage && <div className="actionbar"><div><h2>Officials</h2><p>Add individually or manage the entire roster with CSV.</p></div><button className="secondary" onClick={() => { setShowRoster(!showRoster); setShowForm(false) }}>{showRoster ? 'Close Roster Manager' : 'Roster Import / Export'}</button></div>}
     {showRoster && <OfficialsRosterManager/>}
@@ -252,7 +263,7 @@ export default function OfficialsDirectory() {
         <label>Home ZIP<input value={form.home_zip} onChange={e => setForm(current => ({...current, home_zip:e.target.value}))}/></label>
         <label>Certification<input value={form.certification_level} onChange={e => setForm(current => ({...current, certification_level:e.target.value}))}/></label>
         <fieldset><legend>Sports</legend><div className="sportChecks">{SPORTS.map(s => <label key={s}><input type="checkbox" checked={form.sports.includes(s)} onChange={() => toggleSport(s)}/>{s}</label>)}</div></fieldset>
-        {canManage && <>{rankInput('ref_rank','REF Rank')}{rankInput('ar1_rank','AR1 Rank')}{rankInput('ar2_rank','AR2 Rank')}{rankInput('fourth_rank','4th Rank')}{rankInput('mentor_rank','Mentor Rank')}<fieldset><legend>Eligible Leagues</legend><div className="sportChecks">{leagues.map(x => <label key={x.id}><input type="checkbox" checked={form.league_ids.includes(x.id)} onChange={() => toggleChoice('league_ids',x.id)}/>{x.name}</label>)}</div></fieldset><fieldset><legend>Eligible Levels</legend><div className="sportChecks">{levels.map(x => <label key={x.id}><input type="checkbox" checked={form.level_ids.includes(x.id)} onChange={() => toggleChoice('level_ids',x.id)}/>{x.name}</label>)}</div></fieldset></>}
+        {canManage && <>{rankInput('ref_rank','REF Rank')}{rankInput('ar1_rank','AR1 Rank')}{rankInput('ar2_rank','AR2 Rank')}{rankInput('fourth_rank','4th Rank')}{rankInput('mentor_rank','Mentor Rank')}<fieldset><legend>Eligible Leagues</legend><div className="sportChecks"><label><input type="checkbox" checked={allLeaguesSelected} onChange={() => toggleAllChoices('league_ids', leagues)}/><b>{allLeaguesSelected ? 'Clear All Leagues' : 'Select All Leagues'}</b></label>{leagues.map(x => <label key={x.id}><input type="checkbox" checked={form.league_ids.includes(x.id)} onChange={() => toggleChoice('league_ids',x.id)}/>{x.name}</label>)}</div></fieldset><fieldset><legend>Eligible Levels</legend><div className="sportChecks"><label><input type="checkbox" checked={allLevelsSelected} onChange={() => toggleAllChoices('level_ids', levels)}/><b>{allLevelsSelected ? 'Clear All Levels' : 'Select All Levels'}</b></label>{levels.map(x => <label key={x.id}><input type="checkbox" checked={form.level_ids.includes(x.id)} onChange={() => toggleChoice('level_ids',x.id)}/>{x.name}</label>)}</div></fieldset></>}
         <div className="formActions"><button type="button" className="secondary" onClick={() => setShowForm(false)}>Cancel</button><button className="primary" disabled={saving}>{saving ? 'Saving…' : editingId ? 'Save Changes' : 'Save Official'}</button></div>
       </form>}
       {error && <div className="errorBox">{error}</div>}
