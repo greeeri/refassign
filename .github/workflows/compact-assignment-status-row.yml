@@ -1,0 +1,36 @@
+name: Compact Assignment Status Row
+
+on:
+  push:
+    paths:
+      - '.github/workflows/compact-assignment-status-row.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Update compact assignment status row
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path=Path('components/AssignmentsManagerV2.tsx')
+          text=path.read_text()
+          old="""{filteredGames.length?filteredGames.map(g=>{const assigned=Math.min(assignments.filter(a=>a.game_id===g.id&&a.status!=='declined').length,g.officials_needed);const open=Math.max(0,g.officials_needed-assigned);const d=new Date(g.starts_at);return <button key={g.id} type=\"button\" onClick={()=>{setSelected(g.id);setOverrideOfficial('')}} style={{width:'100%',display:'grid',gridTemplateColumns:'minmax(240px,1fr) auto auto',gap:12,alignItems:'center',textAlign:'left',padding:'11px 12px',border:0,borderBottom:'1px solid #e2e8f0',background:selected===g.id?'#eff6ff':'#fff',cursor:'pointer'}}><span><b>{g.game_number} — {g.home?.name||'TBD'} vs {g.away?.name||'TBD'}</b><small style={{display:'block',color:'#64748b',marginTop:2}}>{d.toLocaleDateString()} {d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})} • {g.location?.name||'TBD'}</small></span><span className=\"badge green\">{assigned} Assigned</span><span className={open?'badge red':'badge green'}>{open} Unassigned</span></button>}):<div style={{padding:14,color:'#64748b'}}>No games in this selection.</div>}"""
+          new="""{filteredGames.length?filteredGames.map(g=>{const d=new Date(g.starts_at),gp=positions.filter(p=>p.sport_id===g.sport_id).sort((a,b)=>a.sort_order-b.sort_order).slice(0,Math.max(0,g.officials_needed));return <button key={g.id} type=\"button\" onClick={()=>{setSelected(g.id);setOverrideOfficial('')}} style={{width:'100%',display:'grid',gridTemplateColumns:'minmax(300px,1fr) minmax(390px,auto)',gap:12,alignItems:'center',textAlign:'left',padding:'9px 12px',border:0,borderBottom:'1px solid #e2e8f0',background:selected===g.id?'#eff6ff':'#fff',cursor:'pointer'}}><span style={{minWidth:0}}><span style={{fontSize:16,fontWeight:800,lineHeight:1.15}}>{g.home?.name||'TBD'} vs {g.away?.name||'TBD'} <small style={{fontSize:11,color:'#94a3b8',fontWeight:700,whiteSpace:'nowrap'}}>• {g.game_number}</small></span><small style={{display:'block',color:'#64748b',marginTop:3,fontSize:12,lineHeight:1.15}}>{d.toLocaleDateString()} {d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})} • {g.location?.name||'TBD'}</small></span><span style={{display:'flex',justifyContent:'flex-end',alignItems:'center',gap:'5px 12px',flexWrap:'wrap',fontSize:11,lineHeight:1.1}}>{gp.map(pos=>{const a=assignments.find(x=>x.game_id===g.id&&x.position_id===pos.id&&x.status!=='declined'),o=a?officials.find(x=>x.id===a.official_id):undefined,color=!a?'#dc2626':!a.published_at?'#2563eb':(['accepted','confirmed'].includes(a.status)?'#16a34a':'#ca8a04');return <span key={pos.id} style={{whiteSpace:'nowrap'}}><span style={{fontWeight:800,color:a?'#64748b':'#dc2626'}}>{pos.name}</span>{o&&<span style={{fontWeight:800,color}}> {o.first_name} {o.last_name}</span>}</span>})}</span></button>}):<div style={{padding:14,color:'#64748b'}}>No games in this selection.</div>}"""
+          if old not in text:
+              raise SystemExit('Target assignment status row not found; no change made.')
+          path.write_text(text.replace(old,new,1))
+          PY
+      - name: Commit update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add components/AssignmentsManagerV2.tsx
+          git commit -m "Compact assignment status game rows"
+          git push
