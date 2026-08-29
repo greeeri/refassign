@@ -1,7 +1,7 @@
 'use client'
 import {useEffect,useMemo,useState} from 'react'
 import {createClient} from '../lib/supabase/client'
-import GamesManager from '../components/GamesManagerV3'
+import GamesManager from '../components/SortableGamesManager'
 import GameSetup from '../components/GameSetup'
 import AssignmentsManager from '../components/AssignmentsManagerV2'
 import OfficialsDirectory from '../components/OfficialsDirectory'
