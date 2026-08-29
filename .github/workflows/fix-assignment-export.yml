@@ -1,0 +1,30 @@
+name: Fix assignment export
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/fix-assignment-export.yml']
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update assignment export
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('components/AssignmentsManagerV2.tsx')
+          s=p.read_text()
+          start=s.index("async function exportAssignments()")
+          end=s.index("\nconst filters:", start)
+          new="""async function exportAssignments(){const XLSX=await import('xlsx');const positionNames:string[]=[];for(const g of filteredGames){const gp=positions.filter(p=>p.sport_id===g.sport_id).sort((a,b)=>a.sort_order-b.sort_order).slice(0,Math.max(0,g.officials_needed));for(const pos of gp)if(!positionNames.includes(pos.name))positionNames.push(pos.name)}const data=filteredGames.map(g=>{const d=new Date(g.starts_at),row:Record<string,string|number>={'Game Number':g.game_number,'Date':d.toLocaleDateString(),'Time':d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}),'Sport':g.sports?.name||'','League':g.leagues?.name||'','Home Team':g.home?.name||'TBD','Away Team':g.away?.name||'TBD','Location':g.location?.name||'TBD','Power':Number(gamePower(g).toFixed(1))};for(const name of positionNames){row[`${name} Official`]='';row[`${name} Email`]='';row[`${name} Phone`]='';row[`${name} Status`]='';row[`${name} Published`]='';row[`${name} Accept By`]=''}const gp=positions.filter(p=>p.sport_id===g.sport_id).sort((a,b)=>a.sort_order-b.sort_order).slice(0,Math.max(0,g.officials_needed));for(const pos of gp){const a=assignments.find(x=>x.game_id===g.id&&x.position_id===pos.id&&x.status!=='declined'),o=a?officials.find(x=>x.id===a.official_id):undefined;row[`${pos.name} Official`]=o?`${o.first_name} ${o.last_name}`:'UNASSIGNED';row[`${pos.name} Email`]=o?.email||'';row[`${pos.name} Phone`]=o?.phone||'';row[`${pos.name} Status`]=a?assignmentStatus(a).label:'Unassigned';row[`${pos.name} Published`]=a?.published_at?'Yes':'No';row[`${pos.name} Accept By`]=a?.accept_by?new Date(a.accept_by).toLocaleString():''}return row});const ws=XLSX.utils.json_to_sheet(data),wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Assignments');XLSX.writeFile(wb,'refassign-game-assignments.xlsx')}"""
+          p.write_text(s[:start]+new+s[end:])
+          PY
+      - name: Commit change
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add components/AssignmentsManagerV2.tsx
+          git commit -m "Export one row per game with officials in columns"
+          git push
