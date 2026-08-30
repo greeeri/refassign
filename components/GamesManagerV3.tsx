@@ -73,8 +73,22 @@ const req = [
 ];
 const pad = (n: number) => String(n).padStart(2, "0");
 const norm = (s: string) => s.trim().toLowerCase();
-function dateVal(v: string) {
-  v = String(v || "").trim();
+function excelDateParts(value: number) {
+  if (!Number.isFinite(value)) return null;
+  const wholeDays = Math.floor(value);
+  const date = new Date(Date.UTC(1899, 11, 30) + wholeDays * 86_400_000);
+  return {
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1,
+    day: date.getUTCDate(),
+  };
+}
+function dateVal(value: unknown) {
+  if (typeof value === "number") {
+    const parts = excelDateParts(value);
+    return parts ? `${parts.year}-${pad(parts.month)}-${pad(parts.day)}` : null;
+  }
+  let v = String(value || "").trim();
   let m = v.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2}|\d{4})$/);
   if (m) {
     let y = +m[3];
@@ -118,8 +132,13 @@ function dateVal(v: string) {
   }
   return null;
 }
-function timeVal(v: string) {
-  v = String(v || "")
+function timeVal(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const fraction = ((value % 1) + 1) % 1;
+    const totalMinutes = Math.round(fraction * 24 * 60) % (24 * 60);
+    return `${pad(Math.floor(totalMinutes / 60))}:${pad(totalMinutes % 60)}`;
+  }
+  let v = String(value || "")
     .trim()
     .replace(
       /\s+(?:CST|CDT|EST|EDT|MST|MDT|PST|PDT)(?:\s+(?:CST|CDT|EST|EDT|MST|MDT|PST|PDT))*\s*$/i,
@@ -318,21 +337,22 @@ export default function GamesManagerV3() {
     XLSX.utils.book_append_sheet(wb, ws, "Games");
     XLSX.writeFile(wb, "refassign-games.xlsx");
   }
-  function validate(raw: string[][]) {
+  function validate(raw: unknown[][]) {
     const h = raw[0].map((x) => norm(String(x)).replace(/\s+/g, "_"));
     const missing = req.filter((x) => !h.includes(x));
     if (missing.length)
       throw new Error(`Missing columns: ${missing.join(", ")}`);
     return raw.slice(1).map((r, i) => {
-      const get = (n: string) => String(r[h.indexOf(n)] ?? "").trim(),
+      const cell = (n: string) => r[h.indexOf(n)] ?? "",
+        get = (n: string) => String(cell(n)).trim(),
         sport = get("sport"),
         league = get("league"),
         level = get("level"),
         home = get("home_team"),
         away = get("away_team"),
         location = get("location"),
-        date = dateVal(get("date")),
-        time = timeVal(get("time")),
+        date = dateVal(cell("date")),
+        time = timeVal(cell("time")),
         duration = Number(get("duration_minutes") || 110),
         officials = Number(get("officials_needed")),
         issues: string[] = [];
@@ -380,8 +400,8 @@ export default function GamesManagerV3() {
         raw = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {
           header: 1,
           defval: "",
-          raw: false,
-        }) as string[][];
+          raw: true,
+        }) as unknown[][];
       setRows(validate(raw));
     } catch (x) {
       setError(x instanceof Error ? x.message : "Unable to read file");
