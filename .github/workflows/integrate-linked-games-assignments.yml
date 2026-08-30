@@ -1,0 +1,83 @@
+name: Integrate linked games into Assignments
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/integrate-linked-games-assignments.yml'
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Integrate linked games UI
+        run: |
+          python3 - <<'PY'
+          p='components/AssignmentsManagerV2.tsx';s=open(p).read()
+          # Add linked group types.
+          s=s.replace("type Range='all'|'today'|'tomorrow'|'thisWeek'|'nextWeek'|'custom'", "type LinkGroup={id:string;name:string;created_at:string};type LinkMember={group_id:string;game_id:string;sort_order:number};type Range='all'|'today'|'tomorrow'|'thisWeek'|'nextWeek'|'custom'",1)
+          # Add state.
+          target="[gameSortDir,setGameSortDir]=useState<'asc'|'desc'>('asc')"
+          repl=target+",[linkGroups,setLinkGroups]=useState<LinkGroup[]>([]),[linkMembers,setLinkMembers]=useState<LinkMember[]>([]),[linkSelected,setLinkSelected]=useState<string[]>([]),[linking,setLinking]=useState(false)"
+          if '[linkGroups,setLinkGroups]' not in s:
+            if target not in s: raise SystemExit('sort state target missing')
+            s=s.replace(target,repl,1)
+          # Extend load Promise and error/setters using stable fragments.
+          old="const [g,o,p,a,r,pr,pw,le,ve,bl]=await Promise.all(["
+          new="const [g,o,p,a,r,pr,pw,le,ve,bl,lg,lm]=await Promise.all(["
+          if old in s:
+            s=s.replace(old,new,1)
+            needle="supabase.from('official_availability_blocks').select('official_id,block_type,start_date,end_date,starts_at,ends_at,location_id,team_id')])"
+            replacement="supabase.from('official_availability_blocks').select('official_id,block_type,start_date,end_date,starts_at,ends_at,location_id,team_id'),supabase.from('game_link_groups').select('id,name,created_at').order('created_at',{ascending:false}),supabase.from('game_link_members').select('group_id,game_id,sort_order').order('sort_order')])"
+            if needle not in s: raise SystemExit('promise tail missing')
+            s=s.replace(needle,replacement,1)
+            s=s.replace("const err=g.error||o.error||p.error||a.error||r.error||pr.error||pw.error||le.error||ve.error||bl.error;", "const err=g.error||o.error||p.error||a.error||r.error||pr.error||pw.error||le.error||ve.error||bl.error||lg.error||lm.error;",1)
+            setter="setBlocks((bl.data||[]) as Block[]);"
+            s=s.replace(setter,setter+"setLinkGroups((lg.data||[]) as LinkGroup[]);setLinkMembers((lm.data||[]) as LinkMember[]);",1)
+          # Group linked games adjacent while preserving selected sort for groups and singles.
+          oldsort="const filteredGames=[...baseFilteredGames].sort((a,b)=>{let n=0;if(gameSort==='location')n=(a.location?.name||'').localeCompare(b.location?.name||'');else if(gameSort==='time')n=new Date(a.starts_at).getTime()-new Date(b.starts_at).getTime();else n=gamePower(b)-gamePower(a)||new Date(a.starts_at).getTime()-new Date(b.starts_at).getTime();return gameSortDir==='desc'?-n:n});"
+          newsort="const gameCmp=(a:Game,b:Game)=>{let n=0;if(gameSort==='location')n=(a.location?.name||'').localeCompare(b.location?.name||'');else if(gameSort==='time')n=new Date(a.starts_at).getTime()-new Date(b.starts_at).getTime();else n=gamePower(b)-gamePower(a)||new Date(a.starts_at).getTime()-new Date(b.starts_at).getTime();return gameSortDir==='desc'?-n:n};const linkGroupByGame=new Map(linkMembers.map(m=>[m.game_id,m.group_id]));const linkOrder=new Map(linkMembers.map(m=>[m.game_id,m.sort_order]));const grouped=new Map<string,Game[]>(),singles:Game[]=[];for(const g of baseFilteredGames){const gid=linkGroupByGame.get(g.id);if(gid){const arr=grouped.get(gid)||[];arr.push(g);grouped.set(gid,arr)}else singles.push(g)}const units:[string,Game[]][]=[...Array.from(grouped.entries()),...singles.map(g=>['single:'+g.id,[g]] as [string,Game[]])];units.sort((a,b)=>gameCmp(a[1][0],b[1][0]));const filteredGames=units.flatMap(([key,arr])=>key.startsWith('single:')?arr:arr.sort((a,b)=>(linkOrder.get(a.id)||0)-(linkOrder.get(b.id)||0)));"
+          if oldsort in s:s=s.replace(oldsort,newsort,1)
+          # Add link actions before chooseRange.
+          marker="function chooseRange(r:Range)"
+          actions="async function linkGames(){if(linkSelected.length<2)return;setLinking(true);setError('');setNotice('');const existingGroups=[...new Set(linkSelected.map(id=>linkGroupByGame.get(id)).filter(Boolean))] as string[];if(existingGroups.length){setError('Unlink the selected game from its current linked group before creating a new group.');setLinking(false);return}const {data:user}=await supabase.auth.getUser();const {data:grp,error:ge}=await supabase.from('game_link_groups').insert({name:`Linked Games ${new Date().toLocaleDateString()}`,created_by:user.user?.id||null}).select('id').single();if(ge||!grp){setError(ge?.message||'Unable to create linked games.');setLinking(false);return}const rows=linkSelected.map((game_id,i)=>({group_id:grp.id,game_id,sort_order:i}));const {error:me}=await supabase.from('game_link_members').insert(rows);if(me){await supabase.from('game_link_groups').delete().eq('id',grp.id);setError(me.message)}else{setNotice(`${rows.length} games linked.`);setLinkSelected([])}await load();setLinking(false)}async function unlinkGame(gameId:string){const gid=linkGroupByGame.get(gameId);if(!gid)return;setLinking(true);const {error:e}=await supabase.from('game_link_members').delete().eq('group_id',gid).eq('game_id',gameId);if(e)setError(e.message);else{const {count}=await supabase.from('game_link_members').select('*',{count:'exact',head:true}).eq('group_id',gid);if((count||0)<2)await supabase.from('game_link_groups').delete().eq('id',gid);setNotice('Game unlinked.')}await load();setLinking(false)}function toggleLinkSelection(id:string){setLinkSelected(v=>v.includes(id)?v.filter(x=>x!==id):[...v,id])}"
+          if 'async function linkGames()' not in s:
+            if marker not in s: raise SystemExit('action marker missing')
+            s=s.replace(marker,actions+marker,1)
+          # Insert top Link button immediately before sortable headers.
+          hdr="<div style={{display:'grid',gridTemplateColumns:'minmax(150px,1fr) 120px',gap:8,padding:'6px 10px',fontSize:11,fontWeight:800,color:'#64748b',borderBottom:'1px solid #e2e8f0'}}>"
+          top="<div style={{display:'flex',alignItems:'center',gap:10,margin:'8px 0'}}><button className=\"primary\" disabled={linking||linkSelected.length<2} onClick={()=>void linkGames()}>🔗 Link{linkSelected.length?` (${linkSelected.length})`:''}</button>{linkSelected.length===1&&<small style={{color:'#64748b'}}>Select at least 2 games to link.</small>}</div>"
+          if 'linkSelected.length<2' in s and 'Select at least 2 games to link.' not in s:
+            if hdr not in s: raise SystemExit('header target missing')
+            s=s.replace(hdr,top+hdr,1)
+          # Modify each filteredGames row at the start of map output using common patterns. Add checkbox + linked group visual before existing content.
+          # Find map expression and first element following arrow.
+          mapmark="{filteredGames.map(g=>"
+          i=s.find(mapmark)
+          if i<0: raise SystemExit('map missing')
+          # Replace first opening element after arrow with fragment prefix by locating '<' after marker.
+          j=i+len(mapmark);k=s.find('<',j)
+          if k<0: raise SystemExit('row element missing')
+          prefix="<div key={'linkwrap-'+g.id} style={{background:linkGroupByGame.has(g.id)?'#eff6ff':undefined,borderRadius:linkGroupByGame.has(g.id)?8:undefined}}>{linkGroupByGame.has(g.id)&&linkMembers.find(m=>m.game_id===g.id)?.sort_order===0&&<div style={{padding:'7px 10px 3px',fontSize:12,fontWeight:900,color:'#1d4ed8'}}>🔗 Linked Games</div>}<div style={{display:'flex',alignItems:'stretch'}}><label title={linkGroupByGame.has(g.id)?'Already linked':'Select game to link'} style={{display:'flex',alignItems:'center',padding:'0 8px',cursor:linkGroupByGame.has(g.id)?'default':'pointer'}}><input type=\"checkbox\" checked={linkSelected.includes(g.id)} disabled={linkGroupByGame.has(g.id)} onChange={()=>toggleLinkSelection(g.id)}/></label>{linkGroupByGame.has(g.id)&&<span aria-hidden=\"true\" title=\"Linked game\" style={{display:'flex',alignItems:'center',fontSize:18}}>🔗</span>}"
+          s=s[:k]+prefix+s[k:]
+          # Close wrappers immediately before map's likely closing `)}` by finding next occurrence after map. This is intentionally anchored to the first `})}` after map.
+          close=s.find('})}',k+len(prefix))
+          if close<0: raise SystemExit('map close missing')
+          s=s[:close]+'</div></div>'+s[close:]
+          open(p,'w').write(s)
+
+          # Remove standalone Linked Games navigation/render/import.
+          p='app/page.tsx';s=open(p).read()
+          s=s.replace("import LinkedGamesManager from '../components/LinkedGamesManager'\n",'')
+          s=s.replace("'Assignments','Linked Games','Auto Assign'","'Assignments','Auto Assign'")
+          s=s.replace("{manager&&section==='Linked Games'&&<LinkedGamesManager/>}",'')
+          open(p,'w').write(s)
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add components/AssignmentsManagerV2.tsx app/page.tsx
+          git diff --cached --quiet || git commit -m "Integrate linked games into Assignments"
+          git push
