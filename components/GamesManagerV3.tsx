@@ -420,9 +420,11 @@ export default function GamesManagerV3() {
           bEnd = bStart + b.duration_minutes * 60_000;
         if (aStart >= bEnd || bStart >= aEnd) continue;
         const sameLocation = norm(a.location) === norm(b.location),
-          aTeams = new Set([norm(a.home_team), norm(a.away_team)]),
+          teamKey = (row: Row, team: string) =>
+            `${norm(row.sport)}|${norm(row.level)}|${norm(team)}`,
+          aTeams = new Set([teamKey(a, a.home_team), teamKey(a, a.away_team)]),
           sharedTeam = [b.home_team, b.away_team].find((team) =>
-            aTeams.has(norm(team)),
+            aTeams.has(teamKey(b, team)),
           );
         if (!sameLocation && !sharedTeam) continue;
         const reasons = [
@@ -871,6 +873,13 @@ export default function GamesManagerV3() {
           <input type="file" accept=".xlsx,.xls,.csv" onChange={file} />
           {rows.length > 0 && (
             <>
+              {rows.some((r) => !r.valid) && (
+                <div className="errorBox">
+                  Import paused: {rows.filter((r) => !r.valid).length}{" "}
+                  spreadsheet row(s) need correction. Review the Validation
+                  column below, update the file, and upload it again.
+                </div>
+              )}
               <div className="tableWrap">
                 <table>
                   <thead>
