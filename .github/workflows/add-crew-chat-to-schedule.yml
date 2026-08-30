@@ -1,0 +1,34 @@
+name: Add crew chat to schedule
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'components/CrewChatButton.tsx'
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch OfficialSchedule
+        run: |
+          python3 - <<'PY'
+          p='components/OfficialSchedule.tsx'
+          s=open(p).read()
+          if "import CrewChatButton from './CrewChatButton'" not in s:
+              s=s.replace("import LocationContactLink from './LocationContactLink'", "import LocationContactLink from './LocationContactLink'\nimport CrewChatButton from './CrewChatButton'")
+          needle="{(e.a.location_name||e.a.location_address)&&<a className=\"tableButton\" href={mapsUrl(e.a)} target=\"_blank\" rel=\"noreferrer\">Directions</a>}"
+          repl=needle+"<CrewChatButton gameId={e.a.game_id} title={`${e.a.home_team||'TBD'} vs ${e.a.away_team||'TBD'}`}/>"
+          if 'CrewChatButton gameId={e.a.game_id}' not in s:
+              if needle not in s: raise SystemExit('Directions target not found')
+              s=s.replace(needle,repl)
+          open(p,'w').write(s)
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add components/OfficialSchedule.tsx
+          git diff --cached --quiet || git commit -m "Show crew chat beside directions"
+          git push
