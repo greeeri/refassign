@@ -417,66 +417,105 @@ export default function GamesManagerV3() {
     setError("");
     let added = 0,
       updated = 0;
+    const importedByGameNumber = new Map(
+        rows
+          .filter((r) => r.valid && r.game_number)
+          .map((r) => [norm(r.game_number), r]),
+      ),
+      applied = new Set<number>();
+    const rowErrorMessage = (r: Row, detail: string) =>
+      `Import stopped at spreadsheet row ${r.row} — Game ${r.game_number || "NEW"} — ${r.home_team || "TBD"} vs ${r.away_team || "TBD"} — ${r.date} ${r.time} — ${r.location || "No location"}. Reason: ${detail}`;
+    const errorDetail = (value: unknown) =>
+      value instanceof Error
+        ? value.message
+        : typeof value === "object" && value !== null && "message" in value
+          ? String((value as { message: unknown }).message)
+          : String(value);
+    async function applyRow(r: Row, resolving = new Set<number>()) {
+      if (applied.has(r.row)) return;
+      if (resolving.has(r.row))
+        throw new Error(
+          rowErrorMessage(
+            r,
+            "The uploaded games contain a circular scheduling conflict that cannot be reordered automatically.",
+          ),
+        );
+      const nextResolving = new Set(resolving).add(r.row);
+      const s = sports.find((x) => norm(x.name) === norm(r.sport))!,
+        lg = leagues.find((x) => norm(x.name) === norm(r.league))!,
+        lv = levels.find((x) => norm(x.name) === norm(r.level))!,
+        home = teams.find(
+          (x) =>
+            norm(x.name) === norm(r.home_team) &&
+            x.sport_id === s.id &&
+            x.level_id === lv.id,
+        ),
+        away = teams.find(
+          (x) =>
+            norm(x.name) === norm(r.away_team) &&
+            x.sport_id === s.id &&
+            x.level_id === lv.id,
+        ),
+        loc = locations.find((x) => norm(x.name) === norm(r.location))!;
+      if (!home || !away)
+        throw new Error(
+          rowErrorMessage(
+            r,
+            "Team not found for the selected sport and level.",
+          ),
+        );
+      const payload = {
+          sport_id: s.id,
+          league_id: lg.id,
+          level_id: lv.id,
+          level: lv.name,
+          home_team_id: home.id,
+          away_team_id: away.id,
+          location_id: loc.id,
+          starts_at: new Date(`${r.date}T${r.time}:00`).toISOString(),
+          duration_minutes: r.duration_minutes || 110,
+          officials_needed: r.officials_needed,
+          notes: r.notes || null,
+        },
+        existing = r.game_number
+          ? games.find((g) => norm(g.game_number) === norm(r.game_number))
+          : null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const { error: saveError } = existing
+          ? await sb.from("games").update(payload).eq("id", existing.id)
+          : await sb.from("games").insert({
+              ...payload,
+              game_number: r.game_number || null,
+              status: "open",
+            });
+        if (!saveError) {
+          applied.add(r.row);
+          existing ? updated++ : added++;
+          return;
+        }
+        const detail = errorDetail(saveError),
+          blockingGame = detail.match(
+            /conflict with Game #([^\s]+)\s+at/i,
+          )?.[1],
+          blockingRow = blockingGame
+            ? importedByGameNumber.get(norm(blockingGame))
+            : undefined;
+        if (
+          attempt === 0 &&
+          blockingRow &&
+          blockingRow.row !== r.row &&
+          !applied.has(blockingRow.row)
+        ) {
+          await applyRow(blockingRow, nextResolving);
+          continue;
+        }
+        throw new Error(rowErrorMessage(r, detail));
+      }
+    }
     try {
       for (const r of rows) {
         if (!r.valid) continue;
-        try {
-          const s = sports.find((x) => norm(x.name) === norm(r.sport))!,
-            lg = leagues.find((x) => norm(x.name) === norm(r.league))!,
-            lv = levels.find((x) => norm(x.name) === norm(r.level))!,
-            home = teams.find(
-              (x) =>
-                norm(x.name) === norm(r.home_team) &&
-                x.sport_id === s.id &&
-                x.level_id === lv.id,
-            ),
-            away = teams.find(
-              (x) =>
-                norm(x.name) === norm(r.away_team) &&
-                x.sport_id === s.id &&
-                x.level_id === lv.id,
-            ),
-            loc = locations.find((x) => norm(x.name) === norm(r.location))!;
-          if (!home || !away)
-            throw new Error("Team not found for the selected sport and level.");
-          const payload = {
-            sport_id: s.id,
-            league_id: lg.id,
-            level_id: lv.id,
-            level: lv.name,
-            home_team_id: home.id,
-            away_team_id: away.id,
-            location_id: loc.id,
-            starts_at: new Date(`${r.date}T${r.time}:00`).toISOString(),
-            duration_minutes: r.duration_minutes || 110,
-            officials_needed: r.officials_needed,
-            notes: r.notes || null,
-          };
-          const existing = r.game_number
-            ? games.find((g) => norm(g.game_number) === norm(r.game_number))
-            : null;
-          const { error: e2 } = existing
-            ? await sb.from("games").update(payload).eq("id", existing.id)
-            : await sb.from("games").insert({
-                ...payload,
-                game_number: r.game_number || null,
-                status: "open",
-              });
-          if (e2) throw e2;
-          existing ? updated++ : added++;
-        } catch (rowError) {
-          const detail =
-            rowError instanceof Error
-              ? rowError.message
-              : typeof rowError === "object" &&
-                  rowError !== null &&
-                  "message" in rowError
-                ? String((rowError as { message: unknown }).message)
-                : String(rowError);
-          throw new Error(
-            `Import stopped at spreadsheet row ${r.row} — Game ${r.game_number || "NEW"} — ${r.home_team || "TBD"} vs ${r.away_team || "TBD"} — ${r.date} ${r.time} — ${r.location || "No location"}. Reason: ${detail}`,
-          );
-        }
+        await applyRow(r);
       }
       setMessage(`Import complete: ${updated} updated, ${added} added.`);
       setRows([]);
