@@ -140,21 +140,25 @@ function timeVal(value: unknown) {
   }
   let v = String(value || "")
     .trim()
+    .replace(/\u00a0/g, " ")
     .replace(
       /\s+(?:CST|CDT|EST|EDT|MST|MDT|PST|PDT)(?:\s+(?:CST|CDT|EST|EDT|MST|MDT|PST|PDT))*\s*$/i,
       "",
     )
+    .replace(/\b([AP])\.M\.?$/i, "$1M")
     .trim();
-  let m = v.match(/^(\d{1,2})(?::(\d{2}))?\s*([AP]M)$/i);
+  let m = v.match(/^(\d{1,2})(?::(\d{2}))?(?::\d{2}(?:\.\d+)?)?\s*([AP]M)$/i);
   if (m) {
     let h = +m[1],
       mi = +(m[2] || 0);
+    if (h < 1 || h > 12 || mi > 59) return null;
     if (m[3].toUpperCase() === "PM" && h < 12) h += 12;
     if (m[3].toUpperCase() === "AM" && h === 12) h = 0;
     return `${pad(h)}:${pad(mi)}`;
   }
-  m = v.match(/^(\d{1,2}):(\d{2})/);
-  return m ? `${pad(+m[1])}:${m[2]}` : null;
+  m = v.match(/^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/);
+  if (!m || +m[1] > 23 || +m[2] > 59) return null;
+  return `${pad(+m[1])}:${m[2]}`;
 }
 function startDay(d: Date) {
   const x = new Date(d);
@@ -789,6 +793,7 @@ export default function GamesManagerV3() {
                       <th>Row</th>
                       <th>Game #</th>
                       <th>Game</th>
+                      <th>Date / Time</th>
                       <th>Length</th>
                       <th>Validation</th>
                     </tr>
@@ -800,6 +805,10 @@ export default function GamesManagerV3() {
                         <td>{r.game_number || "NEW"}</td>
                         <td>
                           {r.home_team} vs {r.away_team}
+                        </td>
+                        <td>
+                          {r.date}
+                          <small>{r.time}</small>
                         </td>
                         <td>{r.duration_minutes} min</td>
                         <td>{r.valid ? "Ready" : r.issue}</td>
