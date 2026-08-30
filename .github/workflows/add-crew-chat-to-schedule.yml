@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'components/CrewChatButton.tsx'
+      - '.github/workflows/add-crew-chat-to-schedule.yml'
 jobs:
   patch:
     runs-on: ubuntu-latest
