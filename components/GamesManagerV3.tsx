@@ -346,7 +346,7 @@ export default function GamesManagerV3() {
     const missing = req.filter((x) => !h.includes(x));
     if (missing.length)
       throw new Error(`Missing columns: ${missing.join(", ")}`);
-    return raw.slice(1).map((r, i) => {
+    const validated: Row[] = raw.slice(1).map((r, i) => {
       const cell = (n: string) => r[h.indexOf(n)] ?? "",
         get = (n: string) => String(cell(n)).trim(),
         sport = get("sport"),
@@ -370,6 +370,8 @@ export default function GamesManagerV3() {
         issues.push("Location not found");
       if (!date) issues.push("Invalid date");
       if (!time) issues.push("Invalid time");
+      if (home && away && norm(home) === norm(away))
+        issues.push("Home and away teams must be different");
       if (!Number.isFinite(duration) || duration < 1)
         issues.push("Invalid duration");
       if (!Number.isFinite(officials) || officials < 1)
@@ -392,6 +394,50 @@ export default function GamesManagerV3() {
         issue: issues.join("; "),
       };
     });
+    const schedulable = validated.map((row) => row.valid),
+      addIssue = (row: Row, issue: string) => {
+        row.valid = false;
+        row.issue = row.issue ? `${row.issue}; ${issue}` : issue;
+      };
+    for (let i = 0; i < validated.length; i++) {
+      const a = validated[i];
+      if (!schedulable[i]) continue;
+      for (let j = i + 1; j < validated.length; j++) {
+        const b = validated[j];
+        if (!schedulable[j]) continue;
+        if (
+          a.game_number &&
+          b.game_number &&
+          norm(a.game_number) === norm(b.game_number)
+        ) {
+          addIssue(a, `Duplicate game number also appears on row ${b.row}`);
+          addIssue(b, `Duplicate game number also appears on row ${a.row}`);
+          continue;
+        }
+        const aStart = new Date(`${a.date}T${a.time}:00`).getTime(),
+          bStart = new Date(`${b.date}T${b.time}:00`).getTime(),
+          aEnd = aStart + a.duration_minutes * 60_000,
+          bEnd = bStart + b.duration_minutes * 60_000;
+        if (aStart >= bEnd || bStart >= aEnd) continue;
+        const sameLocation = norm(a.location) === norm(b.location),
+          aTeams = new Set([norm(a.home_team), norm(a.away_team)]),
+          sharedTeam = [b.home_team, b.away_team].find((team) =>
+            aTeams.has(norm(team)),
+          );
+        if (!sameLocation && !sharedTeam) continue;
+        const reasons = [
+            sameLocation ? `same location (${a.location})` : "",
+            sharedTeam ? `same team (${sharedTeam})` : "",
+          ]
+            .filter(Boolean)
+            .join(" and "),
+          aMessage = `Conflicts with spreadsheet row ${b.row}, Game ${b.game_number || "NEW"} — ${reasons} at ${a.date} ${a.time}`,
+          bMessage = `Conflicts with spreadsheet row ${a.row}, Game ${a.game_number || "NEW"} — ${reasons} at ${b.date} ${b.time}`;
+        addIssue(a, aMessage);
+        addIssue(b, bMessage);
+      }
+    }
+    return validated;
   }
   async function file(e: ChangeEvent<HTMLInputElement>) {
     setError("");
