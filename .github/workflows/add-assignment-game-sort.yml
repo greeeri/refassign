@@ -1,0 +1,44 @@
+name: Add sortable assignment game headers
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/add-assignment-game-sort.yml'
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add assignment game sort controls
+        run: |
+          python3 - <<'PY'
+          p='components/AssignmentsManagerV2.tsx'
+          s=open(p).read()
+          old="[overrideOfficial,setOverrideOfficial]=useState('')"
+          new="[overrideOfficial,setOverrideOfficial]=useState(''),[gameSort,setGameSort]=useState<'default'|'location'|'time'>('default'),[gameSortDir,setGameSortDir]=useState<'asc'|'desc'>('asc')"
+          if 'setGameSort' not in s:
+              if old not in s: raise SystemExit('state target not found')
+              s=s.replace(old,new,1)
+          old2="const filteredGames=rangeGames.filter(g=>!unpublishedOnly||isUnpublishedGame(g));const game="
+          new2="const baseFilteredGames=rangeGames.filter(g=>!unpublishedOnly||isUnpublishedGame(g));const filteredGames=[...baseFilteredGames].sort((a,b)=>{let n=0;if(gameSort==='location')n=(a.location?.name||'').localeCompare(b.location?.name||'');else if(gameSort==='time')n=new Date(a.starts_at).getTime()-new Date(b.starts_at).getTime();else n=gamePower(b)-gamePower(a)||new Date(a.starts_at).getTime()-new Date(b.starts_at).getTime();return gameSortDir==='desc'?-n:n});function sortGames(by:'location'|'time'){if(gameSort===by)setGameSortDir(d=>d==='asc'?'desc':'asc');else{setGameSort(by);setGameSortDir('asc')}}function sortArrow(by:'location'|'time'){return gameSort===by?(gameSortDir==='asc'?' ▲':' ▼'):''}const game="
+          if 'baseFilteredGames' not in s:
+              if old2 not in s: raise SystemExit('filteredGames target not found')
+              s=s.replace(old2,new2,1)
+          # Locate the game selector/list and inject a compact sortable header immediately before its filteredGames map.
+          marker="{filteredGames.map(g=>"
+          if 'Location{sortArrow' not in s:
+              i=s.find(marker)
+              if i<0: raise SystemExit('filteredGames map target not found')
+              header="<div style={{display:'grid',gridTemplateColumns:'minmax(150px,1fr) 120px',gap:8,padding:'6px 10px',fontSize:11,fontWeight:800,color:'#64748b',borderBottom:'1px solid #e2e8f0'}}><button type=\"button\" onClick={()=>sortGames('location')} style={{border:0,background:'none',padding:0,textAlign:'left',font:'inherit',fontWeight:800,color:'inherit',cursor:'pointer'}}>Location{sortArrow('location')}</button><button type=\"button\" onClick={()=>sortGames('time')} style={{border:0,background:'none',padding:0,textAlign:'left',font:'inherit',fontWeight:800,color:'inherit',cursor:'pointer'}}>Game Time{sortArrow('time')}</button></div>"
+              s=s[:i]+header+s[i:]
+          open(p,'w').write(s)
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add components/AssignmentsManagerV2.tsx
+          git diff --cached --quiet || git commit -m "Add sortable assignment game headers"
+          git push
