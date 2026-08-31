@@ -23,7 +23,7 @@ export default function ResetPasswordPage(){
     if(!active)return
     if(delayedSession)setReady(true)
     else setMessage('This password reset link is invalid or has expired. Return to sign in and request one new reset email.')
-   },500)
+   },3000)
   }
   const {data:{subscription}}=supabase.auth.onAuthStateChange((event,session)=>{
    if(active&&session&&(event==='PASSWORD_RECOVERY'||event==='SIGNED_IN'))setReady(true)

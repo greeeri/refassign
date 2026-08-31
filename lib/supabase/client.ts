@@ -1,4 +1,5 @@
 import { createBrowserClient } from '@supabase/ssr'
+import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 
 export function createClient() {
   return createBrowserClient(
@@ -8,13 +9,15 @@ export function createClient() {
 }
 
 export function createPasswordRecoveryClient() {
-  return createBrowserClient(
+  return createSupabaseClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       auth: {
         flowType: 'implicit',
-        detectSessionInUrl: true
+        detectSessionInUrl: true,
+        persistSession: true,
+        autoRefreshToken: true
       }
     }
   )
