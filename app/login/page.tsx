@@ -2,7 +2,7 @@
 
 import { FormEvent, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '../../lib/supabase/client'
+import { createClient, createPasswordRecoveryClient } from '../../lib/supabase/client'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -41,9 +41,9 @@ export default function LoginPage() {
     setResetting(true)
     setMessage('')
     try {
-      const supabase = createClient()
+      const supabase = createPasswordRecoveryClient()
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`
+        redirectTo: `${window.location.origin}/reset-password`
       })
       setMessage(error ? error.message : 'Password reset email sent. Check your inbox.')
     } catch (err) {
