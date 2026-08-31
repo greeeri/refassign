@@ -180,13 +180,13 @@ export default function AssignmentsManagerV2() {
     setError("");
     const { data: userData } = await supabase.auth.getUser();
     if (userData.user) {
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", userData.user.id)
-        .maybeSingle();
-      setCanManage(["admin", "assignor"].includes(profile?.role || ""));
-    }
+      const { data: userRoles } = await supabase.rpc("current_user_roles");
+      setCanManage(
+        ((userRoles || []) as string[]).some((role) =>
+          ["admin", "assignor"].includes(role),
+        ),
+      );
+    } else setCanManage(false);
     const [g, o, p, a, r, pr, pw, le, ve, bl, lg, lm] = await Promise.all([
       supabase
         .from("games")
