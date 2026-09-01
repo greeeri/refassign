@@ -8,6 +8,7 @@ type Location = Named & { city: string | null; state: string | null };
 type Game = {
   id: string;
   game_number: string;
+  status: string;
   sport_id: string;
   league_id: string | null;
   level_id: string | null;
@@ -43,6 +44,19 @@ type Row = {
   issue: string;
 };
 type Range = "all" | "today" | "tomorrow" | "thisWeek" | "nextWeek" | "custom";
+const statusOptions = [
+  ["active", "Active"],
+  ["suspended", "Hold"],
+  ["canceled", "Cancelled"],
+  ["rained_out", "Rain Out"],
+] as const;
+function statusColors(value: string) {
+  const status = value === "open" ? "active" : value;
+  if (status === "canceled") return { background: "#fee2e2", color: "#172033" };
+  if (status === "suspended") return { background: "#fef9c3", color: "#172033" };
+  if (status === "rained_out") return { background: "#1e3a8a", color: "#fff" };
+  return { background: "#fff", color: "#172033" };
+}
 const blank = {
   game_number: "",
   sport_id: "",
@@ -214,6 +228,7 @@ export default function GamesManagerV3() {
     [customDate, setCustomDate] = useState(""),
     [showCalendar, setShowCalendar] = useState(false),
     [busy, setBusy] = useState(false),
+    [statusBusy, setStatusBusy] = useState(""),
     [error, setError] = useState(""),
     [message, setMessage] = useState("");
   async function load() {
@@ -234,7 +249,7 @@ export default function GamesManagerV3() {
       sb
         .from("games")
         .select(
-          "id,game_number,sport_id,league_id,level_id,home_team_id,away_team_id,location_id,starts_at,duration_minutes,officials_needed,notes,sports(name),leagues(name),levels(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(id,name,city,state)",
+          "id,game_number,status,sport_id,league_id,level_id,home_team_id,away_team_id,location_id,starts_at,duration_minutes,officials_needed,notes,sports(name),leagues(name),levels(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(id,name,city,state)",
         )
         .order("starts_at"),
     ]);
@@ -252,6 +267,23 @@ export default function GamesManagerV3() {
   useEffect(() => {
     void load();
   }, []);
+  async function changeStatus(id: string, status: string) {
+    setStatusBusy(id);
+    setError("");
+    setMessage("");
+    const { error: statusError } = await sb.rpc("set_game_status", {
+      p_game_id: id,
+      p_status: status,
+    });
+    if (statusError) setError(statusError.message);
+    else {
+      setGames((current) =>
+        current.map((game) => (game.id === id ? { ...game, status } : game)),
+      );
+      setMessage("Game status updated.");
+    }
+    setStatusBusy("");
+  }
   const filteredGames = games.filter((g) => inRange(g, range, customDate));
   const eligible = teams.filter(
     (t) => t.sport_id === form.sport_id && t.level_id === form.level_id,
@@ -935,20 +967,26 @@ export default function GamesManagerV3() {
               <th>Location</th>
               <th>Length</th>
               <th>Officials</th>
+              <th>Status</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {filteredGames.map((g) => {
               const d = new Date(g.starts_at);
+              const row = statusColors(g.status);
+              const rainOut = g.status === "rained_out";
               return (
-                <tr key={g.id}>
+                <tr
+                  key={g.id}
+                  style={{ background: row.background, color: row.color }}
+                >
                   <td>
                     <b>{g.game_number}</b>
                   </td>
                   <td>
                     {d.toLocaleDateString()}
-                    <small>
+                    <small style={{ color: rainOut ? "#dbeafe" : undefined }}>
                       {d.toLocaleTimeString([], {
                         hour: "numeric",
                         minute: "2-digit",
@@ -962,11 +1000,32 @@ export default function GamesManagerV3() {
                   </td>
                   <td>
                     {g.leagues?.name || "—"}
-                    <small>{g.levels?.name || ""}</small>
+                    <small style={{ color: rainOut ? "#dbeafe" : undefined }}>
+                      {g.levels?.name || ""}
+                    </small>
                   </td>
                   <td>{g.location?.name || "TBD"}</td>
                   <td>{g.duration_minutes || 110} min</td>
                   <td>{g.officials_needed}</td>
+                  <td>
+                    <select
+                      aria-label={`Status for ${g.game_number}`}
+                      disabled={statusBusy === g.id}
+                      value={g.status === "open" ? "active" : g.status}
+                      onChange={(e) => void changeStatus(g.id, e.target.value)}
+                      style={{
+                        minWidth: 120,
+                        background: rainOut ? "#eff6ff" : "#fff",
+                        color: "#172033",
+                      }}
+                    >
+                      {statusOptions.map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
                   <td>
                     <button className="secondary" onClick={() => edit(g)}>
                       Edit

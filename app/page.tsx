@@ -13,7 +13,6 @@ import AutoAssignManager from "../components/AutoAssignManager";
 import OfficialDashboard from "../components/OfficialDashboard";
 import OfficialProfile from "../components/OfficialProfile";
 import OfficialSchedule from "../components/OfficialSchedule";
-import GameStatusControl from "../components/GameStatusControl";
 const adminNav = [
   "Dashboard",
   "Games",
@@ -226,12 +225,7 @@ export default function Home() {
           </div>
         </header>
         {manager && section === "Dashboard" && <DashboardGames />}
-        {manager && section === "Games" && (
-          <>
-            <GameStatusControl />
-            <GamesManager />
-          </>
-        )}
+        {manager && section === "Games" && <GamesManager />}
         {manager && isSetup && <GameSetup view={section as SetupView} />}{" "}
         {manager && section === "Officials" && <OfficialsDirectory />}
         {manager && section === "Assignments" && <AssignmentsManager />}
