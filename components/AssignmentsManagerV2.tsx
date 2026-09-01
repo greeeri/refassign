@@ -1315,18 +1315,19 @@ export default function AssignmentsManagerV2() {
                     <b style={{ color: "#dc2626" }}> Unassigned</b>
                   )}
                 </span>
-                {assignment && official && canManage && (
+                {assignment && canManage && (
                   <>
                     <span
                       style={{
                         display: "inline-flex",
                         gap: 3,
                         marginRight: 2,
+                        alignItems: "center",
                       }}
                     >
                       <button
                         type="button"
-                        aria-label={`Move ${official.first_name} ${official.last_name} to the previous position`}
+                        aria-label={`Move ${official ? `${official.first_name} ${official.last_name}` : "official"} to the previous position`}
                         title="Move left; swaps with the adjacent official"
                         disabled={
                           positionIndex === 0 ||
@@ -1335,14 +1336,23 @@ export default function AssignmentsManagerV2() {
                         onClick={() =>
                           void moveAssignment(g.id, assignment.id, -1)
                         }
-                        className="secondary"
-                        style={{ padding: "3px 6px", fontSize: 11 }}
+                        style={{
+                          padding: "5px 8px",
+                          fontSize: 14,
+                          lineHeight: 1,
+                          borderRadius: 6,
+                          border: "1px solid #1d4ed8",
+                          background: positionIndex === 0 ? "#cbd5e1" : "#2563eb",
+                          color: "#fff",
+                          fontWeight: 900,
+                          cursor: positionIndex === 0 ? "not-allowed" : "pointer",
+                        }}
                       >
                         ←
                       </button>
                       <button
                         type="button"
-                        aria-label={`Move ${official.first_name} ${official.last_name} to the next position`}
+                        aria-label={`Move ${official ? `${official.first_name} ${official.last_name}` : "official"} to the next position`}
                         title="Move right; swaps with the adjacent official"
                         disabled={
                           positionIndex === gamePositionsForRow.length - 1 ||
@@ -1351,8 +1361,23 @@ export default function AssignmentsManagerV2() {
                         onClick={() =>
                           void moveAssignment(g.id, assignment.id, 1)
                         }
-                        className="secondary"
-                        style={{ padding: "3px 6px", fontSize: 11 }}
+                        style={{
+                          padding: "5px 8px",
+                          fontSize: 14,
+                          lineHeight: 1,
+                          borderRadius: 6,
+                          border: "1px solid #1d4ed8",
+                          background:
+                            positionIndex === gamePositionsForRow.length - 1
+                              ? "#cbd5e1"
+                              : "#2563eb",
+                          color: "#fff",
+                          fontWeight: 900,
+                          cursor:
+                            positionIndex === gamePositionsForRow.length - 1
+                              ? "not-allowed"
+                              : "pointer",
+                        }}
                       >
                         →
                       </button>
@@ -2006,11 +2031,19 @@ export default function AssignmentsManagerV2() {
                                       display: "inline-flex",
                                       gap: 4,
                                       marginLeft: 8,
+                                      alignItems: "center",
                                     }}
                                   >
+                                    <small
+                                      style={{
+                                        color: "#2563eb",
+                                        fontWeight: 900,
+                                      }}
+                                    >
+                                      Position
+                                    </small>
                                     <button
                                       type="button"
-                                      className="secondary"
                                       title="Move to previous position; swaps officials when occupied"
                                       aria-label="Move official to previous position"
                                       disabled={
@@ -2024,13 +2057,21 @@ export default function AssignmentsManagerV2() {
                                           -1,
                                         )
                                       }
-                                      style={{ padding: "3px 7px" }}
+                                      style={{
+                                        padding: "5px 9px",
+                                        border: "1px solid #1d4ed8",
+                                        borderRadius: 6,
+                                        background:
+                                          index === 0 ? "#cbd5e1" : "#2563eb",
+                                        color: "#fff",
+                                        fontSize: 14,
+                                        fontWeight: 900,
+                                      }}
                                     >
                                       ←
                                     </button>
                                     <button
                                       type="button"
-                                      className="secondary"
                                       title="Move to next position; swaps officials when occupied"
                                       aria-label="Move official to next position"
                                       disabled={
@@ -2044,7 +2085,18 @@ export default function AssignmentsManagerV2() {
                                           1,
                                         )
                                       }
-                                      style={{ padding: "3px 7px" }}
+                                      style={{
+                                        padding: "5px 9px",
+                                        border: "1px solid #1d4ed8",
+                                        borderRadius: 6,
+                                        background:
+                                          index === gamePositions.length - 1
+                                            ? "#cbd5e1"
+                                            : "#2563eb",
+                                        color: "#fff",
+                                        fontSize: 14,
+                                        fontWeight: 900,
+                                      }}
                                     >
                                       →
                                     </button>
