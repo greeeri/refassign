@@ -14,6 +14,7 @@ import OfficialDashboard from "../components/OfficialDashboard";
 import OfficialProfile from "../components/OfficialProfile";
 import OfficialSchedule from "../components/OfficialSchedule";
 import PowerRankingsManager from "../components/PowerRankingsManager";
+import SelfAssignBoard from "../components/SelfAssignBoard";
 const adminNav = [
   "Dashboard",
   "Games",
@@ -124,6 +125,7 @@ export default function Home() {
             <>
               {[
                 "Official Dashboard",
+                "Self Assign",
                 "My Schedule",
                 "My Availability",
                 "My Profile",
@@ -260,6 +262,9 @@ export default function Home() {
         )}{" "}
         {viewRole === "official" && section === "My Schedule" && (
           <OfficialSchedule />
+        )}
+        {viewRole === "official" && section === "Self Assign" && (
+          <SelfAssignBoard />
         )}
         {viewRole === "official" && section === "My Availability" && (
           <AvailabilityCalendar />

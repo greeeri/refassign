@@ -80,6 +80,12 @@ type Block = {
 };
 type LinkGroup = { id: string; name: string; created_at: string };
 type LinkMember = { group_id: string; game_id: string; sort_order: number };
+type SelfAssignSlot = {
+  id: string;
+  game_id: string;
+  position_id: string;
+  status: "open" | "claimed" | "withdrawn";
+};
 type Range = "all" | "today" | "tomorrow" | "thisWeek" | "nextWeek" | "custom";
 type Completeness =
   | "all"
@@ -199,7 +205,10 @@ export default function AssignmentsManagerV2() {
     [linkGroups, setLinkGroups] = useState<LinkGroup[]>([]),
     [linkMembers, setLinkMembers] = useState<LinkMember[]>([]),
     [linkSelected, setLinkSelected] = useState<string[]>([]),
-    [linking, setLinking] = useState(false);
+    [linking, setLinking] = useState(false),
+    [selfAssignSlots, setSelfAssignSlots] = useState<SelfAssignSlot[]>([]),
+    [selfAssignSelected, setSelfAssignSelected] = useState<string[]>([]),
+    [selfAssignSaving, setSelfAssignSaving] = useState(false);
   async function load() {
     setError("");
     const { data: userData } = await supabase.auth.getUser();
@@ -211,7 +220,7 @@ export default function AssignmentsManagerV2() {
         ),
       );
     } else setCanManage(false);
-    const [g, o, p, a, r, pr, pw, le, ve, bl, lg, lm] = await Promise.all([
+    const [g, o, p, a, r, pr, pw, le, ve, bl, lg, lm, sas] = await Promise.all([
       supabase
         .from("games")
         .select(
@@ -259,6 +268,10 @@ export default function AssignmentsManagerV2() {
         .from("game_link_members")
         .select("group_id,game_id,sort_order")
         .order("sort_order"),
+      supabase
+        .from("assignment_self_assign_slots")
+        .select("id,game_id,position_id,status")
+        .eq("status", "open"),
     ]);
     const err =
       g.error ||
@@ -272,7 +285,8 @@ export default function AssignmentsManagerV2() {
       ve.error ||
       bl.error ||
       lg.error ||
-      lm.error;
+      lm.error ||
+      sas.error;
     if (err) {
       setError(err.message);
       return;
@@ -308,6 +322,7 @@ export default function AssignmentsManagerV2() {
     setBlocks((bl.data || []) as Block[]);
     setLinkGroups((lg.data || []) as LinkGroup[]);
     setLinkMembers((lm.data || []) as LinkMember[]);
+    setSelfAssignSlots((sas.data || []) as SelfAssignSlot[]);
     const sorted = ((g.data || []) as unknown as Game[]).sort(
       (x, y) =>
         gamePower(y, pm) - gamePower(x, pm) ||
@@ -501,6 +516,59 @@ export default function AssignmentsManagerV2() {
     else setNotice("Games unlinked.");
     await load();
     setLinking(false);
+  }
+  function selfAssignKey(gameId: string, positionId: string) {
+    return `${gameId}:${positionId}`;
+  }
+  function isSelfAssignOpen(gameId: string, positionId: string) {
+    return selfAssignSlots.some(
+      (slot) => slot.game_id === gameId && slot.position_id === positionId,
+    );
+  }
+  function toggleSelfAssignSelection(gameId: string, positionId: string) {
+    const key = selfAssignKey(gameId, positionId);
+    setSelfAssignSelected((current) =>
+      current.includes(key)
+        ? current.filter((item) => item !== key)
+        : [...current, key],
+    );
+  }
+  async function openSelfAssignPositions() {
+    if (!canManage || !selfAssignSelected.length) return;
+    setSelfAssignSaving(true);
+    setError("");
+    setNotice("");
+    const slots = selfAssignSelected.map((key) => {
+      const [game_id, position_id] = key.split(":");
+      return { game_id, position_id };
+    });
+    const { data, error: saveError } = await supabase.rpc(
+      "set_self_assign_positions",
+      { p_slots: slots },
+    );
+    if (saveError) setError(saveError.message);
+    else {
+      const count = Number(data || slots.length);
+      setNotice(
+        `${count} ${count === 1 ? "position is" : "positions are"} now available for Self Assign.`,
+      );
+      setSelfAssignSelected([]);
+    }
+    await load();
+    setSelfAssignSaving(false);
+  }
+  async function withdrawSelfAssignPosition(gameId: string, positionId: string) {
+    if (!canManage) return;
+    setSelfAssignSaving(true);
+    setError("");
+    const { error: withdrawError } = await supabase.rpc(
+      "withdraw_self_assign_position",
+      { p_game_id: gameId, p_position_id: positionId },
+    );
+    if (withdrawError) setError(withdrawError.message);
+    else setNotice("Self Assign position removed.");
+    await load();
+    setSelfAssignSaving(false);
   }
   const game = games.find((g) => g.id === selected);
   const sportPositions = game
@@ -1285,6 +1353,8 @@ export default function AssignmentsManagerV2() {
             const official = assignment
               ? officials.find((item) => item.id === assignment.official_id)
               : undefined;
+            const selfAssignOpen = isSelfAssignOpen(g.id, pos.id);
+            const selfAssignSelectionKey = selfAssignKey(g.id, pos.id);
             const color = !assignment
               ? "#dc2626"
               : !assignment.published_at
@@ -1302,6 +1372,16 @@ export default function AssignmentsManagerV2() {
                   whiteSpace: "nowrap",
                 }}
               >
+                {!assignment && canManage && !selfAssignOpen && (
+                  <input
+                    type="checkbox"
+                    checked={selfAssignSelected.includes(selfAssignSelectionKey)}
+                    disabled={selfAssignSaving}
+                    aria-label={`Select ${pos.name} on game ${g.game_number} for Self Assign`}
+                    title="Select this unpublished open position for Self Assign"
+                    onChange={() => toggleSelfAssignSelection(g.id, pos.id)}
+                  />
+                )}
                 <span>
                   <b style={{ color: isRainOut ? "#bfdbfe" : assignment ? "#64748b" : "#dc2626" }}>
                     {pos.name}
@@ -1315,6 +1395,22 @@ export default function AssignmentsManagerV2() {
                     <b style={{ color: "#dc2626" }}> Unassigned</b>
                   )}
                 </span>
+                {!assignment && selfAssignOpen && (
+                  <>
+                    <span className="badge green">Self Assign Open</span>
+                    {canManage && (
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={selfAssignSaving}
+                        onClick={() => void withdrawSelfAssignPosition(g.id, pos.id)}
+                        style={{ padding: "4px 7px", fontSize: 10 }}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </>
+                )}
                 {assignment && canManage && (
                   <>
                     <span
@@ -1454,13 +1550,25 @@ export default function AssignmentsManagerV2() {
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {canManage && (
-              <button
-                className="secondary"
-                disabled={!filteredGames.length}
-                onClick={() => void exportAssignments()}
-              >
-                Export Assignments
-              </button>
+              <>
+                <button
+                  className="secondary"
+                  disabled={!filteredGames.length}
+                  onClick={() => void exportAssignments()}
+                >
+                  Export Assignments
+                </button>
+                <button
+                  type="button"
+                  className="success"
+                  disabled={!selfAssignSelected.length || selfAssignSaving}
+                  onClick={() => void openSelfAssignPositions()}
+                >
+                  {selfAssignSaving
+                    ? "Opening…"
+                    : `Self Assign${selfAssignSelected.length ? ` (${selfAssignSelected.length})` : ""}`}
+                </button>
+              </>
             )}
             <button
               className="primary"
@@ -1969,6 +2077,7 @@ export default function AssignmentsManagerV2() {
                 <table>
                   <thead>
                     <tr>
+                      <th>Self Assign</th>
                       <th>Position</th>
                       <th>Assigned Official</th>
                       <th>Status</th>
@@ -1986,6 +2095,32 @@ export default function AssignmentsManagerV2() {
                         status = current ? assignmentStatus(current) : null;
                       return (
                         <tr key={pos.id}>
+                          <td>
+                            {!current && !isSelfAssignOpen(game.id, pos.id) ? (
+                              <input
+                                type="checkbox"
+                                checked={selfAssignSelected.includes(selfAssignKey(game.id, pos.id))}
+                                disabled={!canManage || selfAssignSaving}
+                                aria-label={`Select ${pos.name} for Self Assign`}
+                                onChange={() => toggleSelfAssignSelection(game.id, pos.id)}
+                              />
+                            ) : !current ? (
+                              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                                <span className="badge green">Open</span>
+                                <button
+                                  type="button"
+                                  className="secondary"
+                                  disabled={!canManage || selfAssignSaving}
+                                  onClick={() => void withdrawSelfAssignPosition(game.id, pos.id)}
+                                  style={{ padding: "4px 7px", fontSize: 10 }}
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            ) : (
+                              <span>—</span>
+                            )}
+                          </td>
                           <td>
                             <div
                               style={{
