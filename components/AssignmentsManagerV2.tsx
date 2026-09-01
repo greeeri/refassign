@@ -88,6 +88,14 @@ type Completeness =
   | "awaiting"
   | "confirmed"
   | "attention";
+type GameSort =
+  | "default"
+  | "game"
+  | "location"
+  | "time"
+  | "power"
+  | "status"
+  | "assignments";
 const gameStatusOptions = [
   ["active", "Active"],
   ["suspended", "Hold"],
@@ -185,9 +193,7 @@ export default function AssignmentsManagerV2() {
     [gameStatusSaving, setGameStatusSaving] = useState(""),
     [canManage, setCanManage] = useState(false),
     [overrideOfficial, setOverrideOfficial] = useState(""),
-    [gameSort, setGameSort] = useState<"default" | "location" | "time">(
-      "default",
-    ),
+    [gameSort, setGameSort] = useState<GameSort>("default"),
     [gameSortDir, setGameSortDir] = useState<"asc" | "desc">("asc"),
     [linkGroups, setLinkGroups] = useState<LinkGroup[]>([]),
     [linkMembers, setLinkMembers] = useState<LinkMember[]>([]),
@@ -356,14 +362,29 @@ export default function AssignmentsManagerV2() {
   );
   function compareGames(a: Game, b: Game) {
     let n = 0;
-    if (gameSort === "location")
+    if (gameSort === "game")
+      n = `${a.home?.name || ""} ${a.away?.name || ""}`.localeCompare(
+        `${b.home?.name || ""} ${b.away?.name || ""}`,
+      );
+    else if (gameSort === "location")
       n = (a.location?.name || "").localeCompare(b.location?.name || "");
     else if (gameSort === "time")
       n = new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime();
+    else if (gameSort === "power") n = gamePower(a) - gamePower(b);
+    else if (gameSort === "status")
+      n = (a.status === "open" ? "active" : a.status).localeCompare(
+        b.status === "open" ? "active" : b.status,
+      );
+    else if (gameSort === "assignments")
+      n = assignmentCompleteness(a).label.localeCompare(
+        assignmentCompleteness(b).label,
+      );
     else
       n =
         gamePower(b) - gamePower(a) ||
         new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime();
+    if (n === 0)
+      n = new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime();
     return gameSortDir === "desc" ? -n : n;
   }
   const linkGroupByGame = new Map(
@@ -399,14 +420,14 @@ export default function AssignmentsManagerV2() {
     })),
   ].sort((a, b) => compareGames(a.games[0], b.games[0]));
   const filteredGames = gameUnits.flatMap((unit) => unit.games);
-  function sortGames(by: "location" | "time") {
+  function sortGames(by: Exclude<GameSort, "default">) {
     if (gameSort === by) setGameSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else {
       setGameSort(by);
       setGameSortDir("asc");
     }
   }
-  function sortArrow(by: "location" | "time") {
+  function sortArrow(by: Exclude<GameSort, "default">) {
     return gameSort === by ? (gameSortDir === "asc" ? " ▲" : " ▼") : "";
   }
   function toggleLinkSelection(gameId: string) {
@@ -1127,7 +1148,7 @@ export default function AssignmentsManagerV2() {
         style={{
           display: "grid",
           gridTemplateColumns:
-            "38px minmax(230px,1fr) minmax(150px,220px) 105px 125px minmax(430px,auto)",
+            "38px minmax(230px,1fr) minmax(150px,220px) 105px 90px 125px minmax(390px,auto)",
           alignItems: "center",
           gap: 10,
           padding: "9px 12px",
@@ -1196,6 +1217,16 @@ export default function AssignmentsManagerV2() {
           }}
         >
           {d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+        </span>
+        <span
+          title="Average of the home and away team power rankings"
+          style={{
+            color: isRainOut ? "#fff" : "#7c3aed",
+            fontSize: 13,
+            fontWeight: 900,
+          }}
+        >
+          {gamePower(g).toFixed(1)}
         </span>
         <select
           aria-label={`Status for game ${g.game_number}`}
@@ -1498,7 +1529,7 @@ export default function AssignmentsManagerV2() {
             style={{
               display: "grid",
               gridTemplateColumns:
-                "38px minmax(230px,1fr) minmax(150px,220px) 105px 125px minmax(430px,auto)",
+                "38px minmax(230px,1fr) minmax(150px,220px) 105px 90px 125px minmax(390px,auto)",
               gap: 10,
               padding: "7px 12px",
               background: "#f8fafc",
@@ -1509,7 +1540,13 @@ export default function AssignmentsManagerV2() {
             }}
           >
             <span />
-            <span>Game</span>
+            <button
+              type="button"
+              onClick={() => sortGames("game")}
+              style={{ border: 0, background: "none", padding: 0, textAlign: "left", font: "inherit", color: "inherit", cursor: "pointer" }}
+            >
+              Game{sortArrow("game")}
+            </button>
             <button
               type="button"
               onClick={() => sortGames("location")}
@@ -1540,8 +1577,27 @@ export default function AssignmentsManagerV2() {
             >
               Game Time{sortArrow("time")}
             </button>
-            <span>Game Status</span>
-            <span style={{ textAlign: "right" }}>Assignment Status</span>
+            <button
+              type="button"
+              onClick={() => sortGames("power")}
+              style={{ border: 0, background: "none", padding: 0, textAlign: "left", font: "inherit", color: "inherit", cursor: "pointer" }}
+            >
+              Game Ranking{sortArrow("power")}
+            </button>
+            <button
+              type="button"
+              onClick={() => sortGames("status")}
+              style={{ border: 0, background: "none", padding: 0, textAlign: "left", font: "inherit", color: "inherit", cursor: "pointer" }}
+            >
+              Game Status{sortArrow("status")}
+            </button>
+            <button
+              type="button"
+              onClick={() => sortGames("assignments")}
+              style={{ border: 0, background: "none", padding: 0, textAlign: "right", font: "inherit", color: "inherit", cursor: "pointer" }}
+            >
+              Assignment Status{sortArrow("assignments")}
+            </button>
           </div>
           <div style={{ maxHeight: 420, overflow: "auto" }}>
             {gameUnits.length ? (
