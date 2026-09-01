@@ -1192,11 +1192,11 @@ export default function AssignmentsManagerV2() {
     XLSX.utils.book_append_sheet(wb, ws, "Assignments");
     XLSX.writeFile(wb, "refassign-game-assignments.xlsx");
   }
-  async function runBulkAction(action: "publish" | "confirm" | "unassign" | "status" | "remind") {
+  async function runBulkAction(action: "publish" | "confirm" | "unassign" | "status") {
     if (!canManage || !linkSelected.length || bulkWorking) return;
     const selectedIds = [...linkSelected];
     const selectedAssignments = assignments.filter((a) => selectedIds.includes(a.game_id) && a.status !== "declined");
-    const labels = {publish:"publish assignments for",confirm:"confirm officials on",unassign:"unassign every official from",status:`change the status to ${gameStatusOptions.find(([value])=>value===bulkStatus)?.[1]||bulkStatus} for`,remind:"send reminders for"};
+    const labels = {publish:"publish assignments for",confirm:"confirm officials on",unassign:"unassign every official from",status:`change the status to ${gameStatusOptions.find(([value])=>value===bulkStatus)?.[1]||bulkStatus} for`};
     if (!window.confirm(`${labels[action]} ${selectedIds.length} selected game${selectedIds.length===1?"":"s"}?`)) return;
     setBulkWorking(true); setError(""); setNotice("");
     let succeeded=0; const failures:string[]=[];
@@ -1211,11 +1211,9 @@ export default function AssignmentsManagerV2() {
       } else if(action==="confirm"){
         const eligible=selectedAssignments.filter(a=>a.published_at&&a.status!=="confirmed");
         for(const a of eligible){const response=await fetch("/api/assignments/confirm",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({assignmentId:a.id})});const body=await response.json().catch(()=>({})) as {error?:string};if(response.ok)succeeded++;else failures.push(body.error||`Could not confirm assignment ${a.id}`)}
-      } else {
-        const response=await fetch("/api/assignments/remind",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({gameIds:selectedIds})});const body=await response.json().catch(()=>({})) as {sent?:number;error?:string;failures?:string[]};if(!response.ok)failures.push(body.error||"Could not send reminders");else{succeeded=body.sent||0;failures.push(...(body.failures||[]))}
       }
       if(failures.length)setError(`Bulk action completed with ${failures.length} issue${failures.length===1?"":"s"}: ${failures.slice(0,4).join(" | ")}${failures.length>4?" | …":""}`);
-      setNotice(`Bulk action complete: ${succeeded} ${action==="status"?"game":action==="confirm"||action==="unassign"||action==="remind"?"assignment":"game"}${succeeded===1?"":"s"} processed.`);
+      setNotice(`Bulk action complete: ${succeeded} ${action==="status"?"game":action==="confirm"||action==="unassign"?"assignment":"game"}${succeeded===1?"":"s"} processed.`);
       setLinkSelected([]); await load();
     } catch(e){setError(e instanceof Error?e.message:"Unable to complete the bulk action.");}
     finally{setBulkWorking(false)}
@@ -1732,7 +1730,7 @@ export default function AssignmentsManagerV2() {
               <button type="button" className="primary" disabled={linking||bulkWorking||linkSelected.length<2} onClick={()=>void linkGames()}>🔗 Link{linkSelected.length?` (${linkSelected.length})`:""}</button>
             </span>
           </div>
-          {canManage&&linkSelected.length>0&&<div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap",padding:"9px 12px",background:"#fffbeb",borderBottom:"1px solid #fde68a"}}><b style={{marginRight:4}}>{linkSelected.length} selected:</b><button className="secondary" disabled={bulkWorking} onClick={()=>void runBulkAction("publish")}>Publish</button><button className="secondary" disabled={bulkWorking} onClick={()=>void runBulkAction("confirm")}>Confirm Officials</button><button className="secondary" disabled={bulkWorking} onClick={()=>void runBulkAction("unassign")}>Unassign Officials</button><select aria-label="Bulk game status" value={bulkStatus} disabled={bulkWorking} onChange={e=>setBulkStatus(e.target.value)} style={{width:"auto"}}>{gameStatusOptions.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select><button className="secondary" disabled={bulkWorking} onClick={()=>void runBulkAction("status")}>Change Status</button><button className="secondary" disabled={bulkWorking} onClick={()=>void exportAssignments(linkSelected)}>Export Selected</button><button className="secondary" disabled={bulkWorking} onClick={()=>void runBulkAction("remind")}>Send Reminders</button>{bulkWorking&&<span>Working…</span>}</div>}
+          {canManage&&linkSelected.length>0&&<div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap",padding:"9px 12px",background:"#fffbeb",borderBottom:"1px solid #fde68a"}}><b style={{marginRight:4}}>{linkSelected.length} selected:</b><button className="secondary" disabled={bulkWorking} onClick={()=>void runBulkAction("publish")}>Publish</button><button className="secondary" disabled={bulkWorking} onClick={()=>void runBulkAction("confirm")}>Confirm Officials</button><button className="secondary" disabled={bulkWorking} onClick={()=>void runBulkAction("unassign")}>Unassign Officials</button><select aria-label="Bulk game status" value={bulkStatus} disabled={bulkWorking} onChange={e=>setBulkStatus(e.target.value)} style={{width:"auto"}}>{gameStatusOptions.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select><button className="secondary" disabled={bulkWorking} onClick={()=>void runBulkAction("status")}>Change Status</button><button className="secondary" disabled={bulkWorking} onClick={()=>void exportAssignments(linkSelected)}>Export Selected</button>{bulkWorking&&<span>Working…</span>}</div>}
           <div
             style={{
               display: "grid",
