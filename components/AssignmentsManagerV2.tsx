@@ -1050,6 +1050,24 @@ export default function AssignmentsManagerV2() {
   ];
   function renderGameRow(g: Game, linked: boolean, showChain: boolean) {
     const d = new Date(g.starts_at);
+    const normalizedStatus = g.status === "open" ? "active" : g.status;
+    const isRainOut = normalizedStatus === "rained_out";
+    const statusBackground =
+      normalizedStatus === "canceled"
+        ? "#fee2e2"
+        : normalizedStatus === "suspended"
+          ? "#fef9c3"
+          : isRainOut
+            ? "#1e3a8a"
+            : null;
+    const statusBorder =
+      normalizedStatus === "canceled"
+        ? "#fecaca"
+        : normalizedStatus === "suspended"
+          ? "#fde68a"
+          : isRainOut
+            ? "#1e40af"
+            : null;
     const gamePositionsForRow = positions
       .filter((p) => p.sport_id === g.sport_id)
       .sort((a, b) => a.sort_order - b.sort_order)
@@ -1064,12 +1082,11 @@ export default function AssignmentsManagerV2() {
           alignItems: "center",
           gap: 10,
           padding: "9px 12px",
-          borderBottom: linked ? "1px solid #bfdbfe" : "1px solid #e2e8f0",
-          background: linked
-            ? "#eff6ff"
-            : selected === g.id
-              ? "#f8fafc"
-              : "#fff",
+          borderBottom: `1px solid ${statusBorder || (linked ? "#bfdbfe" : "#e2e8f0")}`,
+          background:
+            statusBackground ||
+            (linked ? "#eff6ff" : selected === g.id ? "#f8fafc" : "#fff"),
+          color: isRainOut ? "#fff" : "inherit",
         }}
       >
         <label
@@ -1110,20 +1127,20 @@ export default function AssignmentsManagerV2() {
               </span>
             )}
             {g.home?.name || "TBD"} vs {g.away?.name || "TBD"}
-            <small style={{ marginLeft: 7, color: "#64748b" }}>
+            <small style={{ marginLeft: 7, color: isRainOut ? "#bfdbfe" : "#64748b" }}>
               • {g.game_number}
             </small>
           </span>
-          <small style={{ display: "block", color: "#64748b", marginTop: 3 }}>
+          <small style={{ display: "block", color: isRainOut ? "#dbeafe" : "#64748b", marginTop: 3 }}>
             {d.toLocaleDateString()}
           </small>
         </button>
-        <span style={{ color: "#475569", fontSize: 12, fontWeight: 700 }}>
+        <span style={{ color: isRainOut ? "#fff" : "#475569", fontSize: 12, fontWeight: 700 }}>
           {g.location?.name || "TBD"}
         </span>
         <span
           style={{
-            color: "#475569",
+            color: isRainOut ? "#fff" : "#475569",
             fontSize: 12,
             fontWeight: 700,
             whiteSpace: "nowrap",
@@ -1181,11 +1198,11 @@ export default function AssignmentsManagerV2() {
                 }}
               >
                 <span>
-                  <b style={{ color: assignment ? "#64748b" : "#dc2626" }}>
+                  <b style={{ color: isRainOut ? "#bfdbfe" : assignment ? "#64748b" : "#dc2626" }}>
                     {pos.name}
                   </b>
                   {official ? (
-                    <b style={{ color }}>
+                    <b style={{ color: isRainOut ? "#fff" : color }}>
                       {" "}
                       {official.first_name} {official.last_name}
                     </b>
