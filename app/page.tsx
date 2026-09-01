@@ -16,12 +16,14 @@ import OfficialSchedule from "../components/OfficialSchedule";
 import PowerRankingsManager from "../components/PowerRankingsManager";
 import SelfAssignBoard from "../components/SelfAssignBoard";
 import AuditHistoryManager from "../components/AuditHistoryManager";
+import CommunicationCenter from "../components/CommunicationCenter";
 const adminNav = [
   "Dashboard",
   "Games",
   "Officials",
   "Power Rankings",
   "Assignments",
+  "Communications",
   "Audit History",
   "Auto Assign",
   "Blocks",
@@ -236,6 +238,7 @@ export default function Home() {
         {manager && section === "Officials" && <OfficialsDirectory />}
         {manager && section === "Power Rankings" && <PowerRankingsManager />}
         {manager && section === "Assignments" && <AssignmentsManager />}
+        {manager && section === "Communications" && <CommunicationCenter />}
         {manager && section === "Audit History" && <AuditHistoryManager />}
         {manager && section === "Auto Assign" && <AutoAssignManager />}
         {manager && section === "Blocks" && (
