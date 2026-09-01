@@ -55,6 +55,8 @@ type Assignment = {
   status: string;
   published_at: string | null;
   accept_by: string | null;
+  responded_at: string | null;
+  decline_reason: string | null;
 };
 type Rank = { official_id: string; rank: number };
 type PositionRank = {
@@ -243,7 +245,7 @@ export default function AssignmentsManagerV2() {
       supabase
         .from("assignments")
         .select(
-          "id,game_id,official_id,position_id,status,published_at,accept_by",
+          "id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason",
         ),
       supabase.from("official_rankings").select("official_id,rank"),
       supabase
@@ -361,7 +363,15 @@ export default function AssignmentsManagerV2() {
           assignment.status !== "declined" &&
           slots.some((slot) => slot.id === assignment.position_id),
       ),
-      filled = new Set(active.map((assignment) => assignment.position_id)).size;
+      filled = new Set(active.map((assignment) => assignment.position_id)).size,
+      declined = assignments.filter(
+        (assignment) =>
+          assignment.game_id === g.id &&
+          assignment.status === "declined" &&
+          slots.some((slot) => slot.id === assignment.position_id),
+      );
+    if (declined.length)
+      return { key: "attention" as const, label: "Replacement Needed", color: "#dc2626", detail: `${declined.length} declined position${declined.length===1?"":"s"} need replacement` };
     if (!slots.length || filled === 0)
       return { key: "unassigned" as const, label: "Unassigned", color: "#dc2626", detail: "No assignment slots are filled" };
     if (filled < slots.length)
@@ -950,11 +960,11 @@ export default function AssignmentsManagerV2() {
   function candidates(pos: Position) {
     if (!game) return [];
     const current = assignments.find(
-        (a) => a.game_id === game.id && a.position_id === pos.id,
+      (a) => a.game_id === game.id && a.position_id === pos.id && a.status !== "declined",
       ),
       used = new Set(
         assignments
-          .filter((a) => a.game_id === game.id && a.position_id !== pos.id)
+          .filter((a) => a.game_id === game.id && a.position_id !== pos.id && a.status !== "declined")
           .map((a) => a.official_id),
       );
     return officials
@@ -2195,13 +2205,16 @@ export default function AssignmentsManagerV2() {
                     {gamePositions.map((pos, index) => {
                       const current = assignments.find(
                           (a) =>
-                            a.game_id === game.id && a.position_id === pos.id,
+                            a.game_id === game.id && a.position_id === pos.id && a.status !== "declined",
+                        ),
+                        declined = assignments.find(
+                          (a) => a.game_id === game.id && a.position_id === pos.id && a.status === "declined",
                         ),
                         list = candidates(pos),
                         label = rankLabel(pos),
                         status = current ? assignmentStatus(current) : null;
                       return (
-                        <tr key={pos.id}>
+                        <tr key={pos.id} style={{background:declined&&!current?"#fff1f2":undefined}}>
                           <td>
                             {!current && !isSelfAssignOpen(game.id, pos.id) ? (
                               <input
@@ -2250,6 +2263,7 @@ export default function AssignmentsManagerV2() {
                               )}
                               <div>
                                 <b>{pos.name}</b>
+                                {declined&&!current&&<span className="badge red" style={{marginLeft:6}}>Replacement Needed</span>}
                                 <small>
                                   Slot {index + 1} of {game.officials_needed}
                                 </small>
@@ -2373,9 +2387,9 @@ export default function AssignmentsManagerV2() {
                                     </div>
                                   )}
                               </div>
-                            ) : (
-                              "Open"
-                            )}
+                            ) : declined ? (
+                              <div><b style={{color:"#b91c1c"}}>Open — official declined</b><small>{officials.find(o=>o.id===declined.official_id)?.first_name} {officials.find(o=>o.id===declined.official_id)?.last_name}{declined.decline_reason?` • ${declined.decline_reason}`:""}{declined.responded_at?` • ${new Date(declined.responded_at).toLocaleString()}`:""}</small></div>
+                            ) : "Open"}
                           </td>
                           <td>
                             {current && status ? (
@@ -2392,7 +2406,7 @@ export default function AssignmentsManagerV2() {
                                   )}
                               </>
                             ) : (
-                              <span>—</span>
+                              declined?<span className="badge red">Declined</span>:<span>—</span>
                             )}
                           </td>
                           <td>
@@ -2422,6 +2436,7 @@ export default function AssignmentsManagerV2() {
                                 </option>
                               ))}
                             </select>
+                            {declined&&!current&&<div style={{marginTop:7,padding:8,background:"#fff",border:"1px solid #fecaca",borderRadius:7}}><b style={{fontSize:11,color:"#991b1b"}}>Recommended qualified replacements</b>{list.filter(candidate=>candidate.reasons.length===0).slice(0,3).map((candidate,recommendationIndex)=><button key={candidate.id} type="button" disabled={saving===pos.id} onClick={()=>void assign(pos.id,candidate.id)} style={{display:"block",width:"100%",textAlign:"left",marginTop:5,padding:"6px 8px",border:"1px solid #e2e8f0",borderRadius:6,background:"#f8fafc",cursor:"pointer",fontSize:11}}><b>{recommendationIndex+1}. {candidate.first_name} {candidate.last_name}</b> — {label} {candidate.rank.toFixed(1)}{candidate.distance!=null?` • ${candidate.distance.toFixed(1)} mi`:""}</button>)}{list.every(candidate=>candidate.reasons.length>0)&&<small style={{display:"block",marginTop:5}}>No fully qualified, conflict-free replacements are currently available.</small>}</div>}
                           </td>
                         </tr>
                       );
