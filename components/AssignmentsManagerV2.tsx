@@ -15,6 +15,7 @@ type Game = {
   officials_needed: number;
   sports: { name: string } | null;
   leagues: { name: string } | null;
+  levels: { name: string } | null;
   home: Team | null;
   away: Team | null;
   location: {
@@ -80,6 +81,13 @@ type Block = {
 type LinkGroup = { id: string; name: string; created_at: string };
 type LinkMember = { group_id: string; game_id: string; sort_order: number };
 type Range = "all" | "today" | "tomorrow" | "thisWeek" | "nextWeek" | "custom";
+type Completeness =
+  | "all"
+  | "unassigned"
+  | "partial"
+  | "awaiting"
+  | "confirmed"
+  | "attention";
 const gameStatusOptions = [
   ["active", "Active"],
   ["suspended", "Hold"],
@@ -168,6 +176,7 @@ export default function AssignmentsManagerV2() {
     [customDate, setCustomDate] = useState(""),
     [showCalendar, setShowCalendar] = useState(false),
     [unpublishedOnly, setUnpublishedOnly] = useState(false),
+    [completenessFilter, setCompletenessFilter] = useState<Completeness>("all"),
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [saving, setSaving] = useState(""),
@@ -199,7 +208,7 @@ export default function AssignmentsManagerV2() {
       supabase
         .from("games")
         .select(
-          "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,duration_minutes,officials_needed,sports(name),leagues(name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,city,state,latitude,longitude)",
+          "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,duration_minutes,officials_needed,sports(name),leagues(name),levels(name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,city,state,latitude,longitude)",
         )
         .order("starts_at"),
       supabase
@@ -316,9 +325,34 @@ export default function AssignmentsManagerV2() {
     );
     return ga.length > 0 && ga.some((a) => !a.published_at);
   }
+  function assignmentCompleteness(g: Game) {
+    const slots = positions
+        .filter((position) => position.sport_id === g.sport_id)
+        .sort((a, b) => a.sort_order - b.sort_order)
+        .slice(0, Math.max(0, g.officials_needed)),
+      active = assignments.filter(
+        (assignment) =>
+          assignment.game_id === g.id &&
+          assignment.status !== "declined" &&
+          slots.some((slot) => slot.id === assignment.position_id),
+      ),
+      filled = new Set(active.map((assignment) => assignment.position_id)).size;
+    if (!slots.length || filled === 0)
+      return { key: "unassigned" as const, label: "Unassigned", color: "#dc2626", detail: "No assignment slots are filled" };
+    if (filled < slots.length)
+      return { key: "partial" as const, label: "Partially Assigned", color: "#ea580c", detail: `${filled} of ${slots.length} slots filled` };
+    if (active.every((assignment) => ["accepted", "confirmed"].includes(assignment.status)))
+      return { key: "confirmed" as const, label: "Confirmed", color: "#16a34a", detail: "Every assignment is confirmed" };
+    if (active.every((assignment) => Boolean(assignment.published_at)))
+      return { key: "awaiting" as const, label: "Awaiting Confirmation", color: "#ca8a04", detail: "Published; waiting for one or more confirmations" };
+    return { key: "attention" as const, label: "Needs Attention", color: "#2563eb", detail: "All slots are filled but one or more assignments still need publishing" };
+  }
   const rangeGames = games.filter((g) => inRange(g, range, customDate));
   const baseFilteredGames = rangeGames.filter(
-    (g) => !unpublishedOnly || isUnpublishedGame(g),
+    (g) =>
+      (!unpublishedOnly || isUnpublishedGame(g)) &&
+      (completenessFilter === "all" ||
+        assignmentCompleteness(g).key === completenessFilter),
   );
   function compareGames(a: Game, b: Game) {
     let n = 0;
@@ -470,7 +504,9 @@ export default function AssignmentsManagerV2() {
     setOverrideOfficial("");
     const list = games.filter(
       (g) =>
-        inRange(g, r, customDate) && (!unpublishedOnly || isUnpublishedGame(g)),
+        inRange(g, r, customDate) &&
+        (!unpublishedOnly || isUnpublishedGame(g)) &&
+        (completenessFilter === "all" || assignmentCompleteness(g).key === completenessFilter),
     );
     if (!list.some((g) => g.id === selected)) setSelected(list[0]?.id || "");
   }
@@ -481,7 +517,8 @@ export default function AssignmentsManagerV2() {
     const list = games.filter(
       (g) =>
         inRange(g, "custom", value) &&
-        (!unpublishedOnly || isUnpublishedGame(g)),
+        (!unpublishedOnly || isUnpublishedGame(g)) &&
+        (completenessFilter === "all" || assignmentCompleteness(g).key === completenessFilter),
     );
     setSelected(list[0]?.id || "");
   }
@@ -490,57 +527,64 @@ export default function AssignmentsManagerV2() {
     setUnpublishedOnly(next);
     setOverrideOfficial("");
     const list = games.filter(
-      (g) => inRange(g, range, customDate) && (!next || isUnpublishedGame(g)),
+      (g) =>
+        inRange(g, range, customDate) &&
+        (!next || isUnpublishedGame(g)) &&
+        (completenessFilter === "all" || assignmentCompleteness(g).key === completenessFilter),
     );
     if (!list.some((g) => g.id === selected)) setSelected(list[0]?.id || "");
   }
-  function workingAtGameTime(o: Official, ignorePositionId = "") {
-    if (!game) return false;
-    return assignments.some((a) => {
-      if (a.official_id !== o.id || a.status === "declined") return false;
+  function chooseCompleteness(value: Completeness) {
+    setCompletenessFilter(value);
+    setOverrideOfficial("");
+    const list = games.filter(
+      (listedGame) =>
+        inRange(listedGame, range, customDate) &&
+        (!unpublishedOnly || isUnpublishedGame(listedGame)) &&
+        (value === "all" || assignmentCompleteness(listedGame).key === value),
+    );
+    if (!list.some((listedGame) => listedGame.id === selected))
+      setSelected(list[0]?.id || "");
+  }
+  function assignmentConflictReasons(o: Official, ignorePositionId = "") {
+    if (!game) return [];
+    const reasons: string[] = [];
+    for (const a of assignments) {
+      if (a.official_id !== o.id || a.status === "declined") continue;
       if (
         ignorePositionId &&
         a.game_id === game.id &&
         a.position_id === ignorePositionId
       )
-        return false;
+        continue;
       const other = games.find((g) => g.id === a.game_id);
-      return (
-        !!other &&
-        overlaps(
-          game.starts_at,
-          game.duration_minutes || 110,
-          other.starts_at,
-          other.duration_minutes || 110,
-        )
-      );
-    });
-  }
-  function hasAssignmentConflict(o: Official) {
-    if (!game) return false;
-    return assignments.some((a) => {
       if (
-        a.official_id !== o.id ||
-        a.game_id === game.id ||
-        a.status === "declined"
-      )
-        return false;
-      const other = games.find((g) => g.id === a.game_id);
-      return (
-        !!other &&
+        other &&
         overlaps(
           game.starts_at,
           game.duration_minutes || 110,
           other.starts_at,
           other.duration_minutes || 110,
         )
-      );
-    });
+      ) {
+        const when = new Date(other.starts_at).toLocaleString([], {
+          dateStyle: "short",
+          timeStyle: "short",
+        });
+        reasons.push(
+          `Overlaps Game #${other.game_number} (${other.home?.name || "TBD"} vs ${other.away?.name || "TBD"}) at ${when}`,
+        );
+      }
+    }
+    return reasons;
   }
-  function ineligibleReasons(o: Official) {
+  function workingAtGameTime(o: Official, ignorePositionId = "") {
+    return assignmentConflictReasons(o, ignorePositionId).length > 0;
+  }
+  function ineligibleReasons(o: Official, ignorePositionId = "") {
     if (!game) return [];
     const reasons: string[] = [];
-    if (hasAssignmentConflict(o)) reasons.push("Game-time conflict");
+    reasons.push(...assignmentConflictReasons(o, ignorePositionId));
     const day = game.starts_at.slice(0, 10),
       gs = new Date(game.starts_at).getTime(),
       ge = gs + (game.duration_minutes || 110) * 60000;
@@ -552,7 +596,9 @@ export default function AssignmentsManagerV2() {
         new Date(b.starts_at).getTime() < ge &&
         new Date(b.ends_at).getTime() > gs
       )
-        reasons.push("Time block");
+        reasons.push(
+          `Unavailable from ${new Date(b.starts_at).toLocaleString()} to ${new Date(b.ends_at).toLocaleString()}`,
+        );
       else if (
         b.block_type === "date" &&
         b.start_date &&
@@ -560,18 +606,20 @@ export default function AssignmentsManagerV2() {
         day >= b.start_date &&
         day <= b.end_date
       )
-        reasons.push("Date block");
+        reasons.push(`Unavailable from ${b.start_date} through ${b.end_date}`);
       else if (
         b.block_type === "location" &&
         b.location_id === game.location_id
       )
-        reasons.push("Location block");
+        reasons.push(`Blocked at ${game.location?.name || "this location"}`);
       else if (
         b.block_type === "team" &&
         b.team_id &&
         (b.team_id === game.home?.id || b.team_id === game.away?.id)
       )
-        reasons.push("Team block");
+        reasons.push(
+          `Blocked for ${b.team_id === game.home?.id ? game.home?.name : game.away?.name || "this team"}`,
+        );
     }
     if (
       !o.sports.some((s) => s.toLowerCase() === game.sports?.name.toLowerCase())
@@ -584,19 +632,20 @@ export default function AssignmentsManagerV2() {
       ol.length &&
       !ol.some((x) => x.league_id === game.league_id)
     )
-      reasons.push("League not eligible");
+      reasons.push(`Not eligible for league ${game.leagues?.name || "selected league"}`);
     if (
       game.level_id &&
       ov.length &&
       !ov.some((x) => x.level_id === game.level_id)
     )
-      reasons.push("Level not eligible");
+      reasons.push(`Not eligible for level ${game.levels?.name || "selected level"}`);
     if (
       assignments.some(
         (a) =>
           a.game_id === game.id &&
           a.official_id === o.id &&
-          a.status !== "declined",
+          a.status !== "declined" &&
+          !(ignorePositionId && a.position_id === ignorePositionId),
       )
     )
       reasons.push("Already assigned to this game");
@@ -735,7 +784,7 @@ export default function AssignmentsManagerV2() {
           game.location?.longitude ?? null,
         ),
         rank: positionRankFor(o.id, pos),
-        reasons: ineligibleReasons(o).filter(
+        reasons: ineligibleReasons(o, pos.id).filter(
           (r) =>
             !(
               current?.official_id === o.id &&
@@ -770,7 +819,6 @@ export default function AssignmentsManagerV2() {
     : [];
   const ineligibleOfficials = game
     ? officials
-        .filter((o) => !workingAtGameTime(o))
         .map((o) => ({ ...o, reasons: ineligibleReasons(o) }))
         .filter((o) => o.reasons.length > 0)
         .sort(
@@ -784,12 +832,12 @@ export default function AssignmentsManagerV2() {
     const official = officials.find((o) => o.id === officialId);
     if (officialId && official && workingAtGameTime(official, positionId)) {
       setError(
-        `${official.first_name} ${official.last_name} is already working during this game time and cannot be assigned.`,
+        `${official.first_name} ${official.last_name} cannot be assigned: ${assignmentConflictReasons(official, positionId).join("; ")}.`,
       );
       return;
     }
     const reasons = official
-      ? ineligibleReasons(official).filter(
+      ? ineligibleReasons(official, positionId).filter(
           (r) => r !== "Already assigned to this game",
         )
       : [];
@@ -1050,6 +1098,7 @@ export default function AssignmentsManagerV2() {
   ];
   function renderGameRow(g: Game, linked: boolean, showChain: boolean) {
     const d = new Date(g.starts_at);
+    const completeness = assignmentCompleteness(g);
     const normalizedStatus = g.status === "open" ? "active" : g.status;
     const isRainOut = normalizedStatus === "rained_out";
     const statusBackground =
@@ -1170,6 +1219,20 @@ export default function AssignmentsManagerV2() {
             fontSize: 11,
           }}
         >
+          <span
+            title={completeness.detail}
+            style={{
+              border: `1px solid ${completeness.color}`,
+              color: isRainOut ? "#fff" : completeness.color,
+              background: isRainOut ? "rgba(255,255,255,.12)" : "#fff",
+              borderRadius: 999,
+              padding: "3px 7px",
+              fontWeight: 900,
+              whiteSpace: "nowrap",
+            }}
+          >
+            {completeness.label}
+          </span>
           {gamePositionsForRow.map((pos) => {
             const assignment = assignments.find(
               (item) =>
@@ -1361,6 +1424,43 @@ export default function AssignmentsManagerV2() {
               {filteredGames.length})
             </span>
           )}
+        </div>
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            flexWrap: "wrap",
+            margin: "-4px 0 14px",
+            alignItems: "center",
+          }}
+        >
+          <b style={{ fontSize: 12, color: "#475569" }}>Assignment status:</b>
+          {(
+            [
+              ["all", "All"],
+              ["unassigned", "Unassigned"],
+              ["partial", "Partially Assigned"],
+              ["awaiting", "Awaiting Confirmation"],
+              ["confirmed", "Confirmed"],
+              ["attention", "Needs Attention"],
+            ] as [Completeness, string][]
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              className={completenessFilter === key ? "primary" : "secondary"}
+              onClick={() => chooseCompleteness(key)}
+              style={{ padding: "7px 10px", fontSize: 11 }}
+            >
+              {label} (
+              {key === "all"
+                ? rangeGames.length
+                : rangeGames.filter(
+                    (listedGame) => assignmentCompleteness(listedGame).key === key,
+                  ).length}
+              )
+            </button>
+          ))}
         </div>
         <div
           style={{
@@ -1898,9 +1998,9 @@ export default function AssignmentsManagerV2() {
               </span>
             </div>
             <p>
-              Eligible officials are listed first. Ineligible officials are
-              shown in red. Officials already assigned to any overlapping game
-              time are hidden completely and cannot be overridden.
+              Eligible officials are listed first. Every unavailable official
+              remains visible in red with the exact reason. Overlapping game
+              assignments cannot be overridden.
             </p>
             <div className="availableOfficialsList">
               {availableOfficials.map((o, i) => (
@@ -1962,7 +2062,10 @@ export default function AssignmentsManagerV2() {
                         <small style={{ color: "#b91c1c", fontWeight: 700 }}>
                           {o.reasons.join(" • ")}
                         </small>
-                        {canManage && (
+                        {canManage &&
+                          !o.reasons.some((reason) =>
+                            reason.startsWith("Overlaps Game #"),
+                          ) && (
                           <div style={{ marginTop: 6 }}>
                             <button
                               type="button"
@@ -2014,6 +2117,13 @@ export default function AssignmentsManagerV2() {
                               </div>
                             )}
                           </div>
+                        )}
+                        {o.reasons.some((reason) =>
+                          reason.startsWith("Overlaps Game #"),
+                        ) && (
+                          <small style={{ color: "#7f1d1d", fontWeight: 900 }}>
+                            Cannot override an overlapping assignment
+                          </small>
                         )}
                       </div>
                     </div>

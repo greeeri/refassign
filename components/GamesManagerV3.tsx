@@ -42,6 +42,8 @@ type Row = {
   notes: string;
   valid: boolean;
   issue: string;
+  action: "add" | "update" | "skip" | "error";
+  changes: string;
 };
 type Range = "all" | "today" | "tomorrow" | "thisWeek" | "nextWeek" | "custom";
 const statusOptions = [
@@ -424,12 +426,16 @@ export default function GamesManagerV3() {
         notes: get("notes"),
         valid: !issues.length,
         issue: issues.join("; "),
+        action: issues.length ? "error" : "add",
+        changes: issues.length ? issues.join("; ") : "New game",
       };
     });
     const schedulable = validated.map((row) => row.valid),
       addIssue = (row: Row, issue: string) => {
         row.valid = false;
         row.issue = row.issue ? `${row.issue}; ${issue}` : issue;
+        row.action = "error";
+        row.changes = row.issue;
       };
     for (let i = 0; i < validated.length; i++) {
       const a = validated[i];
@@ -471,6 +477,38 @@ export default function GamesManagerV3() {
         addIssue(b, bMessage);
       }
     }
+    for (const row of validated) {
+      if (!row.valid) continue;
+      const existing = row.game_number
+        ? games.find((game) => norm(game.game_number) === norm(row.game_number))
+        : undefined;
+      if (!existing) {
+        row.action = "add";
+        row.changes = "New game will be added";
+        continue;
+      }
+      const currentDate = new Date(existing.starts_at),
+        currentDateValue = `${currentDate.getFullYear()}-${pad(currentDate.getMonth() + 1)}-${pad(currentDate.getDate())}`,
+        currentTimeValue = `${pad(currentDate.getHours())}:${pad(currentDate.getMinutes())}`,
+        changes: string[] = [],
+        compare = (label: string, before: string | number, after: string | number) => {
+          if (norm(String(before)) !== norm(String(after)))
+            changes.push(`${label}: ${before || "blank"} → ${after || "blank"}`);
+        };
+      compare("Sport", existing.sports?.name || "", row.sport);
+      compare("League", existing.leagues?.name || "", row.league);
+      compare("Level", existing.levels?.name || "", row.level);
+      compare("Home team", existing.home?.name || "", row.home_team);
+      compare("Away team", existing.away?.name || "", row.away_team);
+      compare("Date", currentDateValue, row.date);
+      compare("Time", currentTimeValue, row.time);
+      compare("Location", existing.location?.name || "", row.location);
+      compare("Length", existing.duration_minutes || 110, row.duration_minutes);
+      compare("Officials", existing.officials_needed, row.officials_needed);
+      compare("Notes", existing.notes || "", row.notes);
+      row.action = changes.length ? "update" : "skip";
+      row.changes = changes.length ? changes.join(" • ") : "No changes detected";
+    }
     return validated;
   }
   async function file(e: ChangeEvent<HTMLInputElement>) {
@@ -496,7 +534,8 @@ export default function GamesManagerV3() {
     setBusy(true);
     setError("");
     let added = 0,
-      updated = 0;
+      updated = 0,
+      skipped = rows.filter((row) => row.action === "skip").length;
     const importedByGameNumber = new Map(
         rows
           .filter((r) => r.valid && r.game_number)
@@ -512,6 +551,7 @@ export default function GamesManagerV3() {
           ? String((value as { message: unknown }).message)
           : String(value);
     async function applyRow(r: Row, resolving = new Set<number>()) {
+      if (r.action === "skip") return;
       if (applied.has(r.row)) return;
       if (resolving.has(r.row))
         throw new Error(
@@ -597,7 +637,9 @@ export default function GamesManagerV3() {
         if (!r.valid) continue;
         await applyRow(r);
       }
-      setMessage(`Import complete: ${updated} updated, ${added} added.`);
+      setMessage(
+        `Import complete: ${updated} updated, ${added} added, ${skipped} unchanged and skipped.`,
+      );
       setRows([]);
       await load();
     } catch (x) {
@@ -905,6 +947,30 @@ export default function GamesManagerV3() {
           <input type="file" accept=".xlsx,.xls,.csv" onChange={file} />
           {rows.length > 0 && (
             <>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  flexWrap: "wrap",
+                  margin: "12px 0",
+                }}
+              >
+                {(["add", "update", "skip", "error"] as const).map((action) => (
+                  <span
+                    key={action}
+                    className={`badge ${action === "error" ? "red" : action === "skip" ? "" : "blue"}`}
+                  >
+                    {action === "add"
+                      ? "Add"
+                      : action === "update"
+                        ? "Update"
+                        : action === "skip"
+                          ? "No Change"
+                          : "Error"}{" "}
+                    ({rows.filter((row) => row.action === action).length})
+                  </span>
+                ))}
+              </div>
               {rows.some((r) => !r.valid) && (
                 <div className="errorBox">
                   Import paused: {rows.filter((r) => !r.valid).length}{" "}
@@ -921,6 +987,8 @@ export default function GamesManagerV3() {
                       <th>Game</th>
                       <th>Date / Time</th>
                       <th>Length</th>
+                      <th>Action</th>
+                      <th>Proposed Changes</th>
                       <th>Validation</th>
                     </tr>
                   </thead>
@@ -937,6 +1005,27 @@ export default function GamesManagerV3() {
                           <small>{r.time}</small>
                         </td>
                         <td>{r.duration_minutes} min</td>
+                        <td>
+                          <b
+                            style={{
+                              color:
+                                r.action === "error"
+                                  ? "#dc2626"
+                                  : r.action === "skip"
+                                    ? "#64748b"
+                                    : "#2563eb",
+                            }}
+                          >
+                            {r.action === "add"
+                              ? "ADD"
+                              : r.action === "update"
+                                ? "UPDATE"
+                                : r.action === "skip"
+                                  ? "SKIP"
+                                  : "ERROR"}
+                          </b>
+                        </td>
+                        <td style={{ minWidth: 260 }}>{r.changes}</td>
                         <td>{r.valid ? "Ready" : r.issue}</td>
                       </tr>
                     ))}
@@ -948,7 +1037,7 @@ export default function GamesManagerV3() {
                 disabled={busy || rows.some((r) => !r.valid)}
                 onClick={() => void applyImport()}
               >
-                Apply Import / Updates
+                Apply Reviewed Import
               </button>
             </>
           )}
