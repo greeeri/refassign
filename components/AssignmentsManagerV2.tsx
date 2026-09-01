@@ -206,6 +206,8 @@ export default function AssignmentsManagerV2() {
     [linkMembers, setLinkMembers] = useState<LinkMember[]>([]),
     [linkSelected, setLinkSelected] = useState<string[]>([]),
     [linking, setLinking] = useState(false),
+    [bulkWorking, setBulkWorking] = useState(false),
+    [bulkStatus, setBulkStatus] = useState("active"),
     [selfAssignSlots, setSelfAssignSlots] = useState<SelfAssignSlot[]>([]),
     [selfAssignSelected, setSelfAssignSelected] = useState<string[]>([]),
     [selfAssignSaving, setSelfAssignSaving] = useState(false);
@@ -1120,10 +1122,13 @@ export default function AssignmentsManagerV2() {
   function formatDeadline(value: string | null) {
     return value ? new Date(value).toLocaleString() : "";
   }
-  async function exportAssignments() {
+  async function exportAssignments(gameIds?: string[]) {
     const XLSX = await import("xlsx");
+    const exportGames = gameIds?.length
+      ? filteredGames.filter((listedGame) => gameIds.includes(listedGame.id))
+      : filteredGames;
     const positionNames: string[] = [];
-    for (const g of filteredGames) {
+    for (const g of exportGames) {
       const gp = positions
         .filter((p) => p.sport_id === g.sport_id)
         .sort((a, b) => a.sort_order - b.sort_order)
@@ -1131,7 +1136,7 @@ export default function AssignmentsManagerV2() {
       for (const pos of gp)
         if (!positionNames.includes(pos.name)) positionNames.push(pos.name);
     }
-    const data = filteredGames.map((g) => {
+    const data = exportGames.map((g) => {
       const d = new Date(g.starts_at),
         row: Record<string, string | number> = {
           "Game Number": g.game_number,
@@ -1187,6 +1192,34 @@ export default function AssignmentsManagerV2() {
     XLSX.utils.book_append_sheet(wb, ws, "Assignments");
     XLSX.writeFile(wb, "refassign-game-assignments.xlsx");
   }
+  async function runBulkAction(action: "publish" | "confirm" | "unassign" | "status" | "remind") {
+    if (!canManage || !linkSelected.length || bulkWorking) return;
+    const selectedIds = [...linkSelected];
+    const selectedAssignments = assignments.filter((a) => selectedIds.includes(a.game_id) && a.status !== "declined");
+    const labels = {publish:"publish assignments for",confirm:"confirm officials on",unassign:"unassign every official from",status:`change the status to ${gameStatusOptions.find(([value])=>value===bulkStatus)?.[1]||bulkStatus} for`,remind:"send reminders for"};
+    if (!window.confirm(`${labels[action]} ${selectedIds.length} selected game${selectedIds.length===1?"":"s"}?`)) return;
+    setBulkWorking(true); setError(""); setNotice("");
+    let succeeded=0; const failures:string[]=[];
+    try {
+      if(action==="unassign"){
+        const {error:deleteError}=await supabase.from("assignments").delete().in("game_id",selectedIds);
+        if(deleteError) failures.push(deleteError.message); else succeeded=selectedAssignments.length;
+      } else if(action==="status"){
+        for(const gameId of selectedIds){const response=await fetch("/api/games/status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({gameId,status:bulkStatus})});const body=await response.json().catch(()=>({})) as {error?:string};if(response.ok)succeeded++;else failures.push(body.error||`Could not update game ${gameId}`)}
+      } else if(action==="publish"){
+        for(const gameId of selectedIds){const response=await fetch("/api/assignments/publish",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({gameId})});const body=await response.json().catch(()=>({})) as {error?:string;failed?:number;failures?:string[]};if(response.ok){succeeded++;if(body.failed)failures.push(...(body.failures||[]))}else failures.push(body.error||`Could not publish game ${gameId}`)}
+      } else if(action==="confirm"){
+        const eligible=selectedAssignments.filter(a=>a.published_at&&a.status!=="confirmed");
+        for(const a of eligible){const response=await fetch("/api/assignments/confirm",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({assignmentId:a.id})});const body=await response.json().catch(()=>({})) as {error?:string};if(response.ok)succeeded++;else failures.push(body.error||`Could not confirm assignment ${a.id}`)}
+      } else {
+        const response=await fetch("/api/assignments/remind",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({gameIds:selectedIds})});const body=await response.json().catch(()=>({})) as {sent?:number;error?:string;failures?:string[]};if(!response.ok)failures.push(body.error||"Could not send reminders");else{succeeded=body.sent||0;failures.push(...(body.failures||[]))}
+      }
+      if(failures.length)setError(`Bulk action completed with ${failures.length} issue${failures.length===1?"":"s"}: ${failures.slice(0,4).join(" | ")}${failures.length>4?" | …":""}`);
+      setNotice(`Bulk action complete: ${succeeded} ${action==="status"?"game":action==="confirm"||action==="unassign"||action==="remind"?"assignment":"game"}${succeeded===1?"":"s"} processed.`);
+      setLinkSelected([]); await load();
+    } catch(e){setError(e instanceof Error?e.message:"Unable to complete the bulk action.");}
+    finally{setBulkWorking(false)}
+  }
   const filters: [Range, string][] = [
     ["all", "All Games"],
     ["today", "Today's Games"],
@@ -1237,18 +1270,14 @@ export default function AssignmentsManagerV2() {
         }}
       >
         <label
-          title={
-            linked
-              ? "Unlink this group before selecting this game"
-              : "Select game to link"
-          }
+          title="Select game for bulk actions or linking"
           style={{ display: "flex", justifyContent: "center" }}
         >
           <input
             type="checkbox"
-            aria-label={`Select game ${g.game_number} to link`}
+            aria-label={`Select game ${g.game_number}`}
             checked={linkSelected.includes(g.id)}
-            disabled={linked || linking}
+            disabled={linking || bulkWorking}
             onChange={() => toggleLinkSelection(g.id)}
           />
         </label>
@@ -1698,15 +1727,12 @@ export default function AssignmentsManagerV2() {
               Assignments — {filteredGames.length} game
               {filteredGames.length === 1 ? "" : "s"}
             </b>
-            <button
-              type="button"
-              className="primary"
-              disabled={linking || linkSelected.length < 2}
-              onClick={() => void linkGames()}
-            >
-              🔗 Link{linkSelected.length ? ` (${linkSelected.length})` : ""}
-            </button>
+            <span style={{display:"flex",gap:7,flexWrap:"wrap",alignItems:"center",justifyContent:"flex-end"}}>
+              <button type="button" className="secondary" disabled={!filteredGames.length||bulkWorking} onClick={()=>setLinkSelected(linkSelected.length===filteredGames.length?[]:filteredGames.map(g=>g.id))}>{linkSelected.length===filteredGames.length?"Clear All":"Select All"}</button>
+              <button type="button" className="primary" disabled={linking||bulkWorking||linkSelected.length<2} onClick={()=>void linkGames()}>🔗 Link{linkSelected.length?` (${linkSelected.length})`:""}</button>
+            </span>
           </div>
+          {canManage&&linkSelected.length>0&&<div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap",padding:"9px 12px",background:"#fffbeb",borderBottom:"1px solid #fde68a"}}><b style={{marginRight:4}}>{linkSelected.length} selected:</b><button className="secondary" disabled={bulkWorking} onClick={()=>void runBulkAction("publish")}>Publish</button><button className="secondary" disabled={bulkWorking} onClick={()=>void runBulkAction("confirm")}>Confirm Officials</button><button className="secondary" disabled={bulkWorking} onClick={()=>void runBulkAction("unassign")}>Unassign Officials</button><select aria-label="Bulk game status" value={bulkStatus} disabled={bulkWorking} onChange={e=>setBulkStatus(e.target.value)} style={{width:"auto"}}>{gameStatusOptions.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select><button className="secondary" disabled={bulkWorking} onClick={()=>void runBulkAction("status")}>Change Status</button><button className="secondary" disabled={bulkWorking} onClick={()=>void exportAssignments(linkSelected)}>Export Selected</button><button className="secondary" disabled={bulkWorking} onClick={()=>void runBulkAction("remind")}>Send Reminders</button>{bulkWorking&&<span>Working…</span>}</div>}
           <div
             style={{
               display: "grid",
