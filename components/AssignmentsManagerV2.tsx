@@ -188,6 +188,7 @@ export default function AssignmentsManagerV2() {
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [saving, setSaving] = useState(""),
+    [movingAssignment, setMovingAssignment] = useState(""),
     [publishing, setPublishing] = useState(false),
     [confirming, setConfirming] = useState(""),
     [gameStatusSaving, setGameStatusSaving] = useState(""),
@@ -886,38 +887,48 @@ export default function AssignmentsManagerV2() {
         .from("assignments")
         .delete()
         .eq("id", existing.id);
-    else if (existing)
-      result = await supabase
-        .from("assignments")
-        .update({
-          official_id: officialId,
-          status: "proposed",
-          published_at: null,
-          accept_by: null,
-          published_by: null,
-          email_sent_at: null,
-          resend_email_id: null,
-          email_error: null,
-          response_token: null,
-          responded_at: null,
-          decline_reason: null,
-        })
-        .eq("id", existing.id);
-    else
-      result = await supabase.from("assignments").insert({
-        game_id: game.id,
-        official_id: officialId,
-        position_id: positionId,
-        status: "proposed",
+    else if (officialId)
+      result = await supabase.rpc("assign_official_to_linked_games", {
+        p_game_id: game.id,
+        p_position_id: positionId,
+        p_official_id: officialId,
       });
+    if (!result) {
+      setSaving("");
+      return;
+    }
     if (result.error) setError(result.error.message);
-    else if (reasons.length)
+    else if (officialId) {
+      const linkedCount = Number(result.data || 1);
       setNotice(
-        `Eligibility override applied for ${official?.first_name} ${official?.last_name}.`,
+        `${official?.first_name} ${official?.last_name} assigned to ${linkedCount} ${linkedCount === 1 ? "game" : "linked games"}${reasons.length ? " with an eligibility override" : ""}.`,
       );
+    }
     await load();
     setSaving("");
     setOverrideOfficial("");
+  }
+  async function moveAssignment(
+    gameId: string,
+    assignmentId: string,
+    direction: -1 | 1,
+  ) {
+    if (!canManage) return;
+    setMovingAssignment(assignmentId);
+    setError("");
+    setNotice("");
+    const { error: moveError } = await supabase.rpc(
+      "move_assignment_position",
+      {
+        p_game_id: gameId,
+        p_assignment_id: assignmentId,
+        p_direction: direction,
+      },
+    );
+    if (moveError) setError(moveError.message);
+    else setNotice("Official positions updated.");
+    await load();
+    setMovingAssignment("");
   }
   async function unassign(assignmentId: string, positionId: string) {
     if (!canManage) {
@@ -1264,7 +1275,7 @@ export default function AssignmentsManagerV2() {
           >
             {completeness.label}
           </span>
-          {gamePositionsForRow.map((pos) => {
+          {gamePositionsForRow.map((pos, positionIndex) => {
             const assignment = assignments.find(
               (item) =>
                 item.game_id === g.id &&
@@ -1306,6 +1317,46 @@ export default function AssignmentsManagerV2() {
                 </span>
                 {assignment && official && canManage && (
                   <>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        gap: 3,
+                        marginRight: 2,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        aria-label={`Move ${official.first_name} ${official.last_name} to the previous position`}
+                        title="Move left; swaps with the adjacent official"
+                        disabled={
+                          positionIndex === 0 ||
+                          movingAssignment === assignment.id
+                        }
+                        onClick={() =>
+                          void moveAssignment(g.id, assignment.id, -1)
+                        }
+                        className="secondary"
+                        style={{ padding: "3px 6px", fontSize: 11 }}
+                      >
+                        ←
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Move ${official.first_name} ${official.last_name} to the next position`}
+                        title="Move right; swaps with the adjacent official"
+                        disabled={
+                          positionIndex === gamePositionsForRow.length - 1 ||
+                          movingAssignment === assignment.id
+                        }
+                        onClick={() =>
+                          void moveAssignment(g.id, assignment.id, 1)
+                        }
+                        className="secondary"
+                        style={{ padding: "3px 6px", fontSize: 11 }}
+                      >
+                        →
+                      </button>
+                    </span>
                     <button
                       type="button"
                       disabled={
@@ -1947,8 +1998,58 @@ export default function AssignmentsManagerV2() {
                                   " " +
                                   officials.find(
                                     (o) => o.id === current.official_id,
-                                  )?.last_name}
+                                )?.last_name}
                                 {futureBadge(current.official_id)}
+                                {canManage && (
+                                  <span
+                                    style={{
+                                      display: "inline-flex",
+                                      gap: 4,
+                                      marginLeft: 8,
+                                    }}
+                                  >
+                                    <button
+                                      type="button"
+                                      className="secondary"
+                                      title="Move to previous position; swaps officials when occupied"
+                                      aria-label="Move official to previous position"
+                                      disabled={
+                                        index === 0 ||
+                                        movingAssignment === current.id
+                                      }
+                                      onClick={() =>
+                                        void moveAssignment(
+                                          game.id,
+                                          current.id,
+                                          -1,
+                                        )
+                                      }
+                                      style={{ padding: "3px 7px" }}
+                                    >
+                                      ←
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="secondary"
+                                      title="Move to next position; swaps officials when occupied"
+                                      aria-label="Move official to next position"
+                                      disabled={
+                                        index === gamePositions.length - 1 ||
+                                        movingAssignment === current.id
+                                      }
+                                      onClick={() =>
+                                        void moveAssignment(
+                                          game.id,
+                                          current.id,
+                                          1,
+                                        )
+                                      }
+                                      style={{ padding: "3px 7px" }}
+                                    >
+                                      →
+                                    </button>
+                                  </span>
+                                )}
                                 {canManage &&
                                   current.published_at &&
                                   current.status !== "declined" &&
