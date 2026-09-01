@@ -643,7 +643,16 @@ export default function GamesManagerV3() {
       setRows([]);
       await load();
     } catch (x) {
-      setError(x instanceof Error ? x.message : "Import failed");
+      const importError = x instanceof Error ? x.message : "Import failed";
+      setError(importError);
+      const rowNumber = Number(importError.match(/spreadsheet row (\d+)/i)?.[1] || 0) || null;
+      const { data: userData } = await sb.auth.getUser();
+      await sb.from("import_error_log").insert({
+        import_type: "games",
+        error_message: importError,
+        row_number: rowNumber,
+        created_by: userData.user?.id || null,
+      });
     }
     setBusy(false);
   }
