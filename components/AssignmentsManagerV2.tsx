@@ -206,6 +206,7 @@ export default function AssignmentsManagerV2() {
     [linkMembers, setLinkMembers] = useState<LinkMember[]>([]),
     [linkSelected, setLinkSelected] = useState<string[]>([]),
     [linking, setLinking] = useState(false),
+    [draggingGame, setDraggingGame] = useState(""),
     [bulkWorking, setBulkWorking] = useState(false),
     [bulkStatus, setBulkStatus] = useState("active"),
     [selfAssignSlots, setSelfAssignSlots] = useState<SelfAssignSlot[]>([]),
@@ -518,6 +519,106 @@ export default function AssignmentsManagerV2() {
     else setNotice("Games unlinked.");
     await load();
     setLinking(false);
+  }
+  function travelBetween(first: Game, second: Game) {
+    if (first.location_id && first.location_id === second.location_id)
+      return { miles: 0, minutes: 0 };
+    const directMiles = miles(
+      first.location?.latitude ?? null,
+      first.location?.longitude ?? null,
+      second.location?.latitude ?? null,
+      second.location?.longitude ?? null,
+    );
+    if (directMiles == null) return null;
+    const roadMiles = directMiles * 1.2;
+    return {
+      miles: roadMiles,
+      minutes: Math.max(10, Math.ceil((roadMiles / 35) * 60 + 10)),
+    };
+  }
+  function sharedCrew(first: Game, second: Game) {
+    const firstIds = new Set(
+      assignments
+        .filter((assignment) => assignment.game_id === first.id && assignment.status !== "declined")
+        .map((assignment) => assignment.official_id),
+    );
+    return [...new Set(
+      assignments
+        .filter(
+          (assignment) =>
+            assignment.game_id === second.id &&
+            assignment.status !== "declined" &&
+            firstIds.has(assignment.official_id),
+        )
+        .map((assignment) => assignment.official_id),
+    )];
+  }
+  function travelDetails(first: Game, second: Game) {
+    const travel = travelBetween(first, second);
+    const firstEnds =
+      new Date(first.starts_at).getTime() + first.duration_minutes * 60000;
+    const gapMinutes = Math.floor(
+      (new Date(second.starts_at).getTime() - firstEnds) / 60000,
+    );
+    const shared = sharedCrew(first, second);
+    const impossible = gapMinutes < 0 || (travel != null && gapMinutes < travel.minutes);
+    return { travel, gapMinutes, shared, impossible };
+  }
+  function linkedGroupWarnings(groupGames: Game[]) {
+    const warnings: string[] = [];
+    for (let index = 1; index < groupGames.length; index++) {
+      const first = groupGames[index - 1], second = groupGames[index];
+      const details = travelDetails(first, second);
+      if (!details.impossible || !details.shared.length) continue;
+      const names = details.shared.map((officialId) => {
+        const official = officials.find((candidate) => candidate.id === officialId);
+        return official ? `${official.first_name} ${official.last_name}` : "Assigned official";
+      });
+      warnings.push(
+        `${names.join(", ")} cannot reasonably travel from ${first.location?.name || "the first location"} to ${second.location?.name || "the next location"} in the ${Math.max(0, details.gapMinutes)} minutes available.`,
+      );
+    }
+    return warnings;
+  }
+  async function reorderLinkedGame(groupId: string, draggedId: string, targetId: string) {
+    if (!canManage || !draggedId || draggedId === targetId) return;
+    const ordered = linkMembers
+      .filter((member) => member.group_id === groupId)
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((member) => member.game_id);
+    const from = ordered.indexOf(draggedId), to = ordered.indexOf(targetId);
+    if (from < 0 || to < 0) return;
+    const next = [...ordered];
+    next.splice(to, 0, next.splice(from, 1)[0]);
+    setLinking(true); setError(""); setNotice("");
+    const results = await Promise.all(
+      next.map((gameId, sortOrder) =>
+        supabase.from("game_link_members").update({ sort_order: sortOrder }).eq("group_id", groupId).eq("game_id", gameId),
+      ),
+    );
+    const failed = results.find((result) => result.error)?.error;
+    if (failed) setError(failed.message);
+    else setNotice("Linked-game order updated.");
+    setDraggingGame(""); await load(); setLinking(false);
+  }
+  async function moveLinkedGame(groupId: string, gameId: string, direction: -1 | 1) {
+    const ordered = linkMembers.filter((member) => member.group_id === groupId).sort((a,b)=>a.sort_order-b.sort_order);
+    const index = ordered.findIndex((member) => member.game_id === gameId);
+    const target = ordered[index + direction];
+    if (target) await reorderLinkedGame(groupId, gameId, target.game_id);
+  }
+  async function unlinkOneGame(groupId: string, gameId: string) {
+    if (!canManage || linking) return;
+    setLinking(true); setError(""); setNotice("");
+    const members = linkMembers.filter((member) => member.group_id === groupId);
+    const { error: removeError } = await supabase.from("game_link_members").delete().eq("group_id", groupId).eq("game_id", gameId);
+    if (removeError) setError(removeError.message);
+    else if (members.length <= 2) {
+      const { error: groupError } = await supabase.from("game_link_groups").delete().eq("id", groupId);
+      if (groupError) setError(groupError.message);
+      else setNotice("Game unlinked; the remaining single-game group was removed.");
+    } else setNotice("Game removed from Linked Games.");
+    await load(); setLinking(false);
   }
   function selfAssignKey(gameId: string, positionId: string) {
     return `${gameId}:${positionId}`;
@@ -1807,42 +1908,26 @@ export default function AssignmentsManagerV2() {
           </div>
           <div style={{ maxHeight: 420, overflow: "auto" }}>
             {gameUnits.length ? (
-              gameUnits.map((unit) => (
-                <div key={unit.key}>
+              gameUnits.map((unit) => {
+                const warnings = unit.groupId ? linkedGroupWarnings(unit.games) : [];
+                return <div key={unit.key}>
                   {unit.groupId && (
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        padding: "8px 12px",
-                        background: "#dbeafe",
-                        color: "#1e3a8a",
-                        borderBottom: "1px solid #93c5fd",
-                        fontWeight: 900,
-                      }}
-                    >
-                      <span>🔗 Linked Games</span>
-                      <button
-                        type="button"
-                        className="secondary"
-                        disabled={linking}
-                        onClick={() => void unlinkGames(unit.groupId!)}
-                        style={{ padding: "5px 9px", fontSize: 11 }}
-                      >
-                        Unlink
-                      </button>
-                    </div>
+                    <><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,padding:"8px 12px",background:"#dbeafe",color:"#1e3a8a",borderBottom:"1px solid #93c5fd",fontWeight:900}}>
+                      <span>🔗 Linked Games <small style={{fontWeight:600}}>• Drag games to set crew order</small></span>
+                      <button type="button" className="secondary" disabled={linking} onClick={() => void unlinkGames(unit.groupId!)} style={{padding:"5px 9px",fontSize:11}}>Unlink Group</button>
+                    </div>{warnings.map((warning)=><div key={warning} role="alert" style={{padding:"8px 12px",background:"#fff7ed",color:"#9a3412",borderBottom:"1px solid #fdba74",fontSize:12,fontWeight:800}}>⚠️ {warning}</div>)}</>
                   )}
-                  {unit.games.map((listedGame, index) =>
-                    renderGameRow(
-                      listedGame,
-                      Boolean(unit.groupId),
-                      Boolean(unit.groupId) && index > 0,
-                    ),
-                  )}
-                </div>
-              ))
+                  {unit.games.map((listedGame, index) => {
+                    const previous = index > 0 ? unit.games[index - 1] : null;
+                    const travel = previous ? travelDetails(previous, listedGame) : null;
+                    return <div key={listedGame.id} draggable={Boolean(unit.groupId)&&canManage&&!linking} onDragStart={()=>setDraggingGame(listedGame.id)} onDragEnd={()=>setDraggingGame("")} onDragOver={event=>{if(unit.groupId)event.preventDefault()}} onDrop={event=>{event.preventDefault();if(unit.groupId)void reorderLinkedGame(unit.groupId,draggingGame,listedGame.id)}} style={{opacity:draggingGame===listedGame.id ? 0.7 : 1,position:"relative"}}>
+                      {unit.groupId&&previous&&travel&&<div style={{display:"flex",alignItems:"center",gap:8,padding:"5px 12px 5px 50px",background:travel.impossible&&travel.shared.length?"#fff7ed":"#f8fafc",color:travel.impossible&&travel.shared.length?"#9a3412":"#475569",borderBottom:"1px dashed #cbd5e1",fontSize:11,fontWeight:700}}><span>↳</span><span>{travel.travel?`Estimated travel: ${travel.travel.minutes} min (${travel.travel.miles.toFixed(1)} mi)`:"Travel time unavailable — location coordinates needed"}</span><span>• Schedule gap: {travel.gapMinutes} min</span></div>}
+                      {unit.groupId&&canManage&&<div style={{position:"absolute",right:8,top:8,zIndex:2,display:"flex",gap:4}}><button type="button" className="secondary" aria-label={`Move ${listedGame.game_number} earlier`} title="Move earlier" disabled={linking||index===0} onClick={()=>void moveLinkedGame(unit.groupId!,listedGame.id,-1)} style={{padding:"3px 6px",fontSize:10}}>↑</button><button type="button" className="secondary" aria-label={`Move ${listedGame.game_number} later`} title="Move later" disabled={linking||index===unit.games.length-1} onClick={()=>void moveLinkedGame(unit.groupId!,listedGame.id,1)} style={{padding:"3px 6px",fontSize:10}}>↓</button><button type="button" className="secondary" aria-label={`Unlink ${listedGame.game_number}`} title="Unlink this game" disabled={linking} onClick={()=>void unlinkOneGame(unit.groupId!,listedGame.id)} style={{padding:"3px 6px",fontSize:10}}>Unlink</button></div>}
+                      {renderGameRow(listedGame,Boolean(unit.groupId),Boolean(unit.groupId)&&index>0)}
+                    </div>;
+                  })}
+                </div>;
+              })
             ) : (
               <div style={{ padding: 14, color: "#64748b" }}>
                 No games in this selection.
