@@ -640,7 +640,7 @@ export default function AssignmentsManagerV2() {
     if (!game) return [];
     const reasons: string[] = [];
     for (const a of assignments) {
-      if (a.official_id !== o.id || a.status === "declined") continue;
+      if (a.official_id !== o.id || ["declined", "cancelled"].includes(a.status)) continue;
       if (
         ignorePositionId &&
         a.game_id === game.id &&
@@ -1056,11 +1056,9 @@ export default function AssignmentsManagerV2() {
     setGameStatusSaving(gameId);
     setError("");
     setNotice("");
-    const { error: statusError } = await supabase.rpc("set_game_status", {
-      p_game_id: gameId,
-      p_status: status,
-    });
-    if (statusError) setError(statusError.message);
+    const response = await fetch("/api/games/status", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({gameId,status})});
+    const result = await response.json().catch(() => ({})) as {error?:string;sent?:number;failed?:number;failures?:string[]};
+    if (!response.ok) setError(result.error || "Unable to change game status.");
     else {
       setGames((current) =>
         current.map((listedGame) =>
@@ -1069,10 +1067,10 @@ export default function AssignmentsManagerV2() {
             : listedGame,
         ),
       );
-      setNotice(
-        `Game status changed to ${gameStatusOptions.find(([value]) => value === status)?.[1] || status}.`,
-      );
+      const notification = ["canceled","rained_out"].includes(status) ? ` ${result.sent||0} official notification${result.sent===1?"":"s"} sent${result.failed?`; ${result.failed} failed`:""}.` : "";
+      setNotice(`Game status changed to ${gameStatusOptions.find(([value]) => value === status)?.[1] || status}.${notification}`);
     }
+    await load();
     setGameStatusSaving("");
   }
   async function publishAssignments() {
