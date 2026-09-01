@@ -226,6 +226,10 @@ export default function GamesManagerV3() {
     [show, setShow] = useState(false),
     [showImport, setShowImport] = useState(false),
     [rows, setRows] = useState<Row[]>([]),
+    [importFileName, setImportFileName] = useState(""),
+    [importValidated, setImportValidated] = useState(false),
+    [importApproved, setImportApproved] = useState(false),
+    [validationBusy, setValidationBusy] = useState(false),
     [range, setRange] = useState<Range>("all"),
     [customDate, setCustomDate] = useState(""),
     [showCalendar, setShowCalendar] = useState(false),
@@ -393,17 +397,43 @@ export default function GamesManagerV3() {
         time = timeVal(cell("time")),
         duration = Number(get("duration_minutes") || 110),
         officials = Number(get("officials_needed")),
-        issues: string[] = [];
-      if (!sports.some((x) => norm(x.name) === norm(sport)))
+        issues: string[] = [],
+        sportMatch = sports.find((x) => norm(x.name) === norm(sport)),
+        levelMatch = levels.find((x) => norm(x.name) === norm(level));
+      if (!sportMatch)
         issues.push("Sport not found");
       if (!leagues.some((x) => norm(x.name) === norm(league)))
         issues.push("League not found");
-      if (!levels.some((x) => norm(x.name) === norm(level)))
+      if (!levelMatch)
         issues.push("Level not found");
       if (!locations.some((x) => norm(x.name) === norm(location)))
         issues.push("Location not found");
       if (!date) issues.push("Invalid date");
       if (!time) issues.push("Invalid time");
+      if (
+        home &&
+        sportMatch &&
+        levelMatch &&
+        !teams.some(
+          (x) =>
+            norm(x.name) === norm(home) &&
+            x.sport_id === sportMatch.id &&
+            x.level_id === levelMatch.id,
+        )
+      )
+        issues.push("Home team not found for the selected sport and level");
+      if (
+        away &&
+        sportMatch &&
+        levelMatch &&
+        !teams.some(
+          (x) =>
+            norm(x.name) === norm(away) &&
+            x.sport_id === sportMatch.id &&
+            x.level_id === levelMatch.id,
+        )
+      )
+        issues.push("Away team not found for the selected sport and level");
       if (home && away && norm(home) === norm(away))
         issues.push("Home and away teams must be different");
       if (!Number.isFinite(duration) || duration < 1)
@@ -513,9 +543,14 @@ export default function GamesManagerV3() {
   }
   async function file(e: ChangeEvent<HTMLInputElement>) {
     setError("");
+    setMessage("");
     setRows([]);
+    setImportValidated(false);
+    setImportApproved(false);
     const f = e.target.files?.[0];
     if (!f) return;
+    setImportFileName(f.name);
+    setValidationBusy(true);
     try {
       const XLSX = await import("xlsx"),
         wb = XLSX.read(await f.arrayBuffer(), { type: "array" }),
@@ -524,123 +559,106 @@ export default function GamesManagerV3() {
           defval: "",
           raw: true,
         }) as unknown[][];
-      setRows(validate(raw));
+      const validated = validate(raw);
+      setRows(validated);
+      if (!validated.length)
+        throw new Error("The spreadsheet does not contain any game rows.");
+      if (!validated.some((row) => !row.valid)) {
+        const databaseValidated = validated.map((row) => ({ ...row }));
+        for (let attempt = 0; attempt < databaseValidated.length; attempt++) {
+          const { error: validationError } = await sb
+            .rpc("validate_game_import", {
+              p_rows: importPayload(databaseValidated),
+            });
+          if (!validationError) break;
+          const rowNumber = Number(
+              validationError.message.match(/spreadsheet row (\d+)/i)?.[1] || 0,
+            ),
+            failedRow = databaseValidated.find((row) => row.row === rowNumber);
+          if (!failedRow) throw validationError;
+          failedRow.valid = false;
+          failedRow.action = "error";
+          failedRow.issue = validationError.message.replace(
+            /^.*spreadsheet row \d+\s*[—-]\s*game\s*[^—-]+\s*[—-]\s*/i,
+            "",
+          );
+          failedRow.changes = failedRow.issue;
+        }
+        setRows(databaseValidated);
+        if (!databaseValidated.some((row) => !row.valid)) {
+          setImportValidated(true);
+          setMessage(
+            `Validation passed for all ${databaseValidated.length} spreadsheet rows. Review the preview and approve it before applying any changes.`,
+          );
+        }
+      }
     } catch (x) {
       setError(x instanceof Error ? x.message : "Unable to read file");
     }
+    setValidationBusy(false);
     e.target.value = "";
   }
-  async function applyImport() {
-    setBusy(true);
-    setError("");
-    let added = 0,
-      updated = 0,
-      skipped = rows.filter((row) => row.action === "skip").length;
-    const importedByGameNumber = new Map(
-        rows
-          .filter((r) => r.valid && r.game_number)
-          .map((r) => [norm(r.game_number), r]),
-      ),
-      applied = new Set<number>();
-    const rowErrorMessage = (r: Row, detail: string) =>
-      `Import stopped at spreadsheet row ${r.row} — Game ${r.game_number || "NEW"} — ${r.home_team || "TBD"} vs ${r.away_team || "TBD"} — ${r.date} ${r.time} — ${r.location || "No location"}. Reason: ${detail}`;
-    const errorDetail = (value: unknown) =>
-      value instanceof Error
-        ? value.message
-        : typeof value === "object" && value !== null && "message" in value
-          ? String((value as { message: unknown }).message)
-          : String(value);
-    async function applyRow(r: Row, resolving = new Set<number>()) {
-      if (r.action === "skip") return;
-      if (applied.has(r.row)) return;
-      if (resolving.has(r.row))
-        throw new Error(
-          rowErrorMessage(
-            r,
-            "The uploaded games contain a circular scheduling conflict that cannot be reordered automatically.",
-          ),
-        );
-      const nextResolving = new Set(resolving).add(r.row);
-      const s = sports.find((x) => norm(x.name) === norm(r.sport))!,
-        lg = leagues.find((x) => norm(x.name) === norm(r.league))!,
-        lv = levels.find((x) => norm(x.name) === norm(r.level))!,
+  function importPayload(sourceRows: Row[]) {
+    return sourceRows.map((r) => {
+      const s = sports.find((x) => norm(x.name) === norm(r.sport)),
+        lg = leagues.find((x) => norm(x.name) === norm(r.league)),
+        lv = levels.find((x) => norm(x.name) === norm(r.level)),
         home = teams.find(
           (x) =>
             norm(x.name) === norm(r.home_team) &&
-            x.sport_id === s.id &&
-            x.level_id === lv.id,
+            x.sport_id === s?.id &&
+            x.level_id === lv?.id,
         ),
         away = teams.find(
           (x) =>
             norm(x.name) === norm(r.away_team) &&
-            x.sport_id === s.id &&
-            x.level_id === lv.id,
+            x.sport_id === s?.id &&
+            x.level_id === lv?.id,
         ),
-        loc = locations.find((x) => norm(x.name) === norm(r.location))!;
-      if (!home || !away)
-        throw new Error(
-          rowErrorMessage(
-            r,
-            "Team not found for the selected sport and level.",
-          ),
-        );
-      const payload = {
-          sport_id: s.id,
-          league_id: lg.id,
-          level_id: lv.id,
-          level: lv.name,
-          home_team_id: home.id,
-          away_team_id: away.id,
-          location_id: loc.id,
-          starts_at: new Date(`${r.date}T${r.time}:00`).toISOString(),
-          duration_minutes: r.duration_minutes || 110,
-          officials_needed: r.officials_needed,
-          notes: r.notes || null,
-        },
+        loc = locations.find((x) => norm(x.name) === norm(r.location)),
         existing = r.game_number
           ? games.find((g) => norm(g.game_number) === norm(r.game_number))
-          : null;
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const { error: saveError } = existing
-          ? await sb.from("games").update(payload).eq("id", existing.id)
-          : await sb.from("games").insert({
-              ...payload,
-              game_number: r.game_number || null,
-              status: "open",
-            });
-        if (!saveError) {
-          applied.add(r.row);
-          existing ? updated++ : added++;
-          return;
-        }
-        const detail = errorDetail(saveError),
-          blockingGame = detail.match(
-            /conflict with Game #([^\s]+)\s+at/i,
-          )?.[1],
-          blockingRow = blockingGame
-            ? importedByGameNumber.get(norm(blockingGame))
-            : undefined;
-        if (
-          attempt === 0 &&
-          blockingRow &&
-          blockingRow.row !== r.row &&
-          !applied.has(blockingRow.row)
-        ) {
-          await applyRow(blockingRow, nextResolving);
-          continue;
-        }
-        throw new Error(rowErrorMessage(r, detail));
-      }
-    }
+          : undefined;
+      if (r.action !== "skip" && (!s || !lg || !lv || !home || !away || !loc))
+        throw new Error(
+          `Spreadsheet row ${r.row} — Game ${r.game_number || "NEW"} — a sport, league, level, team, or location could not be resolved.`,
+        );
+      return {
+        row: r.row,
+        action: r.valid ? r.action : "skip",
+        game_id: existing?.id || null,
+        game_number: r.game_number,
+        sport_id: s?.id || null,
+        league_id: lg?.id || null,
+        level_id: lv?.id || null,
+        level_name: lv?.name || null,
+        home_team_id: home?.id || null,
+        away_team_id: away?.id || null,
+        location_id: loc?.id || null,
+        starts_at: new Date(`${r.date}T${r.time}:00`).toISOString(),
+        duration_minutes: r.duration_minutes,
+        officials_needed: r.officials_needed,
+        notes: r.notes,
+      };
+    });
+  }
+  async function applyImport() {
+    setBusy(true);
+    setError("");
     try {
-      for (const r of rows) {
-        if (!r.valid) continue;
-        await applyRow(r);
-      }
+      if (!importValidated || !importApproved)
+        throw new Error("Validate and approve the complete preview before applying this import.");
+      const { data, error: applyError } = await sb.rpc("apply_game_import", {
+        p_rows: importPayload(rows),
+      });
+      if (applyError) throw applyError;
+      const result = data as { added?: number; updated?: number; skipped?: number };
       setMessage(
-        `Import complete: ${updated} updated, ${added} added, ${skipped} unchanged and skipped.`,
+        `Import complete: ${result.updated || 0} updated, ${result.added || 0} added, ${result.skipped || 0} unchanged and skipped.`,
       );
       setRows([]);
+      setImportApproved(false);
+      setImportValidated(false);
       await load();
     } catch (x) {
       const importError = x instanceof Error ? x.message : "Import failed";
@@ -690,6 +708,12 @@ export default function GamesManagerV3() {
             onClick={() => {
               setShowImport(!showImport);
               setShow(false);
+              setRows([]);
+              setImportFileName("");
+              setImportValidated(false);
+              setImportApproved(false);
+              setError("");
+              setMessage("");
             }}
           >
             Import / Update
@@ -954,8 +978,13 @@ export default function GamesManagerV3() {
             </button>
           </div>
           <input type="file" accept=".xlsx,.xls,.csv" onChange={file} />
+          {validationBusy && <p>Validating every spreadsheet row…</p>}
           {rows.length > 0 && (
             <>
+              <p>
+                <b>{importFileName}</b> • {rows.length} spreadsheet row
+                {rows.length === 1 ? "" : "s"}
+              </p>
               <div
                 style={{
                   display: "flex",
@@ -985,6 +1014,12 @@ export default function GamesManagerV3() {
                   Import paused: {rows.filter((r) => !r.valid).length}{" "}
                   spreadsheet row(s) need correction. Review the Validation
                   column below, update the file, and upload it again.
+                </div>
+              )}
+              {importValidated && (
+                <div className="loginMessage">
+                  Full-file validation passed. No database changes have been
+                  applied.
                 </div>
               )}
               <div className="tableWrap">
@@ -1041,12 +1076,35 @@ export default function GamesManagerV3() {
                   </tbody>
                 </table>
               </div>
+              <label
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  alignItems: "center",
+                  margin: "14px 0",
+                  fontWeight: 700,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={importApproved}
+                  disabled={!importValidated}
+                  onChange={(e) => setImportApproved(e.target.checked)}
+                />
+                I reviewed and approve this complete import preview.
+              </label>
               <button
                 className="primary"
-                disabled={busy || rows.some((r) => !r.valid)}
+                disabled={
+                  busy ||
+                  validationBusy ||
+                  !importValidated ||
+                  !importApproved ||
+                  rows.some((r) => !r.valid)
+                }
                 onClick={() => void applyImport()}
               >
-                Apply Reviewed Import
+                {busy ? "Applying Import…" : "Apply Approved Import"}
               </button>
             </>
           )}
