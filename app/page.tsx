@@ -17,7 +17,6 @@ import GameStatusControl from "../components/GameStatusControl";
 const adminNav = [
   "Dashboard",
   "Games",
-  "Game Status",
   "Officials",
   "Assignments",
   "Auto Assign",
@@ -88,7 +87,7 @@ export default function Home() {
         <nav>
           {manager && (
             <>
-              {adminNav.slice(0, 3).map((n) => (
+              {adminNav.slice(0, 2).map((n) => (
                 <button
                   key={n}
                   className={section === n ? "active" : ""}
@@ -109,7 +108,7 @@ export default function Home() {
                   </button>
                 ))}
               </div>
-              {adminNav.slice(3).map((n) => (
+              {adminNav.slice(2).map((n) => (
                 <button
                   key={n}
                   className={section === n ? "active" : ""}
@@ -227,8 +226,12 @@ export default function Home() {
           </div>
         </header>
         {manager && section === "Dashboard" && <DashboardGames />}
-        {manager && section === "Games" && <GamesManager />}
-        {manager && section === "Game Status" && <GameStatusControl />}
+        {manager && section === "Games" && (
+          <>
+            <GameStatusControl />
+            <GamesManager />
+          </>
+        )}
         {manager && isSetup && <GameSetup view={section as SetupView} />}{" "}
         {manager && section === "Officials" && <OfficialsDirectory />}
         {manager && section === "Assignments" && <AssignmentsManager />}
