@@ -5,6 +5,7 @@ type Team = { id: string; name: string };
 type Game = {
   id: string;
   game_number: string;
+  status: string;
   sport_id: string;
   league_id: string | null;
   level_id: string | null;
@@ -79,6 +80,12 @@ type Block = {
 type LinkGroup = { id: string; name: string; created_at: string };
 type LinkMember = { group_id: string; game_id: string; sort_order: number };
 type Range = "all" | "today" | "tomorrow" | "thisWeek" | "nextWeek" | "custom";
+const gameStatusOptions = [
+  ["active", "Active"],
+  ["suspended", "Hold"],
+  ["canceled", "Cancelled"],
+  ["rained_out", "Rain Out"],
+] as const;
 function miles(
   a: number | null,
   b: number | null,
@@ -166,6 +173,7 @@ export default function AssignmentsManagerV2() {
     [saving, setSaving] = useState(""),
     [publishing, setPublishing] = useState(false),
     [confirming, setConfirming] = useState(""),
+    [gameStatusSaving, setGameStatusSaving] = useState(""),
     [canManage, setCanManage] = useState(false),
     [overrideOfficial, setOverrideOfficial] = useState(""),
     [gameSort, setGameSort] = useState<"default" | "location" | "time">(
@@ -191,7 +199,7 @@ export default function AssignmentsManagerV2() {
       supabase
         .from("games")
         .select(
-          "id,game_number,sport_id,league_id,level_id,location_id,starts_at,duration_minutes,officials_needed,sports(name),leagues(name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,city,state,latitude,longitude)",
+          "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,duration_minutes,officials_needed,sports(name),leagues(name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,city,state,latitude,longitude)",
         )
         .order("starts_at"),
       supabase
@@ -892,6 +900,33 @@ export default function AssignmentsManagerV2() {
     await load();
     setConfirming("");
   }
+  async function changeGameStatus(gameId: string, status: string) {
+    if (!canManage) {
+      setError("Only Administrators and Assignors can change game status.");
+      return;
+    }
+    setGameStatusSaving(gameId);
+    setError("");
+    setNotice("");
+    const { error: statusError } = await supabase.rpc("set_game_status", {
+      p_game_id: gameId,
+      p_status: status,
+    });
+    if (statusError) setError(statusError.message);
+    else {
+      setGames((current) =>
+        current.map((listedGame) =>
+          listedGame.id === gameId
+            ? { ...listedGame, status }
+            : listedGame,
+        ),
+      );
+      setNotice(
+        `Game status changed to ${gameStatusOptions.find(([value]) => value === status)?.[1] || status}.`,
+      );
+    }
+    setGameStatusSaving("");
+  }
   async function publishAssignments() {
     if (!game || unpublishedCount === 0) return;
     setPublishing(true);
@@ -1025,7 +1060,7 @@ export default function AssignmentsManagerV2() {
         style={{
           display: "grid",
           gridTemplateColumns:
-            "38px minmax(230px,1fr) minmax(150px,220px) 105px minmax(300px,auto)",
+            "38px minmax(230px,1fr) minmax(150px,220px) 105px 125px minmax(430px,auto)",
           alignItems: "center",
           gap: 10,
           padding: "9px 12px",
@@ -1096,6 +1131,19 @@ export default function AssignmentsManagerV2() {
         >
           {d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
         </span>
+        <select
+          aria-label={`Status for game ${g.game_number}`}
+          disabled={!canManage || gameStatusSaving === g.id}
+          value={g.status === "open" ? "active" : g.status}
+          onChange={(event) => void changeGameStatus(g.id, event.target.value)}
+          style={{ width: "100%", minWidth: 115, padding: "6px 7px" }}
+        >
+          {gameStatusOptions.map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
         <div
           style={{
             display: "flex",
@@ -1123,17 +1171,83 @@ export default function AssignmentsManagerV2() {
                   ? "#16a34a"
                   : "#ca8a04";
             return (
-              <span key={pos.id} style={{ whiteSpace: "nowrap" }}>
-                <b style={{ color: assignment ? "#64748b" : "#dc2626" }}>
-                  {pos.name}
-                </b>
-                {official && (
-                  <b style={{ color }}>
-                    {" "}
-                    {official.first_name} {official.last_name}
+              <div
+                key={pos.id}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                <span>
+                  <b style={{ color: assignment ? "#64748b" : "#dc2626" }}>
+                    {pos.name}
                   </b>
+                  {official ? (
+                    <b style={{ color }}>
+                      {" "}
+                      {official.first_name} {official.last_name}
+                    </b>
+                  ) : (
+                    <b style={{ color: "#dc2626" }}> Unassigned</b>
+                  )}
+                </span>
+                {assignment && official && canManage && (
+                  <>
+                    <button
+                      type="button"
+                      disabled={
+                        confirming === assignment.id ||
+                        !assignment.published_at ||
+                        assignment.status === "confirmed"
+                      }
+                      title={
+                        !assignment.published_at
+                          ? "Publish this assignment before confirming it"
+                          : assignment.status === "confirmed"
+                            ? "This assignment is confirmed"
+                            : "Confirm this official"
+                      }
+                      onClick={() => void confirmAssignment(assignment)}
+                      style={{
+                        background: "#facc15",
+                        color: "#713f12",
+                        border: "1px solid #eab308",
+                        borderRadius: 6,
+                        padding: "4px 7px",
+                        fontSize: 10,
+                        fontWeight: 800,
+                        cursor:
+                          !assignment.published_at ||
+                          assignment.status === "confirmed"
+                            ? "not-allowed"
+                            : "pointer",
+                        opacity:
+                          !assignment.published_at ||
+                          assignment.status === "confirmed"
+                            ? 0.55
+                            : 1,
+                      }}
+                    >
+                      {confirming === assignment.id
+                        ? "Confirming…"
+                        : assignment.status === "confirmed"
+                          ? "Confirmed"
+                          : "Confirm"}
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={saving === pos.id}
+                      onClick={() => void unassign(assignment.id, pos.id)}
+                      style={{ padding: "4px 7px", fontSize: 10 }}
+                    >
+                      {saving === pos.id ? "Unassigning…" : "Unassign"}
+                    </button>
+                  </>
                 )}
-              </span>
+              </div>
             );
           })}
         </div>
@@ -1267,7 +1381,7 @@ export default function AssignmentsManagerV2() {
             style={{
               display: "grid",
               gridTemplateColumns:
-                "38px minmax(230px,1fr) minmax(150px,220px) 105px minmax(300px,auto)",
+                "38px minmax(230px,1fr) minmax(150px,220px) 105px 125px minmax(430px,auto)",
               gap: 10,
               padding: "7px 12px",
               background: "#f8fafc",
@@ -1309,6 +1423,7 @@ export default function AssignmentsManagerV2() {
             >
               Game Time{sortArrow("time")}
             </button>
+            <span>Game Status</span>
             <span style={{ textAlign: "right" }}>Assignment Status</span>
           </div>
           <div style={{ maxHeight: 420, overflow: "auto" }}>
