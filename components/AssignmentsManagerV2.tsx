@@ -93,6 +93,7 @@ type Completeness =
   | "all"
   | "unassigned"
   | "partial"
+  | "full"
   | "awaiting"
   | "confirmed"
   | "attention";
@@ -371,16 +372,25 @@ export default function AssignmentsManagerV2() {
           slots.some((slot) => slot.id === assignment.position_id),
       );
     if (declined.length)
-      return { key: "attention" as const, label: "Replacement Needed", color: "#dc2626", detail: `${declined.length} declined position${declined.length===1?"":"s"} need replacement` };
+      return { key: "attention" as const, label: "Needs Attention", color: "#dc2626", detail: `${declined.length} declined position${declined.length===1?"":"s"} need replacement` };
     if (!slots.length || filled === 0)
       return { key: "unassigned" as const, label: "Unassigned", color: "#dc2626", detail: "No assignment slots are filled" };
     if (filled < slots.length)
       return { key: "partial" as const, label: "Partially Assigned", color: "#ea580c", detail: `${filled} of ${slots.length} slots filled` };
+    const overdue = active.some(
+      (assignment) =>
+        assignment.published_at &&
+        assignment.status === "proposed" &&
+        assignment.accept_by &&
+        new Date(assignment.accept_by).getTime() < Date.now(),
+    );
+    if (overdue)
+      return { key: "attention" as const, label: "Needs Attention", color: "#dc2626", detail: "One or more confirmation deadlines have passed" };
     if (active.every((assignment) => ["accepted", "confirmed"].includes(assignment.status)))
       return { key: "confirmed" as const, label: "Confirmed", color: "#16a34a", detail: "Every assignment is confirmed" };
     if (active.every((assignment) => Boolean(assignment.published_at)))
       return { key: "awaiting" as const, label: "Awaiting Confirmation", color: "#ca8a04", detail: "Published; waiting for one or more confirmations" };
-    return { key: "attention" as const, label: "Needs Attention", color: "#2563eb", detail: "All slots are filled but one or more assignments still need publishing" };
+    return { key: "full" as const, label: "Fully Assigned", color: "#2563eb", detail: "Every position is filled; one or more assignments still need publishing" };
   }
   const rangeGames = games.filter((g) => inRange(g, range, customDate));
   const baseFilteredGames = rangeGames.filter(
@@ -1791,6 +1801,7 @@ export default function AssignmentsManagerV2() {
               ["all", "All"],
               ["unassigned", "Unassigned"],
               ["partial", "Partially Assigned"],
+              ["full", "Fully Assigned"],
               ["awaiting", "Awaiting Confirmation"],
               ["confirmed", "Confirmed"],
               ["attention", "Needs Attention"],
