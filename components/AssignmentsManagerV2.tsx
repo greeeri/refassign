@@ -59,6 +59,7 @@ type Assignment = {
   responded_at: string | null;
   decline_reason: string | null;
   overdue_reviewed_at: string | null;
+  assignment_source: "manager" | "self_assign" | "auto_assign";
 };
 type Rank = { official_id: string; rank: number };
 type PositionRank = {
@@ -247,7 +248,7 @@ export default function AssignmentsManagerV2() {
       supabase
         .from("assignments")
         .select(
-          "id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at",
+          "id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at,assignment_source",
         ),
       supabase.from("official_rankings").select("official_id,rank"),
       supabase
@@ -397,6 +398,7 @@ export default function AssignmentsManagerV2() {
       (assignment) =>
         assignment.published_at &&
         assignment.status === "proposed" &&
+        ["auto_assign", "manager"].includes(assignment.assignment_source) &&
         assignment.accept_by &&
         new Date(assignment.accept_by).getTime() < Date.now(),
     );
@@ -2150,7 +2152,7 @@ export default function AssignmentsManagerV2() {
                     ?.first_name || "This official"}{" "}
                   {officials.find((official) => official.id === overdueGroup[0])
                     ?.last_name || ""}{" "}
-                  has not accepted the following AutoAssign game
+                  has not accepted the following assigned game
                   {overdueGroup[1].length === 1 ? "" : "s"}. Official {1} of{" "}
                   {overdueGroups.length} requiring review.
                 </p>
