@@ -13,7 +13,6 @@ import AutoAssignManager from "../components/AutoAssignManager";
 import OfficialDashboard from "../components/OfficialDashboard";
 import OfficialProfile from "../components/OfficialProfile";
 import OfficialSchedule from "../components/OfficialSchedule";
-import PowerRankingsManager from "../components/PowerRankingsManager";
 import SelfAssignBoard from "../components/SelfAssignBoard";
 import AuditHistoryManager from "../components/AuditHistoryManager";
 import CommunicationCenter from "../components/CommunicationCenter";
@@ -30,7 +29,7 @@ const adminNav = [
   "Sports & Rules",
 ];
 const setupNav = ["Leagues", "Levels", "Teams", "Locations"] as const;
-const gameSetupNav = ["Leagues", "Levels", "Teams", "Power Rankings", "Locations"] as const;
+const gameSetupNav = ["Leagues", "Levels", "Teams", "Locations"] as const;
 const officialsNav = [
   ["Officials", "Directory"],
   ["Blocks", "Blocks"],
@@ -189,7 +188,13 @@ export default function Home() {
       <main>
         <header>
           <div>
-            <h1>{isSetup ? `Game Setup — ${section}` : isOfficials ? `Officials — ${section === "Officials" ? "Directory" : section}` : section}</h1>
+            <h1>
+              {isSetup
+                ? `Game Setup — ${section}`
+                : isOfficials
+                  ? `Officials — ${section === "Officials" ? "Directory" : section}`
+                  : section}
+            </h1>
             <p>
               {viewRole === "official"
                 ? "Official workspace"
@@ -252,9 +257,10 @@ export default function Home() {
         </header>
         {manager && section === "Dashboard" && <DashboardGames />}
         {manager && section === "Games" && <GamesManager />}
-        {manager && isCoreSetup && <GameSetup view={section as SetupView} />}{" "}
+        {manager && isCoreSetup && (
+          <GameSetup view={section as SetupView} />
+        )}{" "}
         {manager && section === "Officials" && <OfficialsDirectory />}
-        {manager && section === "Power Rankings" && <PowerRankingsManager />}
         {manager && section === "Assignments" && <AssignmentsManager />}
         {manager && section === "Communications" && <CommunicationCenter />}
         {manager && section === "Audit History" && <AuditHistoryManager />}
