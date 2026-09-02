@@ -20,6 +20,13 @@ type Location = {
   address: string | null;
   city: string | null;
   state: string | null;
+  directions: string | null;
+  parking_instructions: string | null;
+  entrance_information: string | null;
+  map_url: string | null;
+  contact_name: string | null;
+  contact_phone: string | null;
+  contact_email: string | null;
 };
 type View = "Leagues" | "Levels" | "Teams" | "Locations";
 export default function GameSetup({ view }: { view: View }) {
@@ -40,6 +47,13 @@ export default function GameSetup({ view }: { view: View }) {
       address: "",
       city: "",
       state: "IA",
+      directions: "",
+      parking_instructions: "",
+      entrance_information: "",
+      map_url: "",
+      contact_name: "",
+      contact_phone: "",
+      contact_email: "",
     });
   const [editingTeamId, setEditingTeamId] = useState<string | null>(null),
     [editingLocationId, setEditingLocationId] = useState<string | null>(null),
@@ -81,7 +95,9 @@ export default function GameSetup({ view }: { view: View }) {
         .order("name"),
       supabase
         .from("locations")
-        .select("id,name,address,city,state")
+        .select(
+          "id,name,address,city,state,directions,parking_instructions,entrance_information,map_url,contact_name,contact_phone,contact_email",
+        )
         .eq("active", true)
         .order("name"),
       supabase.from("team_power_rankings").select("team_id,power"),
@@ -196,6 +212,13 @@ export default function GameSetup({ view }: { view: View }) {
       address: location.address.trim() || null,
       city: location.city.trim() || null,
       state: location.state.trim() || null,
+      directions: location.directions.trim() || null,
+      parking_instructions: location.parking_instructions.trim() || null,
+      entrance_information: location.entrance_information.trim() || null,
+      map_url: location.map_url.trim() || null,
+      contact_name: location.contact_name.trim() || null,
+      contact_phone: location.contact_phone.trim() || null,
+      contact_email: location.contact_email.trim() || null,
     };
     const r = editingLocationId
       ? await supabase
@@ -205,7 +228,19 @@ export default function GameSetup({ view }: { view: View }) {
       : await supabase.from("locations").insert(payload);
     if (r.error) setError(r.error.message);
     else {
-      setLocation({ name: "", address: "", city: "", state: "IA" });
+      setLocation({
+        name: "",
+        address: "",
+        city: "",
+        state: "IA",
+        directions: "",
+        parking_instructions: "",
+        entrance_information: "",
+        map_url: "",
+        contact_name: "",
+        contact_phone: "",
+        contact_email: "",
+      });
       setEditingLocationId(null);
       load();
     }
@@ -217,6 +252,13 @@ export default function GameSetup({ view }: { view: View }) {
       address: v.address || "",
       city: v.city || "",
       state: v.state || "",
+      directions: v.directions || "",
+      parking_instructions: v.parking_instructions || "",
+      entrance_information: v.entrance_information || "",
+      map_url: v.map_url || "",
+      contact_name: v.contact_name || "",
+      contact_phone: v.contact_phone || "",
+      contact_email: v.contact_email || "",
     });
   }
   async function remove(
@@ -550,6 +592,82 @@ export default function GameSetup({ view }: { view: View }) {
                 }
               />
             </label>
+            <label>
+              Preferred Map Link
+              <input
+                type="url"
+                placeholder="https://maps.google.com/…"
+                value={location.map_url}
+                onChange={(e) =>
+                  setLocation({ ...location, map_url: e.target.value })
+                }
+              />
+            </label>
+            <label>
+              Venue Contact
+              <input
+                value={location.contact_name}
+                onChange={(e) =>
+                  setLocation({ ...location, contact_name: e.target.value })
+                }
+              />
+            </label>
+            <label>
+              Contact Phone
+              <input
+                type="tel"
+                value={location.contact_phone}
+                onChange={(e) =>
+                  setLocation({ ...location, contact_phone: e.target.value })
+                }
+              />
+            </label>
+            <label>
+              Contact Email
+              <input
+                type="email"
+                value={location.contact_email}
+                onChange={(e) =>
+                  setLocation({ ...location, contact_email: e.target.value })
+                }
+              />
+            </label>
+            <label style={{ gridColumn: "1 / -1" }}>
+              Field-Specific Directions
+              <textarea
+                rows={2}
+                value={location.directions}
+                onChange={(e) =>
+                  setLocation({ ...location, directions: e.target.value })
+                }
+              />
+            </label>
+            <label style={{ gridColumn: "1 / -1" }}>
+              Parking Instructions
+              <textarea
+                rows={2}
+                value={location.parking_instructions}
+                onChange={(e) =>
+                  setLocation({
+                    ...location,
+                    parking_instructions: e.target.value,
+                  })
+                }
+              />
+            </label>
+            <label style={{ gridColumn: "1 / -1" }}>
+              Entrance Information
+              <textarea
+                rows={2}
+                value={location.entrance_information}
+                onChange={(e) =>
+                  setLocation({
+                    ...location,
+                    entrance_information: e.target.value,
+                  })
+                }
+              />
+            </label>
             <div className="formActions">
               {editingLocationId && (
                 <button
@@ -562,6 +680,13 @@ export default function GameSetup({ view }: { view: View }) {
                       address: "",
                       city: "",
                       state: "IA",
+                      directions: "",
+                      parking_instructions: "",
+                      entrance_information: "",
+                      map_url: "",
+                      contact_name: "",
+                      contact_phone: "",
+                      contact_email: "",
                     });
                   }}
                 >
@@ -579,6 +704,7 @@ export default function GameSetup({ view }: { view: View }) {
                 <tr>
                   <th>Location</th>
                   <th>Address</th>
+                  <th>Venue Details</th>
                   <th></th>
                 </tr>
               </thead>
@@ -588,6 +714,11 @@ export default function GameSetup({ view }: { view: View }) {
                     <td>{v.name}</td>
                     <td>
                       {[v.address, v.city, v.state].filter(Boolean).join(", ")}
+                    </td>
+                    <td>
+                      {[v.directions && "Directions", v.parking_instructions && "Parking", v.entrance_information && "Entrance", (v.contact_name || v.contact_phone || v.contact_email) && "Contact"]
+                        .filter(Boolean)
+                        .join(" • ") || "Not added"}
                     </td>
                     <td>
                       <button
