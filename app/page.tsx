@@ -22,7 +22,6 @@ const adminNav = [
   "Dashboard",
   "Games",
   "Officials",
-  "Power Rankings",
   "Assignments",
   "Communications",
   "Audit History",
@@ -31,6 +30,7 @@ const adminNav = [
   "Sports & Rules",
 ];
 const setupNav = ["Leagues", "Levels", "Teams", "Locations"] as const;
+const gameSetupNav = ["Leagues", "Levels", "Teams", "Power Rankings", "Locations"] as const;
 const officialsNav = [
   ["Officials", "Directory"],
   ["Blocks", "Blocks"],
@@ -66,7 +66,8 @@ export default function Home() {
     }
     void loadRoles();
   }, [supabase]);
-  const isSetup = setupNav.includes(section as SetupView);
+  const isSetup = gameSetupNav.some((view) => view === section);
+  const isCoreSetup = setupNav.includes(section as SetupView);
   const isOfficials = officialsNav.some(([view]) => view === section);
   const manager = viewRole === "admin" || viewRole === "assignor";
   function switchRole(role: Role) {
@@ -109,7 +110,7 @@ export default function Home() {
               ))}
               <div className="navGroup">
                 <div className="navParent">Game Setup</div>
-                {setupNav.map((n) => (
+                {gameSetupNav.map((n) => (
                   <button
                     key={n}
                     className={`subNav ${section === n ? "active" : ""}`}
@@ -251,7 +252,7 @@ export default function Home() {
         </header>
         {manager && section === "Dashboard" && <DashboardGames />}
         {manager && section === "Games" && <GamesManager />}
-        {manager && isSetup && <GameSetup view={section as SetupView} />}{" "}
+        {manager && isCoreSetup && <GameSetup view={section as SetupView} />}{" "}
         {manager && section === "Officials" && <OfficialsDirectory />}
         {manager && section === "Power Rankings" && <PowerRankingsManager />}
         {manager && section === "Assignments" && <AssignmentsManager />}
