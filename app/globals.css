@@ -817,3 +817,61 @@ td small {
     display: grid;
   }
 }
+
+.payrollFilters {
+  margin: 16px 0;
+}
+
+.payrollMetrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 16px;
+}
+
+.payrollMetrics .metric strong {
+  font-size: 20px;
+}
+
+.payrollBulk {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  background: #eff6ff;
+}
+
+.payrollTable input,
+.payrollTable select {
+  min-width: 82px;
+  padding: 7px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.payrollTable input[type="checkbox"] {
+  min-width: 0;
+}
+
+.payrollTable td:nth-child(2) {
+  min-width: 250px;
+}
+
+.payrollTable td:nth-child(10) input {
+  min-width: 180px;
+}
+
+.payrollTable td small {
+  display: block;
+  margin-top: 3px;
+  color: #64748b;
+}
+
+@media (max-width: 900px) {
+  .payrollMetrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

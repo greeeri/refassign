@@ -16,6 +16,7 @@ import OfficialSchedule from "../components/OfficialSchedule";
 import SelfAssignBoard from "../components/SelfAssignBoard";
 import AuditHistoryManager from "../components/AuditHistoryManager";
 import UndoCenter from "../components/UndoCenter";
+import PayrollManager from "../components/PayrollManager";
 const adminNav = [
   "Dashboard",
   "Games",
@@ -28,6 +29,7 @@ const gameSetupNav = ["Leagues", "Levels", "Teams", "Locations"] as const;
 const assignmentsNav = [
   ["Assignments", "Assignment Center"],
   ["Auto Assign", "Auto Assign"],
+  ["Payroll", "Payroll & Game Fees"],
 ] as const;
 const officialsNav = [
   ["Officials", "Directory"],
@@ -275,6 +277,7 @@ export default function Home() {
         {manager && section === "Assignments" && <AssignmentsManager />}
         {manager && section === "Audit History" && <AuditHistoryManager />}
         {manager && section === "Auto Assign" && <AutoAssignManager />}
+        {manager && section === "Payroll" && <PayrollManager />}
         {manager && section === "Blocks" && (
           <AvailabilityCalendar managerView />
         )}
