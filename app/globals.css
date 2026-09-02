@@ -1054,6 +1054,14 @@ td small {
   background: #eff6ff;
 }
 
+.conflictDetail {
+  margin-top: 7px;
+  color: #dc2626;
+  font-style: italic;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
 @media (max-width: 900px) {
   .payrollMetrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
