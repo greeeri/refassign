@@ -27,12 +27,15 @@ const adminNav = [
   "Communications",
   "Audit History",
   "Auto Assign",
-  "Blocks",
-  "Block Removal Requests",
   "Contacts",
   "Sports & Rules",
 ];
 const setupNav = ["Leagues", "Levels", "Teams", "Locations"] as const;
+const officialsNav = [
+  ["Officials", "Directory"],
+  ["Blocks", "Blocks"],
+  ["Block Removal Requests", "Block Removal Requests"],
+] as const;
 type SetupView = (typeof setupNav)[number];
 type Role = "admin" | "assignor" | "official" | "contact";
 const labels: Record<Role, string> = {
@@ -64,6 +67,7 @@ export default function Home() {
     void loadRoles();
   }, [supabase]);
   const isSetup = setupNav.includes(section as SetupView);
+  const isOfficials = officialsNav.some(([view]) => view === section);
   const manager = viewRole === "admin" || viewRole === "assignor";
   function switchRole(role: Role) {
     setViewRole(role);
@@ -115,7 +119,19 @@ export default function Home() {
                   </button>
                 ))}
               </div>
-              {adminNav.slice(2).map((n) => (
+              <div className="navGroup">
+                <div className="navParent">Officials</div>
+                {officialsNav.map(([view, label]) => (
+                  <button
+                    key={view}
+                    className={`subNav ${section === view ? "active" : ""}`}
+                    onClick={() => setSection(view)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {adminNav.slice(3).map((n) => (
                 <button
                   key={n}
                   className={section === n ? "active" : ""}
@@ -172,7 +188,7 @@ export default function Home() {
       <main>
         <header>
           <div>
-            <h1>{isSetup ? `Game Setup — ${section}` : section}</h1>
+            <h1>{isSetup ? `Game Setup — ${section}` : isOfficials ? `Officials — ${section === "Officials" ? "Directory" : section}` : section}</h1>
             <p>
               {viewRole === "official"
                 ? "Official workspace"
