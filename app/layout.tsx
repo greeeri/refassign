@@ -1,4 +1,5 @@
 import './globals.css'
+import './official-mobile.css'
 
 export const metadata = {
   title: 'RefAssign | Sports Officials Scheduling',
