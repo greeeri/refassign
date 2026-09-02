@@ -99,13 +99,7 @@ type Completeness =
   | "confirmed"
   | "attention";
 type GameSort =
-  | "default"
-  | "game"
-  | "location"
-  | "time"
-  | "power"
-  | "status"
-  | "assignments";
+  "default" | "game" | "location" | "time" | "power" | "status" | "assignments";
 const gameStatusOptions = [
   ["active", "Active"],
   ["suspended", "Hold"],
@@ -195,6 +189,7 @@ export default function AssignmentsManagerV2() {
     [showCalendar, setShowCalendar] = useState(false),
     [unpublishedOnly, setUnpublishedOnly] = useState(false),
     [completenessFilter, setCompletenessFilter] = useState<Completeness>("all"),
+    [officialFilter, setOfficialFilter] = useState(""),
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [saving, setSaving] = useState(""),
@@ -239,7 +234,9 @@ export default function AssignmentsManagerV2() {
         .select(
           "id,first_name,last_name,email,phone,sports,active,home_city,home_state,home_latitude,home_longitude",
         )
-        .eq("active", true),
+        .eq("active", true)
+        .order("last_name")
+        .order("first_name"),
       supabase
         .from("sport_positions")
         .select("id,sport_id,name,required,sort_order")
@@ -373,11 +370,26 @@ export default function AssignmentsManagerV2() {
           slots.some((slot) => slot.id === assignment.position_id),
       );
     if (declined.length)
-      return { key: "attention" as const, label: "Needs Attention", color: "#dc2626", detail: `${declined.length} declined position${declined.length===1?"":"s"} need replacement` };
+      return {
+        key: "attention" as const,
+        label: "Needs Attention",
+        color: "#dc2626",
+        detail: `${declined.length} declined position${declined.length === 1 ? "" : "s"} need replacement`,
+      };
     if (!slots.length || filled === 0)
-      return { key: "unassigned" as const, label: "Unassigned", color: "#dc2626", detail: "No assignment slots are filled" };
+      return {
+        key: "unassigned" as const,
+        label: "Unassigned",
+        color: "#dc2626",
+        detail: "No assignment slots are filled",
+      };
     if (filled < slots.length)
-      return { key: "partial" as const, label: "Partially Assigned", color: "#ea580c", detail: `${filled} of ${slots.length} slots filled` };
+      return {
+        key: "partial" as const,
+        label: "Partially Assigned",
+        color: "#ea580c",
+        detail: `${filled} of ${slots.length} slots filled`,
+      };
     const overdue = active.some(
       (assignment) =>
         assignment.published_at &&
@@ -386,14 +398,52 @@ export default function AssignmentsManagerV2() {
         new Date(assignment.accept_by).getTime() < Date.now(),
     );
     if (overdue)
-      return { key: "attention" as const, label: "Needs Attention", color: "#dc2626", detail: "One or more confirmation deadlines have passed" };
-    if (active.every((assignment) => ["accepted", "confirmed"].includes(assignment.status)))
-      return { key: "confirmed" as const, label: "Confirmed", color: "#16a34a", detail: "Every assignment is confirmed" };
+      return {
+        key: "attention" as const,
+        label: "Needs Attention",
+        color: "#dc2626",
+        detail: "One or more confirmation deadlines have passed",
+      };
+    if (
+      active.every((assignment) =>
+        ["accepted", "confirmed"].includes(assignment.status),
+      )
+    )
+      return {
+        key: "confirmed" as const,
+        label: "Confirmed",
+        color: "#16a34a",
+        detail: "Every assignment is confirmed",
+      };
     if (active.every((assignment) => Boolean(assignment.published_at)))
-      return { key: "awaiting" as const, label: "Awaiting Confirmation", color: "#ca8a04", detail: "Published; waiting for one or more confirmations" };
-    return { key: "full" as const, label: "Fully Assigned", color: "#2563eb", detail: "Every position is filled; one or more assignments still need publishing" };
+      return {
+        key: "awaiting" as const,
+        label: "Awaiting Confirmation",
+        color: "#ca8a04",
+        detail: "Published; waiting for one or more confirmations",
+      };
+    return {
+      key: "full" as const,
+      label: "Fully Assigned",
+      color: "#2563eb",
+      detail:
+        "Every position is filled; one or more assignments still need publishing",
+    };
   }
-  const rangeGames = games.filter((g) => inRange(g, range, customDate));
+  function matchesOfficialFilter(g: Game) {
+    return (
+      !officialFilter ||
+      assignments.some(
+        (assignment) =>
+          assignment.game_id === g.id &&
+          assignment.official_id === officialFilter &&
+          assignment.status !== "declined",
+      )
+    );
+  }
+  const rangeGames = games.filter(
+    (g) => inRange(g, range, customDate) && matchesOfficialFilter(g),
+  );
   const baseFilteredGames = rangeGames.filter(
     (g) =>
       (!unpublishedOnly || isUnpublishedGame(g)) &&
@@ -560,19 +610,24 @@ export default function AssignmentsManagerV2() {
   function sharedCrew(first: Game, second: Game) {
     const firstIds = new Set(
       assignments
-        .filter((assignment) => assignment.game_id === first.id && assignment.status !== "declined")
-        .map((assignment) => assignment.official_id),
-    );
-    return [...new Set(
-      assignments
         .filter(
           (assignment) =>
-            assignment.game_id === second.id &&
-            assignment.status !== "declined" &&
-            firstIds.has(assignment.official_id),
+            assignment.game_id === first.id && assignment.status !== "declined",
         )
         .map((assignment) => assignment.official_id),
-    )];
+    );
+    return [
+      ...new Set(
+        assignments
+          .filter(
+            (assignment) =>
+              assignment.game_id === second.id &&
+              assignment.status !== "declined" &&
+              firstIds.has(assignment.official_id),
+          )
+          .map((assignment) => assignment.official_id),
+      ),
+    ];
   }
   function travelDetails(first: Game, second: Game) {
     const travel = travelBetween(first, second);
@@ -582,18 +637,24 @@ export default function AssignmentsManagerV2() {
       (new Date(second.starts_at).getTime() - firstEnds) / 60000,
     );
     const shared = sharedCrew(first, second);
-    const impossible = gapMinutes < 0 || (travel != null && gapMinutes < travel.minutes);
+    const impossible =
+      gapMinutes < 0 || (travel != null && gapMinutes < travel.minutes);
     return { travel, gapMinutes, shared, impossible };
   }
   function linkedGroupWarnings(groupGames: Game[]) {
     const warnings: string[] = [];
     for (let index = 1; index < groupGames.length; index++) {
-      const first = groupGames[index - 1], second = groupGames[index];
+      const first = groupGames[index - 1],
+        second = groupGames[index];
       const details = travelDetails(first, second);
       if (!details.impossible || !details.shared.length) continue;
       const names = details.shared.map((officialId) => {
-        const official = officials.find((candidate) => candidate.id === officialId);
-        return official ? `${official.first_name} ${official.last_name}` : "Assigned official";
+        const official = officials.find(
+          (candidate) => candidate.id === officialId,
+        );
+        return official
+          ? `${official.first_name} ${official.last_name}`
+          : "Assigned official";
       });
       warnings.push(
         `${names.join(", ")} cannot reasonably travel from ${first.location?.name || "the first location"} to ${second.location?.name || "the next location"} in the ${Math.max(0, details.gapMinutes)} minutes available.`,
@@ -601,45 +662,77 @@ export default function AssignmentsManagerV2() {
     }
     return warnings;
   }
-  async function reorderLinkedGame(groupId: string, draggedId: string, targetId: string) {
+  async function reorderLinkedGame(
+    groupId: string,
+    draggedId: string,
+    targetId: string,
+  ) {
     if (!canManage || !draggedId || draggedId === targetId) return;
     const ordered = linkMembers
       .filter((member) => member.group_id === groupId)
       .sort((a, b) => a.sort_order - b.sort_order)
       .map((member) => member.game_id);
-    const from = ordered.indexOf(draggedId), to = ordered.indexOf(targetId);
+    const from = ordered.indexOf(draggedId),
+      to = ordered.indexOf(targetId);
     if (from < 0 || to < 0) return;
     const next = [...ordered];
     next.splice(to, 0, next.splice(from, 1)[0]);
-    setLinking(true); setError(""); setNotice("");
+    setLinking(true);
+    setError("");
+    setNotice("");
     const results = await Promise.all(
       next.map((gameId, sortOrder) =>
-        supabase.from("game_link_members").update({ sort_order: sortOrder }).eq("group_id", groupId).eq("game_id", gameId),
+        supabase
+          .from("game_link_members")
+          .update({ sort_order: sortOrder })
+          .eq("group_id", groupId)
+          .eq("game_id", gameId),
       ),
     );
     const failed = results.find((result) => result.error)?.error;
     if (failed) setError(failed.message);
     else setNotice("Linked-game order updated.");
-    setDraggingGame(""); await load(); setLinking(false);
+    setDraggingGame("");
+    await load();
+    setLinking(false);
   }
-  async function moveLinkedGame(groupId: string, gameId: string, direction: -1 | 1) {
-    const ordered = linkMembers.filter((member) => member.group_id === groupId).sort((a,b)=>a.sort_order-b.sort_order);
+  async function moveLinkedGame(
+    groupId: string,
+    gameId: string,
+    direction: -1 | 1,
+  ) {
+    const ordered = linkMembers
+      .filter((member) => member.group_id === groupId)
+      .sort((a, b) => a.sort_order - b.sort_order);
     const index = ordered.findIndex((member) => member.game_id === gameId);
     const target = ordered[index + direction];
     if (target) await reorderLinkedGame(groupId, gameId, target.game_id);
   }
   async function unlinkOneGame(groupId: string, gameId: string) {
     if (!canManage || linking) return;
-    setLinking(true); setError(""); setNotice("");
+    setLinking(true);
+    setError("");
+    setNotice("");
     const members = linkMembers.filter((member) => member.group_id === groupId);
-    const { error: removeError } = await supabase.from("game_link_members").delete().eq("group_id", groupId).eq("game_id", gameId);
+    const { error: removeError } = await supabase
+      .from("game_link_members")
+      .delete()
+      .eq("group_id", groupId)
+      .eq("game_id", gameId);
     if (removeError) setError(removeError.message);
     else if (members.length <= 2) {
-      const { error: groupError } = await supabase.from("game_link_groups").delete().eq("id", groupId);
+      const { error: groupError } = await supabase
+        .from("game_link_groups")
+        .delete()
+        .eq("id", groupId);
       if (groupError) setError(groupError.message);
-      else setNotice("Game unlinked; the remaining single-game group was removed.");
+      else
+        setNotice(
+          "Game unlinked; the remaining single-game group was removed.",
+        );
     } else setNotice("Game removed from Linked Games.");
-    await load(); setLinking(false);
+    await load();
+    setLinking(false);
   }
   function selfAssignKey(gameId: string, positionId: string) {
     return `${gameId}:${positionId}`;
@@ -659,7 +752,9 @@ export default function AssignmentsManagerV2() {
   }
   async function openSelfAssignPositions() {
     if (!canManage) {
-      setError("Only Administrators and Assignors can open Self Assign positions.");
+      setError(
+        "Only Administrators and Assignors can open Self Assign positions.",
+      );
       return;
     }
     const usedGameSelection = selfAssignSelected.length === 0;
@@ -696,7 +791,8 @@ export default function AssignmentsManagerV2() {
       (slot, index, all) =>
         all.findIndex(
           (item) =>
-            item.game_id === slot.game_id && item.position_id === slot.position_id,
+            item.game_id === slot.game_id &&
+            item.position_id === slot.position_id,
         ) === index,
     );
     if (!slots.length) {
@@ -725,7 +821,10 @@ export default function AssignmentsManagerV2() {
     await load();
     setSelfAssignSaving(false);
   }
-  async function withdrawSelfAssignPosition(gameId: string, positionId: string) {
+  async function withdrawSelfAssignPosition(
+    gameId: string,
+    positionId: string,
+  ) {
     if (!canManage) return;
     setSelfAssignSaving(true);
     setError("");
@@ -764,7 +863,8 @@ export default function AssignmentsManagerV2() {
       (g) =>
         inRange(g, r, customDate) &&
         (!unpublishedOnly || isUnpublishedGame(g)) &&
-        (completenessFilter === "all" || assignmentCompleteness(g).key === completenessFilter),
+        (completenessFilter === "all" ||
+          assignmentCompleteness(g).key === completenessFilter),
     );
     if (!list.some((g) => g.id === selected)) setSelected(list[0]?.id || "");
   }
@@ -776,7 +876,8 @@ export default function AssignmentsManagerV2() {
       (g) =>
         inRange(g, "custom", value) &&
         (!unpublishedOnly || isUnpublishedGame(g)) &&
-        (completenessFilter === "all" || assignmentCompleteness(g).key === completenessFilter),
+        (completenessFilter === "all" ||
+          assignmentCompleteness(g).key === completenessFilter),
     );
     setSelected(list[0]?.id || "");
   }
@@ -788,7 +889,8 @@ export default function AssignmentsManagerV2() {
       (g) =>
         inRange(g, range, customDate) &&
         (!next || isUnpublishedGame(g)) &&
-        (completenessFilter === "all" || assignmentCompleteness(g).key === completenessFilter),
+        (completenessFilter === "all" ||
+          assignmentCompleteness(g).key === completenessFilter),
     );
     if (!list.some((g) => g.id === selected)) setSelected(list[0]?.id || "");
   }
@@ -808,7 +910,11 @@ export default function AssignmentsManagerV2() {
     if (!game) return [];
     const reasons: string[] = [];
     for (const a of assignments) {
-      if (a.official_id !== o.id || ["declined", "cancelled"].includes(a.status)) continue;
+      if (
+        a.official_id !== o.id ||
+        ["declined", "cancelled"].includes(a.status)
+      )
+        continue;
       if (
         ignorePositionId &&
         a.game_id === game.id &&
@@ -890,13 +996,17 @@ export default function AssignmentsManagerV2() {
       ol.length &&
       !ol.some((x) => x.league_id === game.league_id)
     )
-      reasons.push(`Not eligible for league ${game.leagues?.name || "selected league"}`);
+      reasons.push(
+        `Not eligible for league ${game.leagues?.name || "selected league"}`,
+      );
     if (
       game.level_id &&
       ov.length &&
       !ov.some((x) => x.level_id === game.level_id)
     )
-      reasons.push(`Not eligible for level ${game.levels?.name || "selected level"}`);
+      reasons.push(
+        `Not eligible for level ${game.levels?.name || "selected level"}`,
+      );
     if (
       assignments.some(
         (a) =>
@@ -1015,11 +1125,19 @@ export default function AssignmentsManagerV2() {
   function candidates(pos: Position) {
     if (!game) return [];
     const current = assignments.find(
-      (a) => a.game_id === game.id && a.position_id === pos.id && a.status !== "declined",
+        (a) =>
+          a.game_id === game.id &&
+          a.position_id === pos.id &&
+          a.status !== "declined",
       ),
       used = new Set(
         assignments
-          .filter((a) => a.game_id === game.id && a.position_id !== pos.id && a.status !== "declined")
+          .filter(
+            (a) =>
+              a.game_id === game.id &&
+              a.position_id !== pos.id &&
+              a.status !== "declined",
+          )
           .map((a) => a.official_id),
       );
     return officials
@@ -1228,19 +1346,30 @@ export default function AssignmentsManagerV2() {
     setGameStatusSaving(gameId);
     setError("");
     setNotice("");
-    const response = await fetch("/api/games/status", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({gameId,status})});
-    const result = await response.json().catch(() => ({})) as {error?:string;sent?:number;failed?:number;failures?:string[]};
+    const response = await fetch("/api/games/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ gameId, status }),
+    });
+    const result = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      sent?: number;
+      failed?: number;
+      failures?: string[];
+    };
     if (!response.ok) setError(result.error || "Unable to change game status.");
     else {
       setGames((current) =>
         current.map((listedGame) =>
-          listedGame.id === gameId
-            ? { ...listedGame, status }
-            : listedGame,
+          listedGame.id === gameId ? { ...listedGame, status } : listedGame,
         ),
       );
-      const notification = ["canceled","rained_out"].includes(status) ? ` ${result.sent||0} official notification${result.sent===1?"":"s"} sent${result.failed?`; ${result.failed} failed`:""}.` : "";
-      setNotice(`Game status changed to ${gameStatusOptions.find(([value]) => value === status)?.[1] || status}.${notification}`);
+      const notification = ["canceled", "rained_out"].includes(status)
+        ? ` ${result.sent || 0} official notification${result.sent === 1 ? "" : "s"} sent${result.failed ? `; ${result.failed} failed` : ""}.`
+        : "";
+      setNotice(
+        `Game status changed to ${gameStatusOptions.find(([value]) => value === status)?.[1] || status}.${notification}`,
+      );
     }
     await load();
     setGameStatusSaving("");
@@ -1362,38 +1491,129 @@ export default function AssignmentsManagerV2() {
     XLSX.utils.book_append_sheet(wb, ws, "Assignments");
     XLSX.writeFile(wb, "refassign-game-assignments.xlsx");
   }
-  async function runBulkAction(action: "publish" | "confirm" | "unassign" | "status") {
+  async function runBulkAction(
+    action: "publish" | "confirm" | "unassign" | "status",
+  ) {
     if (!canManage || !linkSelected.length || bulkWorking) return;
     const selectedIds = [...linkSelected];
-    const selectedAssignments = assignments.filter((a) => selectedIds.includes(a.game_id) && a.status !== "declined");
-    const labels = {publish:"publish assignments for",confirm:"confirm officials on",unassign:"unassign every official from",status:`change the status to ${gameStatusOptions.find(([value])=>value===bulkStatus)?.[1]||bulkStatus} for`};
-    if (!window.confirm(`${labels[action]} ${selectedIds.length} selected game${selectedIds.length===1?"":"s"}?`)) return;
-    setBulkWorking(true); setError(""); setNotice("");
-    let succeeded=0; const failures:string[]=[]; const undoOperationIds:string[]=[];
+    const selectedAssignments = assignments.filter(
+      (a) => selectedIds.includes(a.game_id) && a.status !== "declined",
+    );
+    const labels = {
+      publish: "publish assignments for",
+      confirm: "confirm officials on",
+      unassign: "unassign every official from",
+      status: `change the status to ${gameStatusOptions.find(([value]) => value === bulkStatus)?.[1] || bulkStatus} for`,
+    };
+    if (
+      !window.confirm(
+        `${labels[action]} ${selectedIds.length} selected game${selectedIds.length === 1 ? "" : "s"}?`,
+      )
+    )
+      return;
+    setBulkWorking(true);
+    setError("");
+    setNotice("");
+    let succeeded = 0;
+    const failures: string[] = [];
+    const undoOperationIds: string[] = [];
     try {
-      if(action==="unassign"){
-        const {error:deleteError}=await supabase.from("assignments").delete().in("game_id",selectedIds);
-        if(deleteError) failures.push(deleteError.message); else {succeeded=selectedAssignments.length;const {data:undoRows}=await supabase.rpc("latest_undo_operation");const undoId=(undoRows as {id:string}[]|null)?.[0]?.id;if(undoId)undoOperationIds.push(undoId)}
-      } else if(action==="status"){
-        for(const gameId of selectedIds){const response=await fetch("/api/games/status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({gameId,status:bulkStatus})});const body=await response.json().catch(()=>({})) as {error?:string};if(response.ok){succeeded++;const {data:undoRows}=await supabase.rpc("latest_undo_operation");const undoId=(undoRows as {id:string}[]|null)?.[0]?.id;if(undoId&&!undoOperationIds.includes(undoId))undoOperationIds.push(undoId)}else failures.push(body.error||`Could not update game ${gameId}`)}
-      } else if(action==="publish"){
-        for(const gameId of selectedIds){const response=await fetch("/api/assignments/publish",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({gameId})});const body=await response.json().catch(()=>({})) as {error?:string;failed?:number;failures?:string[]};if(response.ok){succeeded++;if(body.failed)failures.push(...(body.failures||[]))}else failures.push(body.error||`Could not publish game ${gameId}`)}
-      } else if(action==="confirm"){
-        const eligible=selectedAssignments.filter(a=>a.published_at&&a.status!=="confirmed");
-        for(const a of eligible){const response=await fetch("/api/assignments/confirm",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({assignmentId:a.id})});const body=await response.json().catch(()=>({})) as {error?:string};if(response.ok)succeeded++;else failures.push(body.error||`Could not confirm assignment ${a.id}`)}
+      if (action === "unassign") {
+        const { error: deleteError } = await supabase
+          .from("assignments")
+          .delete()
+          .in("game_id", selectedIds);
+        if (deleteError) failures.push(deleteError.message);
+        else {
+          succeeded = selectedAssignments.length;
+          const { data: undoRows } = await supabase.rpc(
+            "latest_undo_operation",
+          );
+          const undoId = (undoRows as { id: string }[] | null)?.[0]?.id;
+          if (undoId) undoOperationIds.push(undoId);
+        }
+      } else if (action === "status") {
+        for (const gameId of selectedIds) {
+          const response = await fetch("/api/games/status", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ gameId, status: bulkStatus }),
+          });
+          const body = (await response.json().catch(() => ({}))) as {
+            error?: string;
+          };
+          if (response.ok) {
+            succeeded++;
+            const { data: undoRows } = await supabase.rpc(
+              "latest_undo_operation",
+            );
+            const undoId = (undoRows as { id: string }[] | null)?.[0]?.id;
+            if (undoId && !undoOperationIds.includes(undoId))
+              undoOperationIds.push(undoId);
+          } else failures.push(body.error || `Could not update game ${gameId}`);
+        }
+      } else if (action === "publish") {
+        for (const gameId of selectedIds) {
+          const response = await fetch("/api/assignments/publish", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ gameId }),
+          });
+          const body = (await response.json().catch(() => ({}))) as {
+            error?: string;
+            failed?: number;
+            failures?: string[];
+          };
+          if (response.ok) {
+            succeeded++;
+            if (body.failed) failures.push(...(body.failures || []));
+          } else
+            failures.push(body.error || `Could not publish game ${gameId}`);
+        }
+      } else if (action === "confirm") {
+        const eligible = selectedAssignments.filter(
+          (a) => a.published_at && a.status !== "confirmed",
+        );
+        for (const a of eligible) {
+          const response = await fetch("/api/assignments/confirm", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ assignmentId: a.id }),
+          });
+          const body = (await response.json().catch(() => ({}))) as {
+            error?: string;
+          };
+          if (response.ok) succeeded++;
+          else
+            failures.push(body.error || `Could not confirm assignment ${a.id}`);
+        }
       }
-      if(failures.length)setError(`Bulk action completed with ${failures.length} issue${failures.length===1?"":"s"}: ${failures.slice(0,4).join(" | ")}${failures.length>4?" | …":""}`);
-      setNotice(`Bulk action complete: ${succeeded} ${action==="status"?"game":action==="confirm"||action==="unassign"?"assignment":"game"}${succeeded===1?"":"s"} processed.`);
+      if (failures.length)
+        setError(
+          `Bulk action completed with ${failures.length} issue${failures.length === 1 ? "" : "s"}: ${failures.slice(0, 4).join(" | ")}${failures.length > 4 ? " | …" : ""}`,
+        );
+      setNotice(
+        `Bulk action complete: ${succeeded} ${action === "status" ? "game" : action === "confirm" || action === "unassign" ? "assignment" : "game"}${succeeded === 1 ? "" : "s"} processed.`,
+      );
       if (succeeded && (action === "status" || action === "unassign")) {
         await supabase.rpc("group_undo_operations", {
           p_operation_ids: undoOperationIds,
-          p_description: action === "status" ? "Bulk game-status change" : "Bulk unassignment",
+          p_description:
+            action === "status"
+              ? "Bulk game-status change"
+              : "Bulk unassignment",
         });
         announceUndoAvailable();
       }
-      setLinkSelected([]); await load();
-    } catch(e){setError(e instanceof Error?e.message:"Unable to complete the bulk action.");}
-    finally{setBulkWorking(false)}
+      setLinkSelected([]);
+      await load();
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Unable to complete the bulk action.",
+      );
+    } finally {
+      setBulkWorking(false);
+    }
   }
   const filters: [Range, string][] = [
     ["all", "All Games"],
@@ -1403,10 +1623,22 @@ export default function AssignmentsManagerV2() {
     ["nextWeek", "Next Week"],
   ];
   function shortPositionName(name: string) {
-    const normalized = name.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
-    if (["assistantreferee1", "assistant1", "ar1"].includes(normalized)) return "AR1";
-    if (["assistantreferee2", "assistant2", "assistantreferee", "ar2"].includes(normalized)) return "AR2";
-    if (["centerreferee", "center", "referee", "cr", "ref"].includes(normalized)) return "REF";
+    const normalized = name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "");
+    if (["assistantreferee1", "assistant1", "ar1"].includes(normalized))
+      return "AR1";
+    if (
+      ["assistantreferee2", "assistant2", "assistantreferee", "ar2"].includes(
+        normalized,
+      )
+    )
+      return "AR2";
+    if (
+      ["centerreferee", "center", "referee", "cr", "ref"].includes(normalized)
+    )
+      return "REF";
     return name;
   }
   function renderGameRow(g: Game, linked: boolean, showChain: boolean) {
@@ -1485,15 +1717,32 @@ export default function AssignmentsManagerV2() {
               </span>
             )}
             {g.home?.name || "TBD"} vs {g.away?.name || "TBD"}
-            <small style={{ marginLeft: 7, color: isRainOut ? "#bfdbfe" : "#64748b" }}>
+            <small
+              style={{
+                marginLeft: 7,
+                color: isRainOut ? "#bfdbfe" : "#64748b",
+              }}
+            >
               • {g.game_number}
             </small>
           </span>
-          <small style={{ display: "block", color: isRainOut ? "#dbeafe" : "#64748b", marginTop: 3 }}>
+          <small
+            style={{
+              display: "block",
+              color: isRainOut ? "#dbeafe" : "#64748b",
+              marginTop: 3,
+            }}
+          >
             {d.toLocaleDateString()}
           </small>
         </button>
-        <span style={{ color: isRainOut ? "#fff" : "#475569", fontSize: 11, fontWeight: 700 }}>
+        <span
+          style={{
+            color: isRainOut ? "#fff" : "#475569",
+            fontSize: 11,
+            fontWeight: 700,
+          }}
+        >
           {g.location?.name || "TBD"}
         </span>
         <span
@@ -1521,7 +1770,12 @@ export default function AssignmentsManagerV2() {
           disabled={!canManage || gameStatusSaving === g.id}
           value={g.status === "open" ? "active" : g.status}
           onChange={(event) => void changeGameStatus(g.id, event.target.value)}
-          style={{ width: "100%", minWidth: 0, padding: "5px 4px", fontSize: 11 }}
+          style={{
+            width: "100%",
+            minWidth: 0,
+            padding: "5px 4px",
+            fontSize: 11,
+          }}
         >
           {gameStatusOptions.map(([value, label]) => (
             <option key={value} value={value}>
@@ -1584,7 +1838,9 @@ export default function AssignmentsManagerV2() {
                 {!assignment && canManage && !selfAssignOpen && (
                   <input
                     type="checkbox"
-                    checked={selfAssignSelected.includes(selfAssignSelectionKey)}
+                    checked={selfAssignSelected.includes(
+                      selfAssignSelectionKey,
+                    )}
                     disabled={selfAssignSaving}
                     aria-label={`Select ${pos.name} on game ${g.game_number} for Self Assign`}
                     title="Select this unpublished open position for Self Assign"
@@ -1592,7 +1848,15 @@ export default function AssignmentsManagerV2() {
                   />
                 )}
                 <span>
-                  <b style={{ color: isRainOut ? "#bfdbfe" : assignment ? "#64748b" : "#dc2626" }}>
+                  <b
+                    style={{
+                      color: isRainOut
+                        ? "#bfdbfe"
+                        : assignment
+                          ? "#64748b"
+                          : "#dc2626",
+                    }}
+                  >
                     {shortPositionName(pos.name)}
                   </b>
                   {official ? (
@@ -1612,7 +1876,9 @@ export default function AssignmentsManagerV2() {
                         type="button"
                         className="secondary"
                         disabled={selfAssignSaving}
-                        onClick={() => void withdrawSelfAssignPosition(g.id, pos.id)}
+                        onClick={() =>
+                          void withdrawSelfAssignPosition(g.id, pos.id)
+                        }
                         style={{ padding: "4px 7px", fontSize: 10 }}
                       >
                         Remove
@@ -1647,10 +1913,12 @@ export default function AssignmentsManagerV2() {
                           lineHeight: 1,
                           borderRadius: 6,
                           border: "1px solid #1d4ed8",
-                          background: positionIndex === 0 ? "#cbd5e1" : "#2563eb",
+                          background:
+                            positionIndex === 0 ? "#cbd5e1" : "#2563eb",
                           color: "#fff",
                           fontWeight: 900,
-                          cursor: positionIndex === 0 ? "not-allowed" : "pointer",
+                          cursor:
+                            positionIndex === 0 ? "not-allowed" : "pointer",
                         }}
                       >
                         ←
@@ -1772,7 +2040,9 @@ export default function AssignmentsManagerV2() {
                   className="success"
                   disabled={
                     selfAssignSaving ||
-                    (!selfAssignSelected.length && !linkSelected.length && !game)
+                    (!selfAssignSelected.length &&
+                      !linkSelected.length &&
+                      !game)
                   }
                   onClick={() => void openSelfAssignPositions()}
                 >
@@ -1811,10 +2081,56 @@ export default function AssignmentsManagerV2() {
               className={range === key ? "primary" : "secondary"}
               onClick={() => chooseRange(key)}
             >
-              {label} ({games.filter((g) => inRange(g, key, customDate)).length}
+              {label} (
+              {
+                games.filter(
+                  (g) =>
+                    inRange(g, key, customDate) && matchesOfficialFilter(g),
+                ).length
+              }
               )
             </button>
           ))}
+          {canManage && (
+            <label
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 7,
+                fontSize: 12,
+                fontWeight: 800,
+                color: "#475569",
+              }}
+            >
+              View by official
+              <select
+                aria-label="View games by official"
+                value={officialFilter}
+                onChange={(event) => {
+                  setOfficialFilter(event.target.value);
+                  setLinkSelected([]);
+                  setSelected("");
+                }}
+                style={{ width: 220, minWidth: 180 }}
+              >
+                <option value="">All Officials</option>
+                {officials
+                  .filter((official) =>
+                    assignments.some(
+                      (assignment) =>
+                        assignment.official_id === official.id &&
+                        assignment.status !== "declined",
+                    ),
+                  )
+                  .map((official) => (
+                    <option key={official.id} value={official.id}>
+                      {official.last_name}, {official.first_name}
+                      {official.active ? "" : " (Inactive)"}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          )}
           <button
             type="button"
             className={unpublishedOnly ? "primary" : "secondary"}
@@ -1884,7 +2200,8 @@ export default function AssignmentsManagerV2() {
               {key === "all"
                 ? rangeGames.length
                 : rangeGames.filter(
-                    (listedGame) => assignmentCompleteness(listedGame).key === key,
+                    (listedGame) =>
+                      assignmentCompleteness(listedGame).key === key,
                   ).length}
               )
             </button>
@@ -1913,12 +2230,105 @@ export default function AssignmentsManagerV2() {
               Assignments — {filteredGames.length} game
               {filteredGames.length === 1 ? "" : "s"}
             </b>
-            <span style={{display:"flex",gap:7,flexWrap:"wrap",alignItems:"center",justifyContent:"flex-end"}}>
-              <button type="button" className="secondary" disabled={!filteredGames.length||bulkWorking} onClick={()=>setLinkSelected(linkSelected.length===filteredGames.length?[]:filteredGames.map(g=>g.id))}>{linkSelected.length===filteredGames.length?"Clear All":"Select All"}</button>
-              <button type="button" className="primary" disabled={linking||bulkWorking||linkSelected.length<2} onClick={()=>void linkGames()}>🔗 Link{linkSelected.length?` (${linkSelected.length})`:""}</button>
+            <span
+              style={{
+                display: "flex",
+                gap: 7,
+                flexWrap: "wrap",
+                alignItems: "center",
+                justifyContent: "flex-end",
+              }}
+            >
+              <button
+                type="button"
+                className="secondary"
+                disabled={!filteredGames.length || bulkWorking}
+                onClick={() =>
+                  setLinkSelected(
+                    linkSelected.length === filteredGames.length
+                      ? []
+                      : filteredGames.map((g) => g.id),
+                  )
+                }
+              >
+                {linkSelected.length === filteredGames.length
+                  ? "Clear All"
+                  : "Select All"}
+              </button>
+              <button
+                type="button"
+                className="primary"
+                disabled={linking || bulkWorking || linkSelected.length < 2}
+                onClick={() => void linkGames()}
+              >
+                🔗 Link{linkSelected.length ? ` (${linkSelected.length})` : ""}
+              </button>
             </span>
           </div>
-          {canManage&&linkSelected.length>0&&<div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap",padding:"9px 12px",background:"#fffbeb",borderBottom:"1px solid #fde68a"}}><b style={{marginRight:4}}>{linkSelected.length} selected:</b><button className="secondary" disabled={bulkWorking} onClick={()=>void runBulkAction("publish")}>Publish</button><button className="secondary" disabled={bulkWorking} onClick={()=>void runBulkAction("confirm")}>Confirm Officials</button><button className="secondary" disabled={bulkWorking} onClick={()=>void runBulkAction("unassign")}>Unassign Officials</button><select aria-label="Bulk game status" value={bulkStatus} disabled={bulkWorking} onChange={e=>setBulkStatus(e.target.value)} style={{width:"auto"}}>{gameStatusOptions.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select><button className="secondary" disabled={bulkWorking} onClick={()=>void runBulkAction("status")}>Change Status</button><button className="secondary" disabled={bulkWorking} onClick={()=>void exportAssignments(linkSelected)}>Export Selected</button>{bulkWorking&&<span>Working…</span>}</div>}
+          {canManage && linkSelected.length > 0 && (
+            <div
+              style={{
+                display: "flex",
+                gap: 7,
+                alignItems: "center",
+                flexWrap: "wrap",
+                padding: "9px 12px",
+                background: "#fffbeb",
+                borderBottom: "1px solid #fde68a",
+              }}
+            >
+              <b style={{ marginRight: 4 }}>{linkSelected.length} selected:</b>
+              <button
+                className="secondary"
+                disabled={bulkWorking}
+                onClick={() => void runBulkAction("publish")}
+              >
+                Publish
+              </button>
+              <button
+                className="secondary"
+                disabled={bulkWorking}
+                onClick={() => void runBulkAction("confirm")}
+              >
+                Confirm Officials
+              </button>
+              <button
+                className="secondary"
+                disabled={bulkWorking}
+                onClick={() => void runBulkAction("unassign")}
+              >
+                Unassign Officials
+              </button>
+              <select
+                aria-label="Bulk game status"
+                value={bulkStatus}
+                disabled={bulkWorking}
+                onChange={(e) => setBulkStatus(e.target.value)}
+                style={{ width: "auto" }}
+              >
+                {gameStatusOptions.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="secondary"
+                disabled={bulkWorking}
+                onClick={() => void runBulkAction("status")}
+              >
+                Change Status
+              </button>
+              <button
+                className="secondary"
+                disabled={bulkWorking}
+                onClick={() => void exportAssignments(linkSelected)}
+              >
+                Export Selected
+              </button>
+              {bulkWorking && <span>Working…</span>}
+            </div>
+          )}
           <div
             style={{
               display: "grid",
@@ -1937,7 +2347,15 @@ export default function AssignmentsManagerV2() {
             <button
               type="button"
               onClick={() => sortGames("game")}
-              style={{ border: 0, background: "none", padding: 0, textAlign: "left", font: "inherit", color: "inherit", cursor: "pointer" }}
+              style={{
+                border: 0,
+                background: "none",
+                padding: 0,
+                textAlign: "left",
+                font: "inherit",
+                color: "inherit",
+                cursor: "pointer",
+              }}
             >
               Game{sortArrow("game")}
             </button>
@@ -1974,46 +2392,244 @@ export default function AssignmentsManagerV2() {
             <button
               type="button"
               onClick={() => sortGames("power")}
-              style={{ border: 0, background: "none", padding: 0, textAlign: "left", font: "inherit", color: "inherit", cursor: "pointer" }}
+              style={{
+                border: 0,
+                background: "none",
+                padding: 0,
+                textAlign: "left",
+                font: "inherit",
+                color: "inherit",
+                cursor: "pointer",
+              }}
             >
               Game Ranking{sortArrow("power")}
             </button>
             <button
               type="button"
               onClick={() => sortGames("status")}
-              style={{ border: 0, background: "none", padding: 0, textAlign: "left", font: "inherit", color: "inherit", cursor: "pointer" }}
+              style={{
+                border: 0,
+                background: "none",
+                padding: 0,
+                textAlign: "left",
+                font: "inherit",
+                color: "inherit",
+                cursor: "pointer",
+              }}
             >
               Game Status{sortArrow("status")}
             </button>
             <button
               type="button"
               onClick={() => sortGames("assignments")}
-              style={{ border: 0, background: "none", padding: 0, textAlign: "right", font: "inherit", color: "inherit", cursor: "pointer" }}
+              style={{
+                border: 0,
+                background: "none",
+                padding: 0,
+                textAlign: "right",
+                font: "inherit",
+                color: "inherit",
+                cursor: "pointer",
+              }}
             >
               Assignment Status{sortArrow("assignments")}
             </button>
           </div>
-          <div style={{ maxHeight: 420, overflowY: "auto", overflowX: "hidden" }}>
+          <div
+            style={{ maxHeight: 420, overflowY: "auto", overflowX: "hidden" }}
+          >
             {gameUnits.length ? (
               gameUnits.map((unit) => {
-                const warnings = unit.groupId ? linkedGroupWarnings(unit.games) : [];
-                return <div key={unit.key}>
-                  {unit.groupId && (
-                    <><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,padding:"8px 12px",background:"#dbeafe",color:"#1e3a8a",borderBottom:"1px solid #93c5fd",fontWeight:900}}>
-                      <span>🔗 Linked Games <small style={{fontWeight:600}}>• Drag games to set crew order</small></span>
-                      <button type="button" className="secondary" disabled={linking} onClick={() => void unlinkGames(unit.groupId!)} style={{padding:"5px 9px",fontSize:11}}>Unlink Group</button>
-                    </div>{warnings.map((warning)=><div key={warning} role="alert" style={{padding:"8px 12px",background:"#fff7ed",color:"#9a3412",borderBottom:"1px solid #fdba74",fontSize:12,fontWeight:800}}>⚠️ {warning}</div>)}</>
-                  )}
-                  {unit.games.map((listedGame, index) => {
-                    const previous = index > 0 ? unit.games[index - 1] : null;
-                    const travel = previous ? travelDetails(previous, listedGame) : null;
-                    return <div key={listedGame.id} draggable={Boolean(unit.groupId)&&canManage&&!linking} onDragStart={()=>setDraggingGame(listedGame.id)} onDragEnd={()=>setDraggingGame("")} onDragOver={event=>{if(unit.groupId)event.preventDefault()}} onDrop={event=>{event.preventDefault();if(unit.groupId)void reorderLinkedGame(unit.groupId,draggingGame,listedGame.id)}} style={{opacity:draggingGame===listedGame.id ? 0.7 : 1,position:"relative"}}>
-                      {unit.groupId&&previous&&travel&&<div style={{display:"flex",alignItems:"center",gap:8,padding:"5px 12px 5px 50px",background:travel.impossible&&travel.shared.length?"#fff7ed":"#f8fafc",color:travel.impossible&&travel.shared.length?"#9a3412":"#475569",borderBottom:"1px dashed #cbd5e1",fontSize:11,fontWeight:700}}><span>↳</span><span>{travel.travel?`Estimated travel: ${travel.travel.minutes} min (${travel.travel.miles.toFixed(1)} mi)`:"Travel time unavailable — location coordinates needed"}</span><span>• Schedule gap: {travel.gapMinutes} min</span></div>}
-                      {unit.groupId&&canManage&&<div style={{position:"absolute",right:8,top:8,zIndex:2,display:"flex",gap:4}}><button type="button" className="secondary" aria-label={`Move ${listedGame.game_number} earlier`} title="Move earlier" disabled={linking||index===0} onClick={()=>void moveLinkedGame(unit.groupId!,listedGame.id,-1)} style={{padding:"3px 6px",fontSize:10}}>↑</button><button type="button" className="secondary" aria-label={`Move ${listedGame.game_number} later`} title="Move later" disabled={linking||index===unit.games.length-1} onClick={()=>void moveLinkedGame(unit.groupId!,listedGame.id,1)} style={{padding:"3px 6px",fontSize:10}}>↓</button><button type="button" className="secondary" aria-label={`Unlink ${listedGame.game_number}`} title="Unlink this game" disabled={linking} onClick={()=>void unlinkOneGame(unit.groupId!,listedGame.id)} style={{padding:"3px 6px",fontSize:10}}>Unlink</button></div>}
-                      {renderGameRow(listedGame,Boolean(unit.groupId),Boolean(unit.groupId)&&index>0)}
-                    </div>;
-                  })}
-                </div>;
+                const warnings = unit.groupId
+                  ? linkedGroupWarnings(unit.games)
+                  : [];
+                return (
+                  <div key={unit.key}>
+                    {unit.groupId && (
+                      <>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            gap: 10,
+                            padding: "8px 12px",
+                            background: "#dbeafe",
+                            color: "#1e3a8a",
+                            borderBottom: "1px solid #93c5fd",
+                            fontWeight: 900,
+                          }}
+                        >
+                          <span>
+                            🔗 Linked Games{" "}
+                            <small style={{ fontWeight: 600 }}>
+                              • Drag games to set crew order
+                            </small>
+                          </span>
+                          <button
+                            type="button"
+                            className="secondary"
+                            disabled={linking}
+                            onClick={() => void unlinkGames(unit.groupId!)}
+                            style={{ padding: "5px 9px", fontSize: 11 }}
+                          >
+                            Unlink Group
+                          </button>
+                        </div>
+                        {warnings.map((warning) => (
+                          <div
+                            key={warning}
+                            role="alert"
+                            style={{
+                              padding: "8px 12px",
+                              background: "#fff7ed",
+                              color: "#9a3412",
+                              borderBottom: "1px solid #fdba74",
+                              fontSize: 12,
+                              fontWeight: 800,
+                            }}
+                          >
+                            ⚠️ {warning}
+                          </div>
+                        ))}
+                      </>
+                    )}
+                    {unit.games.map((listedGame, index) => {
+                      const previous = index > 0 ? unit.games[index - 1] : null;
+                      const travel = previous
+                        ? travelDetails(previous, listedGame)
+                        : null;
+                      return (
+                        <div
+                          key={listedGame.id}
+                          draggable={
+                            Boolean(unit.groupId) && canManage && !linking
+                          }
+                          onDragStart={() => setDraggingGame(listedGame.id)}
+                          onDragEnd={() => setDraggingGame("")}
+                          onDragOver={(event) => {
+                            if (unit.groupId) event.preventDefault();
+                          }}
+                          onDrop={(event) => {
+                            event.preventDefault();
+                            if (unit.groupId)
+                              void reorderLinkedGame(
+                                unit.groupId,
+                                draggingGame,
+                                listedGame.id,
+                              );
+                          }}
+                          style={{
+                            opacity: draggingGame === listedGame.id ? 0.7 : 1,
+                            position: "relative",
+                          }}
+                        >
+                          {unit.groupId && previous && travel && (
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                                padding: "5px 12px 5px 50px",
+                                background:
+                                  travel.impossible && travel.shared.length
+                                    ? "#fff7ed"
+                                    : "#f8fafc",
+                                color:
+                                  travel.impossible && travel.shared.length
+                                    ? "#9a3412"
+                                    : "#475569",
+                                borderBottom: "1px dashed #cbd5e1",
+                                fontSize: 11,
+                                fontWeight: 700,
+                              }}
+                            >
+                              <span>↳</span>
+                              <span>
+                                {travel.travel
+                                  ? `Estimated travel: ${travel.travel.minutes} min (${travel.travel.miles.toFixed(1)} mi)`
+                                  : "Travel time unavailable — location coordinates needed"}
+                              </span>
+                              <span>
+                                • Schedule gap: {travel.gapMinutes} min
+                              </span>
+                            </div>
+                          )}
+                          {unit.groupId && canManage && (
+                            <div
+                              style={{
+                                position: "absolute",
+                                right: 8,
+                                top: 8,
+                                zIndex: 2,
+                                display: "flex",
+                                gap: 4,
+                              }}
+                            >
+                              <button
+                                type="button"
+                                className="secondary"
+                                aria-label={`Move ${listedGame.game_number} earlier`}
+                                title="Move earlier"
+                                disabled={linking || index === 0}
+                                onClick={() =>
+                                  void moveLinkedGame(
+                                    unit.groupId!,
+                                    listedGame.id,
+                                    -1,
+                                  )
+                                }
+                                style={{ padding: "3px 6px", fontSize: 10 }}
+                              >
+                                ↑
+                              </button>
+                              <button
+                                type="button"
+                                className="secondary"
+                                aria-label={`Move ${listedGame.game_number} later`}
+                                title="Move later"
+                                disabled={
+                                  linking || index === unit.games.length - 1
+                                }
+                                onClick={() =>
+                                  void moveLinkedGame(
+                                    unit.groupId!,
+                                    listedGame.id,
+                                    1,
+                                  )
+                                }
+                                style={{ padding: "3px 6px", fontSize: 10 }}
+                              >
+                                ↓
+                              </button>
+                              <button
+                                type="button"
+                                className="secondary"
+                                aria-label={`Unlink ${listedGame.game_number}`}
+                                title="Unlink this game"
+                                disabled={linking}
+                                onClick={() =>
+                                  void unlinkOneGame(
+                                    unit.groupId!,
+                                    listedGame.id,
+                                  )
+                                }
+                                style={{ padding: "3px 6px", fontSize: 10 }}
+                              >
+                                Unlink
+                              </button>
+                            </div>
+                          )}
+                          {renderGameRow(
+                            listedGame,
+                            Boolean(unit.groupId),
+                            Boolean(unit.groupId) && index > 0,
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
               })
             ) : (
               <div style={{ padding: 14, color: "#64748b" }}>
@@ -2282,33 +2898,59 @@ export default function AssignmentsManagerV2() {
                     {gamePositions.map((pos, index) => {
                       const current = assignments.find(
                           (a) =>
-                            a.game_id === game.id && a.position_id === pos.id && a.status !== "declined",
+                            a.game_id === game.id &&
+                            a.position_id === pos.id &&
+                            a.status !== "declined",
                         ),
                         declined = assignments.find(
-                          (a) => a.game_id === game.id && a.position_id === pos.id && a.status === "declined",
+                          (a) =>
+                            a.game_id === game.id &&
+                            a.position_id === pos.id &&
+                            a.status === "declined",
                         ),
                         list = candidates(pos),
                         label = rankLabel(pos),
                         status = current ? assignmentStatus(current) : null;
                       return (
-                        <tr key={pos.id} style={{background:declined&&!current?"#fff1f2":undefined}}>
+                        <tr
+                          key={pos.id}
+                          style={{
+                            background:
+                              declined && !current ? "#fff1f2" : undefined,
+                          }}
+                        >
                           <td>
                             {!current && !isSelfAssignOpen(game.id, pos.id) ? (
                               <input
                                 type="checkbox"
-                                checked={selfAssignSelected.includes(selfAssignKey(game.id, pos.id))}
+                                checked={selfAssignSelected.includes(
+                                  selfAssignKey(game.id, pos.id),
+                                )}
                                 disabled={!canManage || selfAssignSaving}
                                 aria-label={`Select ${pos.name} for Self Assign`}
-                                onChange={() => toggleSelfAssignSelection(game.id, pos.id)}
+                                onChange={() =>
+                                  toggleSelfAssignSelection(game.id, pos.id)
+                                }
                               />
                             ) : !current ? (
-                              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                              <div
+                                style={{
+                                  display: "flex",
+                                  gap: 6,
+                                  alignItems: "center",
+                                }}
+                              >
                                 <span className="badge green">Open</span>
                                 <button
                                   type="button"
                                   className="secondary"
                                   disabled={!canManage || selfAssignSaving}
-                                  onClick={() => void withdrawSelfAssignPosition(game.id, pos.id)}
+                                  onClick={() =>
+                                    void withdrawSelfAssignPosition(
+                                      game.id,
+                                      pos.id,
+                                    )
+                                  }
                                   style={{ padding: "4px 7px", fontSize: 10 }}
                                 >
                                   Remove
@@ -2340,7 +2982,14 @@ export default function AssignmentsManagerV2() {
                               )}
                               <div>
                                 <b>{shortPositionName(pos.name)}</b>
-                                {declined&&!current&&<span className="badge red" style={{marginLeft:6}}>Replacement Needed</span>}
+                                {declined && !current && (
+                                  <span
+                                    className="badge red"
+                                    style={{ marginLeft: 6 }}
+                                  >
+                                    Replacement Needed
+                                  </span>
+                                )}
                                 <small>
                                   Slot {index + 1} of {game.officials_needed}
                                 </small>
@@ -2356,7 +3005,7 @@ export default function AssignmentsManagerV2() {
                                   " " +
                                   officials.find(
                                     (o) => o.id === current.official_id,
-                                )?.last_name}
+                                  )?.last_name}
                                 {futureBadge(current.official_id)}
                                 {canManage && (
                                   <span
@@ -2465,8 +3114,32 @@ export default function AssignmentsManagerV2() {
                                   )}
                               </div>
                             ) : declined ? (
-                              <div><b style={{color:"#b91c1c"}}>Open — official declined</b><small>{officials.find(o=>o.id===declined.official_id)?.first_name} {officials.find(o=>o.id===declined.official_id)?.last_name}{declined.decline_reason?` • ${declined.decline_reason}`:""}{declined.responded_at?` • ${new Date(declined.responded_at).toLocaleString()}`:""}</small></div>
-                            ) : "Open"}
+                              <div>
+                                <b style={{ color: "#b91c1c" }}>
+                                  Open — official declined
+                                </b>
+                                <small>
+                                  {
+                                    officials.find(
+                                      (o) => o.id === declined.official_id,
+                                    )?.first_name
+                                  }{" "}
+                                  {
+                                    officials.find(
+                                      (o) => o.id === declined.official_id,
+                                    )?.last_name
+                                  }
+                                  {declined.decline_reason
+                                    ? ` • ${declined.decline_reason}`
+                                    : ""}
+                                  {declined.responded_at
+                                    ? ` • ${new Date(declined.responded_at).toLocaleString()}`
+                                    : ""}
+                                </small>
+                              </div>
+                            ) : (
+                              "Open"
+                            )}
                           </td>
                           <td>
                             {current && status ? (
@@ -2482,8 +3155,10 @@ export default function AssignmentsManagerV2() {
                                     </small>
                                   )}
                               </>
+                            ) : declined ? (
+                              <span className="badge red">Declined</span>
                             ) : (
-                              declined?<span className="badge red">Declined</span>:<span>—</span>
+                              <span>—</span>
                             )}
                           </td>
                           <td>
@@ -2513,7 +3188,69 @@ export default function AssignmentsManagerV2() {
                                 </option>
                               ))}
                             </select>
-                            {declined&&!current&&<div style={{marginTop:7,padding:8,background:"#fff",border:"1px solid #fecaca",borderRadius:7}}><b style={{fontSize:11,color:"#991b1b"}}>Recommended qualified replacements</b>{list.filter(candidate=>candidate.reasons.length===0).slice(0,3).map((candidate,recommendationIndex)=><button key={candidate.id} type="button" disabled={saving===pos.id} onClick={()=>void assign(pos.id,candidate.id)} style={{display:"block",width:"100%",textAlign:"left",marginTop:5,padding:"6px 8px",border:"1px solid #e2e8f0",borderRadius:6,background:"#f8fafc",cursor:"pointer",fontSize:11}}><b>{recommendationIndex+1}. {candidate.first_name} {candidate.last_name}</b> — {label} {candidate.rank.toFixed(1)}{candidate.distance!=null?` • ${candidate.distance.toFixed(1)} mi`:""}</button>)}{list.every(candidate=>candidate.reasons.length>0)&&<small style={{display:"block",marginTop:5}}>No fully qualified, conflict-free replacements are currently available.</small>}</div>}
+                            {declined && !current && (
+                              <div
+                                style={{
+                                  marginTop: 7,
+                                  padding: 8,
+                                  background: "#fff",
+                                  border: "1px solid #fecaca",
+                                  borderRadius: 7,
+                                }}
+                              >
+                                <b style={{ fontSize: 11, color: "#991b1b" }}>
+                                  Recommended qualified replacements
+                                </b>
+                                {list
+                                  .filter(
+                                    (candidate) =>
+                                      candidate.reasons.length === 0,
+                                  )
+                                  .slice(0, 3)
+                                  .map((candidate, recommendationIndex) => (
+                                    <button
+                                      key={candidate.id}
+                                      type="button"
+                                      disabled={saving === pos.id}
+                                      onClick={() =>
+                                        void assign(pos.id, candidate.id)
+                                      }
+                                      style={{
+                                        display: "block",
+                                        width: "100%",
+                                        textAlign: "left",
+                                        marginTop: 5,
+                                        padding: "6px 8px",
+                                        border: "1px solid #e2e8f0",
+                                        borderRadius: 6,
+                                        background: "#f8fafc",
+                                        cursor: "pointer",
+                                        fontSize: 11,
+                                      }}
+                                    >
+                                      <b>
+                                        {recommendationIndex + 1}.{" "}
+                                        {candidate.first_name}{" "}
+                                        {candidate.last_name}
+                                      </b>{" "}
+                                      — {label} {candidate.rank.toFixed(1)}
+                                      {candidate.distance != null
+                                        ? ` • ${candidate.distance.toFixed(1)} mi`
+                                        : ""}
+                                    </button>
+                                  ))}
+                                {list.every(
+                                  (candidate) => candidate.reasons.length > 0,
+                                ) && (
+                                  <small
+                                    style={{ display: "block", marginTop: 5 }}
+                                  >
+                                    No fully qualified, conflict-free
+                                    replacements are currently available.
+                                  </small>
+                                )}
+                              </div>
+                            )}
                           </td>
                         </tr>
                       );
@@ -2609,58 +3346,58 @@ export default function AssignmentsManagerV2() {
                           !o.reasons.some((reason) =>
                             reason.startsWith("Overlaps Game #"),
                           ) && (
-                          <div style={{ marginTop: 6 }}>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setOverrideOfficial(
-                                  overrideOfficial === o.id ? "" : o.id,
-                                )
-                              }
-                              style={{
-                                background: "#fff",
-                                color: "#b91c1c",
-                                border: "1px solid #dc2626",
-                                borderRadius: 6,
-                                padding: "4px 8px",
-                                fontSize: 11,
-                                fontWeight: 800,
-                                cursor: "pointer",
-                              }}
-                            >
-                              {overrideOfficial === o.id
-                                ? "Cancel Override"
-                                : "Override"}
-                            </button>
-                            {overrideOfficial === o.id && (
-                              <div style={{ marginTop: 6 }}>
-                                <small
-                                  style={{
-                                    display: "block",
-                                    marginBottom: 4,
-                                    color: "#7f1d1d",
-                                  }}
-                                >
-                                  Assign to position:
-                                </small>
-                                <select
-                                  value=""
-                                  onChange={(e) => {
-                                    if (e.target.value)
-                                      void assign(e.target.value, o.id);
-                                  }}
-                                >
-                                  <option value="">Select position…</option>
-                                  {gamePositions.map((p) => (
-                                    <option key={p.id} value={p.id}>
-                                      {p.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                            )}
-                          </div>
-                        )}
+                            <div style={{ marginTop: 6 }}>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setOverrideOfficial(
+                                    overrideOfficial === o.id ? "" : o.id,
+                                  )
+                                }
+                                style={{
+                                  background: "#fff",
+                                  color: "#b91c1c",
+                                  border: "1px solid #dc2626",
+                                  borderRadius: 6,
+                                  padding: "4px 8px",
+                                  fontSize: 11,
+                                  fontWeight: 800,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                {overrideOfficial === o.id
+                                  ? "Cancel Override"
+                                  : "Override"}
+                              </button>
+                              {overrideOfficial === o.id && (
+                                <div style={{ marginTop: 6 }}>
+                                  <small
+                                    style={{
+                                      display: "block",
+                                      marginBottom: 4,
+                                      color: "#7f1d1d",
+                                    }}
+                                  >
+                                    Assign to position:
+                                  </small>
+                                  <select
+                                    value=""
+                                    onChange={(e) => {
+                                      if (e.target.value)
+                                        void assign(e.target.value, o.id);
+                                    }}
+                                  >
+                                    <option value="">Select position…</option>
+                                    {gamePositions.map((p) => (
+                                      <option key={p.id} value={p.id}>
+                                        {p.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              )}
+                            </div>
+                          )}
                         {o.reasons.some((reason) =>
                           reason.startsWith("Overlaps Game #"),
                         ) && (
