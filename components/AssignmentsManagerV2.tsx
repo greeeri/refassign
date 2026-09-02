@@ -58,6 +58,7 @@ type Assignment = {
   accept_by: string | null;
   responded_at: string | null;
   decline_reason: string | null;
+  overdue_reviewed_at: string | null;
 };
 type Rank = { official_id: string; rank: number };
 type PositionRank = {
@@ -210,7 +211,9 @@ export default function AssignmentsManagerV2() {
     [bulkStatus, setBulkStatus] = useState("active"),
     [selfAssignSlots, setSelfAssignSlots] = useState<SelfAssignSlot[]>([]),
     [selfAssignSelected, setSelfAssignSelected] = useState<string[]>([]),
-    [selfAssignSaving, setSelfAssignSaving] = useState(false);
+    [selfAssignSaving, setSelfAssignSaving] = useState(false),
+    [overduePromptClosed, setOverduePromptClosed] = useState(false),
+    [overdueResolving, setOverdueResolving] = useState(false);
   async function load() {
     setError("");
     const { data: userData } = await supabase.auth.getUser();
@@ -244,7 +247,7 @@ export default function AssignmentsManagerV2() {
       supabase
         .from("assignments")
         .select(
-          "id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason",
+          "id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at",
         ),
       supabase.from("official_rankings").select("official_id,rank"),
       supabase
@@ -1641,6 +1644,74 @@ export default function AssignmentsManagerV2() {
       return "REF";
     return name;
   }
+  const overdueGroups = Array.from(
+    assignments
+      .filter((assignment) => {
+        const overdueGame = games.find(
+          (listedGame) => listedGame.id === assignment.game_id,
+        );
+        return Boolean(
+          overdueGame &&
+          assignment.status === "proposed" &&
+          assignment.published_at &&
+          assignment.accept_by &&
+          new Date(assignment.accept_by).getTime() < Date.now() &&
+          !assignment.overdue_reviewed_at &&
+          new Date(overdueGame.starts_at).getTime() > Date.now() &&
+          !["canceled", "rained_out"].includes(overdueGame.status),
+        );
+      })
+      .reduce((groups, assignment) => {
+        const group = groups.get(assignment.official_id) || [];
+        group.push(assignment);
+        groups.set(assignment.official_id, group);
+        return groups;
+      }, new Map<string, Assignment[]>()),
+  ).sort((a, b) => {
+    const aDeadline = Math.min(
+      ...a[1].map((assignment) => new Date(assignment.accept_by!).getTime()),
+    );
+    const bDeadline = Math.min(
+      ...b[1].map((assignment) => new Date(assignment.accept_by!).getTime()),
+    );
+    return aDeadline - bDeadline;
+  });
+  const overdueGroup = overdueGroups[0] || null;
+  async function resolveOverdue(
+    action: "keep" | "remove" | "remove_and_block",
+  ) {
+    if (!overdueGroup) return;
+    setOverdueResolving(true);
+    setError("");
+    setNotice("");
+    const { data, error: resolveError } = await supabase.rpc(
+      "resolve_overdue_assignments",
+      {
+        p_assignment_ids: overdueGroup[1].map((assignment) => assignment.id),
+        p_action: action,
+      },
+    );
+    if (resolveError) setError(resolveError.message);
+    else {
+      const result = data as {
+        assignments_resolved?: number;
+        blocks_created?: number;
+      } | null;
+      const official = officials.find((item) => item.id === overdueGroup[0]);
+      const name = official
+        ? `${official.first_name} ${official.last_name}`
+        : "Official";
+      setNotice(
+        action === "keep"
+          ? `${name} was kept on ${result?.assignments_resolved || overdueGroup[1].length} overdue game assignment(s).`
+          : `${name} was removed from ${result?.assignments_resolved || overdueGroup[1].length} unaccepted game(s)${action === "remove_and_block" ? ` and ${result?.blocks_created || 0} time block(s) were created` : " without creating blocks"}.`,
+      );
+      setOverduePromptClosed(false);
+      await load();
+      if (action !== "keep") announceUndoAvailable();
+    }
+    setOverdueResolving(false);
+  }
   function renderGameRow(g: Game, linked: boolean, showChain: boolean) {
     const d = new Date(g.starts_at);
     const completeness = assignmentCompleteness(g);
@@ -2065,6 +2136,101 @@ export default function AssignmentsManagerV2() {
         </div>
         {error && <div className="errorBox">{error}</div>}
         {notice && <div className="loginMessage">{notice}</div>}
+        {canManage && overdueGroup && !overduePromptClosed && (
+          <div
+            className="overduePrompt"
+            role="dialog"
+            aria-labelledby="overduePromptTitle"
+          >
+            <div className="cardHead">
+              <div>
+                <h3 id="overduePromptTitle">Acceptance deadline passed</h3>
+                <p>
+                  {officials.find((official) => official.id === overdueGroup[0])
+                    ?.first_name || "This official"}{" "}
+                  {officials.find((official) => official.id === overdueGroup[0])
+                    ?.last_name || ""}{" "}
+                  has not accepted the following AutoAssign game
+                  {overdueGroup[1].length === 1 ? "" : "s"}. Official {1} of{" "}
+                  {overdueGroups.length} requiring review.
+                </p>
+              </div>
+            </div>
+            <div className="overdueGameList">
+              {overdueGroup[1].map((assignment) => {
+                const overdueGame = games.find(
+                  (listedGame) => listedGame.id === assignment.game_id,
+                );
+                const position = positions.find(
+                  (item) => item.id === assignment.position_id,
+                );
+                if (!overdueGame) return null;
+                return (
+                  <div key={assignment.id}>
+                    <b>
+                      {overdueGame.game_number} —{" "}
+                      {overdueGame.home?.name || "TBD"} vs{" "}
+                      {overdueGame.away?.name || "TBD"}
+                    </b>
+                    <small>
+                      {new Date(overdueGame.starts_at).toLocaleString([], {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })}
+                      {" • "}
+                      {position ? shortPositionName(position.name) : "Official"}
+                      {" • Acceptance was due "}
+                      {new Date(assignment.accept_by!).toLocaleString([], {
+                        month: "short",
+                        day: "numeric",
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })}
+                    </small>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="overduePromptQuestion">
+              Would you like to remove this official from these unaccepted
+              games?
+            </p>
+            <div className="overduePromptActions">
+              <button
+                className="secondary"
+                disabled={overdueResolving}
+                onClick={() => void resolveOverdue("keep")}
+              >
+                Keep Official
+              </button>
+              <button
+                className="dangerButton"
+                disabled={overdueResolving}
+                onClick={() => void resolveOverdue("remove")}
+              >
+                Remove — No Block
+              </button>
+              <button
+                className="primary"
+                disabled={overdueResolving}
+                onClick={() => void resolveOverdue("remove_and_block")}
+              >
+                Remove + Create Blocks
+              </button>
+              <button
+                className="secondary"
+                disabled={overdueResolving}
+                onClick={() => setOverduePromptClosed(true)}
+              >
+                Review Later
+              </button>
+              {overdueResolving && <span>Updating…</span>}
+            </div>
+          </div>
+        )}
         <div
           style={{
             display: "flex",
