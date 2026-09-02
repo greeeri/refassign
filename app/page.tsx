@@ -19,15 +19,16 @@ import UndoCenter from "../components/UndoCenter";
 const adminNav = [
   "Dashboard",
   "Games",
-  "Officials",
-  "Assignments",
   "Audit History",
-  "Auto Assign",
   "Contacts",
   "Sports & Rules",
 ];
 const setupNav = ["Leagues", "Levels", "Teams", "Locations"] as const;
 const gameSetupNav = ["Leagues", "Levels", "Teams", "Locations"] as const;
+const assignmentsNav = [
+  ["Assignments", "Assignment Center"],
+  ["Auto Assign", "Auto Assign"],
+] as const;
 const officialsNav = [
   ["Officials", "Directory"],
   ["Blocks", "Blocks"],
@@ -118,6 +119,18 @@ export default function Home() {
                 ))}
               </div>
               <div className="navGroup">
+                <div className="navParent">Assignments</div>
+                {assignmentsNav.map(([view, label]) => (
+                  <button
+                    key={view}
+                    className={`subNav ${section === view ? "active" : ""}`}
+                    onClick={() => setSection(view)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="navGroup">
                 <div className="navParent">Officials</div>
                 {officialsNav.map(([view, label]) => (
                   <button
@@ -129,7 +142,7 @@ export default function Home() {
                   </button>
                 ))}
               </div>
-              {adminNav.slice(3).map((n) => (
+              {adminNav.slice(2).map((n) => (
                 <button
                   key={n}
                   className={section === n ? "active" : ""}
