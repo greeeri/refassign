@@ -214,7 +214,8 @@ export default function AssignmentsManagerV2() {
     [selfAssignSelected, setSelfAssignSelected] = useState<string[]>([]),
     [selfAssignSaving, setSelfAssignSaving] = useState(false),
     [overduePromptClosed, setOverduePromptClosed] = useState(false),
-    [overdueResolving, setOverdueResolving] = useState(false);
+    [overdueResolving, setOverdueResolving] = useState(false),
+    [overdueSelected, setOverdueSelected] = useState<string[]>([]);
   async function load() {
     setError("");
     const { data: userData } = await supabase.auth.getUser();
@@ -1679,17 +1680,33 @@ export default function AssignmentsManagerV2() {
     return aDeadline - bDeadline;
   });
   const overdueGroup = overdueGroups[0] || null;
+  const overdueGroupAssignmentIds = overdueGroup
+    ? overdueGroup[1].map((assignment) => assignment.id)
+    : [];
+  const overdueGroupSelectionKey = overdueGroupAssignmentIds.join(",");
+  useEffect(() => {
+    setOverdueSelected(
+      overdueGroupSelectionKey ? overdueGroupSelectionKey.split(",") : [],
+    );
+  }, [overdueGroupSelectionKey]);
+  function toggleOverdueSelection(assignmentId: string) {
+    setOverdueSelected((current) =>
+      current.includes(assignmentId)
+        ? current.filter((id) => id !== assignmentId)
+        : [...current, assignmentId],
+    );
+  }
   async function resolveOverdue(
     action: "keep" | "remove" | "remove_and_block",
   ) {
-    if (!overdueGroup) return;
+    if (!overdueGroup || overdueSelected.length === 0) return;
     setOverdueResolving(true);
     setError("");
     setNotice("");
     const { data, error: resolveError } = await supabase.rpc(
       "resolve_overdue_assignments",
       {
-        p_assignment_ids: overdueGroup[1].map((assignment) => assignment.id),
+        p_assignment_ids: overdueSelected,
         p_action: action,
       },
     );
@@ -1705,8 +1722,8 @@ export default function AssignmentsManagerV2() {
         : "Official";
       setNotice(
         action === "keep"
-          ? `${name} was kept on ${result?.assignments_resolved || overdueGroup[1].length} overdue game assignment(s).`
-          : `${name} was removed from ${result?.assignments_resolved || overdueGroup[1].length} unaccepted game(s)${action === "remove_and_block" ? ` and ${result?.blocks_created || 0} time block(s) were created` : " without creating blocks"}.`,
+          ? `${name} was kept on ${result?.assignments_resolved || overdueSelected.length} selected overdue game assignment(s).`
+          : `${name} was removed from ${result?.assignments_resolved || overdueSelected.length} selected unaccepted game(s)${action === "remove_and_block" ? ` and ${result?.blocks_created || 0} time block(s) were created` : " without creating blocks"}.`,
       );
       setOverduePromptClosed(false);
       await load();
@@ -2168,56 +2185,67 @@ export default function AssignmentsManagerV2() {
                 );
                 if (!overdueGame) return null;
                 return (
-                  <div key={assignment.id}>
-                    <b>
-                      {overdueGame.game_number} —{" "}
-                      {overdueGame.home?.name || "TBD"} vs{" "}
-                      {overdueGame.away?.name || "TBD"}
-                    </b>
-                    <small>
-                      {new Date(overdueGame.starts_at).toLocaleString([], {
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                        hour: "numeric",
-                        minute: "2-digit",
-                      })}
-                      {" • "}
-                      {position ? shortPositionName(position.name) : "Official"}
-                      {" • Acceptance was due "}
-                      {new Date(assignment.accept_by!).toLocaleString([], {
-                        month: "short",
-                        day: "numeric",
-                        hour: "numeric",
-                        minute: "2-digit",
-                      })}
-                    </small>
-                  </div>
+                  <label key={assignment.id}>
+                    <input
+                      type="checkbox"
+                      checked={overdueSelected.includes(assignment.id)}
+                      disabled={overdueResolving}
+                      onChange={() => toggleOverdueSelection(assignment.id)}
+                      aria-label={`Select game ${overdueGame.game_number}`}
+                    />
+                    <span>
+                      <b>
+                        {overdueGame.game_number} —{" "}
+                        {overdueGame.home?.name || "TBD"} vs{" "}
+                        {overdueGame.away?.name || "TBD"}
+                      </b>
+                      <small>
+                        {new Date(overdueGame.starts_at).toLocaleString([], {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })}
+                        {" • "}
+                        {position
+                          ? shortPositionName(position.name)
+                          : "Official"}
+                        {" • Acceptance was due "}
+                        {new Date(assignment.accept_by!).toLocaleString([], {
+                          month: "short",
+                          day: "numeric",
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })}
+                      </small>
+                    </span>
+                  </label>
                 );
               })}
             </div>
             <p className="overduePromptQuestion">
-              Would you like to remove this official from these unaccepted
-              games?
+              Select the unaccepted games to update. Accepted assignments are
+              never included or removed.
             </p>
             <div className="overduePromptActions">
               <button
                 className="secondary"
-                disabled={overdueResolving}
+                disabled={overdueResolving || overdueSelected.length === 0}
                 onClick={() => void resolveOverdue("keep")}
               >
                 Keep Official
               </button>
               <button
                 className="dangerButton"
-                disabled={overdueResolving}
+                disabled={overdueResolving || overdueSelected.length === 0}
                 onClick={() => void resolveOverdue("remove")}
               >
                 Remove — No Block
               </button>
               <button
                 className="primary"
-                disabled={overdueResolving}
+                disabled={overdueResolving || overdueSelected.length === 0}
                 onClick={() => void resolveOverdue("remove_and_block")}
               >
                 Remove + Create Blocks
