@@ -1358,6 +1358,13 @@ export default function AssignmentsManagerV2() {
     ["thisWeek", "This Week"],
     ["nextWeek", "Next Week"],
   ];
+  function shortPositionName(name: string) {
+    const normalized = name.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (["assistantreferee1", "assistant1", "ar1"].includes(normalized)) return "AR1";
+    if (["assistantreferee2", "assistant2", "assistantreferee", "ar2"].includes(normalized)) return "AR2";
+    if (["centerreferee", "center", "referee", "cr", "ref"].includes(normalized)) return "REF";
+    return name;
+  }
   function renderGameRow(g: Game, linked: boolean, showChain: boolean) {
     const d = new Date(g.starts_at);
     const completeness = assignmentCompleteness(g);
@@ -1389,10 +1396,10 @@ export default function AssignmentsManagerV2() {
         style={{
           display: "grid",
           gridTemplateColumns:
-            "38px minmax(230px,1fr) minmax(150px,220px) 105px 90px 125px minmax(390px,auto)",
+            "28px minmax(120px,1.45fr) minmax(85px,.8fr) 72px 54px 94px minmax(210px,1.8fr)",
           alignItems: "center",
-          gap: 10,
-          padding: "9px 12px",
+          gap: 6,
+          padding: "8px 9px",
           borderBottom: `1px solid ${statusBorder || (linked ? "#bfdbfe" : "#e2e8f0")}`,
           background:
             statusBackground ||
@@ -1427,7 +1434,7 @@ export default function AssignmentsManagerV2() {
             color: "inherit",
           }}
         >
-          <span style={{ fontSize: 16, fontWeight: 800 }}>
+          <span style={{ fontSize: 13, fontWeight: 800, lineHeight: 1.2 }}>
             {showChain && (
               <span aria-hidden="true" style={{ marginRight: 8 }}>
                 🔗
@@ -1442,13 +1449,13 @@ export default function AssignmentsManagerV2() {
             {d.toLocaleDateString()}
           </small>
         </button>
-        <span style={{ color: isRainOut ? "#fff" : "#475569", fontSize: 12, fontWeight: 700 }}>
+        <span style={{ color: isRainOut ? "#fff" : "#475569", fontSize: 11, fontWeight: 700 }}>
           {g.location?.name || "TBD"}
         </span>
         <span
           style={{
             color: isRainOut ? "#fff" : "#475569",
-            fontSize: 12,
+            fontSize: 11,
             fontWeight: 700,
             whiteSpace: "nowrap",
           }}
@@ -1459,7 +1466,7 @@ export default function AssignmentsManagerV2() {
           title="Average of the home and away team power rankings"
           style={{
             color: isRainOut ? "#fff" : "#7c3aed",
-            fontSize: 13,
+            fontSize: 12,
             fontWeight: 900,
           }}
         >
@@ -1470,7 +1477,7 @@ export default function AssignmentsManagerV2() {
           disabled={!canManage || gameStatusSaving === g.id}
           value={g.status === "open" ? "active" : g.status}
           onChange={(event) => void changeGameStatus(g.id, event.target.value)}
-          style={{ width: "100%", minWidth: 115, padding: "6px 7px" }}
+          style={{ width: "100%", minWidth: 0, padding: "5px 4px", fontSize: 11 }}
         >
           {gameStatusOptions.map(([value, label]) => (
             <option key={value} value={value}>
@@ -1482,9 +1489,9 @@ export default function AssignmentsManagerV2() {
           style={{
             display: "flex",
             justifyContent: "flex-end",
-            gap: "5px 12px",
+            gap: "4px 8px",
             flexWrap: "wrap",
-            fontSize: 11,
+            fontSize: 10,
           }}
         >
           <span
@@ -1542,7 +1549,7 @@ export default function AssignmentsManagerV2() {
                 )}
                 <span>
                   <b style={{ color: isRainOut ? "#bfdbfe" : assignment ? "#64748b" : "#dc2626" }}>
-                    {pos.name}
+                    {shortPositionName(pos.name)}
                   </b>
                   {official ? (
                     <b style={{ color: isRainOut ? "#fff" : color }}>
@@ -1591,8 +1598,8 @@ export default function AssignmentsManagerV2() {
                           void moveAssignment(g.id, assignment.id, -1)
                         }
                         style={{
-                          padding: "5px 8px",
-                          fontSize: 14,
+                          padding: "3px 5px",
+                          fontSize: 12,
                           lineHeight: 1,
                           borderRadius: 6,
                           border: "1px solid #1d4ed8",
@@ -1616,8 +1623,8 @@ export default function AssignmentsManagerV2() {
                           void moveAssignment(g.id, assignment.id, 1)
                         }
                         style={{
-                          padding: "5px 8px",
-                          fontSize: 14,
+                          padding: "3px 5px",
+                          fontSize: 12,
                           lineHeight: 1,
                           borderRadius: 6,
                           border: "1px solid #1d4ed8",
@@ -1656,8 +1663,8 @@ export default function AssignmentsManagerV2() {
                         color: "#713f12",
                         border: "1px solid #eab308",
                         borderRadius: 6,
-                        padding: "4px 7px",
-                        fontSize: 10,
+                        padding: "3px 5px",
+                        fontSize: 9,
                         fontWeight: 800,
                         cursor:
                           !assignment.published_at ||
@@ -1682,7 +1689,7 @@ export default function AssignmentsManagerV2() {
                       className="secondary"
                       disabled={saving === pos.id}
                       onClick={() => void unassign(assignment.id, pos.id)}
-                      style={{ padding: "4px 7px", fontSize: 10 }}
+                      style={{ padding: "3px 5px", fontSize: 9 }}
                     >
                       {saving === pos.id ? "Unassigning…" : "Unassign"}
                     </button>
@@ -1869,9 +1876,9 @@ export default function AssignmentsManagerV2() {
             style={{
               display: "grid",
               gridTemplateColumns:
-                "38px minmax(230px,1fr) minmax(150px,220px) 105px 90px 125px minmax(390px,auto)",
-              gap: 10,
-              padding: "7px 12px",
+                "28px minmax(120px,1.45fr) minmax(85px,.8fr) 72px 54px 94px minmax(210px,1.8fr)",
+              gap: 6,
+              padding: "7px 9px",
               background: "#f8fafc",
               color: "#64748b",
               fontSize: 11,
@@ -1939,7 +1946,7 @@ export default function AssignmentsManagerV2() {
               Assignment Status{sortArrow("assignments")}
             </button>
           </div>
-          <div style={{ maxHeight: 420, overflow: "auto" }}>
+          <div style={{ maxHeight: 420, overflowY: "auto", overflowX: "hidden" }}>
             {gameUnits.length ? (
               gameUnits.map((unit) => {
                 const warnings = unit.groupId ? linkedGroupWarnings(unit.games) : [];
@@ -2091,7 +2098,7 @@ export default function AssignmentsManagerV2() {
                                 color: a ? "#64748b" : "#dc2626",
                               }}
                             >
-                              {pos.name}
+                              {shortPositionName(pos.name)}
                             </span>
                             {o && (
                               <span style={{ fontWeight: 800, color }}>
@@ -2285,7 +2292,7 @@ export default function AssignmentsManagerV2() {
                                 </button>
                               )}
                               <div>
-                                <b>{pos.name}</b>
+                                <b>{shortPositionName(pos.name)}</b>
                                 {declined&&!current&&<span className="badge red" style={{marginLeft:6}}>Replacement Needed</span>}
                                 <small>
                                   Slot {index + 1} of {game.officials_needed}
