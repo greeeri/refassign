@@ -1,63 +1,125 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../lib/supabase/client";
 
+type PaymentStatus = "unpaid" | "approved" | "paid" | "void";
+type Period = "all" | "past" | "week" | "future";
+type SortKey =
+  | "date"
+  | "game"
+  | "location"
+  | "official"
+  | "position"
+  | "fee"
+  | "defaultMileage"
+  | "miles"
+  | "rate"
+  | "total"
+  | "status";
 type PayrollRow = {
   id: string;
+  status: string;
   game_fee: number;
   mileage_miles: number;
   mileage_rate: number;
-  payment_status: "unpaid" | "approved" | "paid" | "void";
+  payment_status: PaymentStatus;
   paid_at: string | null;
   payroll_notes: string | null;
-  officials: { first_name: string; last_name: string } | null;
+  officials: {
+    first_name: string;
+    last_name: string;
+    home_latitude: number | null;
+    home_longitude: number | null;
+  } | null;
   sport_positions: { name: string } | null;
   games: {
     game_number: string;
     starts_at: string;
     home: { name: string } | null;
     away: { name: string } | null;
-    location: { name: string } | null;
+    location: {
+      name: string;
+      latitude: number | null;
+      longitude: number | null;
+    } | null;
   } | null;
 };
-
-type PayrollExportRow = {
-  Date: string;
-  "Game Number": string;
-  Game: string;
-  Location: string;
-  Official: string;
-  Position: string;
-  "Game Fee": number;
-  "Mileage Miles": number;
-  "Mileage Rate": number;
-  "Mileage Reimbursement": number;
-  "Payroll Total": number;
-  "Payment Status": string;
-  "Paid Date": string;
-  Notes: string;
+type ImportRow = {
+  spreadsheetRow: number;
+  assignmentId: string;
+  label: string;
+  gameFee: number;
+  mileageMiles: number;
+  mileageRate: number;
+  paymentStatus: PaymentStatus;
+  notes: string;
 };
 
-const statuses = [
+const statuses: ReadonlyArray<[PaymentStatus, string]> = [
   ["unpaid", "Unpaid"],
   ["approved", "Approved"],
   ["paid", "Paid"],
   ["void", "Void"],
-] as const;
+];
+const money = (value: number) =>
+  value.toLocaleString("en-US", { style: "currency", currency: "USD" });
+const officialName = (row: PayrollRow) =>
+  `${row.officials?.first_name || ""} ${row.officials?.last_name || ""}`.trim();
+const gameName = (row: PayrollRow) =>
+  `${row.games?.home?.name || "TBD"} vs ${row.games?.away?.name || "TBD"}`;
 
-function money(value: number) {
-  return value.toLocaleString("en-US", { style: "currency", currency: "USD" });
+function milesBetween(
+  lat1: number | null,
+  lon1: number | null,
+  lat2: number | null,
+  lon2: number | null,
+) {
+  if ([lat1, lon1, lat2, lon2].some((value) => value == null)) return null;
+  const radians = (value: number) => (value * Math.PI) / 180;
+  const dLat = radians(Number(lat2) - Number(lat1));
+  const dLon = radians(Number(lon2) - Number(lon1));
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(radians(Number(lat1))) *
+      Math.cos(radians(Number(lat2))) *
+      Math.sin(dLon / 2) ** 2;
+  return (
+    Math.round(3958.8 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 10) /
+    10
+  );
+}
+
+function weekBounds() {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - start.getDay());
+  const end = new Date(start);
+  end.setDate(end.getDate() + 7);
+  return { start, end };
+}
+
+function normalizedRecord(record: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(record).map(([key, value]) => [
+      key.toLowerCase().replace(/[^a-z0-9]+/g, "_"),
+      value,
+    ]),
+  );
 }
 
 export default function PayrollManager() {
   const supabase = useMemo(() => createClient(), []);
+  const fileInput = useRef<HTMLInputElement>(null);
   const [rows, setRows] = useState<PayrollRow[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
+  const [period, setPeriod] = useState<Period>("all");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [month, setMonth] = useState(() =>
-    new Date().toISOString().slice(0, 7),
+  const [sort, setSort] = useState<{ key: SortKey; direction: "asc" | "desc" }>(
+    { key: "date", direction: "asc" },
   );
+  const [importRows, setImportRows] = useState<ImportRow[]>([]);
+  const [importFile, setImportFile] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState("");
   const [error, setError] = useState("");
@@ -69,41 +131,87 @@ export default function PayrollManager() {
     const { data, error: loadError } = await supabase
       .from("assignments")
       .select(
-        "id,game_fee,mileage_miles,mileage_rate,payment_status,paid_at,payroll_notes,officials(first_name,last_name),sport_positions(name),games(game_number,starts_at,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name))",
+        "id,status,game_fee,mileage_miles,mileage_rate,payment_status,paid_at,payroll_notes,officials(first_name,last_name,home_latitude,home_longitude),sport_positions(name),games(game_number,starts_at,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name,latitude,longitude))",
       )
       .not("official_id", "is", null)
-      .neq("status", "declined")
+      .in("status", ["accepted", "confirmed"])
       .order("assigned_at", { ascending: false });
     if (loadError) setError(loadError.message);
     else setRows((data || []) as unknown as PayrollRow[]);
     setLoading(false);
   }
-
   useEffect(() => {
     void load();
   }, []);
 
-  function patch(id: string, values: Partial<PayrollRow>) {
+  const defaultMileage = (row: PayrollRow) =>
+    milesBetween(
+      row.officials?.home_latitude ?? null,
+      row.officials?.home_longitude ?? null,
+      row.games?.location?.latitude ?? null,
+      row.games?.location?.longitude ?? null,
+    );
+  const total = (row: PayrollRow) =>
+    row.payment_status === "void"
+      ? 0
+      : Number(row.game_fee || 0) +
+        Number(row.mileage_miles || 0) * Number(row.mileage_rate || 0);
+  const patch = (id: string, values: Partial<PayrollRow>) =>
     setRows((current) =>
       current.map((row) => (row.id === id ? { ...row, ...values } : row)),
     );
-  }
 
-  function total(row: PayrollRow) {
-    if (row.payment_status === "void") return 0;
-    return (
-      Number(row.game_fee || 0) +
-      Number(row.mileage_miles || 0) * Number(row.mileage_rate || 0)
-    );
+  function sortValue(row: PayrollRow, key: SortKey): string | number {
+    if (key === "date") return row.games?.starts_at || "";
+    if (key === "game") return gameName(row);
+    if (key === "location") return row.games?.location?.name || "";
+    if (key === "official") return officialName(row);
+    if (key === "position") return row.sport_positions?.name || "";
+    if (key === "fee") return Number(row.game_fee || 0);
+    if (key === "defaultMileage")
+      return defaultMileage(row) ?? Number.MAX_SAFE_INTEGER;
+    if (key === "miles") return Number(row.mileage_miles || 0);
+    if (key === "rate") return Number(row.mileage_rate || 0);
+    if (key === "total") return total(row);
+    return row.payment_status;
   }
+  function changeSort(key: SortKey) {
+    setSort((current) => ({
+      key,
+      direction:
+        current.key === key && current.direction === "asc" ? "desc" : "asc",
+    }));
+  }
+  const sortLabel = (label: string, key: SortKey) =>
+    `${label}${sort.key === key ? (sort.direction === "asc" ? " ▲" : " ▼") : ""}`;
 
-  const visible = rows.filter((row) => {
-    const date = row.games?.starts_at?.slice(0, 7);
-    return (
-      (!month || date === month) &&
-      (statusFilter === "all" || row.payment_status === statusFilter)
-    );
-  });
+  const visible = rows
+    .filter((row) => {
+      const gameDate = new Date(row.games?.starts_at || 0);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const { start, end } = weekBounds();
+      const periodMatch =
+        period === "all" ||
+        (period === "past" && gameDate < today) ||
+        (period === "week" && gameDate >= start && gameDate < end) ||
+        (period === "future" && gameDate >= end);
+      return (
+        periodMatch &&
+        (statusFilter === "all" || row.payment_status === statusFilter)
+      );
+    })
+    .sort((a, b) => {
+      const first = sortValue(a, sort.key),
+        second = sortValue(b, sort.key);
+      const result =
+        typeof first === "number" && typeof second === "number"
+          ? first - second
+          : String(first).localeCompare(String(second), undefined, {
+              numeric: true,
+            });
+      return sort.direction === "asc" ? result : -result;
+    });
   const selectedRows = visible.filter((row) => selected.includes(row.id));
   const totals = visible.reduce(
     (sum, row) => ({
@@ -125,22 +233,21 @@ export default function PayrollManager() {
     setError("");
     setNotice("");
     const { data: userData } = await supabase.auth.getUser();
-    const payload = {
-      game_fee: Number(row.game_fee || 0),
-      mileage_miles: Number(row.mileage_miles || 0),
-      mileage_rate: Number(row.mileage_rate || 0),
-      payment_status: row.payment_status,
-      paid_at:
-        row.payment_status === "paid"
-          ? row.paid_at || new Date().toISOString()
-          : null,
-      payroll_notes: row.payroll_notes?.trim() || null,
-      payroll_updated_at: new Date().toISOString(),
-      payroll_updated_by: userData.user?.id || null,
-    };
     const { error: saveError } = await supabase
       .from("assignments")
-      .update(payload)
+      .update({
+        game_fee: Number(row.game_fee || 0),
+        mileage_miles: Number(row.mileage_miles || 0),
+        mileage_rate: Number(row.mileage_rate || 0),
+        payment_status: row.payment_status,
+        paid_at:
+          row.payment_status === "paid"
+            ? row.paid_at || new Date().toISOString()
+            : null,
+        payroll_notes: row.payroll_notes?.trim() || null,
+        payroll_updated_at: new Date().toISOString(),
+        payroll_updated_by: userData.user?.id || null,
+      })
       .eq("id", row.id);
     if (saveError) setError(saveError.message);
     else {
@@ -150,7 +257,7 @@ export default function PayrollManager() {
     setSaving("");
   }
 
-  async function bulkStatus(status: PayrollRow["payment_status"]) {
+  async function bulkStatus(paymentStatus: PaymentStatus) {
     if (!selected.length) return;
     setSaving("bulk");
     setError("");
@@ -159,15 +266,15 @@ export default function PayrollManager() {
     const { error: updateError } = await supabase
       .from("assignments")
       .update({
-        payment_status: status,
-        paid_at: status === "paid" ? now : null,
+        payment_status: paymentStatus,
+        paid_at: paymentStatus === "paid" ? now : null,
         payroll_updated_at: now,
         payroll_updated_by: userData.user?.id || null,
       })
       .in("id", selected);
     if (updateError) setError(updateError.message);
     else {
-      setNotice(`${selected.length} payroll records marked ${status}.`);
+      setNotice(`${selected.length} payroll records marked ${paymentStatus}.`);
       setSelected([]);
       await load();
     }
@@ -176,78 +283,175 @@ export default function PayrollManager() {
 
   async function exportPayroll() {
     const exportRows = selectedRows.length ? selectedRows : visible;
-    if (!exportRows.length) {
-      setError("There are no payroll records to export.");
-      return;
-    }
+    if (!exportRows.length)
+      return setError("There are no payroll records to export.");
     const XLSX = await import("xlsx");
-    const data: PayrollExportRow[] = exportRows.map((row) => ({
+    const data = exportRows.map((row) => ({
+      "Assignment ID": row.id,
       Date: row.games
         ? new Date(row.games.starts_at).toLocaleDateString("en-US")
         : "",
       "Game Number": row.games?.game_number || "",
-      Game: `${row.games?.home?.name || "TBD"} vs ${row.games?.away?.name || "TBD"}`,
+      Game: gameName(row),
       Location: row.games?.location?.name || "",
-      Official:
-        `${row.officials?.first_name || ""} ${row.officials?.last_name || ""}`.trim(),
+      Official: officialName(row),
       Position: row.sport_positions?.name || "Official",
       "Game Fee": Number(row.game_fee || 0),
+      "Default Mileage": defaultMileage(row) ?? "",
       "Mileage Miles": Number(row.mileage_miles || 0),
       "Mileage Rate": Number(row.mileage_rate || 0),
       "Mileage Reimbursement":
         Number(row.mileage_miles || 0) * Number(row.mileage_rate || 0),
       "Payroll Total": total(row),
       "Payment Status": row.payment_status,
-      "Paid Date": row.paid_at
-        ? new Date(row.paid_at).toLocaleDateString("en-US")
-        : "",
       Notes: row.payroll_notes || "",
     }));
-    data.push({
-      Date: "TOTAL",
-      "Game Number": "",
-      Game: "",
-      Location: "",
-      Official: "",
-      Position: "",
-      "Game Fee": data.reduce((sum, row) => sum + Number(row["Game Fee"]), 0),
-      "Mileage Miles": data.reduce(
-        (sum, row) => sum + Number(row["Mileage Miles"]),
-        0,
-      ),
-      "Mileage Rate": 0,
-      "Mileage Reimbursement": data.reduce(
-        (sum, row) => sum + Number(row["Mileage Reimbursement"]),
-        0,
-      ),
-      "Payroll Total": data.reduce(
-        (sum, row) => sum + Number(row["Payroll Total"]),
-        0,
-      ),
-      "Payment Status": "",
-      "Paid Date": "",
-      Notes: "",
-    });
     const sheet = XLSX.utils.json_to_sheet(data);
     sheet["!cols"] = [
+      { wch: 38 },
       { wch: 12 },
       { wch: 16 },
       { wch: 32 },
       { wch: 24 },
       { wch: 24 },
-      { wch: 20 },
+      { wch: 18 },
       { wch: 12 },
+      { wch: 16 },
       { wch: 14 },
       { wch: 14 },
       { wch: 22 },
       { wch: 16 },
       { wch: 16 },
-      { wch: 12 },
       { wch: 28 },
     ];
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, sheet, "Payroll");
-    XLSX.writeFile(workbook, `refassign-payroll-${month || "all"}.xlsx`);
+    XLSX.writeFile(workbook, `refassign-payroll-${period}.xlsx`);
+  }
+
+  async function selectImport(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setError("");
+    setNotice("");
+    setImportRows([]);
+    try {
+      const XLSX = await import("xlsx");
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      const records = XLSX.utils.sheet_to_json<Record<string, unknown>>(
+        workbook.Sheets[workbook.SheetNames[0]],
+        { defval: "" },
+      );
+      if (!records.length)
+        throw new Error("The payroll spreadsheet has no data rows.");
+      const preview = records.map((raw, index) => {
+        const record = normalizedRecord(raw),
+          assignmentId = String(record.assignment_id || "").trim(),
+          gameNumber = String(record.game_number || "").trim(),
+          official = String(record.official || "").trim(),
+          position = String(record.position || "").trim();
+        const matches = assignmentId
+          ? rows.filter((row) => row.id === assignmentId)
+          : rows.filter(
+              (row) =>
+                row.games?.game_number.toLowerCase() ===
+                  gameNumber.toLowerCase() &&
+                officialName(row).toLowerCase() === official.toLowerCase() &&
+                (row.sport_positions?.name || "Official").toLowerCase() ===
+                  position.toLowerCase(),
+            );
+        if (matches.length !== 1)
+          throw new Error(
+            `Spreadsheet row ${index + 2}: ${matches.length ? "multiple assignments matched" : "no accepted assignment matched"}. Include a valid Assignment ID, or an exact Game Number, Official, and Position.`,
+          );
+        const numberValue = (key: string, fallback: number) => {
+          const rawValue = record[key];
+          if (rawValue === "" || rawValue == null) return fallback;
+          const value = Number(rawValue);
+          if (!Number.isFinite(value) || value < 0)
+            throw new Error(
+              `Spreadsheet row ${index + 2}: ${key.replaceAll("_", " ")} must be zero or greater.`,
+            );
+          return value;
+        };
+        const paymentStatus = String(
+          record.payment_status || matches[0].payment_status,
+        ).toLowerCase();
+        if (!statuses.some(([value]) => value === paymentStatus))
+          throw new Error(
+            `Spreadsheet row ${index + 2}: Payment Status must be Unpaid, Approved, Paid, or Void.`,
+          );
+        return {
+          spreadsheetRow: index + 2,
+          assignmentId: matches[0].id,
+          label: `${matches[0].games?.game_number} — ${officialName(matches[0])} — ${matches[0].sport_positions?.name || "Official"}`,
+          gameFee: numberValue("game_fee", Number(matches[0].game_fee || 0)),
+          mileageMiles: numberValue(
+            "mileage_miles",
+            Number(matches[0].mileage_miles || 0),
+          ),
+          mileageRate: numberValue(
+            "mileage_rate",
+            Number(matches[0].mileage_rate || 0),
+          ),
+          paymentStatus: paymentStatus as PaymentStatus,
+          notes: String(record.notes ?? matches[0].payroll_notes ?? "").trim(),
+        };
+      });
+      const duplicate = preview.find(
+        (row, index) =>
+          preview.findIndex(
+            (other) => other.assignmentId === row.assignmentId,
+          ) !== index,
+      );
+      if (duplicate)
+        throw new Error(
+          `Spreadsheet row ${duplicate.spreadsheetRow}: duplicate assignment in import.`,
+        );
+      setImportRows(preview);
+      setImportFile(file.name);
+      setNotice(
+        `${preview.length} payroll rows validated. Review the preview, then apply the import.`,
+      );
+    } catch (importError) {
+      setImportFile("");
+      setError(
+        importError instanceof Error
+          ? importError.message
+          : "Payroll import failed.",
+      );
+    }
+  }
+
+  async function applyImport() {
+    if (!importRows.length) return;
+    setSaving("import");
+    setError("");
+    const { data, error: importError } = await supabase.rpc(
+      "import_payroll_rows",
+      {
+        p_rows: importRows.map((row) => ({
+          assignment_id: row.assignmentId,
+          spreadsheet_row: row.spreadsheetRow,
+          game_fee: row.gameFee,
+          mileage_miles: row.mileageMiles,
+          mileage_rate: row.mileageRate,
+          payment_status: row.paymentStatus,
+          payroll_notes: row.notes || null,
+        })),
+      },
+    );
+    if (importError) setError(importError.message);
+    else {
+      setNotice(
+        `${Number(data || importRows.length)} payroll records imported from ${importFile}.`,
+      );
+      setImportRows([]);
+      setImportFile("");
+      await load();
+    }
+    setSaving("");
   }
 
   return (
@@ -256,29 +460,49 @@ export default function PayrollManager() {
         <div>
           <h2>Payroll & Game Fees</h2>
           <p>
-            Track position fees, mileage reimbursement, and payment status for
-            every assignment.
+            Accepted officials, game fees, mileage reimbursement, and payment
+            status.
           </p>
         </div>
-        <button
-          className="primary"
-          type="button"
-          onClick={() => void exportPayroll()}
-        >
-          Export {selectedRows.length ? "Selected" : "Payroll"}
-        </button>
+        <div className="headerActions">
+          <input
+            ref={fileInput}
+            hidden
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            onChange={selectImport}
+          />
+          <button
+            className="secondary"
+            onClick={() => fileInput.current?.click()}
+          >
+            Import Payroll
+          </button>
+          <button className="primary" onClick={() => void exportPayroll()}>
+            Export {selectedRows.length ? "Selected" : "Payroll"}
+          </button>
+        </div>
       </div>
       {error && <div className="errorBox">{error}</div>}
       {notice && <div className="loginMessage">{notice}</div>}
+      <div className="payrollSlicers" aria-label="Game date filters">
+        {(["all", "past", "week", "future"] as Period[]).map((value) => (
+          <button
+            key={value}
+            className={period === value ? "active" : ""}
+            onClick={() => setPeriod(value)}
+          >
+            {value === "all"
+              ? "All Games"
+              : value === "past"
+                ? "Past Games"
+                : value === "week"
+                  ? "This Week"
+                  : "Future"}
+          </button>
+        ))}
+      </div>
       <div className="formGrid payrollFilters">
-        <label>
-          Game Month
-          <input
-            type="month"
-            value={month}
-            onChange={(event) => setMonth(event.target.value)}
-          />
-        </label>
         <label>
           Payment Status
           <select
@@ -318,6 +542,62 @@ export default function PayrollManager() {
           <span>Unpaid assignments</span>
         </div>
       </div>
+      {importRows.length > 0 && (
+        <div className="payrollImportPreview">
+          <div className="cardHead">
+            <div>
+              <h3>Import Preview</h3>
+              <p>{importFile} — no changes have been applied.</p>
+            </div>
+            <div className="headerActions">
+              <button
+                className="secondary"
+                onClick={() => {
+                  setImportRows([]);
+                  setImportFile("");
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="primary"
+                disabled={saving === "import"}
+                onClick={() => void applyImport()}
+              >
+                {saving === "import"
+                  ? "Importing…"
+                  : `Apply ${importRows.length} Rows`}
+              </button>
+            </div>
+          </div>
+          <div className="tableWrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Row</th>
+                  <th>Assignment</th>
+                  <th>Fee</th>
+                  <th>Miles</th>
+                  <th>Rate</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {importRows.map((row) => (
+                  <tr key={row.assignmentId}>
+                    <td>{row.spreadsheetRow}</td>
+                    <td>{row.label}</td>
+                    <td>{money(row.gameFee)}</td>
+                    <td>{row.mileageMiles}</td>
+                    <td>{money(row.mileageRate)}</td>
+                    <td>{row.paymentStatus}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
       {selected.length > 0 && (
         <div className="payrollBulk">
           <b>{selected.length} selected</b>
@@ -335,11 +615,7 @@ export default function PayrollManager() {
           >
             Mark Paid
           </button>
-          <button
-            className="secondary"
-            disabled={saving === "bulk"}
-            onClick={() => setSelected([])}
-          >
+          <button className="secondary" onClick={() => setSelected([])}>
             Clear
           </button>
         </div>
@@ -375,144 +651,195 @@ export default function PayrollManager() {
                     }
                   />
                 </th>
-                <th>Game / Official</th>
-                <th>Position</th>
-                <th>Game Fee</th>
-                <th>Miles</th>
-                <th>Rate</th>
+                {(
+                  [
+                    ["date", "Date"],
+                    ["game", "Game"],
+                    ["location", "Location"],
+                    ["official", "Accepted Official"],
+                    ["position", "Position"],
+                    ["fee", "Game Fee"],
+                    ["defaultMileage", "Default Mileage"],
+                    ["miles", "Paid Miles"],
+                    ["rate", "Rate"],
+                  ] as Array<[SortKey, string]>
+                ).map(([key, label]) => (
+                  <th key={key}>
+                    <button onClick={() => changeSort(key)}>
+                      {sortLabel(label, key)}
+                    </button>
+                  </th>
+                ))}
                 <th>Mileage Pay</th>
-                <th>Total</th>
-                <th>Status</th>
+                <th>
+                  <button onClick={() => changeSort("total")}>
+                    {sortLabel("Total", "total")}
+                  </button>
+                </th>
+                <th>
+                  <button onClick={() => changeSort("status")}>
+                    {sortLabel("Status", "status")}
+                  </button>
+                </th>
                 <th>Notes</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
               {visible.length ? (
-                visible.map((row) => (
-                  <tr key={row.id}>
-                    <td>
-                      <input
-                        type="checkbox"
-                        aria-label={`Select payroll record for ${row.officials?.first_name || "official"}`}
-                        checked={selected.includes(row.id)}
-                        onChange={() =>
-                          setSelected((current) =>
-                            current.includes(row.id)
-                              ? current.filter((id) => id !== row.id)
-                              : [...current, row.id],
-                          )
-                        }
-                      />
-                    </td>
-                    <td>
-                      <b>
-                        {row.games?.home?.name || "TBD"} vs{" "}
-                        {row.games?.away?.name || "TBD"}
-                      </b>
-                      <small>
+                visible.map((row) => {
+                  const suggestedMiles = defaultMileage(row);
+                  return (
+                    <tr key={row.id}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          aria-label={`Select payroll record for ${officialName(row)}`}
+                          checked={selected.includes(row.id)}
+                          onChange={() =>
+                            setSelected((current) =>
+                              current.includes(row.id)
+                                ? current.filter((id) => id !== row.id)
+                                : [...current, row.id],
+                            )
+                          }
+                        />
+                      </td>
+                      <td>
                         {row.games
-                          ? new Date(row.games.starts_at).toLocaleString()
-                          : ""}{" "}
-                        • {row.games?.game_number}
-                      </small>
-                      <small>
-                        {row.officials?.first_name} {row.officials?.last_name}
-                      </small>
-                    </td>
-                    <td>{row.sport_positions?.name || "Official"}</td>
-                    <td>
-                      <input
-                        aria-label="Game fee"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={row.game_fee}
-                        onChange={(event) =>
-                          patch(row.id, {
-                            game_fee: Number(event.target.value),
-                          })
-                        }
-                      />
-                    </td>
-                    <td>
-                      <input
-                        aria-label="Mileage miles"
-                        type="number"
-                        min="0"
-                        step="0.1"
-                        value={row.mileage_miles}
-                        onChange={(event) =>
-                          patch(row.id, {
-                            mileage_miles: Number(event.target.value),
-                          })
-                        }
-                      />
-                    </td>
-                    <td>
-                      <input
-                        aria-label="Mileage rate"
-                        type="number"
-                        min="0"
-                        step="0.001"
-                        value={row.mileage_rate}
-                        onChange={(event) =>
-                          patch(row.id, {
-                            mileage_rate: Number(event.target.value),
-                          })
-                        }
-                      />
-                    </td>
-                    <td>
-                      {money(
-                        Number(row.mileage_miles || 0) *
-                          Number(row.mileage_rate || 0),
-                      )}
-                    </td>
-                    <td>
-                      <b>{money(total(row))}</b>
-                    </td>
-                    <td>
-                      <select
-                        aria-label="Payment status"
-                        value={row.payment_status}
-                        onChange={(event) =>
-                          patch(row.id, {
-                            payment_status: event.target
-                              .value as PayrollRow["payment_status"],
-                          })
-                        }
-                      >
-                        {statuses.map(([value, label]) => (
-                          <option key={value} value={value}>
-                            {label}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      <input
-                        aria-label="Payroll notes"
-                        value={row.payroll_notes || ""}
-                        onChange={(event) =>
-                          patch(row.id, { payroll_notes: event.target.value })
-                        }
-                      />
-                    </td>
-                    <td>
-                      <button
-                        className="primary"
-                        disabled={saving === row.id}
-                        onClick={() => void save(row)}
-                      >
-                        {saving === row.id ? "Saving…" : "Save"}
-                      </button>
-                    </td>
-                  </tr>
-                ))
+                          ? new Date(row.games.starts_at).toLocaleDateString(
+                              "en-US",
+                            )
+                          : ""}
+                      </td>
+                      <td>
+                        <b>{gameName(row)}</b>
+                        <small>{row.games?.game_number}</small>
+                      </td>
+                      <td>{row.games?.location?.name || "TBD"}</td>
+                      <td>
+                        <b>{officialName(row)}</b>
+                        <small>
+                          {row.status === "confirmed"
+                            ? "Confirmed"
+                            : "Accepted"}
+                        </small>
+                      </td>
+                      <td>{row.sport_positions?.name || "Official"}</td>
+                      <td>
+                        <input
+                          aria-label="Game fee"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={row.game_fee}
+                          onChange={(event) =>
+                            patch(row.id, {
+                              game_fee: Number(event.target.value),
+                            })
+                          }
+                        />
+                      </td>
+                      <td>
+                        {suggestedMiles == null ? (
+                          <span title="Add coordinates to the official home and venue">
+                            Unavailable
+                          </span>
+                        ) : (
+                          <>
+                            <b>{suggestedMiles} mi</b>
+                            <button
+                              className="linkButton"
+                              onClick={() =>
+                                patch(row.id, { mileage_miles: suggestedMiles })
+                              }
+                            >
+                              Use Default
+                            </button>
+                          </>
+                        )}
+                      </td>
+                      <td>
+                        <input
+                          aria-label="Mileage miles"
+                          type="number"
+                          min="0"
+                          step="0.1"
+                          value={row.mileage_miles}
+                          onChange={(event) =>
+                            patch(row.id, {
+                              mileage_miles: Number(event.target.value),
+                            })
+                          }
+                        />
+                      </td>
+                      <td>
+                        <input
+                          aria-label="Mileage rate"
+                          type="number"
+                          min="0"
+                          step="0.001"
+                          value={row.mileage_rate}
+                          onChange={(event) =>
+                            patch(row.id, {
+                              mileage_rate: Number(event.target.value),
+                            })
+                          }
+                        />
+                      </td>
+                      <td>
+                        {money(
+                          Number(row.mileage_miles || 0) *
+                            Number(row.mileage_rate || 0),
+                        )}
+                      </td>
+                      <td>
+                        <b>{money(total(row))}</b>
+                      </td>
+                      <td>
+                        <select
+                          aria-label="Payment status"
+                          value={row.payment_status}
+                          onChange={(event) =>
+                            patch(row.id, {
+                              payment_status: event.target
+                                .value as PaymentStatus,
+                            })
+                          }
+                        >
+                          {statuses.map(([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <input
+                          aria-label="Payroll notes"
+                          value={row.payroll_notes || ""}
+                          onChange={(event) =>
+                            patch(row.id, { payroll_notes: event.target.value })
+                          }
+                        />
+                      </td>
+                      <td>
+                        <button
+                          className="primary"
+                          disabled={saving === row.id}
+                          onClick={() => void save(row)}
+                        >
+                          {saving === row.id ? "Saving…" : "Save"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
               ) : (
                 <tr>
-                  <td colSpan={11}>No payroll records match these filters.</td>
+                  <td colSpan={15}>
+                    No accepted payroll records match these filters.
+                  </td>
                 </tr>
               )}
             </tbody>

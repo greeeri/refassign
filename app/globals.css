@@ -931,6 +931,58 @@ td small {
   color: #64748b;
 }
 
+.payrollSlicers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 16px 0 4px;
+}
+
+.payrollSlicers button {
+  padding: 10px 16px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #fff;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.payrollSlicers button.active {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
+}
+
+.payrollTable th > button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.payrollTable .linkButton {
+  display: block;
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.payrollImportPreview {
+  margin: 16px 0;
+  padding: 16px;
+  border: 2px solid #60a5fa;
+  border-radius: 12px;
+  background: #eff6ff;
+}
+
 @media (max-width: 900px) {
   .payrollMetrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
