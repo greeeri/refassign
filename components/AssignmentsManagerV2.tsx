@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../lib/supabase/client";
+import { announceUndoAvailable } from "./UndoCenter";
 type Team = { id: string; name: string };
 type Game = {
   id: string;
@@ -1094,6 +1095,9 @@ export default function AssignmentsManagerV2() {
       setNotice(
         `${official?.first_name} ${official?.last_name} assigned to ${linkedCount} ${linkedCount === 1 ? "game" : "linked games"}${reasons.length ? " with an eligibility override" : ""}.`,
       );
+      announceUndoAvailable();
+    } else {
+      announceUndoAvailable();
     }
     await load();
     setSaving("");
@@ -1134,6 +1138,7 @@ export default function AssignmentsManagerV2() {
       .delete()
       .eq("id", assignmentId);
     if (deleteError) setError(deleteError.message);
+    else announceUndoAvailable();
     await load();
     setSaving("");
   }
@@ -1320,13 +1325,13 @@ export default function AssignmentsManagerV2() {
     const labels = {publish:"publish assignments for",confirm:"confirm officials on",unassign:"unassign every official from",status:`change the status to ${gameStatusOptions.find(([value])=>value===bulkStatus)?.[1]||bulkStatus} for`};
     if (!window.confirm(`${labels[action]} ${selectedIds.length} selected game${selectedIds.length===1?"":"s"}?`)) return;
     setBulkWorking(true); setError(""); setNotice("");
-    let succeeded=0; const failures:string[]=[];
+    let succeeded=0; const failures:string[]=[]; const undoOperationIds:string[]=[];
     try {
       if(action==="unassign"){
         const {error:deleteError}=await supabase.from("assignments").delete().in("game_id",selectedIds);
-        if(deleteError) failures.push(deleteError.message); else succeeded=selectedAssignments.length;
+        if(deleteError) failures.push(deleteError.message); else {succeeded=selectedAssignments.length;const {data:undoRows}=await supabase.rpc("latest_undo_operation");const undoId=(undoRows as {id:string}[]|null)?.[0]?.id;if(undoId)undoOperationIds.push(undoId)}
       } else if(action==="status"){
-        for(const gameId of selectedIds){const response=await fetch("/api/games/status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({gameId,status:bulkStatus})});const body=await response.json().catch(()=>({})) as {error?:string};if(response.ok)succeeded++;else failures.push(body.error||`Could not update game ${gameId}`)}
+        for(const gameId of selectedIds){const response=await fetch("/api/games/status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({gameId,status:bulkStatus})});const body=await response.json().catch(()=>({})) as {error?:string};if(response.ok){succeeded++;const {data:undoRows}=await supabase.rpc("latest_undo_operation");const undoId=(undoRows as {id:string}[]|null)?.[0]?.id;if(undoId&&!undoOperationIds.includes(undoId))undoOperationIds.push(undoId)}else failures.push(body.error||`Could not update game ${gameId}`)}
       } else if(action==="publish"){
         for(const gameId of selectedIds){const response=await fetch("/api/assignments/publish",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({gameId})});const body=await response.json().catch(()=>({})) as {error?:string;failed?:number;failures?:string[]};if(response.ok){succeeded++;if(body.failed)failures.push(...(body.failures||[]))}else failures.push(body.error||`Could not publish game ${gameId}`)}
       } else if(action==="confirm"){
@@ -1335,6 +1340,13 @@ export default function AssignmentsManagerV2() {
       }
       if(failures.length)setError(`Bulk action completed with ${failures.length} issue${failures.length===1?"":"s"}: ${failures.slice(0,4).join(" | ")}${failures.length>4?" | …":""}`);
       setNotice(`Bulk action complete: ${succeeded} ${action==="status"?"game":action==="confirm"||action==="unassign"?"assignment":"game"}${succeeded===1?"":"s"} processed.`);
+      if (succeeded && (action === "status" || action === "unassign")) {
+        await supabase.rpc("group_undo_operations", {
+          p_operation_ids: undoOperationIds,
+          p_description: action === "status" ? "Bulk game-status change" : "Bulk unassignment",
+        });
+        announceUndoAvailable();
+      }
       setLinkSelected([]); await load();
     } catch(e){setError(e instanceof Error?e.message:"Unable to complete the bulk action.");}
     finally{setBulkWorking(false)}

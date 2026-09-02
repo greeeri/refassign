@@ -17,6 +17,7 @@ import PowerRankingsManager from "../components/PowerRankingsManager";
 import SelfAssignBoard from "../components/SelfAssignBoard";
 import AuditHistoryManager from "../components/AuditHistoryManager";
 import CommunicationCenter from "../components/CommunicationCenter";
+import UndoCenter from "../components/UndoCenter";
 const adminNav = [
   "Dashboard",
   "Games",
@@ -291,6 +292,7 @@ export default function Home() {
           </section>
         )}
         {viewRole === "contact" && section === "Games" && <DashboardGames />}
+        {manager && <UndoCenter />}
       </main>
     </div>
   );

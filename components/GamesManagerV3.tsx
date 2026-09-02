@@ -1,6 +1,7 @@
 "use client";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import { createClient } from "../lib/supabase/client";
+import { announceUndoAvailable } from "./UndoCenter";
 type Named = { id: string; name: string };
 type Sport = Named & { default_officials: number };
 type Team = Named & { level_id: string | null; sport_id: string | null };
@@ -287,6 +288,7 @@ export default function GamesManagerV3() {
         current.map((game) => (game.id === id ? { ...game, status } : game)),
       );
       setMessage("Game status updated.");
+      announceUndoAvailable();
     }
     setStatusBusy("");
   }
@@ -656,6 +658,7 @@ export default function GamesManagerV3() {
       setMessage(
         `Import complete: ${result.updated || 0} updated, ${result.added || 0} added, ${result.skipped || 0} unchanged and skipped.`,
       );
+      announceUndoAvailable();
       setRows([]);
       setImportApproved(false);
       setImportValidated(false);
