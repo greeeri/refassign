@@ -625,6 +625,23 @@ export default function PayrollManager() {
       ) : (
         <div className="tableWrap">
           <table className="payrollTable">
+            <colgroup>
+              <col className="payrollSelectCol" />
+              <col className="payrollDateCol" />
+              <col className="payrollGameCol" />
+              <col className="payrollLocationCol" />
+              <col className="payrollOfficialCol" />
+              <col className="payrollPositionCol" />
+              <col className="payrollFeeCol" />
+              <col className="payrollDefaultMilesCol" />
+              <col className="payrollMilesCol" />
+              <col className="payrollRateCol" />
+              <col className="payrollMileagePayCol" />
+              <col className="payrollTotalCol" />
+              <col className="payrollStatusCol" />
+              <col className="payrollNotesCol" />
+              <col className="payrollActionCol" />
+            </colgroup>
             <thead>
               <tr>
                 <th>

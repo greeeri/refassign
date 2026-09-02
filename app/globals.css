@@ -906,29 +906,100 @@ td small {
 
 .payrollTable input,
 .payrollTable select {
-  min-width: 82px;
-  padding: 7px 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 4px;
   border: 1px solid #cbd5e1;
-  border-radius: 8px;
+  border-radius: 6px;
   background: #fff;
+  font-size: 11px;
 }
 
 .payrollTable input[type="checkbox"] {
   min-width: 0;
 }
 
-.payrollTable td:nth-child(2) {
-  min-width: 250px;
-}
-
-.payrollTable td:nth-child(10) input {
-  min-width: 180px;
-}
-
 .payrollTable td small {
   display: block;
   margin-top: 3px;
   color: #64748b;
+}
+
+.payrollTable {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.payrollTable th,
+.payrollTable td {
+  overflow-wrap: anywhere;
+  padding: 7px 3px;
+  font-size: 10.5px;
+  line-height: 1.25;
+  vertical-align: top;
+}
+
+.payrollTable th {
+  font-size: 9px;
+  letter-spacing: 0;
+}
+
+.payrollTable th:first-child,
+.payrollTable td:first-child {
+  text-align: center;
+}
+
+.payrollTable .primary {
+  width: 100%;
+  padding: 6px 2px;
+  font-size: 10px;
+}
+
+.payrollSelectCol {
+  width: 2.5%;
+}
+.payrollDateCol {
+  width: 5.5%;
+}
+.payrollGameCol {
+  width: 11%;
+}
+.payrollLocationCol {
+  width: 7.5%;
+}
+.payrollOfficialCol {
+  width: 9%;
+}
+.payrollPositionCol {
+  width: 6%;
+}
+.payrollFeeCol {
+  width: 6%;
+}
+.payrollDefaultMilesCol {
+  width: 7%;
+}
+.payrollMilesCol {
+  width: 5.5%;
+}
+.payrollRateCol {
+  width: 5.5%;
+}
+.payrollMileagePayCol {
+  width: 7%;
+}
+.payrollTotalCol {
+  width: 6.5%;
+}
+.payrollStatusCol {
+  width: 7%;
+}
+.payrollNotesCol {
+  width: 8%;
+}
+.payrollActionCol {
+  width: 5%;
 }
 
 .payrollSlicers {
