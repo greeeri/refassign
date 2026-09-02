@@ -658,14 +658,57 @@ export default function AssignmentsManagerV2() {
     );
   }
   async function openSelfAssignPositions() {
-    if (!canManage || !selfAssignSelected.length) return;
-    setSelfAssignSaving(true);
-    setError("");
-    setNotice("");
-    const slots = selfAssignSelected.map((key) => {
+    if (!canManage) {
+      setError("Only Administrators and Assignors can open Self Assign positions.");
+      return;
+    }
+    const usedGameSelection = selfAssignSelected.length === 0;
+    let slots = selfAssignSelected.map((key) => {
       const [game_id, position_id] = key.split(":");
       return { game_id, position_id };
     });
+    if (!slots.length) {
+      const selectedGameIds = linkSelected.length
+        ? linkSelected
+        : game
+          ? [game.id]
+          : [];
+      slots = selectedGameIds.flatMap((gameId) => {
+        const selectedGame = games.find((item) => item.id === gameId);
+        if (!selectedGame) return [];
+        return positions
+          .filter((position) => position.sport_id === selectedGame.sport_id)
+          .sort((a, b) => a.sort_order - b.sort_order)
+          .slice(0, Math.max(0, selectedGame.officials_needed))
+          .filter(
+            (position) =>
+              !assignments.some(
+                (assignment) =>
+                  assignment.game_id === gameId &&
+                  assignment.position_id === position.id &&
+                  assignment.status !== "declined",
+              ) && !isSelfAssignOpen(gameId, position.id),
+          )
+          .map((position) => ({ game_id: gameId, position_id: position.id }));
+      });
+    }
+    slots = slots.filter(
+      (slot, index, all) =>
+        all.findIndex(
+          (item) =>
+            item.game_id === slot.game_id && item.position_id === slot.position_id,
+        ) === index,
+    );
+    if (!slots.length) {
+      setError(
+        "The selected game has no unassigned positions available for Self Assign.",
+      );
+      setNotice("");
+      return;
+    }
+    setSelfAssignSaving(true);
+    setError("");
+    setNotice("");
     const { data, error: saveError } = await supabase.rpc(
       "set_self_assign_positions",
       { p_slots: slots },
@@ -677,6 +720,7 @@ export default function AssignmentsManagerV2() {
         `${count} ${count === 1 ? "position is" : "positions are"} now available for Self Assign.`,
       );
       setSelfAssignSelected([]);
+      if (usedGameSelection) setLinkSelected([]);
     }
     await load();
     setSelfAssignSaving(false);
@@ -1726,12 +1770,15 @@ export default function AssignmentsManagerV2() {
                 <button
                   type="button"
                   className="success"
-                  disabled={!selfAssignSelected.length || selfAssignSaving}
+                  disabled={
+                    selfAssignSaving ||
+                    (!selfAssignSelected.length && !linkSelected.length && !game)
+                  }
                   onClick={() => void openSelfAssignPositions()}
                 >
                   {selfAssignSaving
                     ? "Opening…"
-                    : `Self Assign${selfAssignSelected.length ? ` (${selfAssignSelected.length})` : ""}`}
+                    : `Self Assign${selfAssignSelected.length ? ` (${selfAssignSelected.length})` : linkSelected.length ? ` (${linkSelected.length} games)` : game ? " (selected game)" : ""}`}
                 </button>
               </>
             )}
