@@ -1,0 +1,13 @@
+"use client";
+import { useEffect, useMemo, useState } from "react";
+import { createClient } from "../lib/supabase/client";
+
+export default function CalendarSync(){
+  const supabase=useMemo(()=>createClient(),[]),[token,setToken]=useState(""),[error,setError]=useState(""),[copied,setCopied]=useState(false),[resetting,setResetting]=useState(false);
+  useEffect(()=>{async function load(){const {data,error:tokenError}=await supabase.rpc("get_or_create_calendar_token");if(tokenError)setError(tokenError.message);else setToken(String(data||""))}void load()},[supabase]);
+  const feedUrl=token&&typeof window!=="undefined"?`${window.location.origin}/api/calendar/${token}`:"",webcalUrl=feedUrl.replace(/^https:/,"webcal:");
+  async function copy(){if(!feedUrl)return;await navigator.clipboard.writeText(feedUrl);setCopied(true);window.setTimeout(()=>setCopied(false),2000)}
+  async function reset(){if(!window.confirm("Reset your private calendar link? Existing calendar subscriptions will stop updating until you add the new link."))return;setResetting(true);setError("");const {data,error:resetError}=await supabase.rpc("rotate_calendar_token");if(resetError)setError(resetError.message);else setToken(String(data||""));setResetting(false)}
+  const google=`https://calendar.google.com/calendar/r?cid=${encodeURIComponent(webcalUrl)}`,outlook=`https://outlook.office.com/calendar/0/addcalendar?url=${encodeURIComponent(feedUrl)}&name=${encodeURIComponent("RefAssign Schedule")}`;
+  return <section className="card calendarSyncCard"><div className="cardHead"><div><h2>Calendar Sync</h2><p>Subscribe once. Schedule changes and cancellations update automatically.</p></div></div>{error&&<div className="errorBox">{error}</div>}<div className="calendarProviderGrid"><a className={!feedUrl?"disabledCalendarLink":""} href={feedUrl?webcalUrl:undefined}> Apple Calendar</a><a className={!feedUrl?"disabledCalendarLink":""} href={feedUrl?google:undefined} target="_blank" rel="noreferrer">Google Calendar</a><a className={!feedUrl?"disabledCalendarLink":""} href={feedUrl?outlook:undefined} target="_blank" rel="noreferrer">Outlook</a></div><div className="calendarLinkActions"><button className="secondary" type="button" disabled={!feedUrl} onClick={()=>void copy()}>{copied?"Link Copied":"Copy Subscription Link"}</button><button className="tableButton" type="button" disabled={resetting} onClick={()=>void reset()}>{resetting?"Resetting…":"Reset Private Link"}</button></div><small className="calendarSyncNote">Calendar providers choose their own refresh timing. Updates normally appear automatically within several minutes to a few hours.</small></section>
+}

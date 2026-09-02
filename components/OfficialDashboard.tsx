@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "../lib/supabase/client";
 import { crewPositionLabel, orderedCrew } from "../lib/crewDisplay";
 import CrewChatButton from "./CrewChatButton";
+import CalendarSync from "./CalendarSync";
 type Assignment={assignment_id:string;game_id:string;game_number:string|null;game_status:string|null;position_name:string|null;starts_at:string;home_team:string|null;away_team:string|null;location_name:string|null;location_address:string|null;location_city:string|null;location_state:string|null;league_name:string|null;level_name:string|null;notes:string|null;status:string;published_at:string;accept_by:string|null;responded_at:string|null;decline_reason:string|null;response_token:string};
 type Crew={assignment_id:string;position:string|null;name:string;phone?:string|null;email?:string|null};
 const declineReasons=["Schedule Conflict","Travel / Distance","Team Conflict","Injury / Illness","Already Assigned","Other"],changedStatuses=["canceled","suspended","rained_out"];
@@ -26,5 +27,5 @@ export default function OfficialDashboard({onNavigate}:{onNavigate:(section:stri
  <div className="mobileToolGrid"><a href={mapsUrl(next)} target="_blank" rel="noreferrer">↗ Directions</a><button type="button" onClick={downloadCalendar}>＋ Calendar</button><CrewChatButton gameId={next.game_id} title={`${next.home_team||"TBD"} vs ${next.away_team||"TBD"}`}/></div>
  <div className="mobileInfoSection"><h3>Crew Contacts</h3>{crew.length?<div className="crewContactList">{crew.map(member=><div key={member.assignment_id}><div><b>{crewPositionLabel(member.position)}</b><span>{member.name}</span></div><div>{member.phone&&<a aria-label={`Call ${member.name}`} href={`tel:${member.phone}`}>Call</a>}{member.email&&<a aria-label={`Email ${member.name}`} href={`mailto:${member.email}`}>Email</a>}</div></div>)}</div>:<p>Crew contacts are not available yet.</p>}</div>
  <div className="mobileInfoSection"><h3>Uniform & Game Notes</h3><p><b>Uniform:</b> Approved referee uniform; bring alternate jersey colors and required equipment.</p><p><b>Game notes:</b> {next.notes||"No additional game notes."}</p></div></section>}
- <button className="secondary mobileFullSchedule" type="button" onClick={()=>onNavigate("My Schedule")}>View Full Schedule</button></div>
+ <button className="secondary mobileFullSchedule" type="button" onClick={()=>onNavigate("My Schedule")}>View Full Schedule</button><CalendarSync/></div>
 }
