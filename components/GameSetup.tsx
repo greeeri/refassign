@@ -5,7 +5,14 @@ import TeamsRosterManager from "./TeamsRosterManager";
 import LocationsRosterManager from "./LocationsRosterManager";
 type Sport = { id: string; name: string };
 type Level = { id: string; name: string; officials_needed: number };
-type League = { id: string; name: string };
+type MileagePlan = "one_way" | "round_trip" | "actual" | "none";
+type League = { id: string; name: string; mileage_plan: MileagePlan };
+const mileagePlans: ReadonlyArray<[MileagePlan, string]> = [
+  ["one_way", "One-way mileage"],
+  ["round_trip", "Round-trip mileage"],
+  ["actual", "Actual driving distance"],
+  ["none", "No mileage paid"],
+];
 type Team = {
   id: string;
   name: string;
@@ -41,6 +48,8 @@ export default function GameSetup({ view }: { view: View }) {
   const [levelName, setLevelName] = useState(""),
     [levelOfficials, setLevelOfficials] = useState("3"),
     [leagueName, setLeagueName] = useState(""),
+    [leagueMileagePlan, setLeagueMileagePlan] =
+      useState<MileagePlan>("round_trip"),
     [team, setTeam] = useState({ name: "", sport_id: "", level_id: "" }),
     [location, setLocation] = useState({
       name: "",
@@ -86,7 +95,7 @@ export default function GameSetup({ view }: { view: View }) {
         .order("name"),
       supabase
         .from("leagues")
-        .select("id,name")
+        .select("id,name,mileage_plan")
         .eq("active", true)
         .order("name"),
       supabase
@@ -155,12 +164,27 @@ export default function GameSetup({ view }: { view: View }) {
     e.preventDefault();
     const r = await supabase
       .from("leagues")
-      .insert({ name: leagueName.trim() });
+      .insert({ name: leagueName.trim(), mileage_plan: leagueMileagePlan });
     if (r.error) setError(r.error.message);
     else {
       setLeagueName("");
+      setLeagueMileagePlan("round_trip");
       load();
     }
+  }
+  async function updateLeagueMileagePlan(id: string, mileagePlan: MileagePlan) {
+    setError("");
+    const { error: updateError } = await supabase
+      .from("leagues")
+      .update({ mileage_plan: mileagePlan })
+      .eq("id", id);
+    if (updateError) setError(updateError.message);
+    else
+      setLeagues((current) =>
+        current.map((league) =>
+          league.id === id ? { ...league, mileage_plan: mileagePlan } : league,
+        ),
+      );
   }
   async function saveTeam(e: FormEvent) {
     e.preventDefault();
@@ -299,15 +323,53 @@ export default function GameSetup({ view }: { view: View }) {
               value={leagueName}
               onChange={(e) => setLeagueName(e.target.value)}
             />
+            <select
+              aria-label="Mileage plan for new league"
+              value={leagueMileagePlan}
+              onChange={(e) =>
+                setLeagueMileagePlan(e.target.value as MileagePlan)
+              }
+            >
+              {mileagePlans.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
             <button className="primary">Add League</button>
           </form>
           <div className="tableWrap">
             <table>
+              <thead>
+                <tr>
+                  <th>League</th>
+                  <th>Mileage Plan</th>
+                  <th></th>
+                </tr>
+              </thead>
               <tbody>
                 {leagues.map((l) => (
                   <tr key={l.id}>
                     <td>
                       <b>{l.name}</b>
+                    </td>
+                    <td>
+                      <select
+                        aria-label={`Mileage plan for ${l.name}`}
+                        value={l.mileage_plan}
+                        onChange={(e) =>
+                          void updateLeagueMileagePlan(
+                            l.id,
+                            e.target.value as MileagePlan,
+                          )
+                        }
+                      >
+                        {mileagePlans.map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
                     </td>
                     <td>
                       <button
@@ -716,7 +778,15 @@ export default function GameSetup({ view }: { view: View }) {
                       {[v.address, v.city, v.state].filter(Boolean).join(", ")}
                     </td>
                     <td>
-                      {[v.directions && "Directions", v.parking_instructions && "Parking", v.entrance_information && "Entrance", (v.contact_name || v.contact_phone || v.contact_email) && "Contact"]
+                      {[
+                        v.directions && "Directions",
+                        v.parking_instructions && "Parking",
+                        v.entrance_information && "Entrance",
+                        (v.contact_name ||
+                          v.contact_phone ||
+                          v.contact_email) &&
+                          "Contact",
+                      ]
                         .filter(Boolean)
                         .join(" • ") || "Not added"}
                     </td>

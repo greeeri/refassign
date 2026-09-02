@@ -4,6 +4,7 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../lib/supabase/client";
 
 type PaymentStatus = "unpaid" | "approved" | "paid" | "void";
+type MileagePlan = "one_way" | "round_trip" | "actual" | "none";
 type Period = "all" | "past" | "week" | "future";
 type SortKey =
   | "date"
@@ -27,6 +28,7 @@ type PayrollRow = {
   paid_at: string | null;
   payroll_notes: string | null;
   officials: {
+    id: string;
     first_name: string;
     last_name: string;
     home_latitude: number | null;
@@ -36,6 +38,7 @@ type PayrollRow = {
   games: {
     game_number: string;
     starts_at: string;
+    leagues: { mileage_plan: MileagePlan } | null;
     home: { name: string } | null;
     away: { name: string } | null;
     location: {
@@ -44,6 +47,14 @@ type PayrollRow = {
       longitude: number | null;
     } | null;
   } | null;
+};
+type WeekdayOrigin = {
+  official_id: string;
+  weekday: number;
+  use_home: boolean;
+  alternate_label: string | null;
+  alternate_latitude: number | null;
+  alternate_longitude: number | null;
 };
 type ImportRow = {
   spreadsheetRow: number;
@@ -62,6 +73,12 @@ const statuses: ReadonlyArray<[PaymentStatus, string]> = [
   ["paid", "Paid"],
   ["void", "Void"],
 ];
+const mileagePlanLabels: Record<MileagePlan, string> = {
+  one_way: "One-way mileage",
+  round_trip: "Round-trip mileage",
+  actual: "Actual driving distance",
+  none: "No mileage paid",
+};
 const money = (value: number) =>
   value.toLocaleString("en-US", { style: "currency", currency: "USD" });
 const officialName = (row: PayrollRow) =>
@@ -112,6 +129,7 @@ export default function PayrollManager() {
   const supabase = useMemo(() => createClient(), []);
   const fileInput = useRef<HTMLInputElement>(null);
   const [rows, setRows] = useState<PayrollRow[]>([]);
+  const [weekdayOrigins, setWeekdayOrigins] = useState<WeekdayOrigin[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [period, setPeriod] = useState<Period>("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -128,34 +146,75 @@ export default function PayrollManager() {
   async function load() {
     setLoading(true);
     setError("");
-    const { data, error: loadError } = await supabase
-      .from("assignments")
-      .select(
-        "id,status,game_fee,mileage_miles,mileage_rate,payment_status,paid_at,payroll_notes,officials(first_name,last_name,home_latitude,home_longitude),sport_positions(name),games(game_number,starts_at,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name,latitude,longitude))",
-      )
-      .not("official_id", "is", null)
-      .in("status", ["accepted", "confirmed"])
-      .order("assigned_at", { ascending: false });
+    const [assignmentResult, originResult] = await Promise.all([
+      supabase
+        .from("assignments")
+        .select(
+          "id,status,game_fee,mileage_miles,mileage_rate,payment_status,paid_at,payroll_notes,officials(id,first_name,last_name,home_latitude,home_longitude),sport_positions(name),games(game_number,starts_at,leagues(mileage_plan),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name,latitude,longitude))",
+        )
+        .not("official_id", "is", null)
+        .in("status", ["accepted", "confirmed"])
+        .order("assigned_at", { ascending: false }),
+      supabase
+        .from("official_weekday_origins")
+        .select(
+          "official_id,weekday,use_home,alternate_label,alternate_latitude,alternate_longitude",
+        ),
+    ]);
+    const loadError = assignmentResult.error || originResult.error;
     if (loadError) setError(loadError.message);
-    else setRows((data || []) as unknown as PayrollRow[]);
+    else {
+      setRows((assignmentResult.data || []) as unknown as PayrollRow[]);
+      setWeekdayOrigins((originResult.data || []) as WeekdayOrigin[]);
+    }
     setLoading(false);
   }
   useEffect(() => {
     void load();
   }, []);
 
-  const defaultMileage = (row: PayrollRow) =>
-    milesBetween(
-      row.officials?.home_latitude ?? null,
-      row.officials?.home_longitude ?? null,
+  const mileagePlan = (row: PayrollRow): MileagePlan =>
+    row.games?.leagues?.mileage_plan || "round_trip";
+  const originFor = (row: PayrollRow) => {
+    const weekday = new Date(row.games?.starts_at || 0).getDay();
+    return weekdayOrigins.find(
+      (origin) =>
+        origin.official_id === row.officials?.id && origin.weekday === weekday,
+    );
+  };
+  const originLabel = (row: PayrollRow) => {
+    const origin = originFor(row);
+    return origin && !origin.use_home
+      ? origin.alternate_label || "Different location"
+      : "Home address";
+  };
+  const defaultMileage = (row: PayrollRow) => {
+    const plan = mileagePlan(row);
+    if (plan === "none") return 0;
+    if (plan === "actual") return null;
+    const origin = originFor(row);
+    const useAlternate = origin && !origin.use_home;
+    const oneWay = milesBetween(
+      useAlternate
+        ? origin.alternate_latitude
+        : (row.officials?.home_latitude ?? null),
+      useAlternate
+        ? origin.alternate_longitude
+        : (row.officials?.home_longitude ?? null),
       row.games?.location?.latitude ?? null,
       row.games?.location?.longitude ?? null,
     );
+    if (oneWay == null) return null;
+    return plan === "round_trip" ? Math.round(oneWay * 2 * 10) / 10 : oneWay;
+  };
+  const mileagePay = (row: PayrollRow) =>
+    mileagePlan(row) === "none"
+      ? 0
+      : Number(row.mileage_miles || 0) * Number(row.mileage_rate || 0);
   const total = (row: PayrollRow) =>
     row.payment_status === "void"
       ? 0
-      : Number(row.game_fee || 0) +
-        Number(row.mileage_miles || 0) * Number(row.mileage_rate || 0);
+      : Number(row.game_fee || 0) + mileagePay(row);
   const patch = (id: string, values: Partial<PayrollRow>) =>
     setRows((current) =>
       current.map((row) => (row.id === id ? { ...row, ...values } : row)),
@@ -219,10 +278,7 @@ export default function PayrollManager() {
         sum.fees +
         (row.payment_status === "void" ? 0 : Number(row.game_fee || 0)),
       mileage:
-        sum.mileage +
-        (row.payment_status === "void"
-          ? 0
-          : Number(row.mileage_miles || 0) * Number(row.mileage_rate || 0)),
+        sum.mileage + (row.payment_status === "void" ? 0 : mileagePay(row)),
       total: sum.total + total(row),
     }),
     { fees: 0, mileage: 0, total: 0 },
@@ -297,11 +353,12 @@ export default function PayrollManager() {
       Official: officialName(row),
       Position: row.sport_positions?.name || "Official",
       "Game Fee": Number(row.game_fee || 0),
+      "Mileage Plan": mileagePlanLabels[mileagePlan(row)],
+      "Mileage Origin": originLabel(row),
       "Default Mileage": defaultMileage(row) ?? "",
       "Mileage Miles": Number(row.mileage_miles || 0),
       "Mileage Rate": Number(row.mileage_rate || 0),
-      "Mileage Reimbursement":
-        Number(row.mileage_miles || 0) * Number(row.mileage_rate || 0),
+      "Mileage Reimbursement": mileagePay(row),
       "Payroll Total": total(row),
       "Payment Status": row.payment_status,
       Notes: row.payroll_notes || "",
@@ -758,13 +815,27 @@ export default function PayrollManager() {
                         />
                       </td>
                       <td>
-                        {suggestedMiles == null ? (
+                        {mileagePlan(row) === "none" ? (
+                          <span title="This league does not pay mileage">
+                            No mileage paid
+                          </span>
+                        ) : mileagePlan(row) === "actual" ? (
+                          <span title="Enter the official's actual driving distance in Paid Miles">
+                            Actual miles • {originLabel(row)}
+                          </span>
+                        ) : suggestedMiles == null ? (
                           <span title="Add coordinates to the official home and venue">
                             Unavailable
                           </span>
                         ) : (
                           <>
                             <b>{suggestedMiles} mi</b>
+                            <small>
+                              {originLabel(row)} •{" "}
+                              {mileagePlan(row) === "round_trip"
+                                ? "Round trip"
+                                : "One way"}
+                            </small>
                             <button
                               className="linkButton"
                               onClick={() =>
@@ -782,7 +853,10 @@ export default function PayrollManager() {
                           type="number"
                           min="0"
                           step="0.1"
-                          value={row.mileage_miles}
+                          disabled={mileagePlan(row) === "none"}
+                          value={
+                            mileagePlan(row) === "none" ? 0 : row.mileage_miles
+                          }
                           onChange={(event) =>
                             patch(row.id, {
                               mileage_miles: Number(event.target.value),
@@ -796,6 +870,7 @@ export default function PayrollManager() {
                           type="number"
                           min="0"
                           step="0.001"
+                          disabled={mileagePlan(row) === "none"}
                           value={row.mileage_rate}
                           onChange={(event) =>
                             patch(row.id, {
@@ -804,12 +879,7 @@ export default function PayrollManager() {
                           }
                         />
                       </td>
-                      <td>
-                        {money(
-                          Number(row.mileage_miles || 0) *
-                            Number(row.mileage_rate || 0),
-                        )}
-                      </td>
+                      <td>{money(mileagePay(row))}</td>
                       <td>
                         <b>{money(total(row))}</b>
                       </td>
