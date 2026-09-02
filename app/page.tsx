@@ -17,6 +17,7 @@ import SelfAssignBoard from "../components/SelfAssignBoard";
 import AuditHistoryManager from "../components/AuditHistoryManager";
 import UndoCenter from "../components/UndoCenter";
 import PayrollManager from "../components/PayrollManager";
+import SportsRulesManager from "../components/SportsRulesManager";
 const adminNav = [
   "Dashboard",
   "Games",
@@ -285,21 +286,7 @@ export default function Home() {
           <BlockRemovalRequests />
         )}
         {manager && section === "Contacts" && <ContactsManager />}
-        {manager && section === "Sports & Rules" && (
-          <section className="card">
-            <h2>Sport Assignment Rules</h2>
-            <div className="rule">
-              <div>
-                <b>Soccer</b>
-                <small>
-                  Center Referee • AR1 • AR2 • optional 4th Official • optional
-                  Mentor
-                </small>
-              </div>
-              <span className="badge blue">3 required</span>
-            </div>
-          </section>
-        )}
+        {manager && section === "Sports & Rules" && <SportsRulesManager />}
         {viewRole === "official" && section === "Official Dashboard" && (
           <OfficialDashboard onNavigate={setSection} />
         )}{" "}

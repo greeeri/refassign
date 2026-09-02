@@ -802,6 +802,67 @@ td small {
     grid-template-columns: 1fr;
   }
 }
+
+.sportsRuleAdd,
+.sportRuleHeader {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.sportsRuleAdd {
+  margin-top: 16px;
+}
+
+.sportsRuleAdd label,
+.sportRuleHeader label:not(.checkLabel) {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.sportsRuleAdd input,
+.sportRuleHeader input,
+.sportPositionsTable input:not([type="checkbox"]) {
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.sportRuleHeader label:first-child input {
+  min-width: 220px;
+}
+
+.sportRuleHeader input[type="number"] {
+  width: 95px;
+}
+
+.sportRuleCard h3 {
+  margin: 20px 0 8px;
+}
+
+.sportPositionsTable input[type="number"] {
+  width: 72px;
+}
+
+.sportPositionsTable td:nth-child(2) input {
+  min-width: 220px;
+}
+
+.checkLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 700;
+}
+
+.checkLabel input {
+  margin: 0;
+}
 @media (max-width: 600px) {
   .assignmentDetailGrid,
   .responseActions {
