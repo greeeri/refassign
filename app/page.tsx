@@ -20,6 +20,8 @@ import PayrollManager from "../components/PayrollManager";
 import SportsRulesManager from "../components/SportsRulesManager";
 import RegistrarManager from "../components/RegistrarManager";
 import SuperAdminManager from "../components/SuperAdminManager";
+import IowaSoccerDevelopment from "../components/IowaSoccerDevelopment";
+import IowaSoccerDevelopmentAdmin from "../components/IowaSoccerDevelopmentAdmin";
 const adminNav = [
   "Dashboard",
   "Games",
@@ -55,14 +57,17 @@ export default function Home() {
     [roles, setRoles] = useState<Role[]>([]),
     [viewRole, setViewRole] = useState<Role>("admin"),
     [isSuperAdmin, setIsSuperAdmin] = useState(false),
+    [iowaDevelopmentAccess, setIowaDevelopmentAccess] = useState(false),
     [ready, setReady] = useState(false);
   useEffect(() => {
     async function loadRoles() {
-      const [{ data }, { data: superAccess }] = await Promise.all([
+      const [{ data }, { data: superAccess }, { data: developmentAccess }] = await Promise.all([
         supabase.rpc("current_user_roles"),
         supabase.rpc("is_super_admin"),
+        supabase.rpc("has_iowa_soccer_development_access"),
       ]);
       setIsSuperAdmin(Boolean(superAccess));
+      setIowaDevelopmentAccess(Boolean(developmentAccess));
       const found = (data || []) as Role[];
       setRoles(found);
       const saved = window.localStorage.getItem(
@@ -185,6 +190,7 @@ export default function Home() {
                 "My Schedule",
                 "My Availability",
                 "My Profile",
+                ...(iowaDevelopmentAccess ? ["Iowa Soccer Development"] : []),
               ].map((n) => (
                 <button
                   key={n}
@@ -210,15 +216,13 @@ export default function Home() {
             </>
           )}
           {viewRole === "registrar" && (
-            <button className="active" onClick={() => setSection("Registrar")}>
-              Registration
-            </button>
+            <><button className={section === "Registrar" ? "active" : ""} onClick={() => setSection("Registrar")}>Registration</button><button className={section === "Development Admin" ? "active" : ""} onClick={() => setSection("Development Admin")}>Official Development</button></>
           )}
           {viewRole === "league_admin" && (
-            <button className="active" onClick={() => setSection("Registrar")}>League Registration</button>
+            <><button className={section === "Registrar" ? "active" : ""} onClick={() => setSection("Registrar")}>League Registration</button><button className={section === "Development Admin" ? "active" : ""} onClick={() => setSection("Development Admin")}>Official Development</button></>
           )}
           {isSuperAdmin && (
-            <button className={section === "Super Admin" ? "active" : ""} onClick={() => setSection("Super Admin")}>Super Admin</button>
+            <><button className={section === "Development Admin" ? "active" : ""} onClick={() => setSection("Development Admin")}>Iowa Soccer Development</button><button className={section === "Super Admin" ? "active" : ""} onClick={() => setSection("Super Admin")}>Super Admin</button></>
           )}
         </nav>
         <div className="asideFoot">
@@ -336,6 +340,9 @@ export default function Home() {
         {viewRole === "official" && section === "My Profile" && (
           <OfficialProfile />
         )}
+        {viewRole === "official" && section === "Iowa Soccer Development" && iowaDevelopmentAccess && (
+          <IowaSoccerDevelopment />
+        )}
         {viewRole === "contact" && section === "Dashboard" && (
           <section className="card">
             <h2>Contact Dashboard</h2>
@@ -351,6 +358,9 @@ export default function Home() {
         {viewRole === "contact" && section === "Games" && <DashboardGames />}
         {(viewRole === "registrar" || viewRole === "league_admin") && section === "Registrar" && (
           <RegistrarManager />
+        )}
+        {(viewRole === "registrar" || viewRole === "league_admin" || isSuperAdmin) && section === "Development Admin" && (
+          <IowaSoccerDevelopmentAdmin />
         )}
         {isSuperAdmin && section === "Super Admin" && <SuperAdminManager />}
         {manager && <UndoCenter />}
