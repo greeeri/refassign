@@ -219,16 +219,19 @@ export default function Home() {
             </>
           )}
           {viewRole === "registrar" && (
-            <><button className={section === "Registrar" ? "active" : ""} onClick={() => setSection("Registrar")}>Registration</button>{iowaDevelopmentStaff && <button className={section === "Development Admin" ? "active" : ""} onClick={() => setSection("Development Admin")}>Official Development</button>}</>
+            <button className={section === "Registrar" ? "active" : ""} onClick={() => setSection("Registrar")}>Registration</button>
           )}
           {viewRole === "league_admin" && (
-            <><button className={section === "Registrar" ? "active" : ""} onClick={() => setSection("Registrar")}>League Registration</button>{iowaDevelopmentStaff && <button className={section === "Development Admin" ? "active" : ""} onClick={() => setSection("Development Admin")}>Official Development</button>}</>
+            <button className={section === "Registrar" ? "active" : ""} onClick={() => setSection("Registrar")}>League Registration</button>
           )}
           {iowaDevelopmentStaff && viewRole !== "registrar" && viewRole !== "league_admin" && (
             <button className={section === "Registrar" ? "active" : ""} onClick={() => setSection("Registrar")}>Iowa Soccer Registration</button>
           )}
+          {iowaDevelopmentStaff && viewRole !== "official" && (
+            <button className={section === "Development Admin" ? "active" : ""} onClick={() => setSection("Development Admin")}>Iowa Soccer Development</button>
+          )}
           {isSuperAdmin && (
-            <>{iowaDevelopmentStaff && <button className={section === "Development Admin" ? "active" : ""} onClick={() => setSection("Development Admin")}>Iowa Soccer Development</button>}<button className={section === "Super Admin" ? "active" : ""} onClick={() => setSection("Super Admin")}>Super Admin</button></>
+            <button className={section === "Super Admin" ? "active" : ""} onClick={() => setSection("Super Admin")}>Super Admin</button>
           )}
         </nav>
         <div className="asideFoot">
