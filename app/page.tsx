@@ -224,6 +224,9 @@ export default function Home() {
           {viewRole === "league_admin" && (
             <><button className={section === "Registrar" ? "active" : ""} onClick={() => setSection("Registrar")}>League Registration</button>{iowaDevelopmentStaff && <button className={section === "Development Admin" ? "active" : ""} onClick={() => setSection("Development Admin")}>Official Development</button>}</>
           )}
+          {iowaDevelopmentStaff && viewRole !== "registrar" && viewRole !== "league_admin" && (
+            <button className={section === "Registrar" ? "active" : ""} onClick={() => setSection("Registrar")}>Iowa Soccer Registration</button>
+          )}
           {isSuperAdmin && (
             <>{iowaDevelopmentStaff && <button className={section === "Development Admin" ? "active" : ""} onClick={() => setSection("Development Admin")}>Iowa Soccer Development</button>}<button className={section === "Super Admin" ? "active" : ""} onClick={() => setSection("Super Admin")}>Super Admin</button></>
           )}
@@ -359,7 +362,7 @@ export default function Home() {
           </section>
         )}
         {viewRole === "contact" && section === "Games" && <DashboardGames />}
-        {(viewRole === "registrar" || viewRole === "league_admin") && section === "Registrar" && (
+        {(viewRole === "registrar" || viewRole === "league_admin" || iowaDevelopmentStaff) && section === "Registrar" && (
           <RegistrarManager />
         )}
         {iowaDevelopmentStaff && section === "Development Admin" && (
