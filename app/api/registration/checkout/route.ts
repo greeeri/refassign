@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
   const { data: registration, error } = await supabase
     .from("official_registrations")
     .select(
-      "id,public_token,first_name,last_name,email,payment_status,fee_cents,league_id,leagues(name)",
+      "id,public_token,first_name,last_name,email,payment_status,fee_cents,registration_program_id,registration_programs(name,registration_fee_cents)",
     )
     .eq("public_token", token)
     .maybeSingle();
@@ -39,7 +39,8 @@ export async function POST(request: NextRequest) {
       { error: "This registration is already paid." },
       { status: 409 },
     );
-  const fee = registration.fee_cents as number | null;
+  const program = registration.registration_programs as unknown as { name?: string; registration_fee_cents?: number | null } | null,
+    fee = (registration.fee_cents ?? program?.registration_fee_cents) as number | null;
   if (fee == null || fee <= 0)
     return NextResponse.json(
       { error: "The Registrar has not published a registration fee." },
@@ -55,7 +56,7 @@ export async function POST(request: NextRequest) {
   body.set("line_items[0][price_data][currency]", "usd");
   body.set(
     "line_items[0][price_data][product_data][name]",
-    `RefAssign Official Registration — ${((registration.leagues as unknown as { name?: string } | null)?.name || "League")}`,
+    `RefAssign Official Registration — ${program?.name || "Iowa Soccer"}`,
   );
   body.set("line_items[0][price_data][unit_amount]", String(fee));
   body.set("line_items[0][quantity]", "1");

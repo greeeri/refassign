@@ -1,18 +1,11 @@
 "use client";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import { createClient } from "../../lib/supabase/client";
 
 export default function RegistrationPage() {
   const supabase = useMemo(() => createClient(), []),
-    [leagues, setLeagues] = useState<{ id: string; name: string; fee_cents: number }[]>([]),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
-  useEffect(() => {
-    void supabase.rpc("list_open_registration_leagues").then(({ data, error: loadError }) => {
-      if (loadError) setError(loadError.message);
-      else setLeagues((data || []) as { id: string; name: string; fee_cents: number }[]);
-    });
-  }, [supabase]);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
@@ -30,7 +23,7 @@ export default function RegistrationPage() {
         p_home_state: String(form.get("home_state") || ""),
         p_home_zip: String(form.get("home_zip") || ""),
         p_sport: String(form.get("sport") || "Soccer"),
-        p_league_id: String(form.get("league_id") || ""),
+        p_program_slug: "iowa-soccer",
       },
     );
     if (submitError) {
@@ -46,7 +39,7 @@ export default function RegistrationPage() {
         <div className="brand">
           Ref<span>Assign</span>
         </div>
-        <h1>Official Registration</h1>
+        <h1>Iowa Soccer Official Registration</h1>
         <p>
           Register as a new sports official. After submitting, you can pay the
           registration fee securely through Stripe.
@@ -68,17 +61,6 @@ export default function RegistrationPage() {
           <label>
             Phone
             <input name="phone" type="tel" />
-          </label>
-          <label>
-            League
-            <select name="league_id" required defaultValue="">
-              <option value="" disabled>Select a league</option>
-              {leagues.map((league) => (
-                <option value={league.id} key={league.id}>
-                  {league.name} — {(league.fee_cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD" })}
-                </option>
-              ))}
-            </select>
           </label>
           <label>
             Sport
@@ -107,7 +89,7 @@ export default function RegistrationPage() {
             ZIP
             <input name="home_zip" inputMode="numeric" />
           </label>
-          <button className="primary" disabled={busy || leagues.length === 0}>
+          <button className="primary" disabled={busy}>
             {busy ? "Submitting…" : "Continue to Payment"}
           </button>
         </form>

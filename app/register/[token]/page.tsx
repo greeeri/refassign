@@ -10,7 +10,7 @@ type Status = {
   payment_status: string;
   fee_cents: number | null;
   registration_year: number;
-  league_name: string;
+  program_name: string;
 };
 export default function RegistrationStatusPage() {
   const { token } = useParams<{ token: string }>(),
@@ -63,7 +63,7 @@ export default function RegistrationStatusPage() {
                 {status.first_name} {status.last_name}
               </h2>
               <p>
-                {status.email} • {status.league_name} • {status.registration_year}
+                {status.email} • {status.program_name} • {status.registration_year}
               </p>
               {complete ? (
                 <div className="loginMessage">
