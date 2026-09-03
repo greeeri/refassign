@@ -94,18 +94,18 @@ export async function POST(request: Request) {
     })
     .eq("id", registrationId)
     .select(
-      "id,first_name,last_name,email,registration_year,registrar_notified_at",
+      "id,first_name,last_name,email,registration_year,registrar_notified_at,league_id,leagues(name)",
     )
     .single();
   if (error)
     return NextResponse.json({ error: error.message }, { status: 500 });
   if (!registration.registrar_notified_at && process.env.RESEND_API_KEY) {
-    const { data: roles } = await supabase
-        .from("user_roles")
-        .select("user_id")
-        .eq("role", "registrar"),
+    const [{ data: roles }, { data: owners }] = await Promise.all([
+      supabase.from("league_staff_access").select("user_id").eq("league_id", registration.league_id),
+      supabase.from("protected_accounts").select("user_id"),
+    ]),
       emails: string[] = [];
-    for (const role of roles || []) {
+    for (const role of [...(roles || []), ...(owners || [])]) {
       const { data: userData } = await supabase.auth.admin.getUserById(
         role.user_id,
       );
@@ -125,7 +125,7 @@ export async function POST(request: Request) {
           to: unique,
           reply_to: "assignments@ref-assign.com",
           subject: `New paid official registration: ${registration.first_name} ${registration.last_name}`,
-          html: `<div style="font-family:Arial,sans-serif"><h2>New Official Registration</h2><p><b>${escapeHtml(registration.first_name)} ${escapeHtml(registration.last_name)}</b> has completed the ${escapeHtml(registration.registration_year)} registration payment.</p><p>${escapeHtml(registration.email)}</p><p>Sign in to RefAssign and open Registrar to create level eligibility.</p></div>`,
+          html: `<div style="font-family:Arial,sans-serif"><h2>New Official Registration</h2><p><b>${escapeHtml(registration.first_name)} ${escapeHtml(registration.last_name)}</b> has completed the ${escapeHtml(registration.registration_year)} registration payment for ${escapeHtml(((registration.leagues as unknown as {name?:string}|null)?.name)||"their league")}.</p><p>${escapeHtml(registration.email)}</p><p>Sign in to RefAssign and open Registrar to approve eligibility. The official is not available for assignments until approval.</p></div>`,
         }),
       });
       if (emailResponse.ok)

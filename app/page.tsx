@@ -19,6 +19,7 @@ import UndoCenter from "../components/UndoCenter";
 import PayrollManager from "../components/PayrollManager";
 import SportsRulesManager from "../components/SportsRulesManager";
 import RegistrarManager from "../components/RegistrarManager";
+import SuperAdminManager from "../components/SuperAdminManager";
 const adminNav = [
   "Dashboard",
   "Games",
@@ -39,10 +40,11 @@ const officialsNav = [
   ["Block Removal Requests", "Block Removal Requests"],
 ] as const;
 type SetupView = (typeof setupNav)[number];
-type Role = "admin" | "assignor" | "registrar" | "official" | "contact";
+type Role = "admin" | "assignor" | "league_admin" | "registrar" | "official" | "contact";
 const labels: Record<Role, string> = {
   admin: "Admin",
   assignor: "Assignor",
+  league_admin: "League Admin",
   registrar: "Registrar",
   official: "Official",
   contact: "Contact",
@@ -52,10 +54,15 @@ export default function Home() {
   const [section, setSection] = useState("Dashboard"),
     [roles, setRoles] = useState<Role[]>([]),
     [viewRole, setViewRole] = useState<Role>("admin"),
+    [isSuperAdmin, setIsSuperAdmin] = useState(false),
     [ready, setReady] = useState(false);
   useEffect(() => {
     async function loadRoles() {
-      const { data } = await supabase.rpc("current_user_roles");
+      const [{ data }, { data: superAccess }] = await Promise.all([
+        supabase.rpc("current_user_roles"),
+        supabase.rpc("is_super_admin"),
+      ]);
+      setIsSuperAdmin(Boolean(superAccess));
       const found = (data || []) as Role[];
       setRoles(found);
       const saved = window.localStorage.getItem(
@@ -67,7 +74,7 @@ export default function Home() {
       setSection(
         initial === "official"
           ? "Official Dashboard"
-          : initial === "registrar"
+          : initial === "registrar" || initial === "league_admin"
             ? "Registrar"
             : "Dashboard",
       );
@@ -85,7 +92,7 @@ export default function Home() {
     setSection(
       role === "official"
         ? "Official Dashboard"
-        : role === "registrar"
+        : role === "registrar" || role === "league_admin"
           ? "Registrar"
           : "Dashboard",
     );
@@ -207,6 +214,12 @@ export default function Home() {
               Registration
             </button>
           )}
+          {viewRole === "league_admin" && (
+            <button className="active" onClick={() => setSection("Registrar")}>League Registration</button>
+          )}
+          {isSuperAdmin && (
+            <button className={section === "Super Admin" ? "active" : ""} onClick={() => setSection("Super Admin")}>Super Admin</button>
+          )}
         </nav>
         <div className="asideFoot">
           Built for soccer.
@@ -231,7 +244,7 @@ export default function Home() {
             <p>
               {viewRole === "official"
                 ? "Official workspace"
-                : viewRole === "registrar"
+                : viewRole === "registrar" || viewRole === "league_admin"
                   ? "Registrar workspace"
                   : viewRole === "contact"
                     ? "Contact workspace"
@@ -336,9 +349,10 @@ export default function Home() {
           </section>
         )}
         {viewRole === "contact" && section === "Games" && <DashboardGames />}
-        {viewRole === "registrar" && section === "Registrar" && (
+        {(viewRole === "registrar" || viewRole === "league_admin") && section === "Registrar" && (
           <RegistrarManager />
         )}
+        {isSuperAdmin && section === "Super Admin" && <SuperAdminManager />}
         {manager && <UndoCenter />}
       </main>
     </div>

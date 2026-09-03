@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
   const { data: registration, error } = await supabase
     .from("official_registrations")
     .select(
-      "id,public_token,first_name,last_name,email,payment_status,fee_cents",
+      "id,public_token,first_name,last_name,email,payment_status,fee_cents,league_id,leagues(name)",
     )
     .eq("public_token", token)
     .maybeSingle();
@@ -34,20 +34,12 @@ export async function POST(request: NextRequest) {
       { error: "Registration not found." },
       { status: 404 },
     );
-  if (["paid", "waived"].includes(registration.payment_status))
+  if (registration.payment_status === "paid")
     return NextResponse.json(
       { error: "This registration is already paid." },
       { status: 409 },
     );
-  let fee = registration.fee_cents as number | null;
-  if (fee == null) {
-    const { data: settings } = await supabase
-      .from("registration_settings")
-      .select("registration_fee_cents")
-      .eq("id", true)
-      .single();
-    fee = settings?.registration_fee_cents ?? null;
-  }
+  const fee = registration.fee_cents as number | null;
   if (fee == null || fee <= 0)
     return NextResponse.json(
       { error: "The Registrar has not published a registration fee." },
@@ -63,7 +55,7 @@ export async function POST(request: NextRequest) {
   body.set("line_items[0][price_data][currency]", "usd");
   body.set(
     "line_items[0][price_data][product_data][name]",
-    "RefAssign Official Registration",
+    `RefAssign Official Registration — ${((registration.leagues as unknown as { name?: string } | null)?.name || "League")}`,
   );
   body.set("line_items[0][price_data][unit_amount]", String(fee));
   body.set("line_items[0][quantity]", "1");

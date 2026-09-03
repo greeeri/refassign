@@ -10,6 +10,7 @@ type Status = {
   payment_status: string;
   fee_cents: number | null;
   registration_year: number;
+  league_name: string;
 };
 export default function RegistrationStatusPage() {
   const { token } = useParams<{ token: string }>(),
@@ -44,8 +45,7 @@ export default function RegistrationStatusPage() {
     }
     window.location.href = result.url;
   }
-  const complete =
-    status?.payment_status === "paid" || status?.payment_status === "waived";
+  const complete = status?.payment_status === "paid";
   return (
     <main className="publicRegistration">
       <section className="card">
@@ -63,12 +63,12 @@ export default function RegistrationStatusPage() {
                 {status.first_name} {status.last_name}
               </h2>
               <p>
-                {status.email} • {status.registration_year}
+                {status.email} • {status.league_name} • {status.registration_year}
               </p>
               {complete ? (
                 <div className="loginMessage">
-                  Payment is complete. Your registration is now with the
-                  Registrar for eligibility review.
+                  Payment is complete. Your registration is not active until
+                  the Registrar reviews and approves your eligibility.
                 </div>
               ) : status.fee_cents == null ? (
                 <div className="errorBox">
