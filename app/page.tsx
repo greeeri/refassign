@@ -94,6 +94,14 @@ export default function Home() {
   const isCoreSetup = setupNav.includes(section as SetupView);
   const isOfficials = officialsNav.some(([view]) => view === section);
   const manager = viewRole === "admin" || viewRole === "assignor";
+  const iowaPageName =
+    section === "Registrar" && iowaDevelopmentStaff
+      ? "Registration"
+      : section === "Development Admin" && iowaDevelopmentStaff
+        ? "Program Administration"
+        : section === "Iowa Soccer Development" && iowaDevelopmentAccess
+          ? "Official Development"
+          : null;
   function switchRole(role: Role) {
     setViewRole(role);
     window.localStorage.setItem("refassign-view-role", role);
@@ -248,14 +256,18 @@ export default function Home() {
         <header>
           <div>
             <h1>
-              {isSetup
+              {iowaPageName
+                ? "Iowa Soccer Referee Development Program"
+                : isSetup
                 ? `Game Setup — ${section}`
                 : isOfficials
                   ? `Officials — ${section === "Officials" ? "Directory" : section}`
                   : section}
             </h1>
             <p>
-              {viewRole === "official"
+              {iowaPageName
+                ? iowaPageName
+                : viewRole === "official"
                 ? "Official workspace"
                 : viewRole === "registrar" || viewRole === "league_admin"
                   ? "Registrar workspace"
