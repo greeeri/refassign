@@ -58,16 +58,19 @@ export default function Home() {
     [viewRole, setViewRole] = useState<Role>("admin"),
     [isSuperAdmin, setIsSuperAdmin] = useState(false),
     [iowaDevelopmentAccess, setIowaDevelopmentAccess] = useState(false),
+    [iowaDevelopmentStaff, setIowaDevelopmentStaff] = useState(false),
     [ready, setReady] = useState(false);
   useEffect(() => {
     async function loadRoles() {
-      const [{ data }, { data: superAccess }, { data: developmentAccess }] = await Promise.all([
+      const [{ data }, { data: superAccess }, { data: developmentAccess }, { data: developmentStaff }] = await Promise.all([
         supabase.rpc("current_user_roles"),
         supabase.rpc("is_super_admin"),
         supabase.rpc("has_iowa_soccer_development_access"),
+        supabase.rpc("is_iowa_soccer_development_staff"),
       ]);
       setIsSuperAdmin(Boolean(superAccess));
       setIowaDevelopmentAccess(Boolean(developmentAccess));
+      setIowaDevelopmentStaff(Boolean(developmentStaff));
       const found = (data || []) as Role[];
       setRoles(found);
       const saved = window.localStorage.getItem(
@@ -216,13 +219,13 @@ export default function Home() {
             </>
           )}
           {viewRole === "registrar" && (
-            <><button className={section === "Registrar" ? "active" : ""} onClick={() => setSection("Registrar")}>Registration</button><button className={section === "Development Admin" ? "active" : ""} onClick={() => setSection("Development Admin")}>Official Development</button></>
+            <><button className={section === "Registrar" ? "active" : ""} onClick={() => setSection("Registrar")}>Registration</button>{iowaDevelopmentStaff && <button className={section === "Development Admin" ? "active" : ""} onClick={() => setSection("Development Admin")}>Official Development</button>}</>
           )}
           {viewRole === "league_admin" && (
-            <><button className={section === "Registrar" ? "active" : ""} onClick={() => setSection("Registrar")}>League Registration</button><button className={section === "Development Admin" ? "active" : ""} onClick={() => setSection("Development Admin")}>Official Development</button></>
+            <><button className={section === "Registrar" ? "active" : ""} onClick={() => setSection("Registrar")}>League Registration</button>{iowaDevelopmentStaff && <button className={section === "Development Admin" ? "active" : ""} onClick={() => setSection("Development Admin")}>Official Development</button>}</>
           )}
           {isSuperAdmin && (
-            <><button className={section === "Development Admin" ? "active" : ""} onClick={() => setSection("Development Admin")}>Iowa Soccer Development</button><button className={section === "Super Admin" ? "active" : ""} onClick={() => setSection("Super Admin")}>Super Admin</button></>
+            <>{iowaDevelopmentStaff && <button className={section === "Development Admin" ? "active" : ""} onClick={() => setSection("Development Admin")}>Iowa Soccer Development</button>}<button className={section === "Super Admin" ? "active" : ""} onClick={() => setSection("Super Admin")}>Super Admin</button></>
           )}
         </nav>
         <div className="asideFoot">
@@ -359,7 +362,7 @@ export default function Home() {
         {(viewRole === "registrar" || viewRole === "league_admin") && section === "Registrar" && (
           <RegistrarManager />
         )}
-        {(viewRole === "registrar" || viewRole === "league_admin" || isSuperAdmin) && section === "Development Admin" && (
+        {iowaDevelopmentStaff && section === "Development Admin" && (
           <IowaSoccerDevelopmentAdmin />
         )}
         {isSuperAdmin && section === "Super Admin" && <SuperAdminManager />}
