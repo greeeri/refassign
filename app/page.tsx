@@ -18,6 +18,7 @@ import AuditHistoryManager from "../components/AuditHistoryManager";
 import UndoCenter from "../components/UndoCenter";
 import PayrollManager from "../components/PayrollManager";
 import SportsRulesManager from "../components/SportsRulesManager";
+import RegistrarManager from "../components/RegistrarManager";
 const adminNav = [
   "Dashboard",
   "Games",
@@ -38,10 +39,11 @@ const officialsNav = [
   ["Block Removal Requests", "Block Removal Requests"],
 ] as const;
 type SetupView = (typeof setupNav)[number];
-type Role = "admin" | "assignor" | "official" | "contact";
+type Role = "admin" | "assignor" | "registrar" | "official" | "contact";
 const labels: Record<Role, string> = {
   admin: "Admin",
   assignor: "Assignor",
+  registrar: "Registrar",
   official: "Official",
   contact: "Contact",
 };
@@ -62,7 +64,13 @@ export default function Home() {
       const initial =
         saved && found.includes(saved) ? saved : found[0] || "official";
       setViewRole(initial);
-      setSection(initial === "official" ? "Official Dashboard" : "Dashboard");
+      setSection(
+        initial === "official"
+          ? "Official Dashboard"
+          : initial === "registrar"
+            ? "Registrar"
+            : "Dashboard",
+      );
       setReady(true);
     }
     void loadRoles();
@@ -74,7 +82,13 @@ export default function Home() {
   function switchRole(role: Role) {
     setViewRole(role);
     window.localStorage.setItem("refassign-view-role", role);
-    setSection(role === "official" ? "Official Dashboard" : "Dashboard");
+    setSection(
+      role === "official"
+        ? "Official Dashboard"
+        : role === "registrar"
+          ? "Registrar"
+          : "Dashboard",
+    );
   }
   async function signOut() {
     await supabase.auth.signOut();
@@ -188,6 +202,11 @@ export default function Home() {
               ))}
             </>
           )}
+          {viewRole === "registrar" && (
+            <button className="active" onClick={() => setSection("Registrar")}>
+              Registration
+            </button>
+          )}
         </nav>
         <div className="asideFoot">
           Built for soccer.
@@ -212,9 +231,11 @@ export default function Home() {
             <p>
               {viewRole === "official"
                 ? "Official workspace"
-                : viewRole === "contact"
-                  ? "Contact workspace"
-                  : "RefAssign scheduling workspace"}
+                : viewRole === "registrar"
+                  ? "Registrar workspace"
+                  : viewRole === "contact"
+                    ? "Contact workspace"
+                    : "RefAssign scheduling workspace"}
             </p>
           </div>
           <div className="headerActions">
@@ -315,6 +336,9 @@ export default function Home() {
           </section>
         )}
         {viewRole === "contact" && section === "Games" && <DashboardGames />}
+        {viewRole === "registrar" && section === "Registrar" && (
+          <RegistrarManager />
+        )}
         {manager && <UndoCenter />}
       </main>
     </div>
