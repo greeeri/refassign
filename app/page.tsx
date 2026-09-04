@@ -108,6 +108,8 @@ export default function Home() {
           ? "Program Referees"
           : section === "Development Mentors" && iowaDevelopmentStaff
             ? "Development Mentors"
+          : section === "Development Mentors" && iowaMentorAccess
+            ? "Mentor Center"
         : section === "Iowa Soccer Development" && iowaDevelopmentAccess
           ? "Official Development"
           : null;
@@ -212,6 +214,7 @@ export default function Home() {
                 "My Profile",
                 ...(iowaDevelopmentAccess ? ["Iowa Soccer Development"] : []),
                 ...(iowaMentorAccess ? ["Program Referees"] : []),
+                ...(iowaMentorAccess ? ["Development Mentors"] : []),
               ].map((n) => (
                 <button
                   key={n}
@@ -396,7 +399,7 @@ export default function Home() {
         {(iowaDevelopmentStaff || iowaMentorAccess) && section === "Program Referees" && (
           <IowaProgramReferees />
         )}
-        {iowaDevelopmentStaff && section === "Development Mentors" && (
+        {(iowaDevelopmentStaff || iowaMentorAccess) && section === "Development Mentors" && (
           <IowaDevelopmentMentors />
         )}
         {isSuperAdmin && section === "Super Admin" && <SuperAdminManager />}
