@@ -3,10 +3,47 @@ export type Coordinates = { latitude: number; longitude: number };
 let venueQueue: Promise<void> = Promise.resolve();
 let lastVenueRequest = 0;
 
+async function geocodeGoogle(query: string): Promise<Coordinates> {
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY?.trim();
+  if (!apiKey) throw new Error("Google Maps geocoding is not configured.");
+
+  const endpoint = new URL("https://maps.googleapis.com/maps/api/geocode/json");
+  endpoint.searchParams.set("address", query.trim());
+  endpoint.searchParams.set("key", apiKey);
+
+  const response = await fetch(endpoint, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(12000),
+  });
+  if (!response.ok) throw new Error("Google Maps address service unavailable.");
+
+  const data = (await response.json()) as {
+    status?: string;
+    error_message?: string;
+    results?: Array<{
+      geometry?: { location?: { lat?: number; lng?: number } };
+    }>;
+  };
+  const point = data.results?.[0]?.geometry?.location;
+  if (data.status !== "OK" || point?.lat == null || point.lng == null)
+    throw new Error(
+      data.error_message || `Google Maps could not locate: ${query.trim()}`,
+    );
+  return { latitude: Number(point.lat), longitude: Number(point.lng) };
+}
+
 export async function geocodeUSAddress(address: string): Promise<Coordinates> {
   const cleaned = address.trim();
   if (!cleaned || cleaned.length > 300)
     throw new Error("Enter a valid U.S. address.");
+
+  if (process.env.GOOGLE_MAPS_API_KEY?.trim()) {
+    try {
+      return await geocodeGoogle(cleaned);
+    } catch {
+      // Continue to the free Census lookup when Google has no match or is unavailable.
+    }
+  }
 
   const endpoint = new URL(
     "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress",
@@ -84,10 +121,28 @@ export async function geocodeVenue(
   )
     throw new Error("Enter a valid venue name or U.S. address.");
 
+  const query = cleanedAddress || `${cleanedName}, United States`;
+  if (process.env.GOOGLE_MAPS_API_KEY?.trim()) {
+    try {
+      return await geocodeGoogle(query);
+    } catch {
+      // Fall through to the existing free providers.
+    }
+  }
+
   if (cleanedAddress) {
     try {
       return await geocodeUSAddress(cleanedAddress);
     } catch {
+      if (cleanedName) {
+        try {
+          return await geocodeOpenStreetMap(
+            `${cleanedName}, ${cleanedAddress}, United States`,
+          );
+        } catch {
+          return geocodeOpenStreetMap(`${cleanedName}, United States`);
+        }
+      }
       return geocodeOpenStreetMap(cleanedAddress);
     }
   }
