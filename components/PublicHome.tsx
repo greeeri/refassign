@@ -1,0 +1,139 @@
+import Link from "next/link";
+import styles from "./PublicHome.module.css";
+
+const Arrow = () => <span aria-hidden="true">→</span>;
+
+function Icon({ children }: { children: React.ReactNode }) {
+  return <div className={styles.icon}>{children}</div>;
+}
+
+export default function PublicHome() {
+  return (
+    <div className={styles.site}>
+      <header className={styles.header}>
+        <Link className={styles.brand} href="/" aria-label="Ref Pro Group home">
+          <span className={styles.brandMark}>RP</span>
+          <span><strong>Ref Pro Group</strong><small>Powering better officiating</small></span>
+        </Link>
+        <nav className={styles.nav} aria-label="Main navigation">
+          <a href="#mission">Our Mission</a>
+          <a href="#platform">RefAssign</a>
+          <a href="#training">Development</a>
+          <a href="#organizations">Organizations</a>
+        </nav>
+        <Link className={styles.signIn} href="/login">Launch RefAssign <Arrow /></Link>
+      </header>
+
+      <main>
+        <section className={styles.hero}>
+          <div className={styles.heroContent}>
+            <div className={styles.eyebrow}>REF PRO GROUP, LLC</div>
+            <h1>Making officiating <span>easier to enter, easier to develop, and easier to manage.</span></h1>
+            <p className={styles.heroLead}>Ref Pro Group is building a connected officiating ecosystem that removes barriers for new officials, creates a clearer path for training and development, and gives assignors and organizations modern tools to run the administrative side of the game.</p>
+            <div className={styles.heroActions}>
+              <Link className={styles.primaryButton} href="/login">Open RefAssign <Arrow /></Link>
+              <a className={styles.secondaryButton} href="#mission">See what we’re building</a>
+            </div>
+            <div className={styles.heroProof}>
+              <div><strong>One pathway</strong><span>From first whistle to advanced opportunities</span></div>
+              <div><strong>One platform</strong><span>Assignments, officials, payroll and administration</span></div>
+              <div><strong>Built to scale</strong><span>Soccer first. Designed for every sport.</span></div>
+            </div>
+          </div>
+          <div className={styles.heroVisual} aria-label="Ref Pro Group platform overview">
+            <div className={styles.orbit}></div>
+            <div className={styles.centerCard}>
+              <span className={styles.miniMark}>RA</span>
+              <strong>RefAssign</strong>
+              <small>Officiating operations, connected.</small>
+            </div>
+            <div className={`${styles.floatCard} ${styles.cardOne}`}><b>01</b><span>Recruit</span><small>Make the first step simple.</small></div>
+            <div className={`${styles.floatCard} ${styles.cardTwo}`}><b>02</b><span>Develop</span><small>Train with a clear pathway.</small></div>
+            <div className={`${styles.floatCard} ${styles.cardThree}`}><b>03</b><span>Assign</span><small>Put the right official on the right game.</small></div>
+            <div className={`${styles.floatCard} ${styles.cardFour}`}><b>04</b><span>Administer</span><small>Reduce the work around the work.</small></div>
+          </div>
+        </section>
+
+        <section className={styles.problem} id="mission">
+          <div className={styles.sectionHeading}>
+            <span>WHY REF PRO GROUP</span>
+            <h2>Officiating should not be harder to access than the sport itself.</h2>
+            <p>Too often, the path into officiating is fragmented: people do not know where to start, training is disconnected from real opportunities, and assignors spend too much time managing spreadsheets, messages, availability, payments and last-minute changes.</p>
+          </div>
+          <div className={styles.problemGrid}>
+            <article><span className={styles.number}>01</span><h3>Access</h3><p>Create a simpler entry point for people who want to become officials and help organizations turn interest into participation.</p></article>
+            <article><span className={styles.number}>02</span><h3>Development</h3><p>Connect beginning education, mentoring, feedback and advancement so officials can see what comes next and how to get there.</p></article>
+            <article><span className={styles.number}>03</span><h3>Operations</h3><p>Give assignors and administrators one efficient place to schedule games, manage people, communicate, track requirements and handle payroll.</p></article>
+          </div>
+        </section>
+
+        <section className={styles.platform} id="platform">
+          <div className={styles.platformCopy}>
+            <span className={styles.kicker}>THE OPERATING PLATFORM</span>
+            <h2>RefAssign brings the administrative side of officiating together.</h2>
+            <p>Instead of forcing assignors and officials to jump between disconnected tools, RefAssign is being built as a single working environment for the day-to-day tasks that keep games covered and officials supported.</p>
+            <div className={styles.featureList}>
+              <div><i>✓</i><span><strong>Assignment management</strong><small>Build, fill and adjust assignments with the information assignors need in one view.</small></span></div>
+              <div><i>✓</i><span><strong>Official availability & profiles</strong><small>Keep schedules, eligibility, locations and preferences connected to assignment decisions.</small></span></div>
+              <div><i>✓</i><span><strong>Rules, fees & payroll</strong><small>Bring game fees, mileage rules and payroll workflows closer to the actual assignment data.</small></span></div>
+              <div><i>✓</i><span><strong>Organization administration</strong><small>Support leagues, levels, teams, locations, contacts and role-based access from one platform.</small></span></div>
+            </div>
+            <Link className={styles.inlineLink} href="/login">Go to RefAssign <Arrow /></Link>
+          </div>
+          <div className={styles.dashboardMock}>
+            <div className={styles.mockTop}><span></span><span></span><span></span><b>RefAssign</b></div>
+            <div className={styles.mockBody}>
+              <aside><strong>Dashboard</strong><span>Games</span><span>Assignments</span><span>Officials</span><span>Payroll</span></aside>
+              <div className={styles.mockMain}>
+                <div className={styles.mockTitle}><div><small>TODAY</small><h3>Assignment Center</h3></div><button>AutoAssign</button></div>
+                <div className={styles.stats}><div><small>GAMES</small><b>24</b></div><div><small>FILLED</small><b>21</b></div><div><small>OPEN SPOTS</small><b>7</b></div></div>
+                <div className={styles.rows}><div><span>7:00 PM</span><b>Varsity</b><em>3 / 3 Assigned</em></div><div><span>7:30 PM</span><b>Premier U16</b><em>2 / 3 Assigned</em></div><div><span>8:15 PM</span><b>Adult League</b><em>3 / 3 Assigned</em></div></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className={styles.training} id="training">
+          <div className={styles.sectionHeadingLight}>
+            <span>OFFICIAL DEVELOPMENT</span>
+            <h2>A better journey from “I might try officiating” to “I know how to improve.”</h2>
+          </div>
+          <div className={styles.pathway}>
+            <article><Icon>1</Icon><h3>Discover</h3><p>Give prospective officials a clear starting point and remove unnecessary friction from entering the profession.</p></article>
+            <div className={styles.connector}></div>
+            <article><Icon>2</Icon><h3>Learn</h3><p>Organize beginning-level education around what a new official actually needs to succeed on the field.</p></article>
+            <div className={styles.connector}></div>
+            <article><Icon>3</Icon><h3>Get Experience</h3><p>Connect training to appropriate games, mentors and opportunities rather than leaving development isolated from assigning.</p></article>
+            <div className={styles.connector}></div>
+            <article><Icon>4</Icon><h3>Advance</h3><p>Use feedback, performance information and development pathways to help officials understand how to progress.</p></article>
+          </div>
+        </section>
+
+        <section className={styles.organizations} id="organizations">
+          <div>
+            <span className={styles.kicker}>FOR LEAGUES, CLUBS & ASSIGNORS</span>
+            <h2>Spend less time managing the process. Spend more time improving the pool of officials.</h2>
+          </div>
+          <div className={styles.orgCards}>
+            <article><h3>For Assignors</h3><p>Reduce manual work, improve visibility, make faster assignment decisions and manage changes from one place.</p></article>
+            <article><h3>For Organizations</h3><p>Create a consistent administrative structure across competitions, locations, requirements, fees and officials.</p></article>
+            <article><h3>For Officials</h3><p>See assignments, availability, development opportunities and important information in a workspace built around the official.</p></article>
+          </div>
+        </section>
+
+        <section className={styles.vision}>
+          <span>OUR VISION</span>
+          <h2>More officials. Better prepared. Better supported.</h2>
+          <p>Ref Pro Group, LLC is focused on strengthening officiating from both sides of the equation: making it easier for people to enter and grow in the profession, while giving the organizations that depend on officials better systems to recruit, train, assign and administer them.</p>
+          <div className={styles.visionActions}><Link className={styles.primaryButton} href="/login">Launch RefAssign <Arrow /></Link><a className={styles.secondaryDark} href="mailto:info@ref-assign.com">Contact Ref Pro Group</a></div>
+        </section>
+      </main>
+
+      <footer className={styles.footer}>
+        <div className={styles.brand}><span className={styles.brandMark}>RP</span><span><strong>Ref Pro Group</strong><small>Powering better officiating</small></span></div>
+        <p>Ref Pro Group, LLC · RefAssign · Built for soccer. Ready for every sport.</p>
+        <div><Link href="/login">Sign In</Link><a href="mailto:info@ref-assign.com">Contact</a></div>
+      </footer>
+    </div>
+  );
+}
