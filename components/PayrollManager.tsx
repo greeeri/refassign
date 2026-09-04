@@ -107,6 +107,33 @@ function milesBetween(
   );
 }
 
+function mileagePlanFor(row: PayrollRow): MileagePlan {
+  return row.games?.leagues?.mileage_plan || "round_trip";
+}
+
+function calculatedMileage(row: PayrollRow, origins: WeekdayOrigin[]) {
+  const plan = mileagePlanFor(row);
+  if (plan === "none") return 0;
+  if (plan === "actual") return null;
+  const weekday = new Date(row.games?.starts_at || 0).getDay();
+  const origin = origins.find(
+    (item) => item.official_id === row.officials?.id && item.weekday === weekday,
+  );
+  const useAlternate = Boolean(origin && !origin.use_home);
+  const oneWay = milesBetween(
+    useAlternate
+      ? origin!.alternate_latitude
+      : (row.officials?.home_latitude ?? null),
+    useAlternate
+      ? origin!.alternate_longitude
+      : (row.officials?.home_longitude ?? null),
+    row.games?.location?.latitude ?? null,
+    row.games?.location?.longitude ?? null,
+  );
+  if (oneWay == null) return null;
+  return plan === "round_trip" ? Math.round(oneWay * 2 * 10) / 10 : oneWay;
+}
+
 function weekBounds() {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
@@ -164,8 +191,17 @@ export default function PayrollManager() {
     const loadError = assignmentResult.error || originResult.error;
     if (loadError) setError(loadError.message);
     else {
-      setRows((assignmentResult.data || []) as unknown as PayrollRow[]);
-      setWeekdayOrigins((originResult.data || []) as WeekdayOrigin[]);
+      const origins = (originResult.data || []) as WeekdayOrigin[];
+      const loadedRows = (assignmentResult.data || []) as unknown as PayrollRow[];
+      setRows(
+        loadedRows.map((row) => {
+          const automaticMiles = calculatedMileage(row, origins);
+          return automaticMiles == null
+            ? row
+            : { ...row, mileage_miles: automaticMiles };
+        }),
+      );
+      setWeekdayOrigins(origins);
     }
     setLoading(false);
   }
@@ -173,8 +209,7 @@ export default function PayrollManager() {
     void load();
   }, []);
 
-  const mileagePlan = (row: PayrollRow): MileagePlan =>
-    row.games?.leagues?.mileage_plan || "round_trip";
+  const mileagePlan = mileagePlanFor;
   const originFor = (row: PayrollRow) => {
     const weekday = new Date(row.games?.starts_at || 0).getDay();
     return weekdayOrigins.find(
@@ -188,25 +223,8 @@ export default function PayrollManager() {
       ? origin.alternate_label || "Different location"
       : "Home address";
   };
-  const defaultMileage = (row: PayrollRow) => {
-    const plan = mileagePlan(row);
-    if (plan === "none") return 0;
-    if (plan === "actual") return null;
-    const origin = originFor(row);
-    const useAlternate = origin && !origin.use_home;
-    const oneWay = milesBetween(
-      useAlternate
-        ? origin.alternate_latitude
-        : (row.officials?.home_latitude ?? null),
-      useAlternate
-        ? origin.alternate_longitude
-        : (row.officials?.home_longitude ?? null),
-      row.games?.location?.latitude ?? null,
-      row.games?.location?.longitude ?? null,
-    );
-    if (oneWay == null) return null;
-    return plan === "round_trip" ? Math.round(oneWay * 2 * 10) / 10 : oneWay;
-  };
+  const defaultMileage = (row: PayrollRow) =>
+    calculatedMileage(row, weekdayOrigins);
   const mileagePay = (row: PayrollRow) =>
     mileagePlan(row) === "none"
       ? 0
