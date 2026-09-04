@@ -44,13 +44,14 @@ const officialsNav = [
   ["Block Removal Requests", "Block Removal Requests"],
 ] as const;
 type SetupView = (typeof setupNav)[number];
-type Role = "admin" | "assignor" | "league_admin" | "registrar" | "official" | "contact";
+type Role = "admin" | "assignor" | "league_admin" | "registrar" | "official" | "mentor" | "contact";
 const labels: Record<Role, string> = {
   admin: "Admin",
   assignor: "Assignor",
   league_admin: "League Admin",
   registrar: "Registrar",
   official: "Official",
+  mentor: "Mentor",
   contact: "Contact",
 };
 export default function Home() {
@@ -77,16 +78,21 @@ export default function Home() {
       setIowaDevelopmentStaff(Boolean(developmentStaff));
       setIowaMentorAccess(Boolean(mentorAccess));
       const found = (data || []) as Role[];
-      setRoles(found);
+      const availableRoles = Boolean(mentorAccess) && !found.includes("mentor")
+        ? [...found, "mentor" as Role]
+        : found;
+      setRoles(availableRoles);
       const saved = window.localStorage.getItem(
         "refassign-view-role",
       ) as Role | null;
       const initial =
-        saved && found.includes(saved) ? saved : found[0] || "official";
+        saved && availableRoles.includes(saved) ? saved : availableRoles[0] || "official";
       setViewRole(initial);
       setSection(
         initial === "official"
           ? "Official Dashboard"
+          : initial === "mentor"
+            ? "Development Mentors"
           : initial === "registrar" || initial === "league_admin"
             ? "Registrar"
             : "Dashboard",
@@ -119,6 +125,8 @@ export default function Home() {
     setSection(
       role === "official"
         ? "Official Dashboard"
+        : role === "mentor"
+          ? "Development Mentors"
         : role === "registrar" || role === "league_admin"
           ? "Registrar"
           : "Dashboard",
@@ -213,8 +221,6 @@ export default function Home() {
                 "My Availability",
                 "My Profile",
                 ...(iowaDevelopmentAccess ? ["Iowa Soccer Development"] : []),
-                ...(iowaMentorAccess ? ["Program Referees"] : []),
-                ...(iowaMentorAccess ? ["Development Mentors"] : []),
               ].map((n) => (
                 <button
                   key={n}
@@ -237,6 +243,12 @@ export default function Home() {
                   {n}
                 </button>
               ))}
+            </>
+          )}
+          {viewRole === "mentor" && iowaMentorAccess && (
+            <>
+              <button className={section === "Development Mentors" ? "active" : ""} onClick={() => setSection("Development Mentors")}>Mentor Center</button>
+              <button className={section === "Program Referees" ? "active" : ""} onClick={() => setSection("Program Referees")}>Program Referees</button>
             </>
           )}
           {viewRole === "registrar" && (
@@ -282,6 +294,8 @@ export default function Home() {
                 ? iowaPageName
                 : viewRole === "official"
                 ? "Official workspace"
+                : viewRole === "mentor"
+                  ? "Iowa Soccer mentor workspace"
                 : viewRole === "registrar" || viewRole === "league_admin"
                   ? "Registrar workspace"
                   : viewRole === "contact"
