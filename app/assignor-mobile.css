@@ -4,6 +4,29 @@
   display: none;
 }
 
+.assignmentDirectFilters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 280px)) minmax(200px, 1fr);
+  gap: 10px;
+  align-items: end;
+  margin: -4px 0 14px;
+}
+
+.assignmentDirectFilters label {
+  display: grid;
+  gap: 5px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.assignmentDirectFilters span {
+  align-self: center;
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 700;
+}
+
 @media (max-width: 760px) {
   .mobileNavBackdrop {
     display: block;
@@ -191,6 +214,58 @@
 
   .assignmentLayout {
     grid-template-columns: 1fr;
+  }
+
+  .assignmentDirectFilters {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 9px;
+    margin: 0 0 14px;
+    padding: 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    background: #f8fafc;
+  }
+
+  .assignmentDirectFilters label {
+    display: grid;
+    gap: 5px;
+    color: #475569;
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .assignmentDirectFilters span {
+    color: #2563eb;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .assignmentGameTable {
+    overflow-x: auto !important;
+    overscroll-behavior-inline: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .assignmentGameTable > div,
+  .assignmentGameRows {
+    min-width: 720px;
+  }
+
+  .assignmentGameRows {
+    overflow-x: visible !important;
+  }
+
+  .assignmentGameTable::after {
+    content: "Swipe sideways to view officials and assignment controls";
+    position: sticky;
+    left: 0;
+    display: block;
+    width: min(100%, 330px);
+    padding: 7px 10px;
+    color: #64748b;
+    font-size: 10px;
+    text-align: center;
   }
 
   .availableOfficialsPanel {
