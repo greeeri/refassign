@@ -30,7 +30,7 @@ export default function LoginPage() {
         setMessage(error.message);
         return;
       }
-      router.replace("/");
+      router.replace("/workspace");
       router.refresh();
     } catch (err) {
       setMessage(
