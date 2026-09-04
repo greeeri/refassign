@@ -192,6 +192,7 @@ export default function AssignmentsManagerV2() {
     [unpublishedOnly, setUnpublishedOnly] = useState(false),
     [completenessFilter, setCompletenessFilter] = useState<Completeness>("all"),
     [officialFilter, setOfficialFilter] = useState(""),
+    [locationFilter, setLocationFilter] = useState(""),
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [saving, setSaving] = useState(""),
@@ -447,15 +448,21 @@ export default function AssignmentsManagerV2() {
       )
     );
   }
-  const rangeGames = games.filter(
-    (g) => inRange(g, range, customDate) && matchesOfficialFilter(g),
-  );
-  const baseFilteredGames = rangeGames.filter(
-    (g) =>
+  function matchesLocationFilter(g: Game) {
+    return !locationFilter || g.location_id === locationFilter;
+  }
+  const hasDirectGameFilter = Boolean(locationFilter || officialFilter);
+  const rangeGames = games.filter((g) => inRange(g, range, customDate));
+  const baseFilteredGames = games.filter((g) => {
+    if (hasDirectGameFilter)
+      return matchesLocationFilter(g) && matchesOfficialFilter(g);
+    return (
+      inRange(g, range, customDate) &&
       (!unpublishedOnly || isUnpublishedGame(g)) &&
       (completenessFilter === "all" ||
-        assignmentCompleteness(g).key === completenessFilter),
-  );
+        assignmentCompleteness(g).key === completenessFilter)
+    );
+  });
   function compareGames(a: Game, b: Game) {
     let n = 0;
     if (gameSort === "game")
@@ -2287,46 +2294,6 @@ export default function AssignmentsManagerV2() {
               )
             </button>
           ))}
-          {canManage && (
-            <label
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 7,
-                fontSize: 12,
-                fontWeight: 800,
-                color: "#475569",
-              }}
-            >
-              View by official
-              <select
-                aria-label="View games by official"
-                value={officialFilter}
-                onChange={(event) => {
-                  setOfficialFilter(event.target.value);
-                  setLinkSelected([]);
-                  setSelected("");
-                }}
-                style={{ width: 220, minWidth: 180 }}
-              >
-                <option value="">All Officials</option>
-                {officials
-                  .filter((official) =>
-                    assignments.some(
-                      (assignment) =>
-                        assignment.official_id === official.id &&
-                        assignment.status !== "declined",
-                    ),
-                  )
-                  .map((official) => (
-                    <option key={official.id} value={official.id}>
-                      {official.last_name}, {official.first_name}
-                      {official.active ? "" : " (Inactive)"}
-                    </option>
-                  ))}
-              </select>
-            </label>
-          )}
           <button
             type="button"
             className={unpublishedOnly ? "primary" : "secondary"}
@@ -2364,6 +2331,63 @@ export default function AssignmentsManagerV2() {
             </span>
           )}
         </div>
+        {canManage && (
+          <div className="assignmentDirectFilters">
+            <label>
+              Location
+              <select
+                aria-label="Show games at location"
+                value={locationFilter}
+                onChange={(event) => {
+                  setLocationFilter(event.target.value);
+                  setLinkSelected([]);
+                  setSelected("");
+                }}
+              >
+                <option value="">All Locations</option>
+                {Array.from(
+                  new Map(
+                    games
+                      .filter((listedGame) => listedGame.location)
+                      .map((listedGame) => [listedGame.location!.id, listedGame.location!.name]),
+                  ).entries(),
+                )
+                  .sort((a, b) => a[1].localeCompare(b[1]))
+                  .map(([id, name]) => (
+                    <option key={id} value={id}>{name}</option>
+                  ))}
+              </select>
+            </label>
+            <label>
+              Official
+              <select
+                aria-label="Show games assigned to official"
+                value={officialFilter}
+                onChange={(event) => {
+                  setOfficialFilter(event.target.value);
+                  setLinkSelected([]);
+                  setSelected("");
+                }}
+              >
+                <option value="">All Officials</option>
+                {officials
+                  .filter((official) => assignments.some(
+                    (assignment) =>
+                      assignment.official_id === official.id &&
+                      assignment.status !== "declined",
+                  ))
+                  .map((official) => (
+                    <option key={official.id} value={official.id}>
+                      {official.last_name}, {official.first_name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            {hasDirectGameFilter && (
+              <span>Showing matching games across all dates and assignment statuses.</span>
+            )}
+          </div>
+        )}
         <div
           style={{
             display: "flex",
@@ -2404,6 +2428,7 @@ export default function AssignmentsManagerV2() {
           ))}
         </div>
         <div
+          className="assignmentGameTable"
           style={{
             margin: "14px 0",
             border: "1px solid #cbd5e1",
@@ -2631,9 +2656,7 @@ export default function AssignmentsManagerV2() {
               Assignment Status{sortArrow("assignments")}
             </button>
           </div>
-          <div
-            style={{ maxHeight: 420, overflowY: "auto", overflowX: "hidden" }}
-          >
+          <div className="assignmentGameRows" style={{ maxHeight: 420, overflowY: "auto" }}>
             {gameUnits.length ? (
               gameUnits.map((unit) => {
                 const warnings = unit.groupId
