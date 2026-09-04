@@ -1,6 +1,7 @@
 "use client";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { createClient } from "../lib/supabase/client";
+import { coordinatesForVenue } from "../lib/client-geocode";
 import TeamsRosterManager from "./TeamsRosterManager";
 import LocationsRosterManager from "./LocationsRosterManager";
 type Sport = { id: string; name: string };
@@ -230,6 +231,22 @@ export default function GameSetup({ view }: { view: View }) {
   }
   async function saveLocation(e: FormEvent) {
     e.preventDefault();
+    setError("");
+    let coordinates: { latitude: number | null; longitude: number | null } = {
+      latitude: null,
+      longitude: null,
+    };
+    if (location.address.trim() || location.name.trim()) {
+      try {
+        coordinates = await coordinatesForVenue(
+          [location.address, location.city, location.state].filter(Boolean).join(", "),
+          location.name,
+        );
+      } catch (geocodeError) {
+        setError(geocodeError instanceof Error ? geocodeError.message : "The venue address could not be located.");
+        return;
+      }
+    }
     const payload = {
       name: location.name.trim(),
       level_id: null,
@@ -243,6 +260,8 @@ export default function GameSetup({ view }: { view: View }) {
       contact_name: location.contact_name.trim() || null,
       contact_phone: location.contact_phone.trim() || null,
       contact_email: location.contact_email.trim() || null,
+      latitude: coordinates.latitude,
+      longitude: coordinates.longitude,
     };
     const r = editingLocationId
       ? await supabase
