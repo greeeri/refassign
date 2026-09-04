@@ -22,6 +22,8 @@ import RegistrarManager from "../components/RegistrarManager";
 import SuperAdminManager from "../components/SuperAdminManager";
 import IowaSoccerDevelopment from "../components/IowaSoccerDevelopment";
 import IowaSoccerDevelopmentAdmin from "../components/IowaSoccerDevelopmentAdmin";
+import IowaProgramReferees from "../components/IowaProgramReferees";
+import IowaDevelopmentMentors from "../components/IowaDevelopmentMentors";
 const adminNav = [
   "Dashboard",
   "Games",
@@ -59,18 +61,21 @@ export default function Home() {
     [isSuperAdmin, setIsSuperAdmin] = useState(false),
     [iowaDevelopmentAccess, setIowaDevelopmentAccess] = useState(false),
     [iowaDevelopmentStaff, setIowaDevelopmentStaff] = useState(false),
+    [iowaMentorAccess, setIowaMentorAccess] = useState(false),
     [ready, setReady] = useState(false);
   useEffect(() => {
     async function loadRoles() {
-      const [{ data }, { data: superAccess }, { data: developmentAccess }, { data: developmentStaff }] = await Promise.all([
+      const [{ data }, { data: superAccess }, { data: developmentAccess }, { data: developmentStaff }, { data: mentorAccess }] = await Promise.all([
         supabase.rpc("current_user_roles"),
         supabase.rpc("is_super_admin"),
         supabase.rpc("has_iowa_soccer_development_access"),
         supabase.rpc("is_iowa_soccer_development_staff"),
+        supabase.rpc("is_iowa_soccer_development_mentor"),
       ]);
       setIsSuperAdmin(Boolean(superAccess));
       setIowaDevelopmentAccess(Boolean(developmentAccess));
       setIowaDevelopmentStaff(Boolean(developmentStaff));
+      setIowaMentorAccess(Boolean(mentorAccess));
       const found = (data || []) as Role[];
       setRoles(found);
       const saved = window.localStorage.getItem(
@@ -99,6 +104,10 @@ export default function Home() {
       ? "Registration"
       : section === "Development Admin" && iowaDevelopmentStaff
         ? "Program Administration"
+        : section === "Program Referees" && (iowaDevelopmentStaff || iowaMentorAccess)
+          ? "Program Referees"
+          : section === "Development Mentors" && iowaDevelopmentStaff
+            ? "Development Mentors"
         : section === "Iowa Soccer Development" && iowaDevelopmentAccess
           ? "Official Development"
           : null;
@@ -202,6 +211,7 @@ export default function Home() {
                 "My Availability",
                 "My Profile",
                 ...(iowaDevelopmentAccess ? ["Iowa Soccer Development"] : []),
+                ...(iowaMentorAccess ? ["Program Referees"] : []),
               ].map((n) => (
                 <button
                   key={n}
@@ -236,7 +246,7 @@ export default function Home() {
             <button className={section === "Registrar" ? "active" : ""} onClick={() => setSection("Registrar")}>Iowa Soccer Registration</button>
           )}
           {iowaDevelopmentStaff && viewRole !== "official" && (
-            <button className={section === "Development Admin" ? "active" : ""} onClick={() => setSection("Development Admin")}>Iowa Soccer Development</button>
+            <><button className={section === "Development Admin" ? "active" : ""} onClick={() => setSection("Development Admin")}>Iowa Soccer Development</button><button className={section === "Program Referees" ? "active" : ""} onClick={() => setSection("Program Referees")}>Program Referees</button><button className={section === "Development Mentors" ? "active" : ""} onClick={() => setSection("Development Mentors")}>Mentors</button></>
           )}
           {isSuperAdmin && (
             <button className={section === "Super Admin" ? "active" : ""} onClick={() => setSection("Super Admin")}>Super Admin</button>
@@ -291,7 +301,7 @@ export default function Home() {
                 ))}
               </select>
             </label>
-            {manager && (
+            {manager && !iowaPageName && (
               <>
                 <button
                   className="secondary"
@@ -382,6 +392,12 @@ export default function Home() {
         )}
         {iowaDevelopmentStaff && section === "Development Admin" && (
           <IowaSoccerDevelopmentAdmin />
+        )}
+        {(iowaDevelopmentStaff || iowaMentorAccess) && section === "Program Referees" && (
+          <IowaProgramReferees />
+        )}
+        {iowaDevelopmentStaff && section === "Development Mentors" && (
+          <IowaDevelopmentMentors />
         )}
         {isSuperAdmin && section === "Super Admin" && <SuperAdminManager />}
         {manager && <UndoCenter />}
