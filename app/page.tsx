@@ -63,9 +63,17 @@ export default function Home() {
     [iowaDevelopmentAccess, setIowaDevelopmentAccess] = useState(false),
     [iowaDevelopmentStaff, setIowaDevelopmentStaff] = useState(false),
     [iowaMentorAccess, setIowaMentorAccess] = useState(false),
+    [mobileNavOpen, setMobileNavOpen] = useState(false),
     [ready, setReady] = useState(false);
   useEffect(() => {
     async function loadRoles() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        window.location.replace("/login");
+        return;
+      }
       const [{ data }, { data: superAccess }, { data: developmentAccess }, { data: developmentStaff }, { data: mentorAccess }] = await Promise.all([
         supabase.rpc("current_user_roles"),
         supabase.rpc("is_super_admin"),
@@ -148,12 +156,13 @@ export default function Home() {
     );
   return (
     <div className="shell">
-      <aside>
+      {mobileNavOpen && <button className="mobileNavBackdrop" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} />}
+      <aside id="primary-navigation" className={mobileNavOpen ? "mobileNavOpen" : ""}>
         <div className="brand">
           Ref<span>Assign</span>
         </div>
         <div className="tag">OFFICIALS MANAGEMENT</div>
-        <nav>
+        <nav onClick={() => setMobileNavOpen(false)}>
           {manager && (
             <>
               {adminNav.slice(0, 2).map((n) => (
@@ -277,8 +286,9 @@ export default function Home() {
           </button>
         </div>
       </aside>
-      <main>
+      <main className={manager ? "assignorWorkspace" : ""}>
         <header>
+          {manager && <button className="mobileMenuButton" aria-label="Open assignor navigation" aria-controls="primary-navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}>☰</button>}
           <div>
             <h1>
               {iowaPageName
@@ -419,6 +429,10 @@ export default function Home() {
         {isSuperAdmin && section === "Super Admin" && <SuperAdminManager />}
         {manager && <UndoCenter />}
       </main>
+      {manager && <nav className="assignorMobileNav" aria-label="Assignor quick navigation">
+        {[["Dashboard","Dashboard","⌂"],["Games","Games","▣"],["Assignments","Assign","✓"],["Officials","Officials","♟"]].map(([view,label,icon]) => <button key={view} className={section===view?"active":""} aria-current={section===view?"page":undefined} onClick={() => {setSection(view);setMobileNavOpen(false)}}><span>{icon}</span>{label}</button>)}
+        <button className={!["Dashboard","Games","Assignments","Officials"].includes(section)?"active":""} aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(value => !value)}><span>☰</span>More</button>
+      </nav>}
     </div>
   );
 }
