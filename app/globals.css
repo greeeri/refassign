@@ -757,6 +757,12 @@ td small {
   grid-template-columns: 1fr 1.5fr 1fr 70px 90px;
   gap: 6px;
 }
+.alternateOriginFields.alternateOriginActive input {
+  color: #111827;
+  background: #fff;
+  opacity: 1;
+  -webkit-text-fill-color: #111827;
+}
 @media (max-width: 900px) {
   .weekdayOriginHeader {
     display: none;
