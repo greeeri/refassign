@@ -174,26 +174,17 @@ export default function PayrollManager() {
   async function load() {
     setLoading(true);
     setError("");
-    const [assignmentResult, originResult] = await Promise.all([
-      supabase
-        .from("assignments")
-        .select(
-          "id,status,game_fee,mileage_miles,mileage_rate,payment_status,paid_at,payroll_notes,officials(id,first_name,last_name,home_latitude,home_longitude),sport_positions(name),games(game_number,starts_at,leagues(mileage_plan),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name,latitude,longitude))",
-        )
-        .not("official_id", "is", null)
-        .in("status", ["accepted", "confirmed"])
-        .order("assigned_at", { ascending: false }),
-      supabase
-        .from("official_weekday_origins")
-        .select(
-          "official_id,weekday,use_home,alternate_label,alternate_latitude,alternate_longitude",
-        ),
-    ]);
-    const loadError = assignmentResult.error || originResult.error;
-    if (loadError) setError(loadError.message);
-    else {
-      const origins = (originResult.data || []) as WeekdayOrigin[];
-      const loadedRows = (assignmentResult.data || []) as unknown as PayrollRow[];
+    try {
+      const response = await fetch("/api/payroll", { cache: "no-store" });
+      const result = (await response.json()) as {
+        assignments?: PayrollRow[];
+        weekdayOrigins?: WeekdayOrigin[];
+        error?: string;
+      };
+      if (!response.ok)
+        throw new Error(result.error || "Payroll could not be loaded.");
+      const origins = result.weekdayOrigins || [];
+      const loadedRows = result.assignments || [];
       setRows(
         loadedRows.map((row) => {
           const automaticMiles = calculatedMileage(row, origins);
@@ -203,6 +194,12 @@ export default function PayrollManager() {
         }),
       );
       setWeekdayOrigins(origins);
+    } catch (loadError) {
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Payroll could not be loaded.",
+      );
     }
     setLoading(false);
   }
