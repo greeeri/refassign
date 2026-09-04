@@ -1,6 +1,7 @@
 import './globals.css'
 import './official-mobile.css'
 import './assignor-mobile.css'
+import './brand-concept2.css'
 
 export const metadata = {
   title: 'Ref Pro Group | Better Officiating, Connected',
