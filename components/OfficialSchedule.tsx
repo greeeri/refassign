@@ -42,6 +42,24 @@ type Block = {
   notes: string | null;
   source_assignment_id: string | null;
 };
+type MentorObservation = {
+  request_id: string;
+  game_id: string;
+  game_number: string | null;
+  starts_at: string;
+  duration_minutes: number;
+  official_name: string;
+  home_name: string | null;
+  away_name: string | null;
+  location_name: string | null;
+  location_address: string | null;
+  location_city: string | null;
+  location_state: string | null;
+  league_name: string | null;
+  level_name: string | null;
+  request_details: string | null;
+  availability_block_id: string | null;
+};
 type Choice = { id: string; name: string };
 type Filter =
   | "All"
@@ -49,6 +67,7 @@ type Filter =
   | "Accepted"
   | "Game Changes"
   | "Past Games"
+  | "Mentor Visits"
   | "Availability Blocks";
 type View = "List" | "Calendar";
 const reasons = [
@@ -63,6 +82,7 @@ export default function OfficialSchedule() {
   const sb = useMemo(() => createClient(), []);
   const [assignments, setAssignments] = useState<Assignment[]>([]),
     [blocks, setBlocks] = useState<Block[]>([]),
+    [observations, setObservations] = useState<MentorObservation[]>([]),
     [locations, setLocations] = useState<Choice[]>([]),
     [teams, setTeams] = useState<Choice[]>([]),
     [crew, setCrew] = useState<Record<string, any[]>>({}),
@@ -98,7 +118,7 @@ export default function OfficialSchedule() {
       setLoading(false);
       return;
     }
-    const [a, b, l, t] = await Promise.all([
+    const [a, b, l, t, m] = await Promise.all([
       sb.rpc("my_official_assignments"),
       sb
         .from("official_availability_blocks")
@@ -108,13 +128,15 @@ export default function OfficialSchedule() {
         .eq("official_id", o.id),
       sb.from("locations").select("id,name"),
       sb.from("teams").select("id,name"),
+      sb.rpc("list_my_mentor_observations"),
     ]);
-    const e = a.error || b.error || l.error || t.error;
+    const e = a.error || b.error || l.error || t.error || m.error;
     if (e) setError(e.message);
     else {
       const rows = (a.data || []) as Assignment[];
       setAssignments(rows);
       setBlocks((b.data || []) as Block[]);
+      setObservations((m.data || []) as MentorObservation[]);
       setLocations((l.data || []) as Choice[]);
       setTeams((t.data || []) as Choice[]);
       const ids = [...new Set(rows.map((x) => x.game_id).filter(Boolean))];
@@ -227,8 +249,20 @@ export default function OfficialSchedule() {
         date: new Date(a.starts_at),
         a,
       })),
+    ...observations
+      .filter((observation) => {
+        const past = new Date(observation.starts_at).getTime() < now;
+        if (filter === "Past Games") return past;
+        return (filter === "All" || filter === "Mentor Visits") && !past;
+      })
+      .map((observation) => ({
+        kind: "mentor" as const,
+        date: new Date(observation.starts_at),
+        observation,
+      })),
     ...(filter === "All" || filter === "Availability Blocks"
       ? activeBlocks.flatMap((b) => {
+          if (filter === "All" && b.notes?.startsWith("Mentor observation:")) return [];
           if (b.block_type === "time" && b.starts_at)
             return [{ kind: "block" as const, date: new Date(b.starts_at), b }];
           if (b.block_type === "date" && b.start_date)
@@ -279,6 +313,7 @@ export default function OfficialSchedule() {
             "Needs Response",
             "Accepted",
             "Past Games",
+            "Mentor Visits",
             "Availability Blocks",
           ] as Filter[]
         ).map((x) => (
@@ -453,6 +488,27 @@ export default function OfficialSchedule() {
                     )}
                   </div>
                 </div>
+              ) : e.kind === "mentor" ? (
+                <div
+                  key={`m-${e.observation.request_id}`}
+                  className="mentorScheduleItem"
+                >
+                  <div>
+                    <b>{e.date.toLocaleDateString()}</b>
+                    <small>{e.date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</small>
+                  </div>
+                  <div>
+                    <b>Mentor Visit — {e.observation.official_name}</b>
+                    <small>{e.observation.home_name || "TBD"} vs {e.observation.away_name || "TBD"}</small>
+                    <small>{e.observation.game_number ? `Game ${e.observation.game_number} • ` : ""}{e.observation.league_name || ""}{e.observation.level_name ? ` • ${e.observation.level_name}` : ""}</small>
+                    {e.observation.request_details && <p><b>Development focus:</b> {e.observation.request_details}</p>}
+                  </div>
+                  <div>
+                    <b>{e.observation.location_name || "Location TBD"}</b>
+                    <small>{[e.observation.location_address, e.observation.location_city, e.observation.location_state].filter(Boolean).join(", ")}</small>
+                  </div>
+                  <span className="badge blue">Schedule Blocked</span>
+                </div>
               ) : (
                 <div
                   key={`b-${e.b.id}-${i}`}
@@ -585,13 +641,13 @@ export default function OfficialSchedule() {
                                 ? aStatus(e.a) === "Accepted"
                                   ? "#dcfce7"
                                   : "#fef9c3"
-                                : "#fee2e2",
+                                : e.kind === "mentor" ? "#dbeafe" : "#fee2e2",
                             color:
                               e.kind === "assignment"
                                 ? aStatus(e.a) === "Accepted"
                                   ? "#166534"
                                   : "#854d0e"
-                                : "#991b1b",
+                                : e.kind === "mentor" ? "#1d4ed8" : "#991b1b",
                             overflow: "hidden",
                             textOverflow: "ellipsis",
                             whiteSpace: "nowrap",
@@ -601,7 +657,9 @@ export default function OfficialSchedule() {
                         >
                           {e.kind === "assignment"
                             ? `${e.date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} ${crewPositionLabel(e.a.position_name)} — ${e.a.home_team || "TBD"}`
-                            : "Unavailable"}
+                            : e.kind === "mentor"
+                              ? `${e.date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} Mentor — ${e.observation.official_name}`
+                              : "Unavailable"}
                         </div>
                       ))}
                     </>
