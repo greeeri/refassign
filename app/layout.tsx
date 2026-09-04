@@ -3,8 +3,8 @@ import './official-mobile.css'
 import './assignor-mobile.css'
 
 export const metadata = {
-  title: 'RefAssign | Sports Officials Scheduling',
-  description: 'Multi-sport game and officials assignment management.'
+  title: 'Ref Pro Group | Better Officiating, Connected',
+  description: 'Ref Pro Group makes officiating easier to access, more efficient to develop, and simpler to assign and administer through the RefAssign platform.'
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
