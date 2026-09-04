@@ -155,6 +155,7 @@ function normalizedRecord(record: Record<string, unknown>) {
 export default function PayrollManager() {
   const supabase = useMemo(() => createClient(), []);
   const fileInput = useRef<HTMLInputElement>(null);
+  const geocodeBackfillStarted = useRef(false);
   const [rows, setRows] = useState<PayrollRow[]>([]);
   const [weekdayOrigins, setWeekdayOrigins] = useState<WeekdayOrigin[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
@@ -206,7 +207,36 @@ export default function PayrollManager() {
     setLoading(false);
   }
   useEffect(() => {
-    void load();
+    if (geocodeBackfillStarted.current) return;
+    geocodeBackfillStarted.current = true;
+    void (async () => {
+      await load();
+      try {
+        const response = await fetch("/api/geocode/backfill", { method: "POST" });
+        const result = (await response.json()) as {
+          updated?: number;
+          failed?: number;
+          error?: string;
+        };
+        if (!response.ok) throw new Error(result.error || "Address backfill failed.");
+        if (result.updated) {
+          setNotice(
+            `${result.updated} saved address${result.updated === 1 ? " was" : "es were"} located automatically. Mileage has been recalculated.`,
+          );
+          await load();
+        }
+        if (result.failed)
+          setError(
+            `${result.failed} address${result.failed === 1 ? " could" : "es could"} not be located. Check those street addresses, cities, and states.`,
+          );
+      } catch (backfillError) {
+        setError(
+          backfillError instanceof Error
+            ? backfillError.message
+            : "Existing addresses could not be located automatically.",
+        );
+      }
+    })();
   }, []);
 
   const mileagePlan = mileagePlanFor;
