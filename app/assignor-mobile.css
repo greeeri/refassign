@@ -34,57 +34,184 @@
     inset: 0;
     z-index: 1090;
     border: 0;
-    background: rgba(15, 23, 42, 0.58);
+    background: rgba(3, 18, 36, 0.68);
+    backdrop-filter: blur(2px);
   }
 
-  aside {
+  .refAssignBranded aside {
     z-index: 1100;
-    width: min(320px, 88vw);
-    padding: 22px 16px 100px;
+    width: min(330px, 90vw);
+    padding: 20px 14px calc(26px + env(safe-area-inset-bottom));
     transform: translateX(-105%);
     transition: transform 180ms ease;
-    box-shadow: 12px 0 35px rgba(15, 23, 42, 0.28);
+    box-shadow: 14px 0 38px rgba(0, 14, 32, 0.42);
+    background: linear-gradient(180deg,#031c38 0%,#06294c 55%,#031a33 100%);
+    border-right: 1px solid #164c77;
   }
 
-  aside.mobileNavOpen {
+  .refAssignBranded aside.mobileNavOpen {
     transform: translateX(0);
   }
 
-  aside .brand {
-    font-size: 25px;
+  .refAssignBranded .workspaceBrand {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px 4px 18px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid #ffffff18;
   }
 
-  aside .brand span {
+  .refAssignBranded .workspaceBrandMark {
+    width: 64px;
+    height: 48px;
+    flex: 0 0 64px;
+  }
+
+  .refAssignBranded aside .brand {
+    padding: 0;
+    color: #fff;
+    font-size: 22px;
+    font-style: italic;
+    letter-spacing: -1px;
+  }
+
+  .refAssignBranded aside .brand span {
+    color: #23a7ff;
     font-size: inherit;
   }
 
-  aside .tag,
-  aside .navParent,
-  aside .asideFoot {
+  .refAssignBranded aside .tag {
     display: block;
+    padding: 3px 0 0;
+    color: #b8c9d8;
+    font-size: 7px;
+    letter-spacing: 1px;
   }
 
-  aside nav button,
-  aside .navGroup button.subNav {
+  .refAssignBranded aside nav {
+    display: grid;
+    gap: 5px;
+  }
+
+  .refAssignBranded aside nav button,
+  .refAssignBranded aside .navGroup button.subNav {
+    width: 100%;
     height: auto;
-    min-height: 44px;
-    padding: 11px 12px;
+    min-height: 46px;
+    padding: 11px 13px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: #c7d6e4;
     font-size: 14px;
+    font-weight: 700;
+    text-align: left;
   }
 
-  aside .navGroup button.subNav {
-    padding-left: 28px;
+  .refAssignBranded aside nav button:hover {
+    background: #ffffff0b;
+    color: #fff;
   }
 
-  aside nav button::after {
-    content: none;
+  .refAssignBranded aside nav button.active {
+    background: linear-gradient(100deg,#0963c6,#087af1);
+    color: #fff;
+    box-shadow: 0 8px 18px #001a3560, inset 5px 0 #62d531;
   }
 
-  aside .navGroup button.subNav::before {
-    content: "›";
-    position: absolute;
-    left: 13px;
+  .refAssignBranded .topNavButton,
+  .refAssignBranded .navGroupButton {
+    display: flex !important;
+    align-items: center;
+    gap: 11px;
+  }
+
+  .refAssignBranded .navGroupButton b {
+    margin-left: auto;
+    color: #c7d6e4;
     font-size: 18px;
+  }
+
+  .refAssignBranded .sideNavIcon {
+    width: 27px;
+    height: 27px;
+    display: grid;
+    place-items: center;
+    flex: 0 0 27px;
+    color: #dcecff;
+    font-size: 20px;
+  }
+
+  .refAssignBranded .collapsibleNavGroup {
+    display: grid;
+    gap: 3px;
+  }
+
+  .refAssignBranded .navChildren {
+    display: grid;
+    gap: 3px;
+    margin: 1px 0 7px 39px;
+    padding-left: 10px;
+    border-left: 1px solid #4d7597;
+  }
+
+  .refAssignBranded aside nav .navChildren button {
+    min-height: 38px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    color: #a9bfd1;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .refAssignBranded aside nav .navChildren button.childActive {
+    background: #0b5792;
+    color: #fff;
+    box-shadow: inset 3px 0 #62d531;
+  }
+
+  .refAssignBranded .iowaSoccerNavButton {
+    display: flex !important;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .refAssignBranded .iowaSoccerNavLogo {
+    width: 42px;
+    height: 42px;
+    flex: 0 0 42px;
+    object-fit: contain;
+  }
+
+  .refAssignBranded .mentorBrainIcon {
+    display: inline-grid;
+    place-items: center;
+    width: 22px;
+    margin-right: 7px;
+    font-size: 18px;
+  }
+
+  .refAssignBranded aside .asideFoot {
+    display: block;
+    margin-top: auto;
+    padding: 18px 12px 0;
+    border-top: 1px solid #ffffff1c;
+    color: #9db2c6;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .refAssignBranded .workspaceParentBrand {
+    color: #62d531;
+  }
+
+  .refAssignBranded .signOutButton {
+    min-height: 42px;
+    margin-top: 12px;
+    border: 1px solid #ffffff25;
+    border-radius: 8px;
+    color: #fff;
   }
 
   .assignorWorkspace {
@@ -122,13 +249,12 @@
   .assignorWorkspace > header > .headerActions {
     grid-column: 1 / -1;
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: 1fr;
     width: 100%;
     gap: 7px;
   }
 
   .assignorWorkspace > header > .headerActions label {
-    grid-column: 1 / -1;
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     align-items: center;
@@ -139,14 +265,6 @@
     width: 100% !important;
     min-width: 0 !important;
     margin-left: 0 !important;
-  }
-
-  .assignorWorkspace > header > .headerActions > button {
-    min-width: 0;
-    min-height: 44px;
-    padding: 9px 5px !important;
-    justify-content: center;
-    font-size: 11px;
   }
 
   .assignorWorkspace .card {
@@ -225,20 +343,6 @@
     border: 1px solid #cbd5e1;
     border-radius: 10px;
     background: #f8fafc;
-  }
-
-  .assignmentDirectFilters label {
-    display: grid;
-    gap: 5px;
-    color: #475569;
-    font-size: 12px;
-    font-weight: 800;
-  }
-
-  .assignmentDirectFilters span {
-    color: #2563eb;
-    font-size: 11px;
-    font-weight: 700;
   }
 
   .assignmentGameTable {
@@ -325,11 +429,6 @@
   .assignmentMain td:nth-child(4)::before { content: "Status"; }
   .assignmentMain td:nth-child(5)::before { content: "Candidates"; }
 
-  .assignmentMain td select,
-  .assignmentMain td button {
-    max-width: 100%;
-  }
-
   .assignorMobileNav {
     position: fixed;
     left: 0;
@@ -340,8 +439,8 @@
     grid-template-columns: repeat(5, 1fr);
     padding: 6px max(5px, env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(5px, env(safe-area-inset-left));
     border-top: 1px solid #cbd5e1;
-    background: rgba(255, 255, 255, 0.97);
-    box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.08);
+    background: rgba(255,255,255,.97);
+    box-shadow: 0 -8px 24px rgba(15,23,42,.08);
   }
 
   .assignorMobileNav button {
@@ -357,7 +456,6 @@
     color: #64748b;
     font-size: 9px;
     font-weight: 800;
-    cursor: pointer;
   }
 
   .assignorMobileNav button span {
@@ -366,8 +464,9 @@
   }
 
   .assignorMobileNav button.active {
-    background: #eff6ff;
-    color: #1d4ed8;
+    background: linear-gradient(100deg,#0963c6,#087af1);
+    color: #fff;
+    box-shadow: inset 4px 0 #62d531;
   }
 
   .globalCopyright {
@@ -378,9 +477,5 @@
 @media (max-width: 390px) {
   .assignorWorkspace > header > .headerActions {
     grid-template-columns: 1fr;
-  }
-
-  .assignorWorkspace > header > .headerActions label {
-    grid-column: 1;
   }
 }
