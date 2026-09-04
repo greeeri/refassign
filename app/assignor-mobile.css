@@ -1,0 +1,311 @@
+.mobileMenuButton,
+.mobileNavBackdrop,
+.assignorMobileNav {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .mobileNavBackdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 1090;
+    border: 0;
+    background: rgba(15, 23, 42, 0.58);
+  }
+
+  aside {
+    z-index: 1100;
+    width: min(320px, 88vw);
+    padding: 22px 16px 100px;
+    transform: translateX(-105%);
+    transition: transform 180ms ease;
+    box-shadow: 12px 0 35px rgba(15, 23, 42, 0.28);
+  }
+
+  aside.mobileNavOpen {
+    transform: translateX(0);
+  }
+
+  aside .brand {
+    font-size: 25px;
+  }
+
+  aside .brand span {
+    font-size: inherit;
+  }
+
+  aside .tag,
+  aside .navParent,
+  aside .asideFoot {
+    display: block;
+  }
+
+  aside nav button,
+  aside .navGroup button.subNav {
+    height: auto;
+    min-height: 44px;
+    padding: 11px 12px;
+    font-size: 14px;
+  }
+
+  aside .navGroup button.subNav {
+    padding-left: 28px;
+  }
+
+  aside nav button::after {
+    content: none;
+  }
+
+  aside .navGroup button.subNav::before {
+    content: "›";
+    position: absolute;
+    left: 13px;
+    font-size: 18px;
+  }
+
+  .assignorWorkspace {
+    margin-left: 0;
+    width: 100%;
+    padding: 16px 12px 100px;
+  }
+
+  .assignorWorkspace > header {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr);
+    align-items: start;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  .mobileMenuButton {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    background: #fff;
+    color: #172033;
+    font-size: 22px;
+    cursor: pointer;
+  }
+
+  .assignorWorkspace > header h1 {
+    font-size: 22px;
+    line-height: 1.15;
+  }
+
+  .assignorWorkspace > header > .headerActions {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+    gap: 7px;
+  }
+
+  .assignorWorkspace > header > .headerActions label {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+  }
+
+  .assignorWorkspace > header > .headerActions label select {
+    width: 100% !important;
+    min-width: 0 !important;
+    margin-left: 0 !important;
+  }
+
+  .assignorWorkspace > header > .headerActions > button {
+    min-width: 0;
+    min-height: 44px;
+    padding: 9px 5px !important;
+    justify-content: center;
+    font-size: 11px;
+  }
+
+  .assignorWorkspace .card {
+    padding: 14px;
+    border-radius: 10px;
+  }
+
+  .assignorWorkspace .cardHead,
+  .assignorWorkspace .toolbar,
+  .assignorWorkspace .actionbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .assignorWorkspace .cardHead > .headerActions,
+  .assignorWorkspace .actionbar > .headerActions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .assignorWorkspace .toolbar input,
+  .assignorWorkspace .toolbar select,
+  .assignorWorkspace .actionbar button,
+  .assignorWorkspace .cardHead button {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .assignorWorkspace .formGrid,
+  .assignorWorkspace .officialForm,
+  .assignorWorkspace .metrics,
+  .assignorWorkspace .columns {
+    grid-template-columns: 1fr;
+  }
+
+  .assignorWorkspace .tableWrap {
+    margin-left: -5px;
+    margin-right: -5px;
+    padding-bottom: 5px;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .assignorWorkspace .tableWrap::after {
+    content: "Swipe table sideways to see more";
+    display: block;
+    padding: 7px 5px 0;
+    color: #94a3b8;
+    font-size: 10px;
+    text-align: center;
+  }
+
+  .assignorWorkspace button,
+  .assignorWorkspace select,
+  .assignorWorkspace input[type="date"] {
+    min-height: 44px;
+  }
+
+  .assignorWorkspace input[type="checkbox"] {
+    width: 22px;
+    height: 22px;
+  }
+
+  .assignmentLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .availableOfficialsPanel {
+    position: static;
+    max-height: none;
+  }
+
+  .assignmentMain .tableWrap {
+    overflow: visible;
+  }
+
+  .assignmentMain .tableWrap::after,
+  .assignmentMain thead {
+    display: none;
+  }
+
+  .assignmentMain table,
+  .assignmentMain tbody,
+  .assignmentMain tr,
+  .assignmentMain td {
+    display: block;
+    width: 100%;
+  }
+
+  .assignmentMain tr {
+    margin-bottom: 12px;
+    padding: 12px;
+    border: 1px solid #dbe3ef;
+    border-radius: 10px;
+    background: #fff;
+  }
+
+  .assignmentMain td {
+    display: grid;
+    grid-template-columns: 105px minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+    padding: 9px 0;
+    border-bottom: 1px solid #edf1f5;
+  }
+
+  .assignmentMain td:last-child {
+    border-bottom: 0;
+  }
+
+  .assignmentMain td::before {
+    color: #64748b;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+
+  .assignmentMain td:nth-child(1)::before { content: "Self Assign"; }
+  .assignmentMain td:nth-child(2)::before { content: "Position"; }
+  .assignmentMain td:nth-child(3)::before { content: "Official"; }
+  .assignmentMain td:nth-child(4)::before { content: "Status"; }
+  .assignmentMain td:nth-child(5)::before { content: "Candidates"; }
+
+  .assignmentMain td select,
+  .assignmentMain td button {
+    max-width: 100%;
+  }
+
+  .assignorMobileNav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1080;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    padding: 6px max(5px, env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(5px, env(safe-area-inset-left));
+    border-top: 1px solid #cbd5e1;
+    background: rgba(255, 255, 255, 0.97);
+    box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.08);
+  }
+
+  .assignorMobileNav button {
+    display: grid;
+    justify-items: center;
+    gap: 2px;
+    min-width: 0;
+    min-height: 50px;
+    padding: 4px 2px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: #64748b;
+    font-size: 9px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+
+  .assignorMobileNav button span {
+    font-size: 20px;
+    line-height: 1;
+  }
+
+  .assignorMobileNav button.active {
+    background: #eff6ff;
+    color: #1d4ed8;
+  }
+
+  .globalCopyright {
+    display: none;
+  }
+}
+
+@media (max-width: 390px) {
+  .assignorWorkspace > header > .headerActions {
+    grid-template-columns: 1fr;
+  }
+
+  .assignorWorkspace > header > .headerActions label {
+    grid-column: 1;
+  }
+}
