@@ -5,6 +5,7 @@ import './brand-concept2.css'
 import './officials-whistle.css'
 import './iowa-approved-icon.css'
 import './iowa-training.css'
+import AssignmentCommunicationsDock from '../components/AssignmentCommunicationsDock'
 
 export const metadata = {
   title: 'Ref Pro Group | Better Officiating, Connected',
@@ -12,5 +13,5 @@ export const metadata = {
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return <html lang="en"><body>{children}<footer className="globalCopyright">© 2026 Ref Pro Group, LLC. All rights reserved.</footer></body></html>
+  return <html lang="en"><body>{children}<AssignmentCommunicationsDock/><footer className="globalCopyright">© 2026 Ref Pro Group, LLC. All rights reserved.</footer></body></html>
 }
