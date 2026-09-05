@@ -3,6 +3,7 @@ import './official-mobile.css'
 import './assignor-mobile.css'
 import './brand-concept2.css'
 import './iowa-soccer-nav.css'
+import './officials-whistle.css'
 import IowaSoccerNavEnhancer from '../components/IowaSoccerNavEnhancer'
 
 export const metadata = {
