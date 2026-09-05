@@ -1,8 +1,6 @@
 "use client";
 import { useEffect } from "react";
 
-const APPROVED_LOGO = "/api/assets/iowa-referee-development?v=044d2cc1";
-
 export default function IowaSoccerNavEnhancer(){
   useEffect(()=>{
     const apply=()=>{
@@ -11,8 +9,7 @@ export default function IowaSoccerNavEnhancer(){
 
       const existing=nav.querySelector<HTMLDivElement>(".iowaSoccerNavGroup");
       if(existing){
-        const img=existing.querySelector<HTMLImageElement>(".iowaSoccerNavButton img");
-        if(img && img.getAttribute("src")!==APPROVED_LOGO) img.src=APPROVED_LOGO;
+        existing.querySelectorAll(".iowaSoccerNavButton img").forEach(img=>img.remove());
         return;
       }
 
@@ -27,7 +24,7 @@ export default function IowaSoccerNavEnhancer(){
 
       const group=document.createElement("div"); group.className="iowaSoccerNavGroup";
       const parent=document.createElement("button"); parent.type="button"; parent.className="iowaSoccerNavButton"; parent.setAttribute("aria-expanded","false");
-      parent.innerHTML=`<img src="${APPROVED_LOGO}" alt="Iowa Soccer Referee Development Program"/><span>Iowa Soccer</span><b>›</b>`;
+      parent.innerHTML='<span>Iowa Soccer</span><b>›</b>';
       const children=document.createElement("div"); children.className="iowaSoccerNavChildren"; children.hidden=true;
       const labels=new Map<HTMLButtonElement,string>();
       if(registration) labels.set(registration,"Registration");
