@@ -5,6 +5,7 @@ import './brand-concept2.css'
 import './officials-whistle.css'
 import './iowa-approved-icon.css'
 import './iowa-training.css'
+import './iowa-quiz.css'
 import AssignmentCommunicationsDock from '../components/AssignmentCommunicationsDock'
 
 export const metadata = {
