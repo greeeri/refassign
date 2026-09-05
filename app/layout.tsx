@@ -3,6 +3,7 @@ import './official-mobile.css'
 import './assignor-mobile.css'
 import './brand-concept2.css'
 import './officials-whistle.css'
+import './iowa-approved-icon.css'
 
 export const metadata = {
   title: 'Ref Pro Group | Better Officiating, Connected',
