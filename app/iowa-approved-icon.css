@@ -1,0 +1,2 @@
+.iowaSoccerNavButton::before { content: ''; display: block; width: 30px; height: 34px; min-width: 30px; flex: 0 0 30px; background-image: url('/api/assets/iowa-referee-development'); background-position: center; background-size: contain; background-repeat: no-repeat; }
+.iowaSoccerNavButton { display: flex !important; align-items: center !important; gap: 10px !important; }
