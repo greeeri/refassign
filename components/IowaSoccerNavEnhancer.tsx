@@ -16,7 +16,7 @@ export default function IowaSoccerNavEnhancer(){
       if(!items.length) return;
       const group=document.createElement("div"); group.className="iowaSoccerNavGroup";
       const parent=document.createElement("button"); parent.type="button"; parent.className="iowaSoccerNavButton"; parent.setAttribute("aria-expanded","false");
-      parent.innerHTML='<img src="/iowa-referee-development-icon.svg" alt=""/><span>Iowa Soccer</span><b>›</b>';
+      parent.innerHTML='<img src="/api/assets/iowa-referee-development" alt="Iowa Soccer Referee Development Program"/><span>Iowa Soccer</span><b>›</b>';
       const children=document.createElement("div"); children.className="iowaSoccerNavChildren"; children.hidden=true;
       const labels=new Map<HTMLButtonElement,string>();
       if(registration) labels.set(registration,"Registration");
