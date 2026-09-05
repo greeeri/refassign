@@ -1,7 +1,7 @@
 "use client";
 import { useEffect } from "react";
 
-const IOWA_LOGO = "/api/assets/iowa-referee-development?v=2a93aecf";
+const IOWA_LOGO = "/api/assets/iowa-referee-development?v=30d46091";
 
 export default function IowaSoccerNavEnhancer(){
   useEffect(()=>{
