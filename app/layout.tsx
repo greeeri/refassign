@@ -7,7 +7,6 @@ import "./iowa-approved-icon.css";
 import "./iowa-training.css";
 import "./iowa-quiz.css";
 import "./iowa-support.css";
-import AssignmentCommunicationsDock from "../components/AssignmentCommunicationsDock";
 
 export const metadata = {
   title: "Ref Pro Group | Better Officiating, Connected",
@@ -24,7 +23,6 @@ export default function RootLayout({
     <html lang="en">
       <body>
         {children}
-        <AssignmentCommunicationsDock />
         <footer className="globalCopyright">
           © 2026 Ref Pro Group, LLC. All rights reserved.
         </footer>
