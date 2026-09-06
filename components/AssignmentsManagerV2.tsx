@@ -2076,7 +2076,7 @@ export default function AssignmentsManagerV2() {
             >
               {publishing
                 ? "Publishing & Sending…"
-                : `Publish${unpublishedCount ? ` (${unpublishedCount})` : ""}`}
+                : `Send Assignments${unpublishedCount ? ` (${unpublishedCount})` : ""}`}
             </button>
           </div>
         </div>
@@ -2965,7 +2965,7 @@ export default function AssignmentsManagerV2() {
             id="selected-game-assignment"
             className="card assignmentMain"
           >
-            <div className="cardHead">
+            <div className="cardHead selectedGameStickyHeader">
               <div>
                 <h2>
                   {game.home?.name || "TBD"} vs {game.away?.name || "TBD"}
@@ -2987,6 +2987,13 @@ export default function AssignmentsManagerV2() {
                   {game.location?.name || "TBD"} •{" "}
                   <b>{game.officials_needed} assignment slots</b>
                 </p>
+                <div className="selectedGameSummary" aria-label="Assignment summary">
+                  <span><b>{game.officials_needed}</b> Positions</span>
+                  <span><b>{gameAssignments.filter((item) => item.status !== "declined").length}</b> Assigned</span>
+                  <span><b>{Math.max(0, game.officials_needed - gameAssignments.filter((item) => item.status !== "declined").length)}</b> Open</span>
+                  <span><b>{gameAssignments.filter((item) => item.status === "proposed" && item.published_at).length}</b> Awaiting</span>
+                  <span><b>{gameAssignments.filter((item) => ["accepted", "confirmed"].includes(item.status)).length}</b> Confirmed</span>
+                </div>
               </div>
             </div>
             {gamePositions.length === 0 ? (
@@ -3064,7 +3071,7 @@ export default function AssignmentsManagerV2() {
                                   }
                                   style={{ padding: "4px 7px", fontSize: 10 }}
                                 >
-                                  Remove
+                                  Close Self Assign
                                 </button>
                               </div>
                             ) : (
@@ -3120,6 +3127,7 @@ export default function AssignmentsManagerV2() {
                                 {futureBadge(current.official_id)}
                                 {canManage && (
                                   <span
+                                    className="assignmentPositionControls"
                                     style={{
                                       display: "inline-flex",
                                       gap: 4,
@@ -3219,7 +3227,7 @@ export default function AssignmentsManagerV2() {
                                       >
                                         {confirming === current.id
                                           ? "Confirming…"
-                                          : "Confirm"}
+                                          : "Confirm Official"}
                                       </button>
                                     </div>
                                   )}
@@ -3280,7 +3288,7 @@ export default function AssignmentsManagerV2() {
                                 void assign(pos.id, e.target.value)
                               }
                             >
-                              <option value="">Open / Unassign</option>
+                              <option value="">Select Official / Leave Open</option>
                               {list.map((o) => (
                                 <option key={o.id} value={o.id}>
                                   {o.reasons.length ? "⚠ OVERRIDE — " : ""}
@@ -3299,6 +3307,30 @@ export default function AssignmentsManagerV2() {
                                 </option>
                               ))}
                             </select>
+                            <details className="mobileAssignmentDetails">
+                              <summary>More Details</summary>
+                              <div>
+                                <small>Slot {index + 1} of {game.officials_needed} • {label}</small>
+                                <small>Self Assign: {isSelfAssignOpen(game.id, pos.id) ? "Open" : "Closed"}</small>
+                                {!current && isSelfAssignOpen(game.id, pos.id) && (
+                                  <button
+                                    type="button"
+                                    className="secondary"
+                                    disabled={!canManage || selfAssignSaving}
+                                    onClick={() => void withdrawSelfAssignPosition(game.id, pos.id)}
+                                  >
+                                    Close Self Assign
+                                  </button>
+                                )}
+                                {current && canManage && (
+                                  <div className="mobilePositionMove">
+                                    <span>Move official:</span>
+                                    <button type="button" aria-label="Move official to previous position" disabled={index === 0 || movingAssignment === current.id} onClick={() => void moveAssignment(game.id, current.id, -1)}>←</button>
+                                    <button type="button" aria-label="Move official to next position" disabled={index === gamePositions.length - 1 || movingAssignment === current.id} onClick={() => void moveAssignment(game.id, current.id, 1)}>→</button>
+                                  </div>
+                                )}
+                              </div>
+                            </details>
                             {declined && !current && (
                               <div
                                 style={{
@@ -3492,7 +3524,7 @@ export default function AssignmentsManagerV2() {
                               >
                                 {overrideOfficial === o.id
                                   ? "Cancel Override"
-                                  : "Override"}
+                                  : "Override Eligibility"}
                               </button>
                               {overrideOfficial === o.id && (
                                 <div style={{ marginTop: 6 }}>
