@@ -1,9 +1,10 @@
 "use client";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, Fragment, useEffect, useMemo, useState } from "react";
 import { createClient } from "../lib/supabase/client";
 import { coordinatesForVenue } from "../lib/client-geocode";
 import TeamsRosterManager from "./TeamsRosterManager";
 import LocationsRosterManager from "./LocationsRosterManager";
+import LeagueDocumentsManager from "./LeagueDocumentsManager";
 type Sport = { id: string; name: string };
 type Level = { id: string; name: string; officials_needed: number };
 type MileagePlan = "one_way" | "round_trip" | "actual" | "none";
@@ -67,6 +68,7 @@ export default function GameSetup({ view }: { view: View }) {
     });
   const [editingTeamId, setEditingTeamId] = useState<string | null>(null),
     [editingLocationId, setEditingLocationId] = useState<string | null>(null),
+    [openLeagueDocuments, setOpenLeagueDocuments] = useState<string | null>(null),
     [savingPower, setSavingPower] = useState(""),
     [showTeamImport, setShowTeamImport] = useState(false),
     [showLocationImport, setShowLocationImport] = useState(false),
@@ -363,12 +365,14 @@ export default function GameSetup({ view }: { view: View }) {
                 <tr>
                   <th>League</th>
                   <th>Mileage Plan</th>
+                  <th>Documents &amp; Policies</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
                 {leagues.map((l) => (
-                  <tr key={l.id}>
+                  <Fragment key={l.id}>
+                  <tr>
                     <td>
                       <b>{l.name}</b>
                     </td>
@@ -392,6 +396,15 @@ export default function GameSetup({ view }: { view: View }) {
                     </td>
                     <td>
                       <button
+                        className="secondary"
+                        type="button"
+                        onClick={() => setOpenLeagueDocuments(openLeagueDocuments === l.id ? null : l.id)}
+                      >
+                        {openLeagueDocuments === l.id ? "Close Documents" : "Manage Documents"}
+                      </button>
+                    </td>
+                    <td>
+                      <button
                         className="tableButton"
                         onClick={() => remove("leagues", l.id)}
                       >
@@ -399,6 +412,14 @@ export default function GameSetup({ view }: { view: View }) {
                       </button>
                     </td>
                   </tr>
+                  {openLeagueDocuments === l.id && (
+                    <tr className="leagueDocumentsTableRow">
+                      <td colSpan={4}>
+                        <LeagueDocumentsManager leagueId={l.id} leagueName={l.name} />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

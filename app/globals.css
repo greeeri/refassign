@@ -1450,3 +1450,25 @@ td small {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+.leagueDocumentsTableRow > td { padding: 0 !important; background: #f8fafc; }
+.leagueDocumentsPanel { padding: 20px; border-left: 4px solid #16a34a; }
+.leagueDocumentsHead h3 { margin: 0 0 4px; }
+.leagueDocumentsHead p { margin: 0 0 16px; color: #64748b; }
+.leagueDocumentForm { display: grid; grid-template-columns: minmax(180px, 1.6fr) minmax(130px, .7fr) minmax(220px, 1.4fr) auto; gap: 12px; align-items: end; }
+.leagueDocumentForm label { display: grid; gap: 6px; font-weight: 700; font-size: 14px; }
+.leagueDocumentForm input, .leagueDocumentForm select { width: 100%; }
+.leagueDocumentFile small { color: #64748b; font-weight: 500; }
+.leagueDocumentsEmpty { margin: 18px 0 0; color: #64748b; }
+.leagueDocumentList { margin-top: 18px; display: grid; gap: 8px; }
+.leagueDocumentRow { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid #dbe4ee; border-radius: 10px; background: #fff; }
+.leagueDocumentIcon { display: grid; place-items: center; width: 38px; height: 38px; flex: 0 0 38px; border-radius: 9px; background: #dcfce7; color: #15803d; font-size: 20px; }
+.leagueDocumentDetails { min-width: 0; flex: 1; }
+.leagueDocumentDetails b, .leagueDocumentDetails small { display: block; }
+.leagueDocumentDetails small { margin-top: 4px; color: #64748b; overflow-wrap: anywhere; }
+.leagueDocumentActions { display: flex; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 900px) {
+  .leagueDocumentForm { grid-template-columns: 1fr; }
+  .leagueDocumentRow { align-items: flex-start; flex-wrap: wrap; }
+  .leagueDocumentActions { width: 100%; padding-left: 50px; }
+}
