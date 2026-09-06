@@ -1,2 +1,24 @@
-.iowaSoccerNavButton::before { content: ''; display: block; width: 30px; height: 34px; min-width: 30px; flex: 0 0 30px; background-image: url('/api/assets/iowa-referee-development'); background-position: center; background-size: contain; background-repeat: no-repeat; }
-.iowaSoccerNavButton { display: flex !important; align-items: center !important; gap: 10px !important; }
+.refAssignBranded .iowaSoccerNavButton::before {
+  content: '';
+  display: block;
+  width: 40px;
+  height: 48px;
+  min-width: 40px;
+  flex: 0 0 40px;
+  background: url('/api/assets/iowa-referee-development?v=correct-mobile-20260906-2') center / contain no-repeat !important;
+}
+
+.refAssignBranded .iowaSoccerNavButton {
+  display: flex !important;
+  align-items: center !important;
+  gap: 9px !important;
+}
+
+@media (max-width: 900px) {
+  .refAssignBranded .iowaSoccerNavButton::before {
+    width: 38px;
+    height: 46px;
+    min-width: 38px;
+    flex-basis: 38px;
+  }
+}
