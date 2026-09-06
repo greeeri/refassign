@@ -1850,20 +1850,11 @@ export default function AssignmentsManagerV2() {
           : isRainOut
             ? "#1e40af"
             : null;
-    const gamePositionsForRow = positions
-      .filter((p) => p.sport_id === g.sport_id)
-      .sort((a, b) => a.sort_order - b.sort_order)
-      .slice(0, Math.max(0, g.officials_needed));
     return (
       <div
         key={g.id}
+        className="assignmentGameRow"
         style={{
-          display: "grid",
-          gridTemplateColumns:
-            "28px minmax(120px,1.45fr) minmax(85px,.8fr) 72px 54px 94px minmax(210px,1.8fr)",
-          alignItems: "center",
-          gap: 6,
-          padding: "8px 9px",
           borderBottom: `1px solid ${statusBorder || (linked ? "#bfdbfe" : "#e2e8f0")}`,
           background:
             statusBackground ||
@@ -1898,30 +1889,16 @@ export default function AssignmentsManagerV2() {
             color: "inherit",
           }}
         >
-          <span style={{ fontSize: 13, fontWeight: 800, lineHeight: 1.2 }}>
+          <span className="assignmentGameName">
             {showChain && (
-              <span aria-hidden="true" style={{ marginRight: 8 }}>
-                🔗
+              <span aria-hidden="true" className="assignmentLinkedArrow">
+                ↳
               </span>
             )}
             {g.home?.name || "TBD"} vs {g.away?.name || "TBD"}
-            <small
-              style={{
-                marginLeft: 7,
-                color: isRainOut ? "#bfdbfe" : "#64748b",
-              }}
-            >
-              • {g.game_number}
-            </small>
           </span>
-          <small
-            style={{
-              display: "block",
-              color: isRainOut ? "#dbeafe" : "#64748b",
-              marginTop: 3,
-            }}
-          >
-            {d.toLocaleDateString()}
+          <small style={{ color: isRainOut ? "#dbeafe" : undefined }}>
+            {g.game_number}
           </small>
         </button>
         <span
@@ -1933,15 +1910,9 @@ export default function AssignmentsManagerV2() {
         >
           {g.location?.name || "TBD"}
         </span>
-        <span
-          style={{
-            color: isRainOut ? "#fff" : "#475569",
-            fontSize: 11,
-            fontWeight: 700,
-            whiteSpace: "nowrap",
-          }}
-        >
-          {d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+        <span className="assignmentGameDate" style={{ color: isRainOut ? "#fff" : undefined }}>
+          <span>{d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}</span>
+          <small>{d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</small>
         </span>
         <span
           title="Average of the home and away team power rankings"
@@ -1971,233 +1942,18 @@ export default function AssignmentsManagerV2() {
             </option>
           ))}
         </select>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "flex-end",
-            gap: "4px 8px",
-            flexWrap: "wrap",
-            fontSize: 10,
-          }}
-        >
+        <div className="assignmentStatusCell">
           <span
             title={completeness.detail}
+            className="assignmentStatusBadge"
             style={{
               border: `1px solid ${completeness.color}`,
               color: isRainOut ? "#fff" : completeness.color,
               background: isRainOut ? "rgba(255,255,255,.12)" : "#fff",
-              borderRadius: 999,
-              padding: "3px 7px",
-              fontWeight: 900,
-              whiteSpace: "nowrap",
             }}
           >
             {completeness.label}
           </span>
-          {gamePositionsForRow.map((pos, positionIndex) => {
-            const assignment = assignments.find(
-              (item) =>
-                item.game_id === g.id &&
-                item.position_id === pos.id &&
-                item.status !== "declined",
-            );
-            const official = assignment
-              ? officials.find((item) => item.id === assignment.official_id)
-              : undefined;
-            const selfAssignOpen = isSelfAssignOpen(g.id, pos.id);
-            const selfAssignSelectionKey = selfAssignKey(g.id, pos.id);
-            const color = !assignment
-              ? "#dc2626"
-              : !assignment.published_at
-                ? "#2563eb"
-                : ["accepted", "confirmed"].includes(assignment.status)
-                  ? "#16a34a"
-                  : "#ca8a04";
-            return (
-              <div
-                key={pos.id}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 5,
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {!assignment && canManage && !selfAssignOpen && (
-                  <input
-                    type="checkbox"
-                    checked={selfAssignSelected.includes(
-                      selfAssignSelectionKey,
-                    )}
-                    disabled={selfAssignSaving}
-                    aria-label={`Select ${pos.name} on game ${g.game_number} for Self Assign`}
-                    title="Select this unpublished open position for Self Assign"
-                    onChange={() => toggleSelfAssignSelection(g.id, pos.id)}
-                  />
-                )}
-                <span>
-                  <b
-                    style={{
-                      color: isRainOut
-                        ? "#bfdbfe"
-                        : assignment
-                          ? "#64748b"
-                          : "#dc2626",
-                    }}
-                  >
-                    {shortPositionName(pos.name)}
-                  </b>
-                  {official ? (
-                    <b style={{ color: isRainOut ? "#fff" : color }}>
-                      {" "}
-                      {official.first_name} {official.last_name}
-                    </b>
-                  ) : (
-                    <b style={{ color: "#dc2626" }}> Unassigned</b>
-                  )}
-                </span>
-                {!assignment && selfAssignOpen && (
-                  <>
-                    <span className="badge green">Self Assign Open</span>
-                    {canManage && (
-                      <button
-                        type="button"
-                        className="secondary"
-                        disabled={selfAssignSaving}
-                        onClick={() =>
-                          void withdrawSelfAssignPosition(g.id, pos.id)
-                        }
-                        style={{ padding: "4px 7px", fontSize: 10 }}
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </>
-                )}
-                {assignment && canManage && (
-                  <>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        gap: 3,
-                        marginRight: 2,
-                        alignItems: "center",
-                      }}
-                    >
-                      <button
-                        type="button"
-                        aria-label={`Move ${official ? `${official.first_name} ${official.last_name}` : "official"} to the previous position`}
-                        title="Move left; swaps with the adjacent official"
-                        disabled={
-                          positionIndex === 0 ||
-                          movingAssignment === assignment.id
-                        }
-                        onClick={() =>
-                          void moveAssignment(g.id, assignment.id, -1)
-                        }
-                        style={{
-                          padding: "3px 5px",
-                          fontSize: 12,
-                          lineHeight: 1,
-                          borderRadius: 6,
-                          border: "1px solid #1d4ed8",
-                          background:
-                            positionIndex === 0 ? "#cbd5e1" : "#2563eb",
-                          color: "#fff",
-                          fontWeight: 900,
-                          cursor:
-                            positionIndex === 0 ? "not-allowed" : "pointer",
-                        }}
-                      >
-                        ←
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`Move ${official ? `${official.first_name} ${official.last_name}` : "official"} to the next position`}
-                        title="Move right; swaps with the adjacent official"
-                        disabled={
-                          positionIndex === gamePositionsForRow.length - 1 ||
-                          movingAssignment === assignment.id
-                        }
-                        onClick={() =>
-                          void moveAssignment(g.id, assignment.id, 1)
-                        }
-                        style={{
-                          padding: "3px 5px",
-                          fontSize: 12,
-                          lineHeight: 1,
-                          borderRadius: 6,
-                          border: "1px solid #1d4ed8",
-                          background:
-                            positionIndex === gamePositionsForRow.length - 1
-                              ? "#cbd5e1"
-                              : "#2563eb",
-                          color: "#fff",
-                          fontWeight: 900,
-                          cursor:
-                            positionIndex === gamePositionsForRow.length - 1
-                              ? "not-allowed"
-                              : "pointer",
-                        }}
-                      >
-                        →
-                      </button>
-                    </span>
-                    <button
-                      type="button"
-                      disabled={
-                        confirming === assignment.id ||
-                        !assignment.published_at ||
-                        assignment.status === "confirmed"
-                      }
-                      title={
-                        !assignment.published_at
-                          ? "Publish this assignment before confirming it"
-                          : assignment.status === "confirmed"
-                            ? "This assignment is confirmed"
-                            : "Confirm this official"
-                      }
-                      onClick={() => void confirmAssignment(assignment)}
-                      style={{
-                        background: "#facc15",
-                        color: "#713f12",
-                        border: "1px solid #eab308",
-                        borderRadius: 6,
-                        padding: "3px 5px",
-                        fontSize: 9,
-                        fontWeight: 800,
-                        cursor:
-                          !assignment.published_at ||
-                          assignment.status === "confirmed"
-                            ? "not-allowed"
-                            : "pointer",
-                        opacity:
-                          !assignment.published_at ||
-                          assignment.status === "confirmed"
-                            ? 0.55
-                            : 1,
-                      }}
-                    >
-                      {confirming === assignment.id
-                        ? "Confirming…"
-                        : assignment.status === "confirmed"
-                          ? "Confirmed"
-                          : "Confirm"}
-                    </button>
-                    <button
-                      type="button"
-                      className="secondary"
-                      disabled={saving === pos.id}
-                      onClick={() => void unassign(assignment.id, pos.id)}
-                      style={{ padding: "3px 5px", fontSize: 9 }}
-                    >
-                      {saving === pos.id ? "Unassigning…" : "Unassign"}
-                    </button>
-                  </>
-                )}
-              </div>
-            );
-          })}
         </div>
       </div>
     );
@@ -2485,6 +2241,37 @@ export default function AssignmentsManagerV2() {
           </div>
         )}
         </div>
+        {canManage && linkSelected.length > 0 && (
+          <div className="assignmentSelectionBar">
+            <b>
+              {assignmentSelectionIsLinked
+                ? "1 linked group selected"
+                : `${linkSelected.length} game${linkSelected.length === 1 ? "" : "s"} selected`}
+            </b>
+            <button className="primary" disabled={bulkWorking || !assignmentSelectionTarget} onClick={() => {
+              if (!assignmentSelectionTarget) return;
+              setSelected(assignmentSelectionTarget.id);
+              setOverrideOfficial("");
+              document.getElementById("selected-game-assignment")?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}>
+              {assignmentSelectionIsLinked ? "Assign Linked Group" : "Assign Selected Game"}
+            </button>
+            <button className="secondary" disabled={bulkWorking} onClick={() => void runBulkAction("publish")}>Publish</button>
+            <button className="secondary" disabled={bulkWorking} onClick={() => void runBulkAction("confirm")}>Confirm Officials</button>
+            <details className="assignmentMoreActions">
+              <summary>More Actions</summary>
+              <div>
+                <button className="secondary" disabled={bulkWorking} onClick={() => void runBulkAction("unassign")}>Unassign Officials</button>
+                <label>Game Status<select aria-label="Bulk game status" value={bulkStatus} disabled={bulkWorking} onChange={(e) => setBulkStatus(e.target.value)}>{gameStatusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+                <button className="secondary" disabled={bulkWorking} onClick={() => void runBulkAction("status")}>Apply Status</button>
+                <button className="secondary" disabled={linking || bulkWorking || linkSelected.length < 2} onClick={() => void linkGames()}>Link Selected Games</button>
+                <button className="secondary" disabled={bulkWorking} onClick={() => void exportAssignments(linkSelected)}>Export Selected</button>
+              </div>
+            </details>
+            <button className="assignmentClearSelection" disabled={bulkWorking} onClick={() => setLinkSelected([])}>Clear selection</button>
+            {bulkWorking && <span>Working…</span>}
+          </div>
+        )}
         <div
           className="assignmentGameTable"
           style={{
@@ -2535,124 +2322,8 @@ export default function AssignmentsManagerV2() {
               </button>
             </span>
           </div>
-          {canManage && linkSelected.length > 0 && (
-            <div
-              style={{
-                display: "flex",
-                gap: 7,
-                alignItems: "center",
-                flexWrap: "wrap",
-                padding: "9px 12px",
-                background: "#fffbeb",
-                borderBottom: "1px solid #fde68a",
-              }}
-            >
-              <b style={{ marginRight: 4 }}>
-                {assignmentSelectionIsLinked
-                  ? "1 linked group selected"
-                  : `${linkSelected.length} game${linkSelected.length === 1 ? "" : "s"} selected`}
-              </b>
-              <button
-                className="primary"
-                disabled={bulkWorking || !assignmentSelectionTarget}
-                onClick={() => {
-                  if (!assignmentSelectionTarget) return;
-                  setSelected(assignmentSelectionTarget.id);
-                  setOverrideOfficial("");
-                  document
-                    .getElementById("selected-game-assignment")
-                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
-                }}
-              >
-                {assignmentSelectionIsLinked
-                  ? "Assign Linked Group"
-                  : "Assign Selected Game"}
-              </button>
-              <button
-                className="secondary"
-                disabled={bulkWorking}
-                onClick={() => void runBulkAction("publish")}
-              >
-                Publish
-              </button>
-              <button
-                className="secondary"
-                disabled={bulkWorking}
-                onClick={() => void runBulkAction("confirm")}
-              >
-                Confirm Officials
-              </button>
-              <details className="assignmentMoreActions">
-                <summary>More Actions</summary>
-                <div>
-                  <button
-                    className="secondary"
-                    disabled={bulkWorking}
-                    onClick={() => void runBulkAction("unassign")}
-                  >
-                    Unassign Officials
-                  </button>
-                  <label>
-                    Game Status
-                    <select
-                      aria-label="Bulk game status"
-                      value={bulkStatus}
-                      disabled={bulkWorking}
-                      onChange={(e) => setBulkStatus(e.target.value)}
-                    >
-                      {gameStatusOptions.map(([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <button
-                    className="secondary"
-                    disabled={bulkWorking}
-                    onClick={() => void runBulkAction("status")}
-                  >
-                    Apply Status
-                  </button>
-                  <button
-                    className="secondary"
-                    disabled={linking || bulkWorking || linkSelected.length < 2}
-                    onClick={() => void linkGames()}
-                  >
-                    Link Selected Games
-                  </button>
-                  <button
-                    className="secondary"
-                    disabled={bulkWorking}
-                    onClick={() => void exportAssignments(linkSelected)}
-                  >
-                    Export Selected
-                  </button>
-                </div>
-              </details>
-              <button
-                className="assignmentClearSelection"
-                disabled={bulkWorking}
-                onClick={() => setLinkSelected([])}
-              >
-                Clear selection
-              </button>
-              {bulkWorking && <span>Working…</span>}
-            </div>
-          )}
           <div
-            style={{
-              display: "grid",
-              gridTemplateColumns:
-                "28px minmax(120px,1.45fr) minmax(85px,.8fr) 72px 54px 94px minmax(210px,1.8fr)",
-              gap: 6,
-              padding: "7px 9px",
-              background: "#f8fafc",
-              color: "#64748b",
-              fontSize: 11,
-              fontWeight: 800,
-              borderBottom: "1px solid #e2e8f0",
-            }}
+            className="assignmentGameTableHeader"
           >
             <span />
             <button
@@ -2698,7 +2369,7 @@ export default function AssignmentsManagerV2() {
                 cursor: "pointer",
               }}
             >
-              Game Time{sortArrow("time")}
+              Date &amp; Time{sortArrow("time")}
             </button>
             <button
               type="button"
@@ -2713,7 +2384,7 @@ export default function AssignmentsManagerV2() {
                 cursor: "pointer",
               }}
             >
-              Game Ranking{sortArrow("power")}
+              Power{sortArrow("power")}
             </button>
             <button
               type="button"
