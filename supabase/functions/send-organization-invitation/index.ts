@@ -46,26 +46,27 @@ Deno.serve(async (request) => {
     if (invitationError) return json({ error: invitationError.message }, 403);
 
     const redirectTo = "https://test.ref-assign.com/tier-test";
-    const { error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(email, {
-      redirectTo,
-      data: { refassign_organization_id: organizationId, refassign_role: role },
+    let existingAccount = false;
+    let { data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
+      type: "invite",
+      email,
+      options: { redirectTo, data: { refassign_organization_id: organizationId, refassign_role: role } },
     });
-
-    if (inviteError) {
-      const alreadyRegistered = /already|registered|exists/i.test(inviteError.message);
-      if (alreadyRegistered) {
-        const publicClient = createClient(url, anonKey, { auth: { persistSession: false, autoRefreshToken: false } });
-        const { error: linkError } = await publicClient.auth.signInWithOtp({
-          email,
-          options: { shouldCreateUser: false, emailRedirectTo: redirectTo },
-        });
-        if (!linkError) return json({ sent: true, invitationId, existingAccount: true });
-      }
-      await userClient.rpc("revoke_organization_invitation", { p_invitation_id: invitationId });
-      return json({ error: `The invitation could not be emailed: ${inviteError.message}` }, 400);
+    if (linkError && /already|registered|exists/i.test(linkError.message)) {
+      existingAccount = true;
+      ({ data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
+        type: "magiclink",
+        email,
+        options: { redirectTo },
+      }));
     }
 
-    return json({ sent: true, invitationId, existingAccount: false });
+    if (linkError || !linkData.properties?.action_link) {
+      await userClient.rpc("revoke_organization_invitation", { p_invitation_id: invitationId });
+      return json({ error: `The invitation link could not be created: ${linkError?.message ?? "unknown error"}` }, 400);
+    }
+
+    return json({ invitationId, existingAccount, actionLink: linkData.properties.action_link });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : "Unable to send invitation." }, 400);
   }
