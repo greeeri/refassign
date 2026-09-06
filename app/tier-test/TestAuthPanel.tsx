@@ -14,7 +14,7 @@ export default function TestAuthPanel({onAuthenticated}:{onAuthenticated:(email:
  const submit=async(event:FormEvent)=>{event.preventDefault();setLoading(true);setMessage("");const supabase=createTierTestClient();
   if(mode==="signup"){
    const {data,error}=await supabase.auth.signUp({email,password,options:{data:{full_name:name},emailRedirectTo:`${window.location.origin}/tier-test`}});
-   if(error)setMessage(error.message);else if(data.session)onAuthenticated(email);else setMessage("Check your email to confirm the test account, then return here and sign in.");
+   if(error)setMessage(error.message);else if(data.session)onAuthenticated(email);else if(data.user?.identities?.length===0){const {data:existing,error:signInError}=await supabase.auth.signInWithPassword({email,password});if(existing.user)onAuthenticated(existing.user.email||email);else{setMode("signin");setMessage(signInError?.message||"This test account is already confirmed. Sign in with the password used when it was created.")}}else setMessage("Confirmation requested. If the account was already confirmed, choose Sign in and use the password you created.");
   }else{
    const {data,error}=await supabase.auth.signInWithPassword({email,password});
    if(error)setMessage(error.message);else if(data.user)onAuthenticated(data.user.email||email);
