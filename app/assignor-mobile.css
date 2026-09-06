@@ -1014,3 +1014,127 @@
     grid-template-columns: 1fr;
   }
 }
+
+
+/* Selected game summary and compact mobile assignment cards */
+.selectedGameSummary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.selectedGameSummary span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 6px 9px;
+  border: 1px solid #dbe7f0;
+  border-radius: 999px;
+  background: #f5f9fd;
+  color: #536b80;
+  font-size: 12px;
+  font-weight: 750;
+}
+.selectedGameSummary b {
+  color: #102e52;
+  font-size: 14px;
+}
+.mobileAssignmentDetails {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  .selectedGameStickyHeader {
+    position: sticky;
+    top: 66px;
+    z-index: 45;
+    margin: -12px -12px 12px;
+    padding: 12px;
+    border-bottom: 1px solid #dbe7f0;
+    background: rgba(255, 255, 255, .97);
+    box-shadow: 0 8px 18px rgba(15, 42, 70, .1);
+    backdrop-filter: blur(8px);
+  }
+  .selectedGameStickyHeader h2 {
+    font-size: 18px;
+  }
+  .selectedGameStickyHeader p {
+    margin-bottom: 7px;
+    font-size: 12px;
+  }
+  .selectedGameSummary {
+    gap: 5px;
+    margin-top: 8px;
+  }
+  .selectedGameSummary span {
+    padding: 4px 7px;
+    font-size: 11px;
+  }
+  .assignmentMain td:first-child {
+    display: none;
+  }
+  .assignmentPositionControls {
+    display: none !important;
+  }
+  .assignmentMain tr {
+    padding: 10px 12px;
+  }
+  .assignmentMain td {
+    grid-template-columns: 92px minmax(0, 1fr);
+    padding: 7px 0;
+  }
+  .assignmentMain td:nth-child(2)::before { content: "Position"; }
+  .assignmentMain td:nth-child(3)::before { content: "Official"; }
+  .assignmentMain td:nth-child(4)::before { content: "Status"; }
+  .assignmentMain td:nth-child(5)::before { content: "Assign"; }
+  .mobileAssignmentDetails {
+    display: block;
+    margin-top: 9px;
+    border-top: 1px solid #e2e8f0;
+    padding-top: 8px;
+  }
+  .mobileAssignmentDetails summary {
+    color: #1d4ed8;
+    font-size: 13px;
+    font-weight: 850;
+    cursor: pointer;
+  }
+  .mobileAssignmentDetails > div {
+    display: grid;
+    gap: 7px;
+    margin-top: 8px;
+    padding: 9px;
+    border-radius: 8px;
+    background: #f8fafc;
+  }
+  .mobileAssignmentDetails small {
+    color: #536b80;
+    font-size: 12px;
+  }
+  .mobileAssignmentDetails .secondary {
+    width: fit-content;
+    padding: 7px 9px;
+  }
+  .mobilePositionMove {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: #536b80;
+    font-size: 12px;
+    font-weight: 800;
+  }
+  .mobilePositionMove button {
+    width: 34px;
+    height: 30px;
+    border: 1px solid #1d4ed8;
+    border-radius: 7px;
+    background: #2563eb;
+    color: #fff;
+    font-size: 16px;
+    font-weight: 900;
+  }
+  .mobilePositionMove button:disabled {
+    border-color: #cbd5e1;
+    background: #cbd5e1;
+  }
+}
