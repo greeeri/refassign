@@ -168,6 +168,107 @@
   cursor: pointer;
 }
 
+.assignmentSelectionBar {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 20px 0 14px;
+  padding: 11px 16px;
+  border: 1px solid #f3ca67;
+  border-radius: 11px;
+  background: #fff9eb;
+}
+
+.assignmentSelectionBar > b {
+  margin-right: 2px;
+  color: #102e52;
+  font-size: 16px;
+}
+
+.assignmentGameTableHeader,
+.assignmentGameRow {
+  display: grid;
+  grid-template-columns: 48px minmax(260px, 2.15fr) minmax(180px, 1.3fr) minmax(150px, 1fr) 82px 138px 190px;
+  align-items: center;
+  gap: 12px;
+}
+
+.assignmentGameTableHeader {
+  padding: 10px 16px;
+  border-bottom: 1px solid #dbe7f0;
+  background: #f4f8fb;
+  color: #59728a;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+}
+
+.assignmentGameRow {
+  min-height: 72px;
+  padding: 10px 16px;
+}
+
+.assignmentGameRow input[type="checkbox"] {
+  width: 19px;
+  height: 19px;
+  accent-color: #2563eb;
+}
+
+.assignmentGameName {
+  display: block;
+  color: #102e52;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.assignmentLinkedArrow {
+  margin-right: 7px;
+  color: #102e52;
+}
+
+.assignmentGameRow button > small,
+.assignmentGameDate small {
+  display: block;
+  margin-top: 4px;
+  color: #627a93;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.assignmentGameDate {
+  color: #173b62;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.assignmentStatusCell {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.assignmentStatusBadge {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.assignmentGameRow select {
+  min-height: 38px;
+  border-color: #cbddec;
+  border-radius: 8px;
+  color: #173b62;
+  font-size: 13px !important;
+}
+
 @media (max-width: 1250px) {
   .assignmentFilterPanel {
     grid-template-columns: 1fr;
@@ -177,6 +278,13 @@
     padding-bottom: 14px;
     border-right: 0;
     border-bottom: 1px solid #dbe7f0;
+  }
+  .assignmentGameTable {
+    overflow-x: auto !important;
+  }
+  .assignmentGameTableHeader,
+  .assignmentGameRow {
+    min-width: 1080px;
   }
 }
 
@@ -519,6 +627,18 @@
     top: 74px;
     right: 16px;
     left: 16px;
+  }
+
+  .assignmentSelectionBar {
+    align-items: stretch;
+  }
+
+  .assignmentSelectionBar > b {
+    flex-basis: 100%;
+  }
+
+  .assignmentSelectionBar .assignmentClearSelection {
+    margin-left: 0;
   }
 
   .assignmentMoreActions > div {
