@@ -2704,38 +2704,26 @@ export default function AssignmentsManagerV2() {
             <button type="button" onClick={() => { setUnpublishedOnly(true); setCompletenessFilter("all"); setSelected(""); }}><b>{attentionQueue.unpublished}</b><span>Not published</span></button>
           </section>
         )}
-        <div className="assignmentFilterPanel">
-        <div
-          className="assignmentDateFilters"
-          style={{ paddingBottom: 10, borderBottom: "1px solid #dbeafe" }}
-        >
-          <span className="assignmentFilterLabel">View</span>
-          <button
-            type="button"
-            className={selfAssignOnly ? "success" : "secondary"}
-            aria-pressed={selfAssignOnly}
-            onClick={() => {
-              const next = !selfAssignOnly;
+        <div className="assignmentFilterPanel assignmentCompactToolbar">
+        <label className="assignmentToolbarField">
+          <span>View</span>
+          <select
+            aria-label="Game view"
+            value={selfAssignOnly ? "selfAssign" : "all"}
+            onChange={(event) => {
+              const next = event.target.value === "selfAssign";
               setSelfAssignOnly(next);
               setLinkSelected([]);
               if (next && selected && selfAssignOpenCount(selected) === 0)
                 setSelected("");
             }}
           >
-            {selfAssignOnly ? "✓ " : ""}Open for Self Assign ({selfAssignGameCount})
-          </button>
-          {selfAssignOnly && (
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => setSelfAssignOnly(false)}
-            >
-              Show All Games
-            </button>
-          )}
-        </div>
-        <div className="assignmentDateFilters">
-          <span className="assignmentFilterLabel">Date</span>
+            <option value="all">All Games</option>
+            <option value="selfAssign">Open for Self Assign ({selfAssignGameCount})</option>
+          </select>
+        </label>
+        <label className="assignmentToolbarField">
+          <span>Date</span>
           <select
             aria-label="Date range"
             value={range}
@@ -2755,28 +2743,33 @@ export default function AssignmentsManagerV2() {
             ))}
             <option value="custom">Choose a Date</option>
           </select>
+        </label>
+        <button
+          type="button"
+          className="secondary assignmentToolbarButton assignmentCalendarButton"
+          onClick={() => setShowCalendar((current) => !current)}
+          aria-expanded={showCalendar}
+        >
+          Calendar
+        </button>
+        {canManage && (
+          <label className="assignmentToolbarField assignmentSavedViewField">
+            <span>Saved View</span>
+            <select aria-label="Open a saved view" defaultValue="" onChange={(event) => { const view = savedViews.find((item) => item.id === event.target.value); if (view) applySavedView(view); event.target.value = ""; }}>
+              <option value="">{savedViews.length ? "Choose a saved view" : "No saved views yet"}</option>
+              {savedViews.map((view) => <option value={view.id} key={view.id}>{view.name}</option>)}
+            </select>
+          </label>
+        )}
+        {canManage && (
           <button
             type="button"
-            className="assignmentCalendarButton"
-            onClick={() => setShowCalendar(true)}
+            className="secondary assignmentToolbarButton"
+            onClick={saveCurrentView}
           >
-            Calendar
+            + Save View
           </button>
-          {showCalendar && (
-            <input
-              type="date"
-              value={customDate}
-              onChange={(e) => chooseDate(e.target.value)}
-              style={{ width: "auto", minWidth: 160 }}
-            />
-          )}
-          {range === "custom" && customDate && (
-            <span style={{ fontWeight: 700 }}>
-              {new Date(`${customDate}T00:00:00`).toLocaleDateString()} (
-              {filteredGames.length})
-            </span>
-          )}
-        </div>
+        )}
         {canManage && (
           <details className="assignmentMoreFilters">
             <summary>More Filters</summary>
@@ -2861,18 +2854,37 @@ export default function AssignmentsManagerV2() {
             {hasDirectGameFilter && (
               <span>Showing matching games across all dates and assignment statuses.</span>
             )}
+            {savedViews.length > 0 && (
+              <div className="assignmentManageSavedViews">
+                <b>Manage Saved Views</b>
+                <div>
+                  {savedViews.map((view) => (
+                    <button type="button" key={view.id} onClick={() => deleteSavedView(view.id)}>
+                      Delete {view.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             </div>
           </details>
         )}
-        {canManage && (
-          <div className="assignmentSavedViews">
-            <span className="assignmentFilterLabel">Saved Views</span>
-            <select aria-label="Open a saved view" defaultValue="" onChange={(event) => { const view = savedViews.find((item) => item.id === event.target.value); if (view) applySavedView(view); event.target.value = ""; }}>
-              <option value="">{savedViews.length ? "Choose a saved view" : "No saved views yet"}</option>
-              {savedViews.map((view) => <option value={view.id} key={view.id}>{view.name}</option>)}
-            </select>
-            <button type="button" className="secondary" onClick={saveCurrentView}>+ Save Current View</button>
-            {savedViews.length > 0 && <details className="manageSavedViews"><summary>Manage</summary><div>{savedViews.map((view) => <button type="button" key={view.id} onClick={() => deleteSavedView(view.id)}>Delete {view.name}</button>)}</div></details>}
+        {showCalendar && (
+          <div className="assignmentCustomDateRow">
+            <label className="assignmentToolbarField">
+              <span>Specific Date</span>
+              <input
+                type="date"
+                value={customDate}
+                onChange={(event) => chooseDate(event.target.value)}
+              />
+            </label>
+            {customDate && (
+              <span className="assignmentCustomDateResult">
+                {new Date(`${customDate}T00:00:00`).toLocaleDateString()} · {filteredGames.length} games
+              </span>
+            )}
+            <button type="button" className="secondary" onClick={() => setShowCalendar(false)}>Done</button>
           </div>
         )}
         </div>

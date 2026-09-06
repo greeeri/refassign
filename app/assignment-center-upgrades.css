@@ -10,3 +10,23 @@
 @media(min-width:1051px){.assignmentCenterSplit.hasSelectedGame .assignmentLayout{grid-template-columns:minmax(0,1fr) 320px}.assignmentCenterSplit.hasSelectedGame .availableOfficialsPanel{position:sticky;top:96px;max-height:calc(100vh - 112px)}}
 @media(max-width:1150px){.assignmentFilterPanel{flex-wrap:wrap}.assignmentDateFilters,.assignmentSavedViews{flex:1 1 420px}.assignmentMoreFilters{flex:0 0 auto}.assignmentAttentionQueue{grid-template-columns:repeat(4,minmax(0,1fr))}.assignmentAttentionQueue>div{grid-column:1/-1}}
 @media(max-width:760px){.assignmentFilterPanel{display:grid!important;grid-template-columns:1fr!important}.assignmentDateFilters,.assignmentSavedViews{grid-template-columns:1fr!important;width:100%}.assignmentDateFilters .assignmentFilterLabel,.assignmentSavedViews .assignmentFilterLabel{grid-column:1}.assignmentDateFilters select,.assignmentSavedViews select{min-width:0}.assignmentMoreFilters,.assignmentMoreFilters>summary{width:100%}.assignmentMoreFilters[open]>summary{width:100%}.assignmentDirectFilters{grid-template-columns:1fr}.manageSavedViews,.manageSavedViews>summary{width:100%}.manageSavedViews>div{position:static;min-width:0;margin-top:6px}.assignmentAttentionQueue{grid-template-columns:1fr 1fr}.assignmentAttentionQueue>button{min-height:68px}}
+
+/* Compact Assignment Center toolbar */
+.assignmentFilterPanel.assignmentCompactToolbar{display:grid!important;grid-template-columns:minmax(150px,.8fr) minmax(190px,1fr) auto minmax(190px,1fr) auto auto;align-items:end!important;gap:10px!important;padding:14px 16px!important;border:1px solid #dbe4ee;border-radius:12px;background:#f8fafc}
+.assignmentToolbarField{display:grid;gap:5px;min-width:0;color:#52667a;font-size:14px;font-weight:850;letter-spacing:.04em;text-transform:uppercase}
+.assignmentToolbarField select,.assignmentToolbarField input{box-sizing:border-box;width:100%;min-width:0;height:42px;margin:0;padding:0 12px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#172b4d;font-size:16px;font-weight:650;letter-spacing:normal;text-transform:none}
+.assignmentToolbarButton{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;height:42px;min-height:42px;margin:0;padding:0 14px!important;white-space:nowrap}
+.assignmentCompactToolbar>.assignmentMoreFilters{position:static;align-self:end;min-width:max-content}
+.assignmentCompactToolbar>.assignmentMoreFilters>summary{display:flex;align-items:center;justify-content:center;box-sizing:border-box;height:42px;min-height:42px;margin:0;padding:0 14px}
+.assignmentCompactToolbar>.assignmentMoreFilters[open]{grid-column:1/-1;order:initial;width:100%;min-width:0}
+.assignmentCompactToolbar>.assignmentMoreFilters[open]>summary{width:max-content;margin-left:auto}
+.assignmentCompactToolbar .assignmentDirectFilters{box-sizing:border-box;width:100%;margin-top:10px!important}
+.assignmentCustomDateRow{grid-column:1/-1;display:flex;align-items:flex-end;gap:10px;padding-top:12px;border-top:1px solid #dbe4ee}
+.assignmentCustomDateRow .assignmentToolbarField{width:min(220px,100%)}
+.assignmentCustomDateRow>button{height:42px;margin:0}
+.assignmentCustomDateResult{align-self:center;color:#334155;font-size:14px;font-weight:750}
+.assignmentManageSavedViews{grid-column:1/-1;display:grid;gap:8px;padding-top:10px;border-top:1px solid #e2e8f0;color:#334155;font-size:13px}
+.assignmentManageSavedViews>div{display:flex;gap:7px;flex-wrap:wrap}
+.assignmentManageSavedViews button{padding:7px 10px;border:1px solid #fecaca;border-radius:7px;background:#fff;color:#b91c1c;font-size:12px;font-weight:750;cursor:pointer}
+@media(max-width:1200px){.assignmentFilterPanel.assignmentCompactToolbar{grid-template-columns:repeat(3,minmax(0,1fr))}.assignmentCompactToolbar>.assignmentToolbarButton,.assignmentCompactToolbar>.assignmentMoreFilters{width:100%}.assignmentCompactToolbar>.assignmentMoreFilters>summary{width:100%}.assignmentCompactToolbar>.assignmentMoreFilters[open]>summary{width:100%;margin-left:0}}
+@media(max-width:760px){.assignmentFilterPanel.assignmentCompactToolbar{grid-template-columns:1fr!important;padding:12px!important}.assignmentCompactToolbar>.assignmentToolbarButton,.assignmentCompactToolbar>.assignmentMoreFilters,.assignmentCompactToolbar>.assignmentMoreFilters>summary{width:100%}.assignmentCustomDateRow{display:grid;grid-template-columns:1fr}.assignmentCustomDateRow .assignmentToolbarField,.assignmentCustomDateRow>button{width:100%}.assignmentCustomDateResult{padding:2px 0}.assignmentDirectFilters{grid-template-columns:1fr!important}}
