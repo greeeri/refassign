@@ -373,27 +373,18 @@ export default function OfficialSchedule() {
               e.kind === "assignment" ? (
                 <div
                   key={`a-${e.a.assignment_id}`}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns:
-                      "105px minmax(220px,1.4fr) minmax(180px,1fr) minmax(125px,.7fr) auto",
-                    gap: 12,
-                    alignItems: "center",
-                    padding: "12px",
-                    border: "1px solid #e2e8f0",
-                    borderRadius: 10,
-                  }}
+                  className="officialScheduleCard"
                 >
-                  <div>
+                  <div className="officialScheduleDate">
                     <b>{e.date.toLocaleDateString()}</b>
-                    <small style={{ display: "block", color: "#64748b" }}>
+                    <small>
                       {e.date.toLocaleTimeString([], {
                         hour: "numeric",
                         minute: "2-digit",
                       })}
                     </small>
                   </div>
-                  <div>
+                  <div className="officialScheduleGame">
                     <b>
                       {e.a.home_team || "TBD"} vs {e.a.away_team || "TBD"}
                     </b>
@@ -411,7 +402,7 @@ export default function OfficialSchedule() {
                       {e.a.league_name ? ` • ${e.a.league_name}` : ""}
                     </small>
                   </div>
-                  <div>
+                  <div className="officialScheduleCrew">
                     {(crew[e.a.game_id] || []).map((c: any) => (
                       <small key={c.assignment_id} style={{ display: "block" }}>
                         <b>{crewPositionLabel(c.position)}:</b>{" "}
@@ -419,7 +410,7 @@ export default function OfficialSchedule() {
                       </small>
                     ))}
                   </div>
-                  <div>
+                  <div className="officialScheduleControls">
                     <span
                       className={`badge ${aStatus(e.a) === "Accepted" ? "green" : "yellow"}`}
                     >
@@ -436,15 +427,7 @@ export default function OfficialSchedule() {
                         Respond by {new Date(e.a.accept_by).toLocaleString()}
                       </small>
                     )}
-                  </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: 6,
-                      flexWrap: "wrap",
-                      justifyContent: "flex-end",
-                    }}
-                  >
+                    <div className="officialScheduleActions">
                     {(e.a.location_name || e.a.location_address) && (
                       <a
                         className="tableButton"
@@ -486,6 +469,7 @@ export default function OfficialSchedule() {
                         Game Report
                       </button>
                     )}
+                    </div>
                   </div>
                 </div>
               ) : e.kind === "mentor" ? (

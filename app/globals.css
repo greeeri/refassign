@@ -560,6 +560,126 @@ td small {
   text-decoration: none;
   color: #172033;
 }
+
+.crewChatButton {
+  border: 1px solid #2563eb;
+  border-radius: 7px;
+  padding: 6px 9px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.officialScheduleCard {
+  display: grid;
+  grid-template-columns: 88px minmax(250px, 1.45fr) minmax(190px, 1fr) minmax(230px, auto);
+  gap: 14px;
+  align-items: center;
+  padding: 11px 13px;
+  border: 1px solid #e2e8f0;
+  border-left: 4px solid #2563eb;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.officialScheduleDate {
+  padding-right: 12px;
+  border-right: 1px solid #e2e8f0;
+}
+
+.officialScheduleDate b,
+.officialScheduleGame > b {
+  color: #10243e;
+}
+
+.officialScheduleDate small,
+.officialScheduleGame > small {
+  display: block;
+  margin-top: 2px;
+  color: #64748b;
+}
+
+.officialScheduleCrew {
+  padding-left: 2px;
+}
+
+.officialScheduleCrew small {
+  display: block;
+  line-height: 1.45;
+}
+
+.officialScheduleControls {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
+.officialScheduleActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.officialScheduleActions .tableButton,
+.officialScheduleActions .crewChatButton,
+.officialScheduleActions .acceptButton,
+.officialScheduleActions .dangerButton {
+  min-height: 30px;
+  padding: 6px 9px;
+  border-radius: 7px;
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+@media (max-width: 1100px) {
+  .officialScheduleCard {
+    grid-template-columns: 82px minmax(230px, 1.3fr) minmax(180px, 1fr);
+  }
+
+  .officialScheduleControls {
+    grid-column: 2 / -1;
+    grid-template-columns: auto 1fr;
+    justify-items: start;
+    align-items: center;
+  }
+
+  .officialScheduleActions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 720px) {
+  .officialScheduleCard {
+    grid-template-columns: 78px minmax(0, 1fr);
+    align-items: start;
+    gap: 10px 12px;
+  }
+
+  .officialScheduleCrew,
+  .officialScheduleControls {
+    grid-column: 2;
+  }
+
+  .officialScheduleControls {
+    grid-template-columns: 1fr;
+    gap: 7px;
+  }
+
+  .officialScheduleActions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .officialScheduleActions > * {
+    width: 100%;
+    text-align: center;
+  }
+}
 .globalCopyright {
   position: fixed;
   left: 245px;
