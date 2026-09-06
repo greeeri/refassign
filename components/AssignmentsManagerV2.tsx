@@ -3304,7 +3304,7 @@ export default function AssignmentsManagerV2() {
                   </div>
                   {ineligibleOfficials.map((o) => (
                     <div
-                      className="availableOfficial"
+                      className="availableOfficial ineligibleOfficial"
                       key={o.id}
                       style={{
                         background: "#fef2f2",
