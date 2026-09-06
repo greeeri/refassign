@@ -60,6 +60,12 @@ type Assignment = {
   decline_reason: string | null;
   overdue_reviewed_at: string | null;
   assignment_source: "manager" | "self_assign" | "auto_assign";
+  email_sent_at: string | null;
+  email_error: string | null;
+  resend_email_id: string | null;
+  cancellation_notified_at: string | null;
+  cancellation_email_error: string | null;
+  cancellation_email_id: string | null;
 };
 type Rank = { official_id: string; rank: number };
 type PositionRank = {
@@ -198,6 +204,7 @@ export default function AssignmentsManagerV2() {
     [saving, setSaving] = useState(""),
     [movingAssignment, setMovingAssignment] = useState(""),
     [publishing, setPublishing] = useState(false),
+    [retryingNotifications, setRetryingNotifications] = useState(false),
     [confirming, setConfirming] = useState(""),
     [gameStatusSaving, setGameStatusSaving] = useState(""),
     [pendingGameStatus, setPendingGameStatus] = useState<{
@@ -258,7 +265,7 @@ export default function AssignmentsManagerV2() {
       supabase
         .from("assignments")
         .select(
-          "id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at,assignment_source",
+          "id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at,assignment_source,email_sent_at,email_error,resend_email_id,cancellation_notified_at,cancellation_email_error,cancellation_email_id",
         ),
       supabase.from("official_rankings").select("official_id,rank"),
       supabase
@@ -357,7 +364,7 @@ export default function AssignmentsManagerV2() {
       supabase
         .from("assignments")
         .select(
-          "id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at,assignment_source",
+          "id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at,assignment_source,email_sent_at,email_error,resend_email_id,cancellation_notified_at,cancellation_email_error,cancellation_email_id",
         ),
       supabase
         .from("assignment_self_assign_slots")
@@ -974,8 +981,38 @@ export default function AssignmentsManagerV2() {
     ? assignments.filter((a) => a.game_id === game.id)
     : [];
   const unpublishedCount = gameAssignments.filter(
-    (a) => !a.published_at,
+    (a) => !a.published_at && a.status !== "declined",
   ).length;
+  const activeAssignmentCount = gameAssignments.filter(
+    (a) => !["declined", "cancelled"].includes(a.status),
+  ).length;
+  const openPositionCount = Math.max(0, gamePositions.length - activeAssignmentCount);
+  const assignmentEmailsSent = gameAssignments.filter((a) => a.email_sent_at).length;
+  const assignmentEmailIssues = gameAssignments.filter(
+    (a) => a.published_at && !a.email_sent_at,
+  ).length;
+  const cancellationEmailsSent = gameAssignments.filter(
+    (a) => a.cancellation_notified_at,
+  ).length;
+  const cancellationEmailIssues = gameAssignments.filter(
+    (a) =>
+      ["canceled", "rained_out"].includes(game?.status || "") &&
+      a.status === "cancelled" &&
+      !a.cancellation_notified_at,
+  ).length;
+  function requestSelectedGame(nextGameId: string) {
+    if (
+      nextGameId &&
+      nextGameId !== selected &&
+      unpublishedCount > 0 &&
+      !window.confirm(
+        `Game #${game?.game_number || ""} has ${unpublishedCount} unpublished assignment${unpublishedCount === 1 ? "" : "s"}. Switch games without publishing?`,
+      )
+    )
+      return;
+    setSelected(nextGameId);
+    setOverrideOfficial("");
+  }
   function chooseRange(r: Range) {
     setRange(r);
     setShowCalendar(false);
@@ -1627,6 +1664,51 @@ export default function AssignmentsManagerV2() {
     await refreshAssignmentState();
     setPublishing(false);
   }
+  async function retryNotificationIssues() {
+    if (!game || retryingNotifications) return;
+    setRetryingNotifications(true);
+    setError("");
+    setNotice("");
+    try {
+      const cancellation = ["canceled", "rained_out"].includes(game.status);
+      const response = await fetch(
+        cancellation ? "/api/games/status" : "/api/assignments/publish",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            cancellation
+              ? { gameId: game.id, status: game.status }
+              : { gameId: game.id },
+          ),
+        },
+      );
+      const result = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        sent?: number;
+        failed?: number;
+        failures?: string[];
+      };
+      if (!response.ok)
+        throw new Error(result.error || "Notifications could not be retried.");
+      if (result.failed)
+        setError(
+          `${result.sent || 0} notification${result.sent === 1 ? "" : "s"} sent; ${result.failed} still failed. ${(result.failures || []).join("; ")}`,
+        );
+      else
+        setNotice(
+          `${result.sent || 0} notification${result.sent === 1 ? "" : "s"} sent successfully.`,
+        );
+      await refreshAssignmentState();
+    } catch (retryError) {
+      setError(
+        retryError instanceof Error
+          ? retryError.message
+          : "Notifications could not be retried.",
+      );
+    }
+    setRetryingNotifications(false);
+  }
   function assignmentStatus(a: Assignment) {
     if (a.status === "accepted" || a.status === "confirmed")
       return { label: "Accepted", className: "badge green" };
@@ -1995,8 +2077,7 @@ export default function AssignmentsManagerV2() {
         <button
           type="button"
           onClick={() => {
-            setSelected(g.id);
-            setOverrideOfficial("");
+            requestSelectedGame(g.id);
           }}
           style={{
             border: 0,
@@ -2963,10 +3044,7 @@ export default function AssignmentsManagerV2() {
           Select Game
           <select
             value={selected}
-            onChange={(e) => {
-              setSelected(e.target.value);
-              setOverrideOfficial("");
-            }}
+            onChange={(e) => requestSelectedGame(e.target.value)}
           >
             <option value="">
               {filteredGames.length ? "Select a game" : "No games on this date"}
@@ -3057,11 +3135,49 @@ export default function AssignmentsManagerV2() {
                 </p>
                 <div className="selectedGameSummary" aria-label="Assignment summary">
                   <span><b>{game.officials_needed}</b> Positions</span>
-                  <span><b>{gameAssignments.filter((item) => item.status !== "declined").length}</b> Assigned</span>
-                  <span><b>{Math.max(0, game.officials_needed - gameAssignments.filter((item) => item.status !== "declined").length)}</b> Open</span>
+                  <span><b>{activeAssignmentCount}</b> Assigned</span>
+                  <span><b>{openPositionCount}</b> Open</span>
                   <span><b>{gameAssignments.filter((item) => item.status === "proposed" && item.published_at).length}</b> Awaiting</span>
                   <span><b>{gameAssignments.filter((item) => ["accepted", "confirmed"].includes(item.status)).length}</b> Confirmed</span>
                 </div>
+                <div
+                  className="assignmentConfirmMessage"
+                  style={{ marginTop: 10 }}
+                  aria-label="Notification history"
+                >
+                  <b>Notification history:</b>{" "}
+                  {["canceled", "rained_out"].includes(game.status)
+                    ? `${cancellationEmailsSent} cancellation notice${cancellationEmailsSent === 1 ? "" : "s"} sent`
+                    : `${assignmentEmailsSent} assignment email${assignmentEmailsSent === 1 ? "" : "s"} sent`}
+                  {(cancellationEmailIssues || assignmentEmailIssues) > 0 && (
+                    <>
+                      {" • "}
+                      <b style={{ color: "#b91c1c" }}>
+                        {["canceled", "rained_out"].includes(game.status)
+                          ? cancellationEmailIssues
+                          : assignmentEmailIssues}{" "}
+                        need attention
+                      </b>
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={retryingNotifications}
+                        onClick={() => void retryNotificationIssues()}
+                        style={{ marginLeft: 10 }}
+                      >
+                        {retryingNotifications ? "Retrying…" : "Retry Failed Notifications"}
+                      </button>
+                    </>
+                  )}
+                </div>
+                {openPositionCount > 0 && (
+                  <div className="errorBox" style={{ marginTop: 10 }}>
+                    Publish readiness: {openPositionCount} required position
+                    {openPositionCount === 1 ? " is" : "s are"} still open.
+                    You can publish the assigned officials now or fill the open
+                    positions first.
+                  </div>
+                )}
               </div>
             </div>
             {gamePositions.length === 0 ? (
