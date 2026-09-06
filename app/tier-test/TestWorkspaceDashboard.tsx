@@ -2,7 +2,7 @@
 
 import {useEffect,useState} from "react";
 import d from "./dashboard.module.css";
-import {createClient} from "../../lib/supabase/client";
+import {createTierTestClient as createClient} from "../../lib/supabase/client";
 
 type League={id:number;name:string;region:string;coverage:string};
 type Tab="overview"|"leagues"|"team"|"reporting"|"billing";

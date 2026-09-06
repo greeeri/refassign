@@ -6,7 +6,7 @@ import styles from "./tier-test.module.css";
 import wizard from "./wizard.module.css";
 import TestWorkspaceDashboard from "./TestWorkspaceDashboard";
 import TestAuthPanel from "./TestAuthPanel";
-import {createClient} from "../../lib/supabase/client";
+import {createTierTestClient as createClient} from "../../lib/supabase/client";
 import saved from "./saved.module.css";
 
 type SavedWorkspace={organization_id:string;name:string;role:string;plan:PlanCode;official_limit:number|null;additional_official_blocks:number;status:string;leagues:{name:string;region:string|null;coverage:string}[]};

@@ -21,6 +21,11 @@ export function createClient() {
   )
 }
 
+// Tier testing must remain isolated even when Vercel injects production variables.
+export function createTierTestClient() {
+  return createBrowserClient(testUrl, testPublishableKey)
+}
+
 export function createPasswordRecoveryClient() {
   const config = browserConfiguration()
   return createSupabaseClient(
