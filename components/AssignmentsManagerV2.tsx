@@ -2736,29 +2736,31 @@ export default function AssignmentsManagerV2() {
         </div>
         <div className="assignmentDateFilters">
           <span className="assignmentFilterLabel">Date</span>
-          {filters.map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              className={range === key ? "primary" : "secondary"}
-              onClick={() => chooseRange(key)}
-            >
-              {label} (
-              {
-                games.filter(
-                  (g) =>
-                    inRange(g, key, customDate) && matchesOfficialFilter(g),
-                ).length
+          <select
+            aria-label="Date range"
+            value={range}
+            onChange={(event) => {
+              const next = event.target.value as Range;
+              if (next === "custom") {
+                setRange("custom");
+                setShowCalendar(true);
               }
-              )
-            </button>
-          ))}
+              else chooseRange(next);
+            }}
+          >
+            {filters.map(([key, label]) => (
+              <option key={key} value={key}>
+                {label} ({games.filter((g) => inRange(g, key, customDate) && matchesOfficialFilter(g)).length})
+              </option>
+            ))}
+            <option value="custom">Choose a Date</option>
+          </select>
           <button
             type="button"
             className="assignmentCalendarButton"
-            onClick={() => setShowCalendar(!showCalendar)}
+            onClick={() => setShowCalendar(true)}
           >
-            📅 Calendar
+            Calendar
           </button>
           {showCalendar && (
             <input
@@ -2776,7 +2778,9 @@ export default function AssignmentsManagerV2() {
           )}
         </div>
         {canManage && (
-          <div className="assignmentDirectFilters">
+          <details className="assignmentMoreFilters">
+            <summary>More Filters</summary>
+            <div className="assignmentDirectFilters">
             <span className="assignmentFilterLabel">Filters</span>
             <label>
               Location
@@ -2857,13 +2861,18 @@ export default function AssignmentsManagerV2() {
             {hasDirectGameFilter && (
               <span>Showing matching games across all dates and assignment statuses.</span>
             )}
-          </div>
+            </div>
+          </details>
         )}
         {canManage && (
           <div className="assignmentSavedViews">
             <span className="assignmentFilterLabel">Saved Views</span>
-            {savedViews.map((view) => <span className="savedViewChip" key={view.id}><button type="button" onClick={() => applySavedView(view)}>{view.name}</button><button type="button" aria-label={`Delete saved view ${view.name}`} title="Delete saved view" onClick={() => deleteSavedView(view.id)}>×</button></span>)}
+            <select aria-label="Open a saved view" defaultValue="" onChange={(event) => { const view = savedViews.find((item) => item.id === event.target.value); if (view) applySavedView(view); event.target.value = ""; }}>
+              <option value="">{savedViews.length ? "Choose a saved view" : "No saved views yet"}</option>
+              {savedViews.map((view) => <option value={view.id} key={view.id}>{view.name}</option>)}
+            </select>
             <button type="button" className="secondary" onClick={saveCurrentView}>+ Save Current View</button>
+            {savedViews.length > 0 && <details className="manageSavedViews"><summary>Manage</summary><div>{savedViews.map((view) => <button type="button" key={view.id} onClick={() => deleteSavedView(view.id)}>Delete {view.name}</button>)}</div></details>}
           </div>
         )}
         </div>
