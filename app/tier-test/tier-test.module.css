@@ -1,4 +1,4 @@
-.page{min-height:100vh;margin:0;width:100%;padding:0;background:radial-gradient(circle at 88% 12%,rgba(45,119,185,.34),transparent 30%),linear-gradient(145deg,#061b38 0%,#0a315a 56%,#0c3d68 100%);color:#09234b;font-family:Arial,Helvetica,sans-serif}
+.page{min-height:100vh;margin:0;width:100%;max-width:100vw;padding:0;overflow-x:clip;background:radial-gradient(circle at 88% 12%,rgba(45,119,185,.34),transparent 30%),linear-gradient(145deg,#061b38 0%,#0a315a 56%,#0c3d68 100%);color:#09234b;font-family:Arial,Helvetica,sans-serif}
 .nav{height:78px;padding:0 max(24px,calc((100vw - 1180px)/2));display:flex;align-items:center;justify-content:space-between;background:#061f3f;color:#fff;position:sticky;top:0;z-index:20;box-shadow:0 8px 24px rgba(2,20,43,.2)}
 .brand{display:flex;align-items:center;gap:10px;height:100%}
 .brand>span{height:34px;width:1px;background:#7f91a7}
@@ -95,9 +95,14 @@
 .setup{margin-left:24px;margin-right:24px}
 .hero{gap:35px}
 }
-@media(max-width:760px){.nav{height:68px}
+@media(max-width:760px){.nav{height:68px;width:100%;max-width:100vw;padding:0 12px;gap:10px}
 .navLinks a{display:none}
-.brand .rp,.brand>span{display:none}
+.brand{flex:1 1 auto;min-width:0;overflow:hidden;gap:0}
+.brand img:first-child,.brand>span{display:none}
+.brand img:last-child{display:block;width:clamp(132px,42vw,176px)!important;height:auto!important;max-height:48px}
+.navLinks{flex:0 0 auto;gap:6px;min-width:0}
+.nav .navLinks button{display:block;width:auto;min-width:0;height:42px;padding:8px 10px;font-size:.72rem;line-height:1.1;white-space:nowrap;color:#082652;text-align:center}
+.nav .navLinks button:after{content:none}
 .hero{grid-template-columns:1fr;padding-top:44px;padding-bottom:46px}
 .hero h1{font-size:2.65rem}
 .heroActions{align-items:flex-start;flex-direction:column}
@@ -116,7 +121,11 @@
 .page footer p{margin:0}
 .page footer span{font-size:.75rem}
 }
-@media(max-width:390px){.hero h1{font-size:2.25rem}
+@media(max-width:390px){.nav{padding-right:8px;padding-left:8px;gap:6px}
+.brand img:last-child{width:128px!important}
+.navLinks{gap:4px}
+.nav .navLinks button{padding-right:7px;padding-left:7px;font-size:.68rem}
+.hero h1{font-size:2.25rem}
 .capacityPanel{padding:21px}
 .plans,.status,.setup{margin-left:14px;margin-right:14px}
 .card{padding:23px 18px}
