@@ -1138,3 +1138,23 @@
     background: #cbd5e1;
   }
 }
+
+
+.assignmentConfirmDialog {
+  width: min(500px, 100%);
+}
+.assignmentConfirmMessage {
+  margin: 18px 20px;
+  padding: 13px 14px;
+  border: 1px solid #fecaca;
+  border-radius: 9px;
+  background: #fff1f2;
+  color: #991b1b;
+  font-size: 14px;
+  font-weight: 800;
+}
+@media (max-width: 700px) {
+  .assignmentConfirmMessage {
+    margin: 15px 16px;
+  }
+}
