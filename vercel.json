@@ -4,5 +4,29 @@
       "path": "/api/cron/assignment-reminders",
       "schedule": "0 13 * * *"
     }
+  ],
+  "redirects": [
+    {
+      "source": "/workspace/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "ref-assign.com"
+        }
+      ],
+      "destination": "https://refassign-chi.vercel.app/workspace/:path*",
+      "permanent": false
+    },
+    {
+      "source": "/workspace/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.ref-assign.com"
+        }
+      ],
+      "destination": "https://refassign-chi.vercel.app/workspace/:path*",
+      "permanent": false
+    }
   ]
 }
