@@ -2076,7 +2076,7 @@ export default function AssignmentsManagerV2() {
             >
               {publishing
                 ? "Publishing & Sending…"
-                : `Send Assignments${unpublishedCount ? ` (${unpublishedCount})` : ""}`}
+                : `Publish${unpublishedCount ? ` (${unpublishedCount})` : ""}`}
             </button>
           </div>
         </div>
@@ -2384,7 +2384,7 @@ export default function AssignmentsManagerV2() {
               )}
             </div>
             <button className="success" disabled={bulkWorking || selfAssignSaving || !assignmentSelectionTarget} onClick={prepareSelfAssignPositions}>Open Positions for Self Assign</button>
-            <button className="secondary" disabled={bulkWorking} onClick={() => void runBulkAction("publish")}>Send Assignments</button>
+            <button className="secondary" disabled={bulkWorking} onClick={() => void runBulkAction("publish")}>Publish</button>
             <button className="secondary" disabled={bulkWorking} onClick={() => void runBulkAction("confirm")}>Confirm Officials</button>
             <details className="assignmentMoreActions">
               <summary>More Actions</summary>
