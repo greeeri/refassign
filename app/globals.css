@@ -707,6 +707,9 @@ td small {
   font-size: 11px;
   z-index: 20;
 }
+#tier-test-page + .globalCopyright {
+  display: none;
+}
 .publicAssignment {
   margin: 0;
   width: 100%;

@@ -163,12 +163,17 @@
 .tableRow{padding-right:66px}
 }
 
-/* Fluid defaults: never reserve a desktop sidebar inside an embedded workspace. */
-.shell{grid-template-columns:minmax(0,1fr)}
-.shell aside{grid-template-columns:48px minmax(0,1fr);padding:18px}
-.shell aside nav{display:flex;grid-column:1/-1;gap:6px;margin-top:8px;padding-bottom:4px;overflow-x:auto;overscroll-behavior-inline:contain}
-.shell aside nav button{flex:0 0 auto;min-height:44px;white-space:nowrap}
-.testBadge{display:none}
+/* Reset the production application's fixed sidebar rules inside tier workspaces. */
+.shell aside{position:static;inset:auto;width:auto;overflow-y:visible;flex-direction:initial}
 .content>header{flex-wrap:wrap}
 .metrics{grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr))}
 .columns{grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr))}
+
+@media(max-width:900px){
+.shell aside nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible;gap:6px}
+.shell aside nav button{min-height:44px;white-space:normal;text-align:left}
+}
+
+@media(max-width:430px){
+.shell aside nav{grid-template-columns:minmax(0,1fr)}
+}
