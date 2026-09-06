@@ -1723,9 +1723,13 @@ export default function AssignmentsManagerV2() {
       unassign: "unassign every official from",
       status: `change the status to ${gameStatusOptions.find(([value]) => value === bulkStatus)?.[1] || bulkStatus} for`,
     };
+    const officialNotificationWarning =
+      action === "status" && ["canceled", "rained_out"].includes(bulkStatus)
+        ? "\n\nAssigned officials will be notified of this change."
+        : "";
     if (
       !window.confirm(
-        `${labels[action]} ${selectedIds.length} selected game${selectedIds.length === 1 ? "" : "s"}?`,
+        `${labels[action]} ${selectedIds.length} selected game${selectedIds.length === 1 ? "" : "s"}?${officialNotificationWarning}`,
       )
     )
       return;
