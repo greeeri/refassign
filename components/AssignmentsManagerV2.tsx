@@ -344,6 +344,11 @@ export default function AssignmentsManagerV2() {
   useEffect(() => {
     void load();
   }, []);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(""), 5000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
   function gamePower(g: Game, map = powers) {
     return (
       ((g.home ? (map[g.home.id] ?? 1) : 1) +
@@ -2204,8 +2209,7 @@ export default function AssignmentsManagerV2() {
           <div>
             <h2>Assignment Center</h2>
             <p>
-              Rank, team recency, distance, availability and game-time conflicts
-              are applied when selecting officials.
+              Assign, review and publish officials for upcoming games.
             </p>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -2216,7 +2220,7 @@ export default function AssignmentsManagerV2() {
                   disabled={!filteredGames.length}
                   onClick={() => void exportAssignments()}
                 >
-                  Export Assignments
+                  Export
                 </button>
                 <button
                   type="button"
@@ -2247,7 +2251,7 @@ export default function AssignmentsManagerV2() {
           </div>
         </div>
         {error && <div className="errorBox">{error}</div>}
-        {notice && <div className="loginMessage">{notice}</div>}
+        {notice && <div className="assignmentToast">{notice}</div>}
         {canManage && overdueGroup && !overduePromptClosed && (
           <div
             className="overduePrompt"
@@ -2354,15 +2358,9 @@ export default function AssignmentsManagerV2() {
             </div>
           </div>
         )}
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            flexWrap: "wrap",
-            margin: "14px 0",
-            alignItems: "center",
-          }}
-        >
+        <div className="assignmentFilterPanel">
+        <div className="assignmentDateFilters">
+          <span className="assignmentFilterLabel">Date</span>
           {filters.map(([key, label]) => (
             <button
               key={key}
@@ -2382,23 +2380,8 @@ export default function AssignmentsManagerV2() {
           ))}
           <button
             type="button"
-            className={unpublishedOnly ? "primary" : "secondary"}
-            onClick={toggleUnpublished}
-          >
-            Not Published ({rangeGames.filter(isUnpublishedGame).length})
-          </button>
-          <button
-            type="button"
+            className="assignmentCalendarButton"
             onClick={() => setShowCalendar(!showCalendar)}
-            style={{
-              background: "#111827",
-              color: "#fff",
-              border: "1px solid #111827",
-              borderRadius: 8,
-              padding: "10px 14px",
-              fontWeight: 700,
-              cursor: "pointer",
-            }}
           >
             📅 Calendar
           </button>
@@ -2419,6 +2402,7 @@ export default function AssignmentsManagerV2() {
         </div>
         {canManage && (
           <div className="assignmentDirectFilters">
+            <span className="assignmentFilterLabel">Filters</span>
             <label>
               Location
               <select
@@ -2469,49 +2453,37 @@ export default function AssignmentsManagerV2() {
                   ))}
               </select>
             </label>
+            <label>
+              Assignment Status
+              <select
+                aria-label="Filter by assignment status"
+                value={completenessFilter}
+                onChange={(event) =>
+                  chooseCompleteness(event.target.value as Completeness)
+                }
+              >
+                <option value="all">All Assignment Statuses ({rangeGames.length})</option>
+                <option value="unassigned">Unassigned</option>
+                <option value="partial">Partially Assigned</option>
+                <option value="full">Fully Assigned</option>
+                <option value="awaiting">Awaiting Confirmation</option>
+                <option value="confirmed">Confirmed</option>
+                <option value="attention">Needs Attention</option>
+              </select>
+            </label>
+            <label className="assignmentCheckboxFilter">
+              <input
+                type="checkbox"
+                checked={unpublishedOnly}
+                onChange={toggleUnpublished}
+              />
+              Show not published only ({rangeGames.filter(isUnpublishedGame).length})
+            </label>
             {hasDirectGameFilter && (
               <span>Showing matching games across all dates and assignment statuses.</span>
             )}
           </div>
         )}
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            flexWrap: "wrap",
-            margin: "-4px 0 14px",
-            alignItems: "center",
-          }}
-        >
-          <b style={{ fontSize: 12, color: "#475569" }}>Assignment status:</b>
-          {(
-            [
-              ["all", "All"],
-              ["unassigned", "Unassigned"],
-              ["partial", "Partially Assigned"],
-              ["full", "Fully Assigned"],
-              ["awaiting", "Awaiting Confirmation"],
-              ["confirmed", "Confirmed"],
-              ["attention", "Needs Attention"],
-            ] as [Completeness, string][]
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              className={completenessFilter === key ? "primary" : "secondary"}
-              onClick={() => chooseCompleteness(key)}
-              style={{ padding: "7px 10px", fontSize: 11 }}
-            >
-              {label} (
-              {key === "all"
-                ? rangeGames.length
-                : rangeGames.filter(
-                    (listedGame) =>
-                      assignmentCompleteness(listedGame).key === key,
-                  ).length}
-              )
-            </button>
-          ))}
         </div>
         <div
           className="assignmentGameTable"
@@ -2534,8 +2506,7 @@ export default function AssignmentsManagerV2() {
             }}
           >
             <b>
-              Assignments — {filteredGames.length} game
-              {filteredGames.length === 1 ? "" : "s"}
+              Games <small>{filteredGames.length} results</small>
             </b>
             <span
               style={{
@@ -2559,16 +2530,8 @@ export default function AssignmentsManagerV2() {
                 }
               >
                 {linkSelected.length === filteredGames.length
-                  ? "Clear All"
-                  : "Select All"}
-              </button>
-              <button
-                type="button"
-                className="primary"
-                disabled={linking || bulkWorking || linkSelected.length < 2}
-                onClick={() => void linkGames()}
-              >
-                🔗 Link{linkSelected.length ? ` (${linkSelected.length})` : ""}
+                  ? "Clear Selection"
+                  : "Select All Games"}
               </button>
             </span>
           </div>
@@ -2584,7 +2547,11 @@ export default function AssignmentsManagerV2() {
                 borderBottom: "1px solid #fde68a",
               }}
             >
-              <b style={{ marginRight: 4 }}>{linkSelected.length} selected:</b>
+              <b style={{ marginRight: 4 }}>
+                {assignmentSelectionIsLinked
+                  ? "1 linked group selected"
+                  : `${linkSelected.length} game${linkSelected.length === 1 ? "" : "s"} selected`}
+              </b>
               <button
                 className="primary"
                 disabled={bulkWorking || !assignmentSelectionTarget}
@@ -2615,39 +2582,60 @@ export default function AssignmentsManagerV2() {
               >
                 Confirm Officials
               </button>
+              <details className="assignmentMoreActions">
+                <summary>More Actions</summary>
+                <div>
+                  <button
+                    className="secondary"
+                    disabled={bulkWorking}
+                    onClick={() => void runBulkAction("unassign")}
+                  >
+                    Unassign Officials
+                  </button>
+                  <label>
+                    Game Status
+                    <select
+                      aria-label="Bulk game status"
+                      value={bulkStatus}
+                      disabled={bulkWorking}
+                      onChange={(e) => setBulkStatus(e.target.value)}
+                    >
+                      {gameStatusOptions.map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    className="secondary"
+                    disabled={bulkWorking}
+                    onClick={() => void runBulkAction("status")}
+                  >
+                    Apply Status
+                  </button>
+                  <button
+                    className="secondary"
+                    disabled={linking || bulkWorking || linkSelected.length < 2}
+                    onClick={() => void linkGames()}
+                  >
+                    Link Selected Games
+                  </button>
+                  <button
+                    className="secondary"
+                    disabled={bulkWorking}
+                    onClick={() => void exportAssignments(linkSelected)}
+                  >
+                    Export Selected
+                  </button>
+                </div>
+              </details>
               <button
-                className="secondary"
+                className="assignmentClearSelection"
                 disabled={bulkWorking}
-                onClick={() => void runBulkAction("unassign")}
+                onClick={() => setLinkSelected([])}
               >
-                Unassign Officials
-              </button>
-              <select
-                aria-label="Bulk game status"
-                value={bulkStatus}
-                disabled={bulkWorking}
-                onChange={(e) => setBulkStatus(e.target.value)}
-                style={{ width: "auto" }}
-              >
-                {gameStatusOptions.map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-              <button
-                className="secondary"
-                disabled={bulkWorking}
-                onClick={() => void runBulkAction("status")}
-              >
-                Change Status
-              </button>
-              <button
-                className="secondary"
-                disabled={bulkWorking}
-                onClick={() => void exportAssignments(linkSelected)}
-              >
-                Export Selected
+                Clear selection
               </button>
               {bulkWorking && <span>Working…</span>}
             </div>
