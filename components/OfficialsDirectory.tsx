@@ -102,6 +102,7 @@ export default function OfficialsDirectory() {
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [showRoster, setShowRoster] = useState(false);
+  const [showCommunications, setShowCommunications] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -462,19 +463,32 @@ export default function OfficialsDirectory() {
             <h2>Officials</h2>
             <p>Add individually or manage the entire roster with CSV.</p>
           </div>
-          <button
-            className="secondary"
-            onClick={() => {
-              setShowRoster(!showRoster);
-              setShowForm(false);
-            }}
-          >
-            {showRoster ? "Close Roster Manager" : "Roster Import / Export"}
-          </button>
+          <div className="headerActions">
+            <button
+              className={showCommunications ? "primary" : "secondary"}
+              onClick={() => {
+                setShowCommunications(!showCommunications);
+                setShowRoster(false);
+                setShowForm(false);
+              }}
+            >
+              {showCommunications ? "Back to Official Directory" : "Communications"}
+            </button>
+            <button
+              className="secondary"
+              onClick={() => {
+                setShowRoster(!showRoster);
+                setShowCommunications(false);
+                setShowForm(false);
+              }}
+            >
+              {showRoster ? "Close Roster Manager" : "Roster Import / Export"}
+            </button>
+          </div>
         </div>
       )}
       {showRoster && <OfficialsRosterManager />}
-      <section className="card">
+      {showCommunications ? <CommunicationCenter /> : <section className="card">
         <div className="cardHead">
           <div>
             <h2>Officials Directory</h2>
@@ -845,8 +859,7 @@ export default function OfficialsDirectory() {
             </table>
           </div>
         )}
-      </section>
-      {canManage && <CommunicationCenter />}
+      </section>}
     </>
   );
 }
