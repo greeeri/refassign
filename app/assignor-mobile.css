@@ -203,13 +203,14 @@
 .assignmentGameTableHeader,
 .assignmentGameRow {
   display: grid;
-  grid-template-columns: 48px minmax(260px, 2.15fr) minmax(180px, 1.3fr) minmax(150px, 1fr) 82px 138px 190px;
+  grid-template-columns: 44px minmax(220px, 2.1fr) minmax(150px, 1.25fr) minmax(135px, 1fr) 68px minmax(125px, .9fr) minmax(150px, 1fr);
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  min-width: 0;
 }
 
 .assignmentGameTableHeader {
-  padding: 10px 16px;
+  padding: 10px 14px;
   border-bottom: 1px solid #dbe7f0;
   background: #f4f8fb;
   color: #59728a;
@@ -221,7 +222,7 @@
 
 .assignmentGameRow {
   min-height: 72px;
-  padding: 10px 16px;
+  padding: 10px 14px;
 }
 
 .assignmentGameRow input[type="checkbox"] {
@@ -258,8 +259,19 @@
   line-height: 1.2;
 }
 
+.assignmentGameTableHeader > *,
+.assignmentGameRow > * {
+  min-width: 0;
+}
+
+.assignmentGameTableHeader > :last-child {
+  justify-self: start;
+  white-space: nowrap;
+}
+
 .assignmentStatusCell {
   display: flex;
+  min-width: 0;
   justify-content: flex-start;
 }
 
