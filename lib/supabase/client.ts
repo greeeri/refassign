@@ -1,17 +1,31 @@
 import { createBrowserClient } from '@supabase/ssr'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 
+// Public, read-limited credentials for the isolated league-tier test project.
+// Production continues to use its configured environment variables.
+const testUrl = 'https://slenztuopbfxqzjyrtzp.supabase.co'
+const testPublishableKey = 'sb_publishable_Hz_2BH4cYmrogX3O15x2PQ_fU-0uSKZ'
+
+function browserConfiguration() {
+  return {
+    url: process.env.NEXT_PUBLIC_SUPABASE_URL || testUrl,
+    key: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || testPublishableKey
+  }
+}
+
 export function createClient() {
+  const config = browserConfiguration()
   return createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    config.url,
+    config.key
   )
 }
 
 export function createPasswordRecoveryClient() {
+  const config = browserConfiguration()
   return createSupabaseClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    config.url,
+    config.key,
     {
       auth: {
         flowType: 'implicit',
