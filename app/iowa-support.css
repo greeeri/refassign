@@ -1,0 +1,94 @@
+.trainingSupport {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px 18px;
+  background: linear-gradient(135deg, #f3f8ff, #f4fbf1);
+  border: 1px solid #d7e6f3;
+  border-radius: 12px;
+}
+.trainingSupport h3 {
+  margin: 0 0 4px;
+  color: #0a2142;
+}
+.trainingSupport p {
+  margin: 0;
+  color: #51647c;
+}
+.trainingSupportButtons {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.trainingSupportNotice {
+  width: 100%;
+}
+.trainingSupportBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: #07182b99;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+.trainingSupportDialog {
+  position: relative;
+  width: min(640px, 100%);
+  max-height: 90vh;
+  overflow: auto;
+  background: #fff;
+  border-radius: 14px;
+  padding: 24px;
+  box-shadow: 0 24px 70px #06152755;
+}
+.trainingSupportDialog > .quizClose {
+  position: absolute;
+  right: 16px;
+  top: 16px;
+}
+.trainingSupportDialog h2 {
+  margin: 0 44px 6px 0;
+  color: #0a2142;
+}
+.trainingSupportDialog > p {
+  margin: 0 0 18px;
+  color: #51647c;
+}
+.trainingSupportDialog form {
+  display: grid;
+  gap: 14px;
+}
+.trainingSupportDialog label {
+  display: grid;
+  gap: 6px;
+  font-weight: 800;
+  color: #17365d;
+}
+.trainingSupportDialog textarea,
+.trainingSupportDialog select {
+  font-weight: 400;
+}
+.trainingSupportFormActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 6px;
+}
+@media (max-width: 680px) {
+  .trainingSupport {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .trainingSupportButtons {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .trainingSupportDialog {
+    padding: 20px 16px;
+  }
+  .trainingSupportFormActions > * {
+    flex: 1;
+  }
+}
