@@ -196,6 +196,7 @@ export default function AssignmentsManagerV2() {
     [customDate, setCustomDate] = useState(""),
     [showCalendar, setShowCalendar] = useState(false),
     [unpublishedOnly, setUnpublishedOnly] = useState(false),
+    [selfAssignOnly, setSelfAssignOnly] = useState(false),
     [completenessFilter, setCompletenessFilter] = useState<Completeness>("all"),
     [officialFilter, setOfficialFilter] = useState(""),
     [locationFilter, setLocationFilter] = useState(""),
@@ -487,13 +488,30 @@ export default function AssignmentsManagerV2() {
   function matchesLocationFilter(g: Game) {
     return !locationFilter || g.location_id === locationFilter;
   }
+  function selfAssignOpenCount(gameId: string) {
+    return selfAssignSlots.filter(
+      (slot) => slot.game_id === gameId && slot.status === "open",
+    ).length;
+  }
+  const selfAssignGameCount = new Set(
+    selfAssignSlots
+      .filter((slot) => slot.status === "open")
+      .map((slot) => slot.game_id),
+  ).size;
   const hasDirectGameFilter = Boolean(locationFilter || officialFilter);
   const rangeGames = games.filter((g) => inRange(g, range, customDate));
   const baseFilteredGames = games.filter((g) => {
+    const matchesSelfAssign =
+      !selfAssignOnly || selfAssignOpenCount(g.id) > 0;
     if (hasDirectGameFilter)
-      return matchesLocationFilter(g) && matchesOfficialFilter(g);
+      return (
+        matchesLocationFilter(g) &&
+        matchesOfficialFilter(g) &&
+        matchesSelfAssign
+      );
     return (
       inRange(g, range, customDate) &&
+      matchesSelfAssign &&
       (!unpublishedOnly || isUnpublishedGame(g)) &&
       (completenessFilter === "all" ||
         assignmentCompleteness(g).key === completenessFilter)
@@ -2111,6 +2129,14 @@ export default function AssignmentsManagerV2() {
               </span>
             )}
             {g.home?.name || "TBD"} vs {g.away?.name || "TBD"}
+            {selfAssignOpenCount(g.id) > 0 && (
+              <span
+                className="badge green"
+                style={{ marginLeft: 8, verticalAlign: "middle" }}
+              >
+                Self Assign • {selfAssignOpenCount(g.id)} Open
+              </span>
+            )}
           </span>
           <small style={{ color: isRainOut ? "#dbeafe" : undefined }}>
             {g.game_number}
@@ -2406,6 +2432,35 @@ export default function AssignmentsManagerV2() {
           </div>
         )}
         <div className="assignmentFilterPanel">
+        <div
+          className="assignmentDateFilters"
+          style={{ paddingBottom: 10, borderBottom: "1px solid #dbeafe" }}
+        >
+          <span className="assignmentFilterLabel">View</span>
+          <button
+            type="button"
+            className={selfAssignOnly ? "success" : "secondary"}
+            aria-pressed={selfAssignOnly}
+            onClick={() => {
+              const next = !selfAssignOnly;
+              setSelfAssignOnly(next);
+              setLinkSelected([]);
+              if (next && selected && selfAssignOpenCount(selected) === 0)
+                setSelected("");
+            }}
+          >
+            {selfAssignOnly ? "✓ " : ""}Open for Self Assign ({selfAssignGameCount})
+          </button>
+          {selfAssignOnly && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setSelfAssignOnly(false)}
+            >
+              Show All Games
+            </button>
+          )}
+        </div>
         <div className="assignmentDateFilters">
           <span className="assignmentFilterLabel">Date</span>
           {filters.map(([key, label]) => (
@@ -2907,7 +2962,9 @@ export default function AssignmentsManagerV2() {
               })
             ) : (
               <div style={{ padding: 14, color: "#64748b" }}>
-                No games in this selection.
+                {selfAssignOnly
+                  ? "No games are currently open for Self Assign in this selection."
+                  : "No games in this selection."}
               </div>
             )}
           </div>
