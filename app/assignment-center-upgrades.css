@@ -30,3 +30,15 @@
 .assignmentManageSavedViews button{padding:7px 10px;border:1px solid #fecaca;border-radius:7px;background:#fff;color:#b91c1c;font-size:12px;font-weight:750;cursor:pointer}
 @media(max-width:1200px){.assignmentFilterPanel.assignmentCompactToolbar{grid-template-columns:repeat(3,minmax(0,1fr))}.assignmentCompactToolbar>.assignmentToolbarButton,.assignmentCompactToolbar>.assignmentMoreFilters{width:100%}.assignmentCompactToolbar>.assignmentMoreFilters>summary{width:100%}.assignmentCompactToolbar>.assignmentMoreFilters[open]>summary{width:100%;margin-left:0}}
 @media(max-width:760px){.assignmentFilterPanel.assignmentCompactToolbar{grid-template-columns:1fr!important;padding:12px!important}.assignmentCompactToolbar>.assignmentToolbarButton,.assignmentCompactToolbar>.assignmentMoreFilters,.assignmentCompactToolbar>.assignmentMoreFilters>summary{width:100%}.assignmentCustomDateRow{display:grid;grid-template-columns:1fr}.assignmentCustomDateRow .assignmentToolbarField,.assignmentCustomDateRow>button{width:100%}.assignmentCustomDateResult{padding:2px 0}.assignmentDirectFilters{grid-template-columns:1fr!important}}
+
+/* Multi-game assignment workspace and official drag targets */
+.assignmentCenterSplit.hasSelectedGame>.card{display:block}
+.assignmentCenterSplit.hasSelectedGame .assignmentBackToGames{display:none}
+.draggableOfficial[draggable=true]{cursor:grab;touch-action:manipulation}
+.draggableOfficial[draggable=true]:active{cursor:grabbing}
+.draggableOfficial.dragging{opacity:.48;transform:scale(.985)}
+.assignmentGameRow.officialDropReady{position:relative;outline:1px dashed #60a5fa;outline-offset:-4px}
+.assignmentGameRow.officialDropReady::after{content:"Drop official here";position:absolute;right:12px;bottom:7px;padding:4px 8px;border-radius:999px;background:#eff6ff;color:#1d4ed8;font-size:12px;font-weight:850;pointer-events:none}
+.assignmentGameRow.officialDropTarget{outline:3px solid #16a34a;outline-offset:-3px;background:#f0fdf4!important;box-shadow:inset 0 0 0 1px #bbf7d0}
+.assignmentGameRow.officialDropTarget::after{content:"Release to assign next open position";background:#166534;color:#fff}
+@media(max-width:760px){.assignmentGameRow.officialDropReady::after{display:none}.draggableOfficial[draggable=true]{cursor:default}}

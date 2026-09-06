@@ -250,6 +250,8 @@ export default function AssignmentsManagerV2() {
     [linkSelected, setLinkSelected] = useState<string[]>([]),
     [linking, setLinking] = useState(false),
     [draggingGame, setDraggingGame] = useState(""),
+    [draggingOfficial, setDraggingOfficial] = useState(""),
+    [officialDropGame, setOfficialDropGame] = useState(""),
     [bulkWorking, setBulkWorking] = useState(false),
     [bulkStatus, setBulkStatus] = useState("active"),
     [selfAssignSlots, setSelfAssignSlots] = useState<SelfAssignSlot[]>([]),
@@ -1546,17 +1548,38 @@ export default function AssignmentsManagerV2() {
         (reasonText.includes("overlap") || reasonText.includes("assigned")));
     return matchesSearch && matchesReason;
   });
-  async function assign(positionId: string, officialId: string) {
-    if (!game) return;
+  function openPositionForGame(targetGame: Game) {
+    return positions
+      .filter((position) => position.sport_id === targetGame.sport_id)
+      .sort((a, b) => a.sort_order - b.sort_order || a.id.localeCompare(b.id))
+      .slice(0, Math.max(0, targetGame.officials_needed))
+      .find(
+        (position) =>
+          !assignments.some(
+            (assignment) =>
+              assignment.game_id === targetGame.id &&
+              assignment.position_id === position.id &&
+              assignment.status !== "declined",
+          ),
+      );
+  }
+  async function assignToGame(
+    targetGame: Game,
+    positionId: string,
+    officialId: string,
+  ) {
     const official = officials.find((o) => o.id === officialId);
-    if (officialId && official && workingAtGameTime(official, positionId)) {
+    const conflictReasons = official
+      ? assignmentConflictReasonsForGame(official, targetGame, positionId)
+      : [];
+    if (officialId && official && conflictReasons.length) {
       setError(
-        `${official.first_name} ${official.last_name} cannot be assigned: ${assignmentConflictReasons(official, positionId).join("; ")}.`,
+        `${official.first_name} ${official.last_name} cannot be assigned: ${conflictReasons.join("; ")}.`,
       );
       return;
     }
     const reasons = official
-      ? ineligibleReasons(official, positionId).filter(
+      ? ineligibleReasonsForGame(official, targetGame, positionId).filter(
           (r) => r !== "Already assigned to this game",
         )
       : [];
@@ -1576,7 +1599,7 @@ export default function AssignmentsManagerV2() {
     setError("");
     setNotice("");
     const existing = assignments.find(
-      (a) => a.game_id === game.id && a.position_id === positionId,
+      (a) => a.game_id === targetGame.id && a.position_id === positionId,
     );
     let result;
     if (!officialId && existing)
@@ -1586,7 +1609,7 @@ export default function AssignmentsManagerV2() {
         .eq("id", existing.id);
     else if (officialId)
       result = await supabase.rpc("assign_official_to_linked_games", {
-        p_game_id: game.id,
+        p_game_id: targetGame.id,
         p_position_id: positionId,
         p_official_id: officialId,
       });
@@ -1607,6 +1630,23 @@ export default function AssignmentsManagerV2() {
     await refreshAssignmentState();
     setSaving("");
     setOverrideOfficial("");
+  }
+  async function assign(positionId: string, officialId: string) {
+    if (!game) return;
+    await assignToGame(game, positionId, officialId);
+  }
+  async function dropOfficialOnGame(gameId: string, officialId: string) {
+    const targetGame = games.find((listedGame) => listedGame.id === gameId);
+    if (!targetGame || !officialId || !canManage) return;
+    const position = openPositionForGame(targetGame);
+    setOfficialDropGame("");
+    setDraggingOfficial("");
+    if (!position) {
+      setError(`Game #${targetGame.game_number} has no open assignment positions.`);
+      return;
+    }
+    setSelected(targetGame.id);
+    await assignToGame(targetGame, position.id, officialId);
   }
   async function assignAndPublishReplacement(
     positionId: string,
@@ -2275,7 +2315,31 @@ export default function AssignmentsManagerV2() {
     return (
       <div
         key={g.id}
-        className="assignmentGameRow"
+        className={`assignmentGameRow${officialDropGame === g.id ? " officialDropTarget" : ""}${draggingOfficial ? " officialDropReady" : ""}`}
+        onDragEnter={(event) => {
+          if (!draggingOfficial || !canManage) return;
+          event.preventDefault();
+          event.stopPropagation();
+          setOfficialDropGame(g.id);
+        }}
+        onDragOver={(event) => {
+          if (!draggingOfficial || !canManage) return;
+          event.preventDefault();
+          event.stopPropagation();
+          event.dataTransfer.dropEffect = "move";
+        }}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node))
+            setOfficialDropGame("");
+        }}
+        onDrop={(event) => {
+          const officialId =
+            event.dataTransfer.getData("text/plain") || draggingOfficial;
+          if (!officialId || !canManage) return;
+          event.preventDefault();
+          event.stopPropagation();
+          void dropOfficialOnGame(g.id, officialId);
+        }}
         style={{
           borderBottom: `1px solid ${statusBorder || (linked ? "#bfdbfe" : "#e2e8f0")}`,
           background:
@@ -3959,13 +4023,27 @@ export default function AssignmentsManagerV2() {
               </span>
             </div>
             <p>
-              Eligible officials are listed first. Every unavailable official
-              remains visible in red with the exact reason. Overlapping game
-              assignments cannot be overridden.
+              Drag an official onto a game to fill its next open position.
+              Ineligible officials remain visible in red and require an
+              override; overlapping assignments cannot be overridden.
             </p>
             <div className="availableOfficialsList">
               {availableOfficials.map((o, i) => (
-                <div className="availableOfficial" key={o.id}>
+                <div
+                  className={`availableOfficial draggableOfficial${draggingOfficial === o.id ? " dragging" : ""}`}
+                  key={o.id}
+                  draggable={canManage}
+                  onDragStart={(event) => {
+                    setDraggingOfficial(o.id);
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData("text/plain", o.id);
+                  }}
+                  onDragEnd={() => {
+                    setDraggingOfficial("");
+                    setOfficialDropGame("");
+                  }}
+                  title={canManage ? "Drag onto a game to assign" : undefined}
+                >
                   <span className="availableOrder">{i + 1}</span>
                   <div>
                     <b>
@@ -4016,8 +4094,19 @@ export default function AssignmentsManagerV2() {
                       </div>
                       {visibleIneligibleOfficials.map((o) => (
                     <div
-                      className="availableOfficial ineligibleOfficial"
+                      className={`availableOfficial ineligibleOfficial draggableOfficial${draggingOfficial === o.id ? " dragging" : ""}`}
                       key={o.id}
+                      draggable={canManage}
+                      onDragStart={(event) => {
+                        setDraggingOfficial(o.id);
+                        event.dataTransfer.effectAllowed = "move";
+                        event.dataTransfer.setData("text/plain", o.id);
+                      }}
+                      onDragEnd={() => {
+                        setDraggingOfficial("");
+                        setOfficialDropGame("");
+                      }}
+                      title={canManage ? "Drag onto a game to assign with override" : undefined}
                       style={{
                         background: "#fef2f2",
                         border: "1px solid #fecaca",
