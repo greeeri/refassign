@@ -845,21 +845,33 @@ export default function AssignmentsManagerV2() {
     setSelfAssignSaving(true);
     setError("");
     setNotice("");
-    const { data, error: saveError } = await supabase.rpc(
-      "set_self_assign_positions",
-      { p_slots: slots },
-    );
-    if (saveError) setError(saveError.message);
-    else {
-      const count = Number(data || slots.length);
+    try {
+      const { data, error: saveError } = await supabase.rpc(
+        "set_self_assign_positions",
+        { p_slots: slots },
+      );
+      if (saveError) throw saveError;
+
+      const count = Number(data ?? slots.length);
+      await load();
       setNotice(
         `${count} ${count === 1 ? "position is" : "positions are"} now available for Self Assign.`,
       );
       setSelfAssignSelected([]);
       if (usedGameSelection) setLinkSelected([]);
+    } catch (saveError) {
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : typeof saveError === "object" &&
+              saveError !== null &&
+              "message" in saveError
+            ? String(saveError.message)
+            : "Unable to open the selected positions for Self Assign.",
+      );
+    } finally {
+      setSelfAssignSaving(false);
     }
-    await load();
-    setSelfAssignSaving(false);
   }
   async function withdrawSelfAssignPosition(
     gameId: string,
