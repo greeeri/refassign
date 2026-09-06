@@ -523,6 +523,26 @@ export default function AssignmentsManagerV2() {
     })),
   ].sort((a, b) => compareGames(a.games[0], b.games[0]));
   const filteredGames = gameUnits.flatMap((unit) => unit.games);
+  const assignmentSelection = filteredGames.filter((listedGame) =>
+    linkSelected.includes(listedGame.id),
+  );
+  const assignmentSelectionGroupId = assignmentSelection.length
+    ? linkGroupByGame.get(assignmentSelection[0].id) || null
+    : null;
+  const assignmentSelectionIsOneTarget =
+    assignmentSelection.length === 1 ||
+    (Boolean(assignmentSelectionGroupId) &&
+      assignmentSelection.every(
+        (listedGame) =>
+          linkGroupByGame.get(listedGame.id) === assignmentSelectionGroupId,
+      ));
+  const assignmentSelectionTarget = assignmentSelectionIsOneTarget
+    ? assignmentSelection[0]
+    : null;
+  const assignmentSelectionIsLinked = Boolean(
+    assignmentSelectionTarget &&
+      linkGroupByGame.get(assignmentSelectionTarget.id),
+  );
   function sortGames(by: Exclude<GameSort, "default">) {
     if (gameSort === by) setGameSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else {
@@ -534,6 +554,8 @@ export default function AssignmentsManagerV2() {
     return gameSort === by ? (gameSortDir === "asc" ? " ▲" : " ▼") : "";
   }
   function toggleLinkSelection(gameId: string) {
+    setSelected(gameId);
+    setOverrideOfficial("");
     setLinkSelected((current) =>
       current.includes(gameId)
         ? current.filter((id) => id !== gameId)
@@ -2564,6 +2586,22 @@ export default function AssignmentsManagerV2() {
             >
               <b style={{ marginRight: 4 }}>{linkSelected.length} selected:</b>
               <button
+                className="primary"
+                disabled={bulkWorking || !assignmentSelectionTarget}
+                onClick={() => {
+                  if (!assignmentSelectionTarget) return;
+                  setSelected(assignmentSelectionTarget.id);
+                  setOverrideOfficial("");
+                  document
+                    .getElementById("selected-game-assignment")
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+              >
+                {assignmentSelectionIsLinked
+                  ? "Assign Linked Group"
+                  : "Assign Selected Game"}
+              </button>
+              <button
                 className="secondary"
                 disabled={bulkWorking}
                 onClick={() => void runBulkAction("publish")}
@@ -3136,7 +3174,10 @@ export default function AssignmentsManagerV2() {
       </section>
       {game && filteredGames.some((g) => g.id === game.id) && (
         <div className="assignmentLayout">
-          <section className="card assignmentMain">
+          <section
+            id="selected-game-assignment"
+            className="card assignmentMain"
+          >
             <div className="cardHead">
               <div>
                 <h2>
