@@ -1792,7 +1792,7 @@ export default function AssignmentsManagerV2() {
     XLSX.writeFile(wb, "refassign-game-assignments.xlsx");
   }
   async function runBulkAction(
-    action: "publish" | "confirm" | "unassign" | "status",
+    action: "publish" | "confirm" | "unassign" | "status" | "closeSelfAssign",
   ) {
     if (!canManage || !linkSelected.length || bulkWorking) return;
     const selectedIds = [...linkSelected];
@@ -1803,6 +1803,7 @@ export default function AssignmentsManagerV2() {
       publish: "publish assignments for",
       confirm: "confirm officials on",
       unassign: "unassign every official from",
+      closeSelfAssign: "close every open Self Assign position for",
       status: `change the status to ${gameStatusOptions.find(([value]) => value === bulkStatus)?.[1] || bulkStatus} for`,
     };
     const officialNotificationWarning =
@@ -1835,6 +1836,21 @@ export default function AssignmentsManagerV2() {
           );
           const undoId = (undoRows as { id: string }[] | null)?.[0]?.id;
           if (undoId) undoOperationIds.push(undoId);
+        }
+      } else if (action === "closeSelfAssign") {
+        const openSlots = selfAssignSlots.filter((slot) =>
+          selectedIds.includes(slot.game_id),
+        );
+        for (const slot of openSlots) {
+          const { error: closeError } = await supabase.rpc(
+            "withdraw_self_assign_position",
+            {
+              p_game_id: slot.game_id,
+              p_position_id: slot.position_id,
+            },
+          );
+          if (closeError) failures.push(closeError.message);
+          else succeeded++;
         }
       } else if (action === "status") {
         for (const gameId of selectedIds) {
@@ -2539,6 +2555,7 @@ export default function AssignmentsManagerV2() {
               <summary>More Actions</summary>
               <div>
                 <button className="secondary" disabled={bulkWorking} onClick={() => void runBulkAction("unassign")}>Unassign Officials</button>
+                <button className="secondary" disabled={bulkWorking || !selfAssignSlots.some((slot) => linkSelected.includes(slot.game_id))} onClick={() => void runBulkAction("closeSelfAssign")}>Close Self Assign</button>
                 <label>Game Status<select aria-label="Bulk game status" value={bulkStatus} disabled={bulkWorking} onChange={(e) => setBulkStatus(e.target.value)}>{gameStatusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
                 <button className="secondary" disabled={bulkWorking} onClick={() => void runBulkAction("status")}>Apply Status</button>
                 <button className="secondary" disabled={linking || bulkWorking || linkSelected.length < 2} onClick={() => void linkGames()}>Link Selected Games</button>
