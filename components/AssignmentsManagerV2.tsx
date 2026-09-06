@@ -97,6 +97,24 @@ type SelfAssignSlot = {
   position_id: string;
   status: "open" | "claimed" | "withdrawn";
 };
+type AuditEvent = {
+  id: number;
+  action: string;
+  actor_name: string | null;
+  summary: string;
+  occurred_at: string;
+};
+type SavedAssignmentView = {
+  id: string;
+  name: string;
+  range: Range;
+  customDate: string;
+  locationFilter: string;
+  officialFilter: string;
+  completenessFilter: Completeness;
+  unpublishedOnly: boolean;
+  selfAssignOnly: boolean;
+};
 type Range = "all" | "today" | "tomorrow" | "thisWeek" | "nextWeek" | "custom";
 type Completeness =
   | "all"
@@ -232,7 +250,13 @@ export default function AssignmentsManagerV2() {
     [ineligibleReasonFilter, setIneligibleReasonFilter] = useState("all"),
     [overduePromptClosed, setOverduePromptClosed] = useState(false),
     [overdueResolving, setOverdueResolving] = useState(false),
-    [overdueSelected, setOverdueSelected] = useState<string[]>([]);
+    [overdueSelected, setOverdueSelected] = useState<string[]>([]),
+    [showPublishReview, setShowPublishReview] = useState(false),
+    [showActivityTimeline, setShowActivityTimeline] = useState(false),
+    [activityRows, setActivityRows] = useState<AuditEvent[]>([]),
+    [activityLoading, setActivityLoading] = useState(false),
+    [activityError, setActivityError] = useState(""),
+    [savedViews, setSavedViews] = useState<SavedAssignmentView[]>([]);
   async function load() {
     setError("");
     const { data: userData } = await supabase.auth.getUser();
@@ -359,6 +383,14 @@ export default function AssignmentsManagerV2() {
   }
   useEffect(() => {
     void load();
+  }, []);
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("refassign-assignment-views");
+      if (stored) setSavedViews(JSON.parse(stored) as SavedAssignmentView[]);
+    } catch {
+      localStorage.removeItem("refassign-assignment-views");
+    }
   }, []);
   async function refreshAssignmentState() {
     const [assignmentResult, selfAssignResult] = await Promise.all([
@@ -1001,6 +1033,9 @@ export default function AssignmentsManagerV2() {
   const unpublishedCount = gameAssignments.filter(
     (a) => !a.published_at && a.status !== "declined",
   ).length;
+  const unpublishedAssignments = gameAssignments.filter(
+    (assignment) => !assignment.published_at && assignment.status !== "declined",
+  );
   const activeAssignmentCount = gameAssignments.filter(
     (a) => !["declined", "cancelled"].includes(a.status),
   ).length;
@@ -1081,6 +1116,42 @@ export default function AssignmentsManagerV2() {
     );
     if (!list.some((listedGame) => listedGame.id === selected))
       setSelected(list[0]?.id || "");
+  }
+  function storeSavedViews(next: SavedAssignmentView[]) {
+    setSavedViews(next);
+    localStorage.setItem("refassign-assignment-views", JSON.stringify(next));
+  }
+  function saveCurrentView() {
+    const name = window.prompt("Name this Assignment Center view:")?.trim();
+    if (!name) return;
+    const nextView: SavedAssignmentView = {
+      id: `${Date.now()}`,
+      name,
+      range,
+      customDate,
+      locationFilter,
+      officialFilter,
+      completenessFilter,
+      unpublishedOnly,
+      selfAssignOnly,
+    };
+    storeSavedViews([...savedViews.filter((view) => view.name !== name), nextView]);
+    setNotice(`Saved view “${name}”.`);
+  }
+  function applySavedView(view: SavedAssignmentView) {
+    setRange(view.range);
+    setCustomDate(view.customDate);
+    setLocationFilter(view.locationFilter);
+    setOfficialFilter(view.officialFilter);
+    setCompletenessFilter(view.completenessFilter);
+    setUnpublishedOnly(view.unpublishedOnly);
+    setSelfAssignOnly(view.selfAssignOnly);
+    setLinkSelected([]);
+    setSelected("");
+    setNotice(`Showing saved view “${view.name}”.`);
+  }
+  function deleteSavedView(viewId: string) {
+    storeSavedViews(savedViews.filter((view) => view.id !== viewId));
   }
   function linkedAssignmentGames() {
     if (!game) return [];
@@ -1643,12 +1714,7 @@ export default function AssignmentsManagerV2() {
   }
   async function publishAssignments() {
     if (!game || unpublishedCount === 0) return;
-    if (
-      !window.confirm(
-        `Publish ${unpublishedCount} assignment${unpublishedCount === 1 ? "" : "s"} for Game #${game.game_number}? Officials will receive an email with their response deadline.`,
-      )
-    )
-      return;
+    setShowPublishReview(false);
     setPublishing(true);
     setError("");
     setNotice("");
@@ -1681,6 +1747,21 @@ export default function AssignmentsManagerV2() {
     }
     await refreshAssignmentState();
     setPublishing(false);
+  }
+  async function openActivityTimeline() {
+    if (!game) return;
+    setShowActivityTimeline(true);
+    setActivityLoading(true);
+    setActivityError("");
+    const { data, error: activityLoadError } = await supabase
+      .from("audit_history")
+      .select("id,action,actor_name,summary,occurred_at")
+      .eq("game_id", game.id)
+      .order("occurred_at", { ascending: false })
+      .limit(100);
+    if (activityLoadError) setActivityError(activityLoadError.message);
+    else setActivityRows((data || []) as AuditEvent[]);
+    setActivityLoading(false);
   }
   async function retryNotificationIssues() {
     if (!game || retryingNotifications) return;
@@ -1960,6 +2041,18 @@ export default function AssignmentsManagerV2() {
     ["thisWeek", "This Week"],
     ["nextWeek", "Next Week"],
   ];
+  const attentionQueue = {
+    needsAction: rangeGames.filter(
+      (listedGame) => assignmentCompleteness(listedGame).key === "attention",
+    ).length,
+    unassigned: rangeGames.filter(
+      (listedGame) => assignmentCompleteness(listedGame).key === "unassigned",
+    ).length,
+    awaiting: rangeGames.filter(
+      (listedGame) => assignmentCompleteness(listedGame).key === "awaiting",
+    ).length,
+    unpublished: rangeGames.filter(isUnpublishedGame).length,
+  };
   function shortPositionName(name: string) {
     const normalized = name
       .trim()
@@ -2239,7 +2332,7 @@ export default function AssignmentsManagerV2() {
             <button
               className="primary"
               disabled={!game || unpublishedCount === 0 || publishing}
-              onClick={() => void publishAssignments()}
+              onClick={() => setShowPublishReview(true)}
             >
               {publishing
                 ? "Publishing & Sending…"
@@ -2280,6 +2373,48 @@ export default function AssignmentsManagerV2() {
                   {gameStatusSaving ? "Updating…" : `Confirm ${gameStatusOptions.find(([value]) => value === pendingGameStatus.status)?.[1] || "Change"}`}
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+        {showPublishReview && game && (
+          <div className="assignmentDialogBackdrop" role="presentation" onMouseDown={() => !publishing && setShowPublishReview(false)}>
+            <div className="assignmentDialog assignmentPublishReview" role="dialog" aria-modal="true" aria-labelledby="publishReviewTitle" onMouseDown={(event) => event.stopPropagation()}>
+              <div className="assignmentDialogHead">
+                <div>
+                  <h3 id="publishReviewTitle">Review Before Publishing</h3>
+                  <p>Game #{game.game_number} — {game.home?.name || "TBD"} vs {game.away?.name || "TBD"}</p>
+                </div>
+                <button type="button" aria-label="Close" disabled={publishing} onClick={() => setShowPublishReview(false)}>×</button>
+              </div>
+              <div className="publishReviewSummary">
+                <span><b>{unpublishedCount}</b> official{unpublishedCount === 1 ? "" : "s"} will be notified</span>
+                <span className={openPositionCount ? "warning" : "ready"}><b>{openPositionCount}</b> open position{openPositionCount === 1 ? "" : "s"}</span>
+              </div>
+              <div className="publishRecipientList">
+                {unpublishedAssignments.map((assignment) => {
+                  const official = officials.find((item) => item.id === assignment.official_id);
+                  const position = positions.find((item) => item.id === assignment.position_id);
+                  return <div key={assignment.id}><span><b>{official ? `${official.first_name} ${official.last_name}` : "Unknown official"}</b><small>{position ? shortPositionName(position.name) : "Official"}</small></span><span className={official?.email ? "recipientReady" : "recipientMissing"}>{official?.email || "Email missing"}</span></div>;
+                })}
+              </div>
+              <p className="publishReviewNote">Publishing sends each listed official an assignment email with their response deadline. Open positions are not included.</p>
+              <div className="assignmentDialogFooter">
+                <button type="button" className="secondary" disabled={publishing} onClick={() => setShowPublishReview(false)}>Go Back</button>
+                <button type="button" className="primary" disabled={publishing || !unpublishedCount} onClick={() => void publishAssignments()}>{publishing ? "Publishing & Sending…" : `Publish ${unpublishedCount} Assignment${unpublishedCount === 1 ? "" : "s"}`}</button>
+              </div>
+            </div>
+          </div>
+        )}
+        {showActivityTimeline && game && (
+          <div className="assignmentDialogBackdrop" role="presentation" onMouseDown={() => setShowActivityTimeline(false)}>
+            <div className="assignmentDialog assignmentActivityDialog" role="dialog" aria-modal="true" aria-labelledby="activityTimelineTitle" onMouseDown={(event) => event.stopPropagation()}>
+              <div className="assignmentDialogHead">
+                <div><h3 id="activityTimelineTitle">Activity Timeline</h3><p>Game #{game.game_number} — visible only while this window is open.</p></div>
+                <button type="button" aria-label="Close" onClick={() => setShowActivityTimeline(false)}>×</button>
+              </div>
+              {activityError && <div className="errorBox">{activityError}</div>}
+              {activityLoading ? <p>Loading activity…</p> : activityRows.length ? <div className="gameActivityTimeline">{activityRows.map((row) => <article key={row.id}><i/><div><b>{row.summary}</b><span>{row.actor_name || "System"} • {new Date(row.occurred_at).toLocaleString()}</span></div><em>{row.action.replaceAll("_", " ")}</em></article>)}</div> : <div className="emptyState"><p>No recorded activity for this game yet.</p></div>}
+              <div className="assignmentDialogFooter"><button type="button" className="secondary" onClick={() => setShowActivityTimeline(false)}>Close</button></div>
             </div>
           </div>
         )}
@@ -2430,6 +2565,15 @@ export default function AssignmentsManagerV2() {
               {overdueResolving && <span>Updating…</span>}
             </div>
           </div>
+        )}
+        {canManage && (
+          <section className="assignmentAttentionQueue" aria-labelledby="attentionQueueTitle">
+            <div><h3 id="attentionQueueTitle">Needs Attention</h3><p>Open the work that should be handled next.</p></div>
+            <button type="button" onClick={() => chooseCompleteness("attention")}><b>{attentionQueue.needsAction}</b><span>Declined or overdue</span></button>
+            <button type="button" onClick={() => chooseCompleteness("unassigned")}><b>{attentionQueue.unassigned}</b><span>Unassigned games</span></button>
+            <button type="button" onClick={() => chooseCompleteness("awaiting")}><b>{attentionQueue.awaiting}</b><span>Awaiting response</span></button>
+            <button type="button" onClick={() => { setUnpublishedOnly(true); setCompletenessFilter("all"); setSelected(""); }}><b>{attentionQueue.unpublished}</b><span>Not published</span></button>
+          </section>
         )}
         <div className="assignmentFilterPanel">
         <div
@@ -2584,6 +2728,13 @@ export default function AssignmentsManagerV2() {
             {hasDirectGameFilter && (
               <span>Showing matching games across all dates and assignment statuses.</span>
             )}
+          </div>
+        )}
+        {canManage && (
+          <div className="assignmentSavedViews">
+            <span className="assignmentFilterLabel">Saved Views</span>
+            {savedViews.map((view) => <span className="savedViewChip" key={view.id}><button type="button" onClick={() => applySavedView(view)}>{view.name}</button><button type="button" aria-label={`Delete saved view ${view.name}`} title="Delete saved view" onClick={() => deleteSavedView(view.id)}>×</button></span>)}
+            <button type="button" className="secondary" onClick={saveCurrentView}>+ Save Current View</button>
           </div>
         )}
         </div>
@@ -3214,6 +3365,7 @@ export default function AssignmentsManagerV2() {
                   <span><b>{gameAssignments.filter((item) => item.status === "proposed" && item.published_at).length}</b> Awaiting</span>
                   <span><b>{gameAssignments.filter((item) => ["accepted", "confirmed"].includes(item.status)).length}</b> Confirmed</span>
                 </div>
+                <button type="button" className="assignmentActivityLink" onClick={() => void openActivityTimeline()}>View activity timeline</button>
                 <div
                   className="assignmentConfirmMessage"
                   style={{ marginTop: 10 }}
