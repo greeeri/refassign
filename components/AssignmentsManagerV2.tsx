@@ -200,6 +200,10 @@ export default function AssignmentsManagerV2() {
     [publishing, setPublishing] = useState(false),
     [confirming, setConfirming] = useState(""),
     [gameStatusSaving, setGameStatusSaving] = useState(""),
+    [pendingGameStatus, setPendingGameStatus] = useState<{
+      gameId: string;
+      status: string;
+    } | null>(null),
     [canManage, setCanManage] = useState(false),
     [overrideOfficial, setOverrideOfficial] = useState(""),
     [gameSort, setGameSort] = useState<GameSort>("default"),
@@ -1537,20 +1541,19 @@ export default function AssignmentsManagerV2() {
     await refreshAssignmentState();
     setConfirming("");
   }
+  function requestGameStatusChange(gameId: string, status: string) {
+    if (["canceled", "rained_out"].includes(status)) {
+      setPendingGameStatus({ gameId, status });
+      return;
+    }
+    void changeGameStatus(gameId, status);
+  }
   async function changeGameStatus(gameId: string, status: string) {
     if (!canManage) {
       setError("Only Administrators and Assignors can change game status.");
       return;
     }
-    const selectedStatusLabel =
-      gameStatusOptions.find(([value]) => value === status)?.[1] || status;
-    if (
-      ["canceled", "rained_out"].includes(status) &&
-      !window.confirm(
-        `Change this game to ${selectedStatusLabel}? Assigned officials will be notified.`,
-      )
-    )
-      return;
+    setPendingGameStatus(null);
     setGameStatusSaving(gameId);
     setError("");
     setNotice("");
@@ -2039,7 +2042,7 @@ export default function AssignmentsManagerV2() {
           aria-label={`Status for game ${g.game_number}`}
           disabled={!canManage || gameStatusSaving === g.id}
           value={g.status === "open" ? "active" : g.status}
-          onChange={(event) => void changeGameStatus(g.id, event.target.value)}
+          onChange={(event) => requestGameStatusChange(g.id, event.target.value)}
           style={{
             width: "100%",
             minWidth: 0,
@@ -2127,6 +2130,30 @@ export default function AssignmentsManagerV2() {
           <div className="assignmentToast assignmentFeedback" role="status">
             <span>{notice}</span>
             <button type="button" aria-label="Dismiss message" onClick={() => setNotice("")}>×</button>
+          </div>
+        )}
+        {pendingGameStatus && (
+          <div className="assignmentDialogBackdrop" role="presentation" onMouseDown={() => !gameStatusSaving && setPendingGameStatus(null)}>
+            <div className="assignmentDialog assignmentConfirmDialog" role="dialog" aria-modal="true" aria-labelledby="gameStatusConfirmTitle" onMouseDown={(event) => event.stopPropagation()}>
+              <div className="assignmentDialogHead">
+                <div>
+                  <h3 id="gameStatusConfirmTitle">Confirm Game Status</h3>
+                  <p>
+                    Change Game #{games.find((item) => item.id === pendingGameStatus.gameId)?.game_number || ""} to {gameStatusOptions.find(([value]) => value === pendingGameStatus.status)?.[1] || pendingGameStatus.status}?
+                  </p>
+                </div>
+                <button type="button" aria-label="Close" disabled={Boolean(gameStatusSaving)} onClick={() => setPendingGameStatus(null)}>×</button>
+              </div>
+              <div className="assignmentConfirmMessage">
+                Assigned officials will be notified of this change.
+              </div>
+              <div className="assignmentDialogFooter">
+                <button type="button" className="secondary" disabled={Boolean(gameStatusSaving)} onClick={() => setPendingGameStatus(null)}>Keep Current Status</button>
+                <button type="button" className="danger" disabled={Boolean(gameStatusSaving)} onClick={() => void changeGameStatus(pendingGameStatus.gameId, pendingGameStatus.status)}>
+                  {gameStatusSaving ? "Updating…" : `Confirm ${gameStatusOptions.find(([value]) => value === pendingGameStatus.status)?.[1] || "Change"}`}
+                </button>
+              </div>
+            </div>
           </div>
         )}
         {showSelfAssignDialog && (
