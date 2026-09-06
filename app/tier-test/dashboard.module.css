@@ -162,3 +162,13 @@
 .content>header button,.tableHead button{font-size:.8rem}
 .tableRow{padding-right:66px}
 }
+
+/* Fluid defaults: never reserve a desktop sidebar inside an embedded workspace. */
+.shell{grid-template-columns:minmax(0,1fr)}
+.shell aside{grid-template-columns:48px minmax(0,1fr);padding:18px}
+.shell aside nav{display:flex;grid-column:1/-1;gap:6px;margin-top:8px;padding-bottom:4px;overflow-x:auto;overscroll-behavior-inline:contain}
+.shell aside nav button{flex:0 0 auto;min-height:44px;white-space:nowrap}
+.testBadge{display:none}
+.content>header{flex-wrap:wrap}
+.metrics{grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr))}
+.columns{grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr))}
