@@ -919,8 +919,35 @@ export default function AssignmentsManagerV2() {
     if (!list.some((listedGame) => listedGame.id === selected))
       setSelected(list[0]?.id || "");
   }
-  function assignmentConflictReasons(o: Official, ignorePositionId = "") {
+  function linkedAssignmentGames() {
     if (!game) return [];
+    const groupId = linkGroupByGame.get(game.id);
+    return groupId
+      ? games.filter((listedGame) => linkGroupByGame.get(listedGame.id) === groupId)
+      : [game];
+  }
+  function matchingPositionId(targetGame: Game, sourcePositionId: string) {
+    if (!game || !sourcePositionId) return "";
+    const sourcePositions = positions
+      .filter((position) => position.sport_id === game.sport_id)
+      .sort((a, b) => a.sort_order - b.sort_order || a.id.localeCompare(b.id));
+    const sourceSlot = sourcePositions.findIndex(
+      (position) => position.id === sourcePositionId,
+    );
+    if (sourceSlot < 0) return "";
+    return (
+      positions
+        .filter((position) => position.sport_id === targetGame.sport_id)
+        .sort((a, b) => a.sort_order - b.sort_order || a.id.localeCompare(b.id))[
+        sourceSlot
+      ]?.id || ""
+    );
+  }
+  function assignmentConflictReasonsForGame(
+    o: Official,
+    targetGame: Game,
+    ignorePositionId = "",
+  ) {
     const reasons: string[] = [];
     for (const a of assignments) {
       if (
@@ -930,7 +957,7 @@ export default function AssignmentsManagerV2() {
         continue;
       if (
         ignorePositionId &&
-        a.game_id === game.id &&
+        a.game_id === targetGame.id &&
         a.position_id === ignorePositionId
       )
         continue;
@@ -938,8 +965,8 @@ export default function AssignmentsManagerV2() {
       if (
         other &&
         overlaps(
-          game.starts_at,
-          game.duration_minutes || 110,
+          targetGame.starts_at,
+          targetGame.duration_minutes || 110,
           other.starts_at,
           other.duration_minutes || 110,
         )
@@ -955,16 +982,30 @@ export default function AssignmentsManagerV2() {
     }
     return reasons;
   }
+  function assignmentConflictReasons(o: Official, sourcePositionId = "") {
+    return linkedAssignmentGames().flatMap((targetGame) =>
+      assignmentConflictReasonsForGame(
+        o,
+        targetGame,
+        matchingPositionId(targetGame, sourcePositionId),
+      ),
+    );
+  }
   function workingAtGameTime(o: Official, ignorePositionId = "") {
     return assignmentConflictReasons(o, ignorePositionId).length > 0;
   }
-  function ineligibleReasons(o: Official, ignorePositionId = "") {
-    if (!game) return [];
+  function ineligibleReasonsForGame(
+    o: Official,
+    targetGame: Game,
+    ignorePositionId = "",
+  ) {
     const reasons: string[] = [];
-    reasons.push(...assignmentConflictReasons(o, ignorePositionId));
-    const day = game.starts_at.slice(0, 10),
-      gs = new Date(game.starts_at).getTime(),
-      ge = gs + (game.duration_minutes || 110) * 60000;
+    reasons.push(
+      ...assignmentConflictReasonsForGame(o, targetGame, ignorePositionId),
+    );
+    const day = targetGame.starts_at.slice(0, 10),
+      gs = new Date(targetGame.starts_at).getTime(),
+      ge = gs + (targetGame.duration_minutes || 110) * 60000;
     for (const b of blocks) {
       if (b.official_id !== o.id) continue;
       if (
@@ -986,44 +1027,48 @@ export default function AssignmentsManagerV2() {
         reasons.push(`Unavailable from ${b.start_date} through ${b.end_date}`);
       else if (
         b.block_type === "location" &&
-        b.location_id === game.location_id
+        b.location_id === targetGame.location_id
       )
-        reasons.push(`Blocked at ${game.location?.name || "this location"}`);
+        reasons.push(
+          `Blocked at ${targetGame.location?.name || "this location"}`,
+        );
       else if (
         b.block_type === "team" &&
         b.team_id &&
-        (b.team_id === game.home?.id || b.team_id === game.away?.id)
+        (b.team_id === targetGame.home?.id || b.team_id === targetGame.away?.id)
       )
         reasons.push(
-          `Blocked for ${b.team_id === game.home?.id ? game.home?.name : game.away?.name || "this team"}`,
+          `Blocked for ${b.team_id === targetGame.home?.id ? targetGame.home?.name : targetGame.away?.name || "this team"}`,
         );
     }
     if (
-      !o.sports.some((s) => s.toLowerCase() === game.sports?.name.toLowerCase())
+      !o.sports.some(
+        (s) => s.toLowerCase() === targetGame.sports?.name.toLowerCase(),
+      )
     )
-      reasons.push(`Not eligible for ${game.sports?.name || "sport"}`);
+      reasons.push(`Not eligible for ${targetGame.sports?.name || "sport"}`);
     const ol = leagueElig.filter((x) => x.official_id === o.id),
       ov = levelElig.filter((x) => x.official_id === o.id);
     if (
-      game.league_id &&
+      targetGame.league_id &&
       ol.length &&
-      !ol.some((x) => x.league_id === game.league_id)
+      !ol.some((x) => x.league_id === targetGame.league_id)
     )
       reasons.push(
-        `Not eligible for league ${game.leagues?.name || "selected league"}`,
+        `Not eligible for league ${targetGame.leagues?.name || "selected league"}`,
       );
     if (
-      game.level_id &&
+      targetGame.level_id &&
       ov.length &&
-      !ov.some((x) => x.level_id === game.level_id)
+      !ov.some((x) => x.level_id === targetGame.level_id)
     )
       reasons.push(
-        `Not eligible for level ${game.levels?.name || "selected level"}`,
+        `Not eligible for level ${targetGame.levels?.name || "selected level"}`,
       );
     if (
       assignments.some(
         (a) =>
-          a.game_id === game.id &&
+          a.game_id === targetGame.id &&
           a.official_id === o.id &&
           a.status !== "declined" &&
           !(ignorePositionId && a.position_id === ignorePositionId),
@@ -1031,6 +1076,25 @@ export default function AssignmentsManagerV2() {
     )
       reasons.push("Already assigned to this game");
     return [...new Set(reasons)];
+  }
+  function ineligibleReasons(o: Official, sourcePositionId = "") {
+    const targetGames = linkedAssignmentGames();
+    const linked = targetGames.length > 1;
+    return [
+      ...new Set(
+        targetGames.flatMap((targetGame) =>
+          ineligibleReasonsForGame(
+            o,
+            targetGame,
+            matchingPositionId(targetGame, sourcePositionId),
+          ).map((reason) =>
+            linked && !reason.startsWith("Overlaps Game #")
+              ? `Game #${targetGame.game_number}: ${reason}`
+              : reason,
+          ),
+        ),
+      ),
+    ];
   }
   function eligible(o: Official) {
     return ineligibleReasons(o).length === 0;
