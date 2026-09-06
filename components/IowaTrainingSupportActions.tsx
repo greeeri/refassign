@@ -103,7 +103,7 @@ export default function IowaTrainingSupportActions() {
     <section className="trainingSupport">
       <div>
         <h3>Need Help With Your Development?</h3>
-        <p>Connect directly with the Iowa Soccer mentor team.</p>
+        <p>Connect directly with US Soccer Mentors and Ref Coaches.</p>
       </div>
       <div className="trainingSupportButtons">
         <button
