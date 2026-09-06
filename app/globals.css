@@ -361,6 +361,9 @@ td small {
   color: #fff;
   font-size: 13px;
 }
+.availableOfficial.ineligibleOfficial b {
+  color: #111827;
+}
 .availableOfficial small {
   display: block;
   color: #fff;
