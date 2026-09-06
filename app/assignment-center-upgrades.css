@@ -42,3 +42,24 @@
 .assignmentGameRow.officialDropTarget{outline:3px solid #16a34a;outline-offset:-3px;background:#f0fdf4!important;box-shadow:inset 0 0 0 1px #bbf7d0}
 .assignmentGameRow.officialDropTarget::after{content:"Release to assign next open position";background:#166534;color:#fff}
 @media(max-width:760px){.assignmentGameRow.officialDropReady::after{display:none}.draggableOfficial[draggable=true]{cursor:default}}
+.assignmentPickedOfficial{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border-bottom:1px solid #86efac;background:#f0fdf4;color:#166534;font-size:16px}
+.assignmentPickedOfficial span{display:grid;gap:2px}.assignmentPickedOfficial small{color:#3f6212;font-size:13px}.assignmentPickedOfficial button{margin:0;white-space:nowrap}
+.pickOfficialButton{margin-top:8px;padding:6px 9px;border:1px solid #bfdbfe;border-radius:7px;background:#eff6ff;color:#1d4ed8;font-size:12px;font-weight:850;cursor:pointer}
+.pickOfficialButton[aria-pressed=true]{border-color:#16a34a;background:#dcfce7;color:#166534}
+.pickOfficialButton.ineligiblePick{border-color:#fca5a5;background:#fff;color:#b91c1c}
+.assignmentGameRow:has(button[title="Assign selected official to this game"]){background:#f8fffb}
+.assignmentGameRow button[title="Assign selected official to this game"]{padding:7px!important;border-radius:7px!important;background:#dcfce7!important;box-shadow:inset 0 0 0 1px #86efac;color:#166534!important}
+@media(max-width:760px){.assignmentPickedOfficial{position:sticky;top:0;z-index:12;align-items:flex-start}.assignmentPickedOfficial button{padding:7px 9px}.pickOfficialButton{min-height:38px;font-size:13px}}
+
+/* Safari-safe official drag tray */
+.officialDragHandle{display:inline-flex;align-items:center;gap:5px;margin-top:8px;margin-right:7px;padding:6px 10px;border:1px solid #93c5fd;border-radius:7px;background:#fff;color:#1d4ed8;font-size:13px;font-weight:850;cursor:grab;user-select:none;-webkit-user-select:none}
+.officialDragHandle:active{cursor:grabbing}.officialDragHandle.overrideDrag{border-color:#fca5a5;color:#b91c1c}
+.officialDropTray{position:fixed;top:88px;right:22px;z-index:1000;display:grid;width:min(420px,calc(100vw - 44px));max-height:calc(100vh - 112px);overflow:hidden;border:2px solid #2563eb;border-radius:14px;background:#fff;box-shadow:0 20px 55px #0f172a4d}
+.officialDropTray header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 15px;background:#1d4ed8;color:#fff;font-size:20px}
+.officialDropTray header>span:first-child{display:grid;gap:2px}.officialDropTray header small{color:#dbeafe;font-size:13px;font-weight:700}.officialDropTray>div{display:grid;gap:8px;overflow:auto;padding:10px}
+.officialTrayGame{display:grid;gap:3px;padding:12px;border:2px dashed #93c5fd;border-radius:9px;background:#eff6ff;color:#172b4d}
+.officialTrayGame b{font-size:15px}.officialTrayGame span,.officialTrayGame small{font-size:13px;color:#52667a}.officialTrayGame small{font-weight:800;color:#1d4ed8}
+.officialTrayGame.active{border-style:solid;border-color:#16a34a;background:#dcfce7;transform:scale(1.01)}.officialTrayGame.active small{color:#166534}
+.officialTrayGame.full{border-color:#cbd5e1;background:#f8fafc;opacity:.62}.officialTrayGame.full small{color:#64748b}
+body.officialDragActive{cursor:grabbing}
+@media(max-width:760px){.officialDragHandle{display:none}.officialDropTray{display:none}}

@@ -252,6 +252,7 @@ export default function AssignmentsManagerV2() {
     [draggingGame, setDraggingGame] = useState(""),
     [draggingOfficial, setDraggingOfficial] = useState(""),
     [officialDropGame, setOfficialDropGame] = useState(""),
+    [pickedOfficial, setPickedOfficial] = useState(""),
     [bulkWorking, setBulkWorking] = useState(false),
     [bulkStatus, setBulkStatus] = useState("active"),
     [selfAssignSlots, setSelfAssignSlots] = useState<SelfAssignSlot[]>([]),
@@ -1647,6 +1648,50 @@ export default function AssignmentsManagerV2() {
     }
     setSelected(targetGame.id);
     await assignToGame(targetGame, position.id, officialId);
+    setPickedOfficial("");
+  }
+  function chooseOfficialToAssign(officialId: string) {
+    const next = pickedOfficial === officialId ? "" : officialId;
+    setPickedOfficial(next);
+    if (next)
+      window.requestAnimationFrame(() =>
+        document
+          .querySelector(".assignmentGameTable")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      );
+  }
+  function officialDragHandle(official: Official, requiresOverride = false) {
+    if (!canManage) return null;
+    return (
+      <span
+        className={`officialDragHandle${requiresOverride ? " overrideDrag" : ""}`}
+        draggable
+        role="button"
+        tabIndex={0}
+        aria-label={`Drag ${official.first_name} ${official.last_name} to a game`}
+        onDragStart={(event) => {
+          event.stopPropagation();
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", official.id);
+          setDraggingOfficial(official.id);
+          setPickedOfficial("");
+          document.body.classList.add("officialDragActive");
+        }}
+        onDragEnd={() => {
+          setDraggingOfficial("");
+          setOfficialDropGame("");
+          document.body.classList.remove("officialDragActive");
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            chooseOfficialToAssign(official.id);
+          }
+        }}
+      >
+        <span aria-hidden="true">⠿</span> Drag
+      </span>
+    );
   }
   async function assignAndPublishReplacement(
     positionId: string,
@@ -2363,8 +2408,10 @@ export default function AssignmentsManagerV2() {
         <button
           type="button"
           onClick={() => {
-            requestSelectedGame(g.id);
+            if (pickedOfficial) void dropOfficialOnGame(g.id, pickedOfficial);
+            else requestSelectedGame(g.id);
           }}
+          title={pickedOfficial ? "Assign selected official to this game" : "Open game"}
           style={{
             border: 0,
             background: "transparent",
@@ -2453,6 +2500,56 @@ export default function AssignmentsManagerV2() {
   }
   return (
     <>
+      {draggingOfficial && canManage && (
+        <section className="officialDropTray" aria-label="Choose a game for the dragged official">
+          <header>
+            <span>
+              <b>Drop on a Game</b>
+              <small>
+                {officials.find((official) => official.id === draggingOfficial)?.first_name}{" "}
+                {officials.find((official) => official.id === draggingOfficial)?.last_name}
+              </small>
+            </span>
+            <span aria-hidden="true">→</span>
+          </header>
+          <div>
+            {(assignmentSelection.length ? assignmentSelection : filteredGames).map((targetGame) => {
+              const openPosition = openPositionForGame(targetGame);
+              return (
+                <div
+                  key={targetGame.id}
+                  className={`officialTrayGame${officialDropGame === targetGame.id ? " active" : ""}${openPosition ? "" : " full"}`}
+                  onDragEnter={(event) => {
+                    event.preventDefault();
+                    setOfficialDropGame(targetGame.id);
+                  }}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = openPosition ? "move" : "none";
+                  }}
+                  onDragLeave={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget as Node))
+                      setOfficialDropGame("");
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    const officialId = event.dataTransfer.getData("text/plain") || draggingOfficial;
+                    if (openPosition && officialId)
+                      void dropOfficialOnGame(targetGame.id, officialId);
+                  }}
+                >
+                  <b>{targetGame.home?.name || "TBD"} vs {targetGame.away?.name || "TBD"}</b>
+                  <span>
+                    Game #{targetGame.game_number} · {new Date(targetGame.starts_at).toLocaleDateString([], { month: "short", day: "numeric" })}{" "}
+                    {new Date(targetGame.starts_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                  </span>
+                  <small>{openPosition ? `Next: ${openPosition.name}` : "No open positions"}</small>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
       <div className={`assignmentCenterSplit ${game ? "hasSelectedGame" : ""}`}>
       <section className="card">
         <div className="cardHead">
@@ -3036,6 +3133,15 @@ export default function AssignmentsManagerV2() {
               </button>
             </span>
           </div>
+          {pickedOfficial && (
+            <div className="assignmentPickedOfficial" role="status">
+              <span>
+                Assigning <b>{officials.find((official) => official.id === pickedOfficial)?.first_name} {officials.find((official) => official.id === pickedOfficial)?.last_name}</b>
+                <small>Click any game name below to fill its next open position.</small>
+              </span>
+              <button type="button" className="secondary" onClick={() => setPickedOfficial("")}>Cancel</button>
+            </div>
+          )}
           <div
             className="assignmentGameTableHeader"
           >
@@ -4023,7 +4129,8 @@ export default function AssignmentsManagerV2() {
               </span>
             </div>
             <p>
-              Drag an official onto a game to fill its next open position.
+              Drag an official onto a game, or select one and then choose a
+              game, to fill its next open position.
               Ineligible officials remain visible in red and require an
               override; overlapping assignments cannot be overridden.
             </p>
@@ -4032,16 +4139,6 @@ export default function AssignmentsManagerV2() {
                 <div
                   className={`availableOfficial draggableOfficial${draggingOfficial === o.id ? " dragging" : ""}`}
                   key={o.id}
-                  draggable={canManage}
-                  onDragStart={(event) => {
-                    setDraggingOfficial(o.id);
-                    event.dataTransfer.effectAllowed = "move";
-                    event.dataTransfer.setData("text/plain", o.id);
-                  }}
-                  onDragEnd={() => {
-                    setDraggingOfficial("");
-                    setOfficialDropGame("");
-                  }}
                   title={canManage ? "Drag onto a game to assign" : undefined}
                 >
                   <span className="availableOrder">{i + 1}</span>
@@ -4057,6 +4154,17 @@ export default function AssignmentsManagerV2() {
                         ? ` • ${o.distance.toFixed(1)} mi`
                         : ""}
                     </small>
+                    {officialDragHandle(o)}
+                    {canManage && (
+                      <button
+                        type="button"
+                        className="pickOfficialButton"
+                        aria-pressed={pickedOfficial === o.id}
+                        onClick={() => chooseOfficialToAssign(o.id)}
+                      >
+                        {pickedOfficial === o.id ? "Selected" : "Select to Assign"}
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -4096,16 +4204,6 @@ export default function AssignmentsManagerV2() {
                     <div
                       className={`availableOfficial ineligibleOfficial draggableOfficial${draggingOfficial === o.id ? " dragging" : ""}`}
                       key={o.id}
-                      draggable={canManage}
-                      onDragStart={(event) => {
-                        setDraggingOfficial(o.id);
-                        event.dataTransfer.effectAllowed = "move";
-                        event.dataTransfer.setData("text/plain", o.id);
-                      }}
-                      onDragEnd={() => {
-                        setDraggingOfficial("");
-                        setOfficialDropGame("");
-                      }}
                       title={canManage ? "Drag onto a game to assign with override" : undefined}
                       style={{
                         background: "#fef2f2",
@@ -4126,6 +4224,17 @@ export default function AssignmentsManagerV2() {
                         <small style={{ color: "#b91c1c", fontWeight: 700 }}>
                           {o.reasons.join(" • ")}
                         </small>
+                        {officialDragHandle(o, true)}
+                        {canManage && (
+                          <button
+                            type="button"
+                            className="pickOfficialButton ineligiblePick"
+                            aria-pressed={pickedOfficial === o.id}
+                            onClick={() => chooseOfficialToAssign(o.id)}
+                          >
+                            {pickedOfficial === o.id ? "Selected" : "Select to Assign"}
+                          </button>
+                        )}
                         {canManage &&
                           !o.reasons.some((reason) =>
                             reason.startsWith("Overlaps Game #"),
