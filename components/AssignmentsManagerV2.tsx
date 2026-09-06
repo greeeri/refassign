@@ -214,6 +214,10 @@ export default function AssignmentsManagerV2() {
     [selfAssignSlots, setSelfAssignSlots] = useState<SelfAssignSlot[]>([]),
     [selfAssignSelected, setSelfAssignSelected] = useState<string[]>([]),
     [selfAssignSaving, setSelfAssignSaving] = useState(false),
+    [showSelfAssignDialog, setShowSelfAssignDialog] = useState(false),
+    [showIneligibleOfficials, setShowIneligibleOfficials] = useState(false),
+    [ineligibleSearch, setIneligibleSearch] = useState(""),
+    [ineligibleReasonFilter, setIneligibleReasonFilter] = useState("all"),
     [overduePromptClosed, setOverduePromptClosed] = useState(false),
     [overdueResolving, setOverdueResolving] = useState(false),
     [overdueSelected, setOverdueSelected] = useState<string[]>([]);
@@ -344,11 +348,6 @@ export default function AssignmentsManagerV2() {
   useEffect(() => {
     void load();
   }, []);
-  useEffect(() => {
-    if (!notice) return;
-    const timer = window.setTimeout(() => setNotice(""), 5000);
-    return () => window.clearTimeout(timer);
-  }, [notice]);
   function gamePower(g: Game, map = powers) {
     return (
       ((g.home ? (map[g.home.id] ?? 1) : 1) +
@@ -790,6 +789,50 @@ export default function AssignmentsManagerV2() {
         : [...current, key],
     );
   }
+  function selfAssignOptionsForGames(gameIds: string[]) {
+    return gameIds.flatMap((gameId) => {
+      const listedGame = games.find((item) => item.id === gameId);
+      if (!listedGame) return [];
+      return positions
+        .filter((position) => position.sport_id === listedGame.sport_id)
+        .sort((a, b) => a.sort_order - b.sort_order)
+        .slice(0, Math.max(0, listedGame.officials_needed))
+        .filter(
+          (position) =>
+            !assignments.some(
+              (assignment) =>
+                assignment.game_id === gameId &&
+                assignment.position_id === position.id &&
+                assignment.status !== "declined",
+            ) && !isSelfAssignOpen(gameId, position.id),
+        )
+        .map((position) => ({
+          gameId,
+          positionId: position.id,
+          positionName: position.name,
+          game: listedGame,
+          key: selfAssignKey(gameId, position.id),
+        }));
+    });
+  }
+  function prepareSelfAssignPositions() {
+    const gameIds = linkSelected.length
+      ? linkSelected
+      : game
+        ? [game.id]
+        : [];
+    const options = selfAssignOptionsForGames(gameIds);
+    setNotice("");
+    if (!options.length) {
+      setError(
+        "The selected game has no unassigned positions available for Self Assign.",
+      );
+      return;
+    }
+    setError("");
+    setSelfAssignSelected(options.map((option) => option.key));
+    setShowSelfAssignDialog(true);
+  }
   async function openSelfAssignPositions() {
     if (!canManage) {
       setError(
@@ -857,6 +900,7 @@ export default function AssignmentsManagerV2() {
       setNotice(
         `${count} ${count === 1 ? "position is" : "positions are"} now available for Self Assign.`,
       );
+      setShowSelfAssignDialog(false);
       setSelfAssignSelected([]);
       if (usedGameSelection) setLinkSelected([]);
     } catch (saveError) {
@@ -1319,6 +1363,24 @@ export default function AssignmentsManagerV2() {
             a.first_name.localeCompare(b.first_name),
         )
     : [];
+  const visibleIneligibleOfficials = ineligibleOfficials.filter((official) => {
+    const search = ineligibleSearch.trim().toLowerCase();
+    const matchesSearch =
+      !search ||
+      `${official.first_name} ${official.last_name}`
+        .toLowerCase()
+        .includes(search);
+    const reasonText = official.reasons.join(" ").toLowerCase();
+    const matchesReason =
+      ineligibleReasonFilter === "all" ||
+      (ineligibleReasonFilter === "eligibility" &&
+        (reasonText.includes("league") || reasonText.includes("level"))) ||
+      (ineligibleReasonFilter === "availability" &&
+        (reasonText.includes("unavailable") || reasonText.includes("block"))) ||
+      (ineligibleReasonFilter === "conflict" &&
+        (reasonText.includes("overlap") || reasonText.includes("assigned")));
+    return matchesSearch && matchesReason;
+  });
   async function assign(positionId: string, officialId: string) {
     if (!game) return;
     const official = officials.find((o) => o.id === officialId);
@@ -1999,11 +2061,11 @@ export default function AssignmentsManagerV2() {
                       !linkSelected.length &&
                       !game)
                   }
-                  onClick={() => void openSelfAssignPositions()}
+                  onClick={prepareSelfAssignPositions}
                 >
                   {selfAssignSaving
                     ? "Opening…"
-                    : `Self Assign${selfAssignSelected.length ? ` (${selfAssignSelected.length})` : linkSelected.length ? ` (${linkSelected.length} games)` : game ? " (selected game)" : ""}`}
+                    : "Open Positions for Self Assign"}
                 </button>
               </>
             )}
@@ -2018,8 +2080,60 @@ export default function AssignmentsManagerV2() {
             </button>
           </div>
         </div>
-        {error && <div className="errorBox">{error}</div>}
-        {notice && <div className="assignmentToast">{notice}</div>}
+        {error && (
+          <div className="errorBox assignmentFeedback" role="alert">
+            <span>{error}</span>
+            <button type="button" aria-label="Dismiss error" onClick={() => setError("")}>×</button>
+          </div>
+        )}
+        {notice && (
+          <div className="assignmentToast assignmentFeedback" role="status">
+            <span>{notice}</span>
+            <button type="button" aria-label="Dismiss message" onClick={() => setNotice("")}>×</button>
+          </div>
+        )}
+        {showSelfAssignDialog && (
+          <div className="assignmentDialogBackdrop" role="presentation" onMouseDown={() => !selfAssignSaving && setShowSelfAssignDialog(false)}>
+            <div className="assignmentDialog" role="dialog" aria-modal="true" aria-labelledby="selfAssignDialogTitle" onMouseDown={(event) => event.stopPropagation()}>
+              <div className="assignmentDialogHead">
+                <div>
+                  <h3 id="selfAssignDialogTitle">Open Positions for Self Assign</h3>
+                  <p>Select the positions officials may claim.</p>
+                </div>
+                <button type="button" aria-label="Close" disabled={selfAssignSaving} onClick={() => setShowSelfAssignDialog(false)}>×</button>
+              </div>
+              <div className="selfAssignDialogActions">
+                <button type="button" className="secondary" onClick={() => {
+                  const gameIds = linkSelected.length ? linkSelected : game ? [game.id] : [];
+                  setSelfAssignSelected(selfAssignOptionsForGames(gameIds).map((option) => option.key));
+                }}>Select All</button>
+                <button type="button" className="secondary" onClick={() => setSelfAssignSelected([])}>Clear All</button>
+              </div>
+              <div className="selfAssignPositionList">
+                {selfAssignOptionsForGames(linkSelected.length ? linkSelected : game ? [game.id] : []).map((option) => (
+                  <label key={option.key}>
+                    <input
+                      type="checkbox"
+                      checked={selfAssignSelected.includes(option.key)}
+                      disabled={selfAssignSaving}
+                      onChange={() => toggleSelfAssignSelection(option.gameId, option.positionId)}
+                    />
+                    <span>
+                      <b>{option.positionName}</b>
+                      <small>Game #{option.game.game_number} — {option.game.home?.name || "TBD"} vs {option.game.away?.name || "TBD"}</small>
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <div className="assignmentDialogFooter">
+                <button type="button" className="secondary" disabled={selfAssignSaving} onClick={() => setShowSelfAssignDialog(false)}>Cancel</button>
+                <button type="button" className="success" disabled={selfAssignSaving || !selfAssignSelected.length} onClick={() => void openSelfAssignPositions()}>
+                  {selfAssignSaving ? "Opening…" : `Open ${selfAssignSelected.length} Position${selfAssignSelected.length === 1 ? "" : "s"}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         {canManage && overdueGroup && !overduePromptClosed && (
           <div
             className="overduePrompt"
@@ -2255,20 +2369,30 @@ export default function AssignmentsManagerV2() {
         </div>
         {canManage && linkSelected.length > 0 && (
           <div className="assignmentSelectionBar">
-            <b>
-              {assignmentSelectionIsLinked
-                ? "1 linked group selected"
-                : `${linkSelected.length} game${linkSelected.length === 1 ? "" : "s"} selected`}
-            </b>
+            <div className="assignmentSelectionSummary">
+              <b>
+                {assignmentSelectionIsLinked
+                  ? "1 linked group selected"
+                  : assignmentSelectionTarget
+                    ? `Game #${assignmentSelectionTarget.game_number} — ${assignmentSelectionTarget.home?.name || "TBD"} vs ${assignmentSelectionTarget.away?.name || "TBD"}`
+                    : `${linkSelected.length} games selected`}
+              </b>
+              {assignmentSelectionTarget && (
+                <span>
+                  {assignmentSelectionTarget.officials_needed} positions • {assignments.filter((item) => item.game_id === assignmentSelectionTarget.id && item.status !== "declined").length} assigned • {Math.max(0, assignmentSelectionTarget.officials_needed - assignments.filter((item) => item.game_id === assignmentSelectionTarget.id && item.status !== "declined").length)} open
+                </span>
+              )}
+            </div>
             <button className="primary" disabled={bulkWorking || !assignmentSelectionTarget} onClick={() => {
               if (!assignmentSelectionTarget) return;
               setSelected(assignmentSelectionTarget.id);
               setOverrideOfficial("");
               document.getElementById("selected-game-assignment")?.scrollIntoView({ behavior: "smooth", block: "start" });
             }}>
-              {assignmentSelectionIsLinked ? "Assign Linked Group" : "Assign Selected Game"}
+              {assignmentSelectionIsLinked ? "Manage Linked Group" : "Manage Selected Game"}
             </button>
-            <button className="secondary" disabled={bulkWorking} onClick={() => void runBulkAction("publish")}>Publish</button>
+            <button className="success" disabled={bulkWorking || selfAssignSaving || !assignmentSelectionTarget} onClick={prepareSelfAssignPositions}>Open Positions for Self Assign</button>
+            <button className="secondary" disabled={bulkWorking} onClick={() => void runBulkAction("publish")}>Send Assignments</button>
             <button className="secondary" disabled={bulkWorking} onClick={() => void runBulkAction("confirm")}>Confirm Officials</button>
             <details className="assignmentMoreActions">
               <summary>More Actions</summary>
@@ -3297,24 +3421,38 @@ export default function AssignmentsManagerV2() {
                 </div>
               ))}
               {ineligibleOfficials.length > 0 && (
-                <div
-                  style={{
-                    marginTop: 10,
-                    paddingTop: 10,
-                    borderTop: "2px solid #fecaca",
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 900,
-                      color: "#b91c1c",
-                      marginBottom: 6,
-                    }}
+                <div className="ineligibleOfficialsSection">
+                  <button
+                    type="button"
+                    className="ineligibleOfficialsToggle"
+                    aria-expanded={showIneligibleOfficials}
+                    onClick={() => setShowIneligibleOfficials((visible) => !visible)}
                   >
-                    INELIGIBLE ({ineligibleOfficials.length})
-                  </div>
-                  {ineligibleOfficials.map((o) => (
+                    <span>INELIGIBLE ({ineligibleOfficials.length})</span>
+                    <span>{showIneligibleOfficials ? "Hide" : "Show"}</span>
+                  </button>
+                  {showIneligibleOfficials && (
+                    <>
+                      <div className="ineligibleOfficialFilters">
+                        <input
+                          type="search"
+                          value={ineligibleSearch}
+                          onChange={(event) => setIneligibleSearch(event.target.value)}
+                          placeholder="Search official"
+                          aria-label="Search ineligible officials"
+                        />
+                        <select
+                          value={ineligibleReasonFilter}
+                          onChange={(event) => setIneligibleReasonFilter(event.target.value)}
+                          aria-label="Filter ineligible officials by reason"
+                        >
+                          <option value="all">All reasons</option>
+                          <option value="eligibility">League or level</option>
+                          <option value="availability">Unavailable</option>
+                          <option value="conflict">Assignment conflict</option>
+                        </select>
+                      </div>
+                      {visibleIneligibleOfficials.map((o) => (
                     <div
                       className="availableOfficial ineligibleOfficial"
                       key={o.id}
@@ -3402,7 +3540,12 @@ export default function AssignmentsManagerV2() {
                         )}
                       </div>
                     </div>
-                  ))}
+                      ))}
+                      {!visibleIneligibleOfficials.length && (
+                        <div className="emptyState"><p>No ineligible officials match the filters.</p></div>
+                      )}
+                    </>
+                  )}
                 </div>
               )}
               {!availableOfficials.length && !ineligibleOfficials.length && (
