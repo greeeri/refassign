@@ -8,17 +8,30 @@ import styles from "./tier-test.module.css";
 
 const money=(cents:number|null)=>cents===null?"Custom":new Intl.NumberFormat("en-US",{style:"currency",currency:"USD",maximumFractionDigits:0}).format(cents/100);
 
-export default function TierTestPage(){
+type DatabasePlan={code:string;annual_price_cents:number|null;included_officials:number|null};
+const TEST_DATABASE_URL="https://slenztuopbfxqzjyrtzp.supabase.co";
+const TEST_DATABASE_KEY="sb_publishable_Hz_2BH4cYmrogX3O15x2PQ_fU-0uSKZ";
+
+async function loadDatabasePlans():Promise<DatabasePlan[]>{
+ const response=await fetch(`${TEST_DATABASE_URL}/rest/v1/saas_plan_definitions?select=code,annual_price_cents,included_officials&order=code`,{headers:{apikey:TEST_DATABASE_KEY},cache:"no-store"});
+ if(!response.ok)return [];
+ return response.json() as Promise<DatabasePlan[]>;
+}
+
+export default async function TierTestPage(){
  const enabled=process.env.REFASSIGN_TIER_TEST_MODE==="true"||(
   process.env.VERCEL_ENV==="preview"&&
   process.env.VERCEL_GIT_COMMIT_REF==="feature/league-tier-foundation"
  );
  if(!enabled)notFound();
+ const databasePlans=await loadDatabasePlans();
+ const databaseConnected=databasePlans.length===Object.keys(PLAN_CATALOG).length;
  return <main className={styles.page}>
   <header className={styles.header}>
    <p className={styles.eyebrow}>Isolated test environment</p>
    <h1>League and subscription foundation</h1>
    <p>This page verifies the new RefAssign tier configuration. It does not use or modify Iowa Soccer data.</p>
+   <p className={databaseConnected?styles.connected:styles.disconnected}>{databaseConnected?"Separate test database connected":"Test database connection needs attention"}</p>
   </header>
   <section className={styles.grid} aria-label="Subscription plans">
    {Object.values(PLAN_CATALOG).map(plan=><article className={styles.card} key={plan.code}>

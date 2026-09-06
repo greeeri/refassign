@@ -167,7 +167,7 @@ grant usage on schema private to authenticated;
 grant execute on function private.can_access_organization(uuid) to authenticated;
 grant execute on function private.can_manage_organization(uuid) to authenticated;
 
-grant select on public.saas_plan_definitions, public.saas_plan_entitlements to authenticated;
+grant select on public.saas_plan_definitions, public.saas_plan_entitlements to anon, authenticated;
 grant select on public.organizations, public.organization_memberships,
   public.organization_entitlement_overrides, public.organization_league_coverage,
   public.organization_assignor_coverage, public.league_assignment_templates,
@@ -182,6 +182,10 @@ create policy "Authenticated users read plan definitions" on public.saas_plan_de
 for select to authenticated using (true);
 create policy "Authenticated users read plan entitlements" on public.saas_plan_entitlements
 for select to authenticated using (true);
+create policy "Public users read plan definitions" on public.saas_plan_definitions
+for select to anon using (true);
+create policy "Public users read plan entitlements" on public.saas_plan_entitlements
+for select to anon using (true);
 
 create policy "Members read organizations" on public.organizations
 for select to authenticated using (private.can_access_organization(id));
