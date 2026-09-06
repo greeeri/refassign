@@ -2,6 +2,7 @@
 
 import {useEffect,useState} from "react";
 import d from "./dashboard.module.css";
+import "./responsive.css";
 import {createTierTestClient as createClient} from "../../lib/supabase/client";
 
 type League={id:number;name:string;region:string;coverage:string};

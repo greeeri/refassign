@@ -1,0 +1,232 @@
+#organization-setup :where([class*="dashboard_content"]),
+#organization-setup :where([class*="dashboard_content"]) > header > div,
+#organization-setup :where([class*="dashboard_tableHead"]) > div,
+#organization-setup :where([class*="dashboard_panel"]),
+#organization-setup :where([class*="dashboard_tableRow"]) > div {
+  min-width: 0;
+}
+
+#organization-setup :where([class*="dashboard_content"]) > header,
+#organization-setup :where([class*="dashboard_tableHead"]) {
+  gap: 20px;
+}
+
+#organization-setup :where([class*="dashboard_content"]) > header button,
+#organization-setup :where([class*="dashboard_tableHead"]) button {
+  min-height: 42px;
+  white-space: nowrap;
+}
+
+#organization-setup :where([class*="dashboard_content"]) > header h2,
+#organization-setup :where([class*="dashboard_tableRow"]) b {
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+#organization-setup :where([class*="dashboard_tableHead"]) p {
+  max-width: 590px;
+  margin: 7px 0 0;
+  line-height: 1.45;
+}
+
+#organization-setup :where([class*="dashboard_tableRow"]) {
+  grid-template-columns: 42px minmax(0, 1.3fr) minmax(130px, 1fr) auto;
+}
+
+#organization-setup :where([class*="dashboard_tableRow"]) em {
+  white-space: nowrap;
+}
+
+#organization-setup :where([class*="dashboard_columns"]) {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+#organization-setup :where([class*="dashboard_metrics"]) {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+#organization-setup :where([class*="dashboard_panel"]) input,
+#organization-setup :where([class*="dashboard_panel"]) select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  #organization-setup {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #organization-setup aside {
+    grid-template-columns: 45px minmax(0, 1fr);
+  }
+
+  #organization-setup aside nav {
+    padding-bottom: 3px;
+    overscroll-behavior-inline: contain;
+  }
+
+  #organization-setup aside nav button {
+    min-height: 44px;
+  }
+
+  #organization-setup :where([class*="dashboard_columns"]) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 700px) {
+  #organization-setup {
+    margin: 0 12px 48px;
+    border-radius: 16px;
+  }
+
+  #organization-setup :where([class*="dashboard_content"]) {
+    padding: 18px 16px 22px;
+  }
+
+  #organization-setup :where([class*="dashboard_content"]) > header {
+    align-items: flex-end;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  #organization-setup :where([class*="dashboard_content"]) > header h2 {
+    font-size: clamp(1.55rem, 8vw, 2rem);
+    line-height: 1.05;
+  }
+
+  #organization-setup :where([class*="dashboard_content"]) > header button,
+  #organization-setup :where([class*="dashboard_tableHead"]) button {
+    padding: 9px 12px;
+  }
+
+  #organization-setup :where([class*="dashboard_metrics"]) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #organization-setup :where([class*="dashboard_panel"]) {
+    padding: 17px;
+  }
+
+  #organization-setup :where([class*="dashboard_tableHead"]) {
+    align-items: flex-start;
+    gap: 14px;
+  }
+
+  #organization-setup :where([class*="dashboard_tableHead"]) h3 {
+    font-size: 1.15rem;
+  }
+
+  #organization-setup .table {
+    display: grid;
+    gap: 12px;
+    border-top: 0;
+  }
+
+  #organization-setup :where([class*="dashboard_tableRow"]) {
+    position: relative;
+    grid-template-columns: 40px minmax(0, 1fr);
+    align-items: start;
+    gap: 4px 12px;
+    padding: 16px 72px 16px 14px;
+    border: 1px solid #dfe7ee;
+    border-radius: 12px;
+    background: #f9fbfd;
+  }
+
+  #organization-setup :where([class*="dashboard_leagueIcon"]) {
+    grid-row: 1 / 3;
+    margin-top: 1px;
+  }
+
+  #organization-setup :where([class*="dashboard_tableRow"]) > div:nth-child(2) {
+    grid-column: 2;
+  }
+
+  #organization-setup :where([class*="dashboard_tableRow"]) > div:nth-child(3) {
+    grid-column: 2;
+    margin-top: 9px;
+    padding-top: 9px;
+    border-top: 1px solid #e2e8ee;
+  }
+
+  #organization-setup :where([class*="dashboard_tableRow"]) em {
+    position: absolute;
+    top: 14px;
+    right: 12px;
+  }
+
+  #organization-setup :where([class*="dashboard_empty"]) {
+    padding: 40px 16px;
+  }
+
+  #organization-setup :where([class*="dashboard_features"]) li,
+  #organization-setup :where([class*="dashboard_billLine"]) {
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  #organization-setup :where([class*="dashboard_features"]) b,
+  #organization-setup :where([class*="dashboard_billLine"]) b {
+    text-align: right;
+  }
+}
+
+@media (max-width: 430px) {
+  #organization-setup {
+    margin-right: 8px;
+    margin-left: 8px;
+  }
+
+  #organization-setup :where([class*="dashboard_orgName"]) b {
+    font-size: 0.92rem;
+  }
+
+  #organization-setup :where([class*="dashboard_content"]) {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  #organization-setup :where([class*="dashboard_content"]) > header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+  }
+
+  #organization-setup :where([class*="dashboard_content"]) > header p {
+    font-size: 0.65rem;
+  }
+
+  #organization-setup :where([class*="dashboard_content"]) > header h2 {
+    font-size: 1.65rem;
+  }
+
+  #organization-setup :where([class*="dashboard_content"]) > header button {
+    font-size: 0.8rem;
+  }
+
+  #organization-setup :where([class*="dashboard_tableHead"]) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  #organization-setup :where([class*="dashboard_tableHead"]) p {
+    grid-column: 1 / -1;
+  }
+
+  #organization-setup :where([class*="dashboard_tableHead"]) button {
+    grid-row: 1;
+    grid-column: 2;
+    align-self: start;
+  }
+
+  #organization-setup :where([class*="dashboard_tableRow"]) {
+    padding-right: 68px;
+  }
+
+  #organization-setup :where([class*="dashboard_planTitle"]) {
+    align-items: flex-start;
+    gap: 12px;
+  }
+}
