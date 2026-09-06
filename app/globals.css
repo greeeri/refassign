@@ -321,10 +321,10 @@ td small {
   position: sticky;
   top: 20px;
   width: auto;
-  background: #fff;
-  color: #172033;
+  background: linear-gradient(180deg, #0b2748 0%, #102f56 100%);
+  color: #fff;
   padding: 18px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #315678;
   border-radius: 12px;
   max-height: calc(100vh - 115px);
   overflow: auto;
@@ -337,6 +337,10 @@ td small {
 }
 .availableOfficialsHead h3 {
   margin: 0;
+  color: #fff;
+}
+.availableOfficialsPanel > p {
+  color: #fff;
 }
 .availableOfficialsList {
   margin-top: 14px;
@@ -347,17 +351,19 @@ td small {
   gap: 10px;
   align-items: center;
   padding: 10px 0;
-  border-bottom: 1px solid #edf1f5;
+  color: #fff;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.72);
 }
 .availableOfficial:last-child {
   border-bottom: 0;
 }
 .availableOfficial b {
+  color: #fff;
   font-size: 13px;
 }
 .availableOfficial small {
   display: block;
-  color: #64748b;
+  color: #fff;
   margin-top: 3px;
   font-size: 11px;
 }
