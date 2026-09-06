@@ -2383,14 +2383,6 @@ export default function AssignmentsManagerV2() {
                 </span>
               )}
             </div>
-            <button className="primary" disabled={bulkWorking || !assignmentSelectionTarget} onClick={() => {
-              if (!assignmentSelectionTarget) return;
-              setSelected(assignmentSelectionTarget.id);
-              setOverrideOfficial("");
-              document.getElementById("selected-game-assignment")?.scrollIntoView({ behavior: "smooth", block: "start" });
-            }}>
-              {assignmentSelectionIsLinked ? "Manage Linked Group" : "Manage Selected Game"}
-            </button>
             <button className="success" disabled={bulkWorking || selfAssignSaving || !assignmentSelectionTarget} onClick={prepareSelfAssignPositions}>Open Positions for Self Assign</button>
             <button className="secondary" disabled={bulkWorking} onClick={() => void runBulkAction("publish")}>Send Assignments</button>
             <button className="secondary" disabled={bulkWorking} onClick={() => void runBulkAction("confirm")}>Confirm Officials</button>
