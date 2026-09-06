@@ -67,8 +67,17 @@
   color: #17365d;
 }
 .trainingSupportDialog textarea,
-.trainingSupportDialog select {
+.trainingSupportDialog select,
+.trainingSupportDialog input {
   font-weight: 400;
+}
+.trainingSupportFieldGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.trainingSupportFieldGrid .fullSpan {
+  grid-column: 1 / -1;
 }
 .trainingSupportFormActions {
   display: flex;
@@ -87,6 +96,12 @@
   }
   .trainingSupportDialog {
     padding: 20px 16px;
+  }
+  .trainingSupportFieldGrid {
+    grid-template-columns: 1fr;
+  }
+  .trainingSupportFieldGrid .fullSpan {
+    grid-column: auto;
   }
   .trainingSupportFormActions > * {
     flex: 1;

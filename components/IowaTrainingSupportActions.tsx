@@ -2,21 +2,10 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { createClient } from "../lib/supabase/client";
 
-type Game = {
-  id: string;
-  game_number: string | null;
-  starts_at: string;
-  home: { name: string } | null;
-  away: { name: string } | null;
-  location: { name: string } | null;
-};
-type AssignmentRow = { game_id: string; games: Game | Game[] | null };
-
 export default function IowaTrainingSupportActions() {
   const supabase = useMemo(() => createClient(), []),
     [officialId, setOfficialId] = useState(""),
     [programId, setProgramId] = useState(""),
-    [games, setGames] = useState<Game[]>([]),
     [dialog, setDialog] = useState<"question" | "mentor" | null>(null),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
@@ -42,26 +31,6 @@ export default function IowaTrainingSupportActions() {
       if (!official || !program) return;
       setOfficialId(official.id);
       setProgramId(program.id);
-      const { data, error: e } = await supabase
-        .from("assignments")
-        .select(
-          "game_id,games!inner(id,game_number,starts_at,status,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name))",
-        )
-        .eq("official_id", official.id)
-        .in("status", ["accepted", "confirmed"])
-        .gte("games.starts_at", new Date().toISOString())
-        .not("games.status", "in", "(canceled,cancelled,rained_out)")
-        .order("starts_at", { referencedTable: "games", ascending: true });
-      if (e) {
-        setError(e.message);
-        return;
-      }
-      const unique = new Map<string, Game>();
-      for (const row of (data || []) as unknown as AssignmentRow[]) {
-        const game = Array.isArray(row.games) ? row.games[0] : row.games;
-        if (game) unique.set(game.id, game);
-      }
-      setGames([...unique.values()]);
     }
     void load();
   }, [supabase]);
@@ -94,25 +63,34 @@ export default function IowaTrainingSupportActions() {
     setBusy(true);
     setError("");
     const form = new FormData(event.currentTarget),
-      gameId = String(form.get("game_id") || ""),
+      gameDate = String(form.get("game_date") || ""),
+      gameTime = String(form.get("game_time") || ""),
+      venueName = String(form.get("venue_name") || "").trim(),
+      venueCity = String(form.get("venue_city") || "").trim(),
+      venueState = String(form.get("venue_state") || "").trim(),
+      fieldNumber = String(form.get("field_number") || "").trim(),
       requestDetails = String(form.get("request_details") || "").trim(),
-      { error: e } = await supabase
-        .from("development_mentor_requests")
-        .insert({
-          program_id: programId,
-          official_id: officialId,
-          game_id: gameId,
-          request_details: requestDetails || null,
-        });
+      requestedStartAt = new Date(`${gameDate}T${gameTime}`).toISOString(),
+      { error: e } = await supabase.from("development_mentor_requests").insert({
+        program_id: programId,
+        official_id: officialId,
+        game_id: null,
+        requested_start_at: requestedStartAt,
+        venue_name: venueName,
+        venue_city: venueCity,
+        venue_state: venueState,
+        field_number: fieldNumber,
+        request_details: requestDetails || null,
+      });
     if (e)
       setError(
         e.code === "23505"
-          ? "You already have a pending mentor request for this game."
+          ? "You already have a pending mentor request."
           : e.message,
       );
     else {
       setNotice(
-        "Your mentor request was sent. Iowa Soccer mentors can now accept the game visit.",
+        "Your mentor request was sent. Iowa Soccer mentors can now accept the visit.",
       );
       event.currentTarget.reset();
       setDialog(null);
@@ -201,68 +179,59 @@ export default function IowaTrainingSupportActions() {
               <>
                 <h2 id="training-support-title">Request a Mentor</h2>
                 <p>
-                  Select an upcoming accepted game for an Iowa Soccer mentor to
-                  observe.
+                  Enter the match details below so an Iowa Soccer mentor can
+                  arrange an observation.
                 </p>
-                {games.length ? (
-                  <form onSubmit={submitMentorRequest}>
+                <form onSubmit={submitMentorRequest}>
+                  <div className="trainingSupportFieldGrid">
                     <label>
-                      Game to Observe
-                      <select name="game_id" required defaultValue="">
-                        <option value="" disabled>
-                          Select a game
-                        </option>
-                        {games.map((game) => (
-                          <option value={game.id} key={game.id}>
-                            {new Date(game.starts_at).toLocaleString()} —{" "}
-                            {game.home?.name || "TBD"} vs{" "}
-                            {game.away?.name || "TBD"}
-                            {game.location?.name
-                              ? ` — ${game.location.name}`
-                              : ""}
-                          </option>
-                        ))}
-                      </select>
+                      Date
+                      <input name="game_date" type="date" required />
                     </label>
                     <label>
-                      What would you like help with? <small>(optional)</small>
-                      <textarea
-                        name="request_details"
-                        rows={4}
-                        maxLength={5000}
-                        placeholder="Examples: positioning, foul recognition, confidence, or game management"
-                      />
+                      Time
+                      <input name="game_time" type="time" required />
                     </label>
-                    {error && <div className="errorBox">{error}</div>}
-                    <div className="trainingSupportFormActions">
-                      <button
-                        type="button"
-                        className="secondary"
-                        onClick={() => setDialog(null)}
-                      >
-                        Cancel
-                      </button>
-                      <button className="primary" disabled={busy}>
-                        {busy ? "Sending…" : "Request Mentor"}
-                      </button>
-                    </div>
-                  </form>
-                ) : (
-                  <>
-                    <div className="loginMessage">
-                      You need an upcoming accepted or confirmed assignment
-                      before requesting a mentor visit.
-                    </div>
-                    <div className="trainingSupportFormActions">
-                      <button
-                        className="secondary"
-                        onClick={() => setDialog(null)}
-                      >
-                        Close
-                      </button>
-                    </div>
-                  </>
-                )}
+                    <label className="fullSpan">
+                      Venue Name
+                      <input name="venue_name" maxLength={200} required />
+                    </label>
+                    <label>
+                      City
+                      <input name="venue_city" maxLength={120} required />
+                    </label>
+                    <label>
+                      State
+                      <input name="venue_state" maxLength={50} required />
+                    </label>
+                    <label className="fullSpan">
+                      Field Number
+                      <input name="field_number" maxLength={100} required />
+                    </label>
+                  </div>
+                  <label>
+                    What would you like help with? <small>(optional)</small>
+                    <textarea
+                      name="request_details"
+                      rows={4}
+                      maxLength={5000}
+                      placeholder="Examples: positioning, foul recognition, confidence, or game management"
+                    />
+                  </label>
+                  {error && <div className="errorBox">{error}</div>}
+                  <div className="trainingSupportFormActions">
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => setDialog(null)}
+                    >
+                      Cancel
+                    </button>
+                    <button className="primary" disabled={busy}>
+                      {busy ? "Sending…" : "Request Mentor"}
+                    </button>
+                  </div>
+                </form>
               </>
             )}
           </section>
