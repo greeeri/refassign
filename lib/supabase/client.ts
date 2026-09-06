@@ -5,6 +5,7 @@ import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 // Production continues to use its configured environment variables.
 const testUrl = 'https://slenztuopbfxqzjyrtzp.supabase.co'
 const testPublishableKey = 'sb_publishable_Hz_2BH4cYmrogX3O15x2PQ_fU-0uSKZ'
+let tierTestBrowserClient: ReturnType<typeof createBrowserClient> | undefined
 
 function browserConfiguration() {
   return {
@@ -23,7 +24,18 @@ export function createClient() {
 
 // Tier testing must remain isolated even when Vercel injects production variables.
 export function createTierTestClient() {
-  return createBrowserClient(testUrl, testPublishableKey)
+  if (!tierTestBrowserClient) {
+    tierTestBrowserClient = createSupabaseClient(testUrl, testPublishableKey, {
+      auth: {
+        flowType: 'implicit',
+        detectSessionInUrl: true,
+        persistSession: true,
+        autoRefreshToken: true
+      }
+    }) as ReturnType<typeof createBrowserClient>
+  }
+
+  return tierTestBrowserClient
 }
 
 export function createPasswordRecoveryClient() {
