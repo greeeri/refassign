@@ -348,6 +348,27 @@ export default function AssignmentsManagerV2() {
   useEffect(() => {
     void load();
   }, []);
+  async function refreshAssignmentState() {
+    const [assignmentResult, selfAssignResult] = await Promise.all([
+      supabase
+        .from("assignments")
+        .select(
+          "id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at,assignment_source",
+        ),
+      supabase
+        .from("assignment_self_assign_slots")
+        .select("id,game_id,position_id,status")
+        .eq("status", "open"),
+    ]);
+    const refreshError = assignmentResult.error || selfAssignResult.error;
+    if (refreshError) {
+      setError(refreshError.message);
+      return false;
+    }
+    setAssignments((assignmentResult.data || []) as Assignment[]);
+    setSelfAssignSlots((selfAssignResult.data || []) as SelfAssignSlot[]);
+    return true;
+  }
   function gamePower(g: Game, map = powers) {
     return (
       ((g.home ? (map[g.home.id] ?? 1) : 1) +
@@ -896,7 +917,7 @@ export default function AssignmentsManagerV2() {
       if (saveError) throw saveError;
 
       const count = Number(data ?? slots.length);
-      await load();
+      await refreshAssignmentState();
       setNotice(
         `${count} ${count === 1 ? "position is" : "positions are"} now available for Self Assign.`,
       );
@@ -930,7 +951,7 @@ export default function AssignmentsManagerV2() {
     );
     if (withdrawError) setError(withdrawError.message);
     else setNotice("Self Assign position removed.");
-    await load();
+    await refreshAssignmentState();
     setSelfAssignSaving(false);
   }
   const game = games.find((g) => g.id === selected);
@@ -1439,7 +1460,7 @@ export default function AssignmentsManagerV2() {
     } else {
       announceUndoAvailable();
     }
-    await load();
+    await refreshAssignmentState();
     setSaving("");
     setOverrideOfficial("");
   }
@@ -1462,7 +1483,7 @@ export default function AssignmentsManagerV2() {
     );
     if (moveError) setError(moveError.message);
     else setNotice("Official positions updated.");
-    await load();
+    await refreshAssignmentState();
     setMovingAssignment("");
   }
   async function unassign(assignmentId: string, positionId: string) {
@@ -1479,7 +1500,7 @@ export default function AssignmentsManagerV2() {
       .eq("id", assignmentId);
     if (deleteError) setError(deleteError.message);
     else announceUndoAvailable();
-    await load();
+    await refreshAssignmentState();
     setSaving("");
   }
   async function confirmAssignment(a: Assignment) {
@@ -1513,7 +1534,7 @@ export default function AssignmentsManagerV2() {
         e instanceof Error ? e.message : "Unable to confirm assignment.",
       );
     }
-    await load();
+    await refreshAssignmentState();
     setConfirming("");
   }
   async function changeGameStatus(gameId: string, status: string) {
@@ -1521,6 +1542,15 @@ export default function AssignmentsManagerV2() {
       setError("Only Administrators and Assignors can change game status.");
       return;
     }
+    const selectedStatusLabel =
+      gameStatusOptions.find(([value]) => value === status)?.[1] || status;
+    if (
+      ["canceled", "rained_out"].includes(status) &&
+      !window.confirm(
+        `Change this game to ${selectedStatusLabel}? Assigned officials will be notified.`,
+      )
+    )
+      return;
     setGameStatusSaving(gameId);
     setError("");
     setNotice("");
@@ -1549,11 +1579,18 @@ export default function AssignmentsManagerV2() {
         `Game status changed to ${gameStatusOptions.find(([value]) => value === status)?.[1] || status}.${notification}`,
       );
     }
-    await load();
+    if (["canceled", "rained_out"].includes(status))
+      await refreshAssignmentState();
     setGameStatusSaving("");
   }
   async function publishAssignments() {
     if (!game || unpublishedCount === 0) return;
+    if (
+      !window.confirm(
+        `Publish ${unpublishedCount} assignment${unpublishedCount === 1 ? "" : "s"} for Game #${game.game_number}? Officials will receive an email with their response deadline.`,
+      )
+    )
+      return;
     setPublishing(true);
     setError("");
     setNotice("");
@@ -1584,7 +1621,7 @@ export default function AssignmentsManagerV2() {
         e instanceof Error ? e.message : "Unable to publish assignments.",
       );
     }
-    await load();
+    await refreshAssignmentState();
     setPublishing(false);
   }
   function assignmentStatus(a: Assignment) {
