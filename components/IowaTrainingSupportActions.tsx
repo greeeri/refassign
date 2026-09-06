@@ -42,9 +42,10 @@ export default function IowaTrainingSupportActions() {
   async function submitQuestion(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!officialId || !programId) return;
+    const formElement = event.currentTarget;
     setBusy(true);
     setError("");
-    const form = new FormData(event.currentTarget),
+    const form = new FormData(formElement),
       question = String(form.get("question") || "").trim(),
       { error: e } = await supabase
         .from("development_questions")
@@ -52,17 +53,18 @@ export default function IowaTrainingSupportActions() {
     if (e) setError(e.message);
     else {
       setNotice("Your question was sent to the Iowa Soccer mentor team.");
-      event.currentTarget.reset();
       setDialog(null);
+      formElement.reset();
     }
     setBusy(false);
   }
   async function submitMentorRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!officialId || !programId) return;
+    const formElement = event.currentTarget;
     setBusy(true);
     setError("");
-    const form = new FormData(event.currentTarget),
+    const form = new FormData(formElement),
       gameDate = String(form.get("game_date") || ""),
       gameTime = String(form.get("game_time") || ""),
       venueName = String(form.get("venue_name") || "").trim(),
@@ -92,8 +94,8 @@ export default function IowaTrainingSupportActions() {
       setNotice(
         "Your mentor request was sent. Iowa Soccer mentors can now accept the visit.",
       );
-      event.currentTarget.reset();
       setDialog(null);
+      formElement.reset();
     }
     setBusy(false);
   }
