@@ -236,6 +236,10 @@ export default function GamesManagerV3() {
     [showCalendar, setShowCalendar] = useState(false),
     [busy, setBusy] = useState(false),
     [statusBusy, setStatusBusy] = useState(""),
+    [pendingStatus, setPendingStatus] = useState<{
+      gameId: string;
+      status: string;
+    } | null>(null),
     [error, setError] = useState(""),
     [message, setMessage] = useState("");
   async function load() {
@@ -274,20 +278,37 @@ export default function GamesManagerV3() {
   useEffect(() => {
     void load();
   }, []);
+  function requestStatusChange(gameId: string, status: string) {
+    if (["canceled", "rained_out"].includes(status)) {
+      setPendingStatus({ gameId, status });
+      return;
+    }
+    void changeStatus(gameId, status);
+  }
   async function changeStatus(id: string, status: string) {
+    setPendingStatus(null);
     setStatusBusy(id);
     setError("");
     setMessage("");
-    const { error: statusError } = await sb.rpc("set_game_status", {
-      p_game_id: id,
-      p_status: status,
+    const response = await fetch("/api/games/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ gameId: id, status }),
     });
-    if (statusError) setError(statusError.message);
+    const result = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      sent?: number;
+      failed?: number;
+    };
+    if (!response.ok) setError(result.error || "Game status could not be updated.");
     else {
       setGames((current) =>
         current.map((game) => (game.id === id ? { ...game, status } : game)),
       );
-      setMessage("Game status updated.");
+      const notification = ["canceled", "rained_out"].includes(status)
+        ? ` ${result.sent || 0} official notification${result.sent === 1 ? "" : "s"} sent${result.failed ? `; ${result.failed} failed` : ""}.`
+        : "";
+      setMessage(`Game status updated.${notification}`);
       announceUndoAvailable();
     }
     setStatusBusy("");
@@ -1115,6 +1136,77 @@ export default function GamesManagerV3() {
       )}
       {error && <div className="errorBox">{error}</div>}
       {message && <div className="loginMessage">{message}</div>}
+      {pendingStatus && (
+        <div
+          className="assignmentDialogBackdrop"
+          role="presentation"
+          onMouseDown={() => !statusBusy && setPendingStatus(null)}
+        >
+          <div
+            className="assignmentDialog assignmentConfirmDialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="gamesStatusConfirmTitle"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="assignmentDialogHead">
+              <div>
+                <h3 id="gamesStatusConfirmTitle">Confirm Game Status</h3>
+                <p>
+                  Change Game #
+                  {games.find((game) => game.id === pendingStatus.gameId)
+                    ?.game_number || ""}{" "}
+                  to{" "}
+                  {statusOptions.find(
+                    ([value]) => value === pendingStatus.status,
+                  )?.[1] || pendingStatus.status}
+                  ?
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label="Close"
+                disabled={Boolean(statusBusy)}
+                onClick={() => setPendingStatus(null)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="assignmentConfirmMessage">
+              Assigned officials will be notified of this change.
+            </div>
+            <div className="assignmentDialogFooter">
+              <button
+                type="button"
+                className="secondary"
+                disabled={Boolean(statusBusy)}
+                onClick={() => setPendingStatus(null)}
+              >
+                Keep Current Status
+              </button>
+              <button
+                type="button"
+                className="danger"
+                disabled={Boolean(statusBusy)}
+                onClick={() =>
+                  void changeStatus(
+                    pendingStatus.gameId,
+                    pendingStatus.status,
+                  )
+                }
+              >
+                {statusBusy
+                  ? "Updating…"
+                  : `Confirm ${
+                      statusOptions.find(
+                        ([value]) => value === pendingStatus.status,
+                      )?.[1] || "Change"
+                    }`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="tableWrap">
         <table>
           <thead>
@@ -1171,7 +1263,9 @@ export default function GamesManagerV3() {
                       aria-label={`Status for ${g.game_number}`}
                       disabled={statusBusy === g.id}
                       value={g.status === "open" ? "active" : g.status}
-                      onChange={(e) => void changeStatus(g.id, e.target.value)}
+                      onChange={(e) =>
+                        requestStatusChange(g.id, e.target.value)
+                      }
                       style={{
                         minWidth: 120,
                         background: rainOut ? "#eff6ff" : "#fff",
