@@ -232,15 +232,6 @@ export default function OfficialSchedule() {
       return locations.find((x) => x.id === b.location_id)?.name || "Location";
     return teams.find((x) => x.id === b.team_id)?.name || "Team";
   }
-  function mapsUrl(a: Assignment) {
-    const q =
-      [a.location_address, a.location_city, a.location_state]
-        .filter(Boolean)
-        .join(", ") ||
-      a.location_name ||
-      "";
-    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
-  }
   const events = [
     ...assignments
       .filter(showA)
@@ -428,21 +419,7 @@ export default function OfficialSchedule() {
                       </small>
                     )}
                     <div className="officialScheduleActions">
-                    {(e.a.location_name || e.a.location_address) && (
-                      <a
-                        className="tableButton"
-                        href={mapsUrl(e.a)}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        Directions
-                      </a>
-                    )}
                     <VenueDetailsButton gameId={e.a.game_id} />
-                    <CrewChatButton
-                      gameId={e.a.game_id}
-                      title={`${e.a.home_team || "TBD"} vs ${e.a.away_team || "TBD"}`}
-                    />
                     {aStatus(e.a) === "Needs Response" &&
                     new Date(e.a.starts_at).getTime() >= now ? (
                       <>
@@ -469,6 +446,12 @@ export default function OfficialSchedule() {
                         Game Report
                       </button>
                     )}
+                    </div>
+                    <div className="officialScheduleChat">
+                      <CrewChatButton
+                        gameId={e.a.game_id}
+                        title={`${e.a.home_team || "TBD"} vs ${e.a.away_team || "TBD"}`}
+                      />
                     </div>
                   </div>
                 </div>

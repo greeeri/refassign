@@ -623,6 +623,10 @@ td small {
   gap: 6px;
 }
 
+.officialScheduleChat {
+  justify-self: end;
+}
+
 .officialScheduleActions .tableButton,
 .officialScheduleActions .crewChatButton,
 .officialScheduleActions .acceptButton,
@@ -647,6 +651,10 @@ td small {
     align-items: center;
   }
 
+  .officialScheduleChat {
+    grid-column: 2;
+  }
+
   .officialScheduleActions {
     justify-content: flex-start;
   }
@@ -667,6 +675,12 @@ td small {
   .officialScheduleControls {
     grid-template-columns: 1fr;
     gap: 7px;
+  }
+
+
+  .officialScheduleChat {
+    grid-column: 1;
+    justify-self: end;
   }
 
   .officialScheduleActions {
