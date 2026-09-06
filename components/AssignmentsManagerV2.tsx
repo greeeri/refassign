@@ -115,6 +115,11 @@ type SavedAssignmentView = {
   unpublishedOnly: boolean;
   selfAssignOnly: boolean;
 };
+type BulkActionResult = {
+  action: string;
+  succeeded: number;
+  failures: string[];
+};
 type Range = "all" | "today" | "tomorrow" | "thisWeek" | "nextWeek" | "custom";
 type Completeness =
   | "all"
@@ -162,6 +167,12 @@ function startDay(d: Date) {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
   return x;
+}
+function localDateKey(d: Date) {
+  const year = d.getFullYear(),
+    month = `${d.getMonth() + 1}`.padStart(2, "0"),
+    day = `${d.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 function startWeek(d: Date) {
   const x = startDay(d),
@@ -256,7 +267,10 @@ export default function AssignmentsManagerV2() {
     [activityRows, setActivityRows] = useState<AuditEvent[]>([]),
     [activityLoading, setActivityLoading] = useState(false),
     [activityError, setActivityError] = useState(""),
-    [savedViews, setSavedViews] = useState<SavedAssignmentView[]>([]);
+    [savedViews, setSavedViews] = useState<SavedAssignmentView[]>([]),
+    [showCoverageForecast, setShowCoverageForecast] = useState(false),
+    [replacementPublishing, setReplacementPublishing] = useState(""),
+    [bulkResult, setBulkResult] = useState<BulkActionResult | null>(null);
   async function load() {
     setError("");
     const { data: userData } = await supabase.auth.getUser();
@@ -1594,6 +1608,57 @@ export default function AssignmentsManagerV2() {
     setSaving("");
     setOverrideOfficial("");
   }
+  async function assignAndPublishReplacement(
+    positionId: string,
+    officialId: string,
+  ) {
+    if (!canManage || !game) return;
+    const workKey = `${positionId}:${officialId}`;
+    setReplacementPublishing(workKey);
+    setError("");
+    setNotice("");
+    try {
+      const { error: assignmentError } = await supabase.rpc(
+        "assign_official_to_linked_games",
+        {
+          p_game_id: game.id,
+          p_position_id: positionId,
+          p_official_id: officialId,
+        },
+      );
+      if (assignmentError) throw assignmentError;
+      const response = await fetch("/api/assignments/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gameId: game.id }),
+      });
+      const result = (await response.json().catch(() => ({}))) as {
+        sent?: number;
+        failed?: number;
+        failures?: string[];
+        error?: string;
+      };
+      if (!response.ok)
+        throw new Error(result.error || "The replacement could not be published.");
+      if (result.failed)
+        setError(
+          `Replacement assigned, but ${result.failed} notification${result.failed === 1 ? "" : "s"} failed: ${(result.failures || []).join("; ")}`,
+        );
+      else
+        setNotice(
+          `Replacement assigned and ${result.sent || 0} notification${result.sent === 1 ? "" : "s"} sent.`,
+        );
+      announceUndoAvailable();
+      await refreshAssignmentState();
+    } catch (replacementError) {
+      setError(
+        replacementError instanceof Error
+          ? replacementError.message
+          : "The replacement could not be assigned and published.",
+      );
+    }
+    setReplacementPublishing("");
+  }
   async function moveAssignment(
     gameId: string,
     assignmentId: string,
@@ -1916,6 +1981,7 @@ export default function AssignmentsManagerV2() {
     )
       return;
     setBulkWorking(true);
+    setBulkResult(null);
     setError("");
     setNotice("");
     let succeeded = 0;
@@ -2014,6 +2080,7 @@ export default function AssignmentsManagerV2() {
       setNotice(
         `Bulk action complete: ${succeeded} ${action === "status" ? "game" : action === "confirm" || action === "unassign" ? "assignment" : "game"}${succeeded === 1 ? "" : "s"} processed.`,
       );
+      setBulkResult({ action: labels[action], succeeded, failures: [...failures] });
       if (succeeded && (action === "status" || action === "unassign")) {
         await supabase.rpc("group_undo_operations", {
           p_operation_ids: undoOperationIds,
@@ -2053,6 +2120,34 @@ export default function AssignmentsManagerV2() {
     ).length,
     unpublished: rangeGames.filter(isUnpublishedGame).length,
   };
+  const coverageForecast = Array.from({ length: 14 }, (_, index) => {
+    const date = startDay(new Date());
+    date.setDate(date.getDate() + index);
+    const key = localDateKey(date),
+      dayGames = games.filter(
+        (listedGame) =>
+          localDateKey(new Date(listedGame.starts_at)) === key &&
+          !["canceled", "rained_out"].includes(listedGame.status),
+      ),
+      slots = dayGames.reduce(
+        (total, listedGame) => total + listedGame.officials_needed,
+        0,
+      ),
+      filled = dayGames.reduce((total, listedGame) => {
+        const assigned = new Set(
+          assignments
+            .filter(
+              (assignment) =>
+                assignment.game_id === listedGame.id &&
+                !["declined", "cancelled"].includes(assignment.status),
+            )
+            .map((assignment) => assignment.position_id),
+        ).size;
+        return total + Math.min(listedGame.officials_needed, assigned);
+      }, 0),
+      percent = slots ? Math.round((filled / slots) * 100) : 100;
+    return { date, key, games: dayGames.length, slots, filled, percent };
+  });
   function shortPositionName(name: string) {
     const normalized = name
       .trim()
@@ -2294,6 +2389,7 @@ export default function AssignmentsManagerV2() {
   }
   return (
     <>
+      <div className={`assignmentCenterSplit ${game ? "hasSelectedGame" : ""}`}>
       <section className="card">
         <div className="cardHead">
           <div>
@@ -2305,6 +2401,13 @@ export default function AssignmentsManagerV2() {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {canManage && (
               <>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setShowCoverageForecast(true)}
+                >
+                  Coverage Forecast
+                </button>
                 <button
                   className="secondary"
                   disabled={!filteredGames.length}
@@ -2373,6 +2476,32 @@ export default function AssignmentsManagerV2() {
                   {gameStatusSaving ? "Updating…" : `Confirm ${gameStatusOptions.find(([value]) => value === pendingGameStatus.status)?.[1] || "Change"}`}
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+        {showCoverageForecast && (
+          <div className="assignmentDialogBackdrop" role="presentation" onMouseDown={() => setShowCoverageForecast(false)}>
+            <div className="assignmentDialog coverageForecastDialog" role="dialog" aria-modal="true" aria-labelledby="coverageForecastTitle" onMouseDown={(event) => event.stopPropagation()}>
+              <div className="assignmentDialogHead">
+                <div><h3 id="coverageForecastTitle">14-Day Coverage Forecast</h3><p>Select a date to open its games in the Assignment Center.</p></div>
+                <button type="button" aria-label="Close" onClick={() => setShowCoverageForecast(false)}>×</button>
+              </div>
+              <div className="coverageForecastGrid">
+                {coverageForecast.map((day) => <button type="button" key={day.key} className={day.percent === 100 ? "covered" : day.percent >= 67 ? "watch" : "short"} onClick={() => { chooseDate(day.key); setShowCoverageForecast(false); }}><span>{day.date.toLocaleDateString([], { weekday: "short" })}</span><b>{day.date.toLocaleDateString([], { month: "short", day: "numeric" })}</b><strong>{day.percent}%</strong><small>{day.filled}/{day.slots} positions • {day.games} game{day.games === 1 ? "" : "s"}</small></button>)}
+              </div>
+              <div className="coverageLegend"><span><i className="covered"/>Covered</span><span><i className="watch"/>Watch</span><span><i className="short"/>Short</span></div>
+              <div className="assignmentDialogFooter"><button type="button" className="secondary" onClick={() => setShowCoverageForecast(false)}>Close</button></div>
+            </div>
+          </div>
+        )}
+        {bulkResult && (
+          <div className="assignmentDialogBackdrop" role="presentation" onMouseDown={() => setBulkResult(null)}>
+            <div className="assignmentDialog bulkResultDialog" role="dialog" aria-modal="true" aria-labelledby="bulkResultTitle" onMouseDown={(event) => event.stopPropagation()}>
+              <div className="assignmentDialogHead"><div><h3 id="bulkResultTitle">Assignment Change Summary</h3><p>The selected batch action has finished.</p></div><button type="button" aria-label="Close" onClick={() => setBulkResult(null)}>×</button></div>
+              <div className="bulkResultTotals"><span className="success"><b>{bulkResult.succeeded}</b> completed</span><span className={bulkResult.failures.length ? "failed" : "success"}><b>{bulkResult.failures.length}</b> issues</span></div>
+              <p className="bulkResultAction">Action: {bulkResult.action}</p>
+              {bulkResult.failures.length > 0 && <div className="bulkFailureList"><b>Items requiring attention</b>{bulkResult.failures.map((failure, index) => <p key={`${failure}-${index}`}>{failure}</p>)}</div>}
+              <div className="assignmentDialogFooter"><button type="button" className="primary" onClick={() => setBulkResult(null)}>Done</button></div>
             </div>
           </div>
         )}
@@ -3338,6 +3467,7 @@ export default function AssignmentsManagerV2() {
           >
             <div className="cardHead selectedGameStickyHeader">
               <div>
+                <button type="button" className="assignmentBackToGames" onClick={() => { setSelected(""); setLinkSelected([]); }}>← Back to games</button>
                 <h2>
                   {game.home?.name || "TBD"} vs {game.away?.name || "TBD"}
                 </h2>
@@ -3761,36 +3891,13 @@ export default function AssignmentsManagerV2() {
                                   )
                                   .slice(0, 3)
                                   .map((candidate, recommendationIndex) => (
-                                    <button
+                                    <div
                                       key={candidate.id}
-                                      type="button"
-                                      disabled={saving === pos.id}
-                                      onClick={() =>
-                                        void assign(pos.id, candidate.id)
-                                      }
-                                      style={{
-                                        display: "block",
-                                        width: "100%",
-                                        textAlign: "left",
-                                        marginTop: 5,
-                                        padding: "6px 8px",
-                                        border: "1px solid #e2e8f0",
-                                        borderRadius: 6,
-                                        background: "#f8fafc",
-                                        cursor: "pointer",
-                                        fontSize: 11,
-                                      }}
+                                      className="replacementRecommendation"
                                     >
-                                      <b>
-                                        {recommendationIndex + 1}.{" "}
-                                        {candidate.first_name}{" "}
-                                        {candidate.last_name}
-                                      </b>{" "}
-                                      — {label} {candidate.rank.toFixed(1)}
-                                      {candidate.distance != null
-                                        ? ` • ${candidate.distance.toFixed(1)} mi`
-                                        : ""}
-                                    </button>
+                                      <button type="button" disabled={saving === pos.id || Boolean(replacementPublishing)} onClick={() => void assign(pos.id, candidate.id)}><b>{recommendationIndex + 1}. {candidate.first_name} {candidate.last_name}</b><span>{label} {candidate.rank.toFixed(1)}{candidate.distance != null ? ` • ${candidate.distance.toFixed(1)} mi` : ""}</span></button>
+                                      <button type="button" className="replacementPublishButton" disabled={saving === pos.id || Boolean(replacementPublishing)} onClick={() => void assignAndPublishReplacement(pos.id, candidate.id)}>{replacementPublishing === `${pos.id}:${candidate.id}` ? "Working…" : "Assign & Publish"}</button>
+                                    </div>
                                   ))}
                                 {list.every(
                                   (candidate) => candidate.reasons.length > 0,
@@ -3991,6 +4098,7 @@ export default function AssignmentsManagerV2() {
           </aside>
         </div>
       )}
+      </div>
     </>
   );
 }
