@@ -524,11 +524,11 @@ export default function OfficialsDirectory({
           </div>
         </div>
       )}
-      {canManage && organizationId && (
+      {organizationId && (
         <section className="card directoryConnectCard">
           <div>
-            <p className="eyebrow">Add an official</p>
-            <h2>Connect by email address</h2>
+            <p className="eyebrow">Official email search</p>
+            <h2>Find an existing official or send an invitation</h2>
             <p>
               Existing officials are connected to this organization. New
               officials are created once and prepared for invitation.
@@ -536,7 +536,7 @@ export default function OfficialsDirectory({
           </div>
           <form className="directoryConnectForm" onSubmit={linkOfficialByEmail}>
             <label>
-              Official email
+              Search by email address
               <input
                 type="email"
                 required
@@ -546,7 +546,7 @@ export default function OfficialsDirectory({
               />
             </label>
             <button className="primary" disabled={linkingOfficial}>
-              {linkingOfficial ? "Checking…" : "Find or invite official"}
+              {linkingOfficial ? "Searching…" : "Search email"}
             </button>
           </form>
           {linkMessage && <div className="successBox">{linkMessage}</div>}
@@ -593,7 +593,7 @@ export default function OfficialsDirectory({
           </div>
           <div className="toolbar">
             <input
-              placeholder="Search officials…"
+              placeholder="Search roster by name, email, or phone…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />

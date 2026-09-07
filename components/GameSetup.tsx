@@ -98,7 +98,14 @@ export default function GameSetup({
 
   async function searchLocations(e: FormEvent) {
     e.preventDefault();
-    if (!organizationId || locationQuery.trim().length < 2) return;
+    await runLocationSearch();
+  }
+
+  async function runLocationSearch(query = locationQuery) {
+    if (!organizationId || query.trim().length < 2) {
+      setDirectoryLocations([]);
+      return;
+    }
     setSearchingLocations(true);
     setError("");
     setLocationMessage("");
@@ -106,13 +113,22 @@ export default function GameSetup({
       "search_location_directory",
       {
         p_organization_id: organizationId,
-        p_query: locationQuery.trim(),
+        p_query: query.trim(),
       },
     );
     setSearchingLocations(false);
     if (searchError) setError(searchError.message);
     else setDirectoryLocations((data || []) as DirectoryLocation[]);
   }
+
+  useEffect(() => {
+    if (!organizationId || view !== "Locations") return;
+    const timer = window.setTimeout(
+      () => void runLocationSearch(locationQuery),
+      350,
+    );
+    return () => window.clearTimeout(timer);
+  }, [locationQuery, organizationId, view]);
 
   async function connectLocation(item: DirectoryLocation) {
     if (!organizationId || item.already_connected) return;
@@ -724,7 +740,10 @@ export default function GameSetup({
               <div>
                 <p className="eyebrow">Shared location directory</p>
                 <h2>Find a location before adding a new one</h2>
-                <p>Search by venue name, address, city, state, or ZIP code.</p>
+                <p>
+                  Enter anything you know. A city, partial venue name, ZIP code,
+                  or part of an address will return possible matches.
+                </p>
               </div>
               <form className="directoryConnectForm" onSubmit={searchLocations}>
                 <label>
@@ -733,7 +752,7 @@ export default function GameSetup({
                     value={locationQuery}
                     minLength={2}
                     required
-                    placeholder="Venue name or address"
+                    placeholder="Try “Des Moines”, “Cownie”, or “50317”"
                     onChange={(event) => setLocationQuery(event.target.value)}
                   />
                 </label>
