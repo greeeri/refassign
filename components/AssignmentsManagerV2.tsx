@@ -1131,6 +1131,15 @@ export default function AssignmentsManagerV2() {
   const assignmentEmailIssues = gameAssignments.filter(
     (a) => a.published_at && !a.email_sent_at,
   ).length;
+  const replacementNeededAssignments = gameAssignments.filter(
+    (assignment) =>
+      assignment.status === "declined" &&
+      !gameAssignments.some(
+        (active) =>
+          active.position_id === assignment.position_id &&
+          active.status !== "declined",
+      ),
+  );
   const cancellationEmailsSent = gameAssignments.filter(
     (a) => a.cancellation_notified_at,
   ).length;
@@ -2569,6 +2578,19 @@ export default function AssignmentsManagerV2() {
     ["nextWeek", "Next Week"],
   ];
   const attentionQueue = {
+    replacements: rangeGames.filter((listedGame) =>
+      assignments.some(
+        (assignment) =>
+          assignment.game_id === listedGame.id &&
+          assignment.status === "declined" &&
+          !assignments.some(
+            (active) =>
+              active.game_id === listedGame.id &&
+              active.position_id === assignment.position_id &&
+              active.status !== "declined",
+          ),
+      ),
+    ).length,
     needsAction: rangeGames.filter(
       (listedGame) => assignmentCompleteness(listedGame).key === "attention",
     ).length,
@@ -3507,7 +3529,11 @@ export default function AssignmentsManagerV2() {
         {canManage && (
           <section className="assignmentAttentionQueue" aria-labelledby="attentionQueueTitle">
             <div><h3 id="attentionQueueTitle">Needs Attention</h3><p>Open the work that should be handled next.</p></div>
-            <button type="button" onClick={() => chooseCompleteness("attention")}><b>{attentionQueue.needsAction}</b><span>Declined or overdue</span></button>
+            <button type="button" onClick={() => {
+              chooseCompleteness("attention");
+              const replacementGame = rangeGames.find((listedGame) => assignments.some((assignment) => assignment.game_id === listedGame.id && assignment.status === "declined" && !assignments.some((active) => active.game_id === listedGame.id && active.position_id === assignment.position_id && active.status !== "declined")));
+              if (replacementGame) setSelected(replacementGame.id);
+            }}><b>{attentionQueue.replacements}</b><span>Replacement needed</span></button>
             <button type="button" onClick={() => chooseCompleteness("unassigned")}><b>{attentionQueue.unassigned}</b><span>Unassigned games</span></button>
             <button type="button" onClick={() => chooseCompleteness("awaiting")}><b>{attentionQueue.awaiting}</b><span>Awaiting response</span></button>
             <button type="button" onClick={() => { setUnpublishedOnly(true); setCompletenessFilter("all"); setSelected(""); }}><b>{attentionQueue.unpublished}</b><span>Not published</span></button>
@@ -4356,6 +4382,12 @@ export default function AssignmentsManagerV2() {
                   <span><b>{gameAssignments.filter((item) => item.status === "proposed" && item.published_at).length}</b> Awaiting</span>
                   <span><b>{gameAssignments.filter((item) => ["accepted", "confirmed"].includes(item.status)).length}</b> Confirmed</span>
                 </div>
+                {replacementNeededAssignments.length > 0 && (
+                  <div className="replacementNeededBanner" role="alert">
+                    <span><b>{replacementNeededAssignments.length} replacement{replacementNeededAssignments.length === 1 ? "" : "s"} needed</b><small>Choose a recommended official below, then use Assign & Notify.</small></span>
+                    <button type="button" onClick={() => document.getElementById(`assignment-position-${replacementNeededAssignments[0].position_id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })}>View Replacements</button>
+                  </div>
+                )}
                 <div className="selectedGameUtilities">
                   <button type="button" className="assignmentActivityLink" onClick={() => void openActivityTimeline()}>Activity timeline</button>
                   <div
@@ -4433,6 +4465,7 @@ export default function AssignmentsManagerV2() {
                       return (
                         <tr
                           key={pos.id}
+                          id={`assignment-position-${pos.id}`}
                           style={{
                             background:
                               declined && !current ? "#fff1f2" : undefined,
