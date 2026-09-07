@@ -1123,52 +1123,42 @@ export default function AssignmentsManagerV2() {
     setRange(r);
     setShowCalendar(false);
     setOverrideOfficial("");
-    const list = games.filter(
-      (g) =>
-        inRange(g, r, customDate) &&
-        (!unpublishedOnly || isUnpublishedGame(g)) &&
-        (completenessFilter === "all" ||
-          assignmentCompleteness(g).key === completenessFilter),
-    );
-    if (!list.some((g) => g.id === selected)) setSelected(list[0]?.id || "");
+    setSelected("");
+    setLinkSelected([]);
   }
   function chooseDate(value: string) {
     setCustomDate(value);
     setRange("custom");
     setOverrideOfficial("");
-    const list = games.filter(
-      (g) =>
-        inRange(g, "custom", value) &&
-        (!unpublishedOnly || isUnpublishedGame(g)) &&
-        (completenessFilter === "all" ||
-          assignmentCompleteness(g).key === completenessFilter),
-    );
-    setSelected(list[0]?.id || "");
+    setSelected("");
+    setLinkSelected([]);
   }
   function toggleUnpublished() {
     const next = !unpublishedOnly;
     setUnpublishedOnly(next);
     setOverrideOfficial("");
-    const list = games.filter(
-      (g) =>
-        inRange(g, range, customDate) &&
-        (!next || isUnpublishedGame(g)) &&
-        (completenessFilter === "all" ||
-          assignmentCompleteness(g).key === completenessFilter),
-    );
-    if (!list.some((g) => g.id === selected)) setSelected(list[0]?.id || "");
+    setSelected("");
+    setLinkSelected([]);
   }
   function chooseCompleteness(value: Completeness) {
     setCompletenessFilter(value);
     setOverrideOfficial("");
-    const list = games.filter(
-      (listedGame) =>
-        inRange(listedGame, range, customDate) &&
-        (!unpublishedOnly || isUnpublishedGame(listedGame)) &&
-        (value === "all" || assignmentCompleteness(listedGame).key === value),
-    );
-    if (!list.some((listedGame) => listedGame.id === selected))
-      setSelected(list[0]?.id || "");
+    setSelected("");
+    setLinkSelected([]);
+  }
+  function clearGameFilters() {
+    setRange("all");
+    setCustomDate("");
+    setShowCalendar(false);
+    setUnpublishedOnly(false);
+    setSelfAssignOnly(false);
+    setCompletenessFilter("all");
+    setOfficialFilter("");
+    setLocationFilter("");
+    setLeagueFilter("");
+    setLevelFilter("");
+    setSelected("");
+    setLinkSelected([]);
   }
   function storeSavedViews(next: SavedAssignmentView[]) {
     setSavedViews(next);
@@ -2531,6 +2521,7 @@ export default function AssignmentsManagerV2() {
           </small>
         </button>
         <span
+          className="assignmentGameLocation"
           style={{
             color: isRainOut ? "#fff" : "#475569",
             fontSize: 11,
@@ -2544,6 +2535,7 @@ export default function AssignmentsManagerV2() {
           <small>{d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</small>
         </span>
         <span
+          className="assignmentGamePower"
           title="Average of the home and away team power rankings"
           style={{
             color: isRainOut ? "#fff" : "#7c3aed",
@@ -2554,6 +2546,7 @@ export default function AssignmentsManagerV2() {
           {gamePower(g).toFixed(1)}
         </span>
         <select
+          className="assignmentGameStatusSelect"
           aria-label={`Status for game ${g.game_number}`}
           disabled={!canManage || gameStatusSaving === g.id}
           value={g.status === "open" ? "active" : g.status}
@@ -3053,8 +3046,7 @@ export default function AssignmentsManagerV2() {
               const next = event.target.value === "selfAssign";
               setSelfAssignOnly(next);
               setLinkSelected([]);
-              if (next && selected && selfAssignOpenCount(selected) === 0)
-                setSelected("");
+              setSelected("");
             }}
           >
             <option value="all">All Games</option>
@@ -3632,10 +3624,10 @@ export default function AssignmentsManagerV2() {
                 );
               })
             ) : (
-              <div style={{ padding: 14, color: "#64748b" }}>
-                {selfAssignOnly
-                  ? "No games are currently open for Self Assign in this selection."
-                  : "No games in this selection."}
+              <div className="assignmentNoGames">
+                <b>{selfAssignOnly ? "No games are open for Self Assign" : "No games match these filters"}</b>
+                <span>Change the filters or reset them to see all games.</span>
+                <button type="button" className="secondary" onClick={clearGameFilters}>Clear All Filters</button>
               </div>
             )}
           </div>
@@ -3880,42 +3872,41 @@ export default function AssignmentsManagerV2() {
                   <b>{game.officials_needed} assignment slots</b>
                 </p>
                 <div className="selectedGameSummary" aria-label="Assignment summary">
-                  <span><b>{game.officials_needed}</b> Positions</span>
-                  <span><b>{activeAssignmentCount}</b> Assigned</span>
+                  <span><b>{activeAssignmentCount}/{game.officials_needed}</b> Filled</span>
                   <span><b>{openPositionCount}</b> Open</span>
                   <span><b>{gameAssignments.filter((item) => item.status === "proposed" && item.published_at).length}</b> Awaiting</span>
                   <span><b>{gameAssignments.filter((item) => ["accepted", "confirmed"].includes(item.status)).length}</b> Confirmed</span>
                 </div>
-                <button type="button" className="assignmentActivityLink" onClick={() => void openActivityTimeline()}>View activity timeline</button>
-                <div
-                  className="assignmentConfirmMessage"
-                  style={{ marginTop: 10 }}
-                  aria-label="Notification history"
-                >
-                  <b>Notification history:</b>{" "}
-                  {["canceled", "rained_out"].includes(game.status)
-                    ? `${cancellationEmailsSent} cancellation notice${cancellationEmailsSent === 1 ? "" : "s"} sent`
-                    : `${assignmentEmailsSent} assignment email${assignmentEmailsSent === 1 ? "" : "s"} sent`}
-                  {(cancellationEmailIssues || assignmentEmailIssues) > 0 && (
-                    <>
-                      {" • "}
-                      <b style={{ color: "#b91c1c" }}>
-                        {["canceled", "rained_out"].includes(game.status)
-                          ? cancellationEmailIssues
-                          : assignmentEmailIssues}{" "}
-                        need attention
-                      </b>
-                      <button
-                        type="button"
-                        className="secondary"
-                        disabled={retryingNotifications}
-                        onClick={() => void retryNotificationIssues()}
-                        style={{ marginLeft: 10 }}
-                      >
-                        {retryingNotifications ? "Retrying…" : "Retry Failed Notifications"}
-                      </button>
-                    </>
-                  )}
+                <div className="selectedGameUtilities">
+                  <button type="button" className="assignmentActivityLink" onClick={() => void openActivityTimeline()}>Activity timeline</button>
+                  <div
+                    className="assignmentConfirmMessage"
+                    aria-label="Notification history"
+                  >
+                    <b>Notifications:</b>{" "}
+                    {["canceled", "rained_out"].includes(game.status)
+                      ? `${cancellationEmailsSent} cancellation notice${cancellationEmailsSent === 1 ? "" : "s"} sent`
+                      : `${assignmentEmailsSent} assignment email${assignmentEmailsSent === 1 ? "" : "s"} sent`}
+                    {(cancellationEmailIssues || assignmentEmailIssues) > 0 && (
+                      <>
+                        {" • "}
+                        <b style={{ color: "#b91c1c" }}>
+                          {["canceled", "rained_out"].includes(game.status)
+                            ? cancellationEmailIssues
+                            : assignmentEmailIssues}{" "}
+                          need attention
+                        </b>
+                        <button
+                          type="button"
+                          className="secondary"
+                          disabled={retryingNotifications}
+                          onClick={() => void retryNotificationIssues()}
+                        >
+                          {retryingNotifications ? "Retrying…" : "Retry"}
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
                 {openPositionCount > 0 && (
                   <div className="errorBox" style={{ marginTop: 10 }}>
