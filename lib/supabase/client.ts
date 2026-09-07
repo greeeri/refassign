@@ -8,6 +8,9 @@ const testPublishableKey = 'sb_publishable_Hz_2BH4cYmrogX3O15x2PQ_fU-0uSKZ'
 let tierTestBrowserClient: ReturnType<typeof createBrowserClient> | undefined
 
 function browserConfiguration() {
+  if (typeof window !== 'undefined' && window.location.hostname === 'test.ref-assign.com') {
+    return { url: testUrl, key: testPublishableKey }
+  }
   return {
     url: process.env.NEXT_PUBLIC_SUPABASE_URL || testUrl,
     key: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || testPublishableKey
