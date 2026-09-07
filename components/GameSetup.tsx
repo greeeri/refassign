@@ -217,6 +217,17 @@ export default function GameSetup({
       Boolean(organizationId) || ["admin", "assignor"].includes(p?.role || "");
     setAllowed(ok);
     if (!ok) return;
+    const locationRequest = organizationId
+      ? supabase.rpc("get_organization_locations", {
+          p_organization_id: organizationId,
+        })
+      : supabase
+          .from("locations")
+          .select(
+            "id,name,address,city,state,directions,parking_instructions,entrance_information,map_url,contact_name,contact_phone,contact_email",
+          )
+          .eq("active", true)
+          .order("name");
     const [s, l, lg, t, loc, pw] = await Promise.all([
       supabase
         .from("sports")
@@ -237,13 +248,7 @@ export default function GameSetup({
         .from("teams")
         .select("id,name,sport_id,level_id,level")
         .order("name"),
-      supabase
-        .from("locations")
-        .select(
-          "id,name,address,city,state,directions,parking_instructions,entrance_information,map_url,contact_name,contact_phone,contact_email",
-        )
-        .eq("active", true)
-        .order("name"),
+      locationRequest,
       supabase.from("team_power_rankings").select("team_id,power"),
     ]);
     const err =
@@ -403,12 +408,30 @@ export default function GameSetup({
       latitude: coordinates.latitude,
       longitude: coordinates.longitude,
     };
-    const r = editingLocationId
-      ? await supabase
-          .from("locations")
-          .update(payload)
-          .eq("id", editingLocationId)
-      : await supabase.from("locations").insert(payload);
+    const r = organizationId
+      ? await supabase.rpc("save_organization_location", {
+          p_organization_id: organizationId,
+          p_location_id: editingLocationId,
+          p_name: payload.name,
+          p_address: payload.address,
+          p_city: payload.city,
+          p_state: payload.state,
+          p_directions: payload.directions,
+          p_parking_instructions: payload.parking_instructions,
+          p_entrance_information: payload.entrance_information,
+          p_map_url: payload.map_url,
+          p_contact_name: payload.contact_name,
+          p_contact_phone: payload.contact_phone,
+          p_contact_email: payload.contact_email,
+          p_latitude: payload.latitude,
+          p_longitude: payload.longitude,
+        })
+      : editingLocationId
+        ? await supabase
+            .from("locations")
+            .update(payload)
+            .eq("id", editingLocationId)
+        : await supabase.from("locations").insert(payload);
     if (r.error) setError(r.error.message);
     else {
       setLocation({

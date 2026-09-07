@@ -283,14 +283,19 @@ export default function OfficialsDirectory({
   async function load() {
     setLoading(true);
     setError("");
+    const officialRequest = organizationId
+      ? supabase.rpc("get_organization_official_directory", {
+          p_organization_id: organizationId,
+        })
+      : supabase
+          .from("officials")
+          .select(
+            "id,first_name,last_name,email,phone,home_area,home_address,home_city,home_state,home_zip,sports,certification_level,active",
+          )
+          .order("last_name")
+          .order("first_name");
     const [o, lg, lv] = await Promise.all([
-      supabase
-        .from("officials")
-        .select(
-          "id,first_name,last_name,email,phone,home_area,home_address,home_city,home_state,home_zip,sports,certification_level,active",
-        )
-        .order("last_name")
-        .order("first_name"),
+      officialRequest,
       supabase
         .from("leagues")
         .select("id,name")
