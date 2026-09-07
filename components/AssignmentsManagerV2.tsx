@@ -285,6 +285,8 @@ export default function AssignmentsManagerV2() {
     [bulkAssignPositions, setBulkAssignPositions] = useState<Record<string, string>>({}),
     [bulkOverrideConfirmed, setBulkOverrideConfirmed] = useState(false),
     [bulkAssignMessage, setBulkAssignMessage] = useState(""),
+    [bulkOfficialSearch, setBulkOfficialSearch] = useState(""),
+    [bulkOfficialStatus, setBulkOfficialStatus] = useState<"eligible" | "all" | "warning" | "blocked">("eligible"),
     [bulkAssignmentResult, setBulkAssignmentResult] = useState<BulkAssignmentResult | null>(null),
     [bulkRetryingGame, setBulkRetryingGame] = useState(""),
     [showBulkCrew, setShowBulkCrew] = useState(false),
@@ -1767,6 +1769,8 @@ export default function AssignmentsManagerV2() {
     );
     setBulkOverrideConfirmed(false);
     setBulkAssignMessage("");
+    setBulkOfficialSearch("");
+    setBulkOfficialStatus("eligible");
     setShowBulkAssign(true);
   }
   function bulkAssignmentReview(officialId = bulkAssignOfficial) {
@@ -3026,6 +3030,12 @@ export default function AssignmentsManagerV2() {
             return order[a.status] - order[b.status] || b.averageRoleRank - a.averageRoleRank || a.official.last_name.localeCompare(b.official.last_name) || a.official.first_name.localeCompare(b.official.first_name);
           });
         const eligibleCount = officialAssessments.filter((item) => item.status === "eligible").length;
+        const officialSearch = bulkOfficialSearch.trim().toLowerCase();
+        const visibleOfficialAssessments = officialAssessments.filter(({ official: item, status }) => {
+          const matchesStatus = bulkOfficialStatus === "all" || status === bulkOfficialStatus;
+          const name = `${item.first_name} ${item.last_name}`.toLowerCase();
+          return matchesStatus && (!officialSearch || name.includes(officialSearch));
+        });
         const warnings = review.warnings.filter(
           (warning) => !review.blocking.some((blocked) => blocked.gameId === warning.gameId && warning.reason.includes(blocked.reason)),
         );
@@ -3040,8 +3050,14 @@ export default function AssignmentsManagerV2() {
               </header>
               <div className="bulkOfficialPicker">
                 <div className="bulkOfficialPickerHead"><span>Choose an official</span><b>{eligibleCount} eligible for all selected games</b></div>
+                <div className="bulkOfficialFilters">
+                  <input type="search" value={bulkOfficialSearch} onChange={(event) => setBulkOfficialSearch(event.target.value)} placeholder="Search officials by name" aria-label="Search officials by name" />
+                  <div role="group" aria-label="Filter officials by assignment status">
+                    {([['eligible', `Eligible (${eligibleCount})`], ['all', `All (${officialAssessments.length})`], ['warning', 'Override'], ['blocked', 'Conflicts']] as const).map(([value, label]) => <button key={value} type="button" className={bulkOfficialStatus === value ? "active" : ""} onClick={() => setBulkOfficialStatus(value)}>{label}</button>)}
+                  </div>
+                </div>
                 <div className="bulkOfficialOptions" role="radiogroup" aria-label="Officials ranked by eligibility">
-                  {officialAssessments.map(({ official: item, assessment, status, roleRatings }) => {
+                  {visibleOfficialAssessments.map(({ official: item, assessment, status, roleRatings }) => {
                     const firstIssue = assessment.blocking[0]?.reason || assessment.warnings[0]?.reason;
                     return (
                       <label key={item.id} className={`${status}${bulkAssignOfficial === item.id ? " selected" : ""}`}>
@@ -3051,8 +3067,14 @@ export default function AssignmentsManagerV2() {
                       </label>
                     );
                   })}
+                  {!visibleOfficialAssessments.length && <p className="bulkOfficialEmpty">No officials match this search and filter.</p>}
                 </div>
               </div>
+              {official && <div className="bulkConflictSummary" aria-live="polite">
+                <span className={review.blocking.length ? "bad" : "good"}><b>{review.blocking.length}</b> conflicts</span>
+                <span className={warnings.length ? "warn" : "good"}><b>{warnings.length}</b> warnings</span>
+                <span className="neutral"><b>{review.targets.length}</b> games</span>
+              </div>}
               <div className="bulkAssignGameList">
                 {review.targets.map((target) => {
                   const gameBlocking = review.blocking.filter((item) => item.gameId === target.id);
@@ -3085,11 +3107,20 @@ export default function AssignmentsManagerV2() {
         const hasBlocking = selectedReviews.some((review) => review.candidate?.blocking.length);
         const hasWarnings = selectedReviews.some((review) => review.candidate?.warnings.length);
         const chosenCount = Object.values(bulkCrewSelections).filter(Boolean).length;
+        const conflictCount = selectedReviews.reduce((total, review) => total + (review.candidate?.blocking.length || 0), 0);
+        const warningCount = selectedReviews.reduce((total, review) => total + (review.candidate?.warnings.length || 0), 0);
+        const readyCount = selectedReviews.filter((review) => review.candidate && !review.candidate.blocking.length && !review.candidate.warnings.length).length;
         return (
           <div className="tapAssignOverlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !bulkCrewWorking) setShowBulkCrew(false); }}>
             <section className="tapAssignDialog bulkCrewDialog" role="dialog" aria-modal="true" aria-labelledby="bulk-crew-title">
               <header><div><small>BULK CREW ASSIGNMENT</small><h3 id="bulk-crew-title">Fill {slots.length} Open Positions</h3></div><button type="button" aria-label="Close crew assignment" disabled={bulkCrewWorking} onClick={() => setShowBulkCrew(false)}>×</button></header>
               <div className="bulkCrewTools"><div><b>Smart recommendations</b><span>Position rank, eligibility, distance, conflicts and workload are considered.</span></div><button type="button" className="success" disabled={bulkCrewWorking || !slots.length} onClick={applySmartCrewRecommendations}>Smart Fill</button></div>
+              <div className="bulkConflictSummary" aria-live="polite">
+                <span className="good"><b>{readyCount}</b> ready</span>
+                <span className={warningCount ? "warn" : "good"}><b>{warningCount}</b> warnings</span>
+                <span className={conflictCount ? "bad" : "good"}><b>{conflictCount}</b> conflicts</span>
+                <span className="neutral"><b>{slots.length - chosenCount}</b> open</span>
+              </div>
               <div className="bulkCrewList">
                 {slots.map((slot) => {
                   const candidates = crewCandidatesForSlot(slot.target, slot.position);
