@@ -70,6 +70,7 @@ export default function Workspace() {
     [ready, setReady] = useState(false),
     [openNav, setOpenNav] = useState<string | null>(null),
     [testMode, setTestMode] = useState(false),
+    [testOfficialAccount, setTestOfficialAccount] = useState(false),
     [testWorkspaces, setTestWorkspaces] = useState<TestWorkspace[]>([]),
     [testWorkspace, setTestWorkspace] = useState<TestWorkspace | null>(null);
   useEffect(() => {
@@ -83,6 +84,7 @@ export default function Workspace() {
       }
       if (window.location.hostname === "test.ref-assign.com") {
         setTestMode(true);
+        setTestOfficialAccount(Boolean(user.user_metadata?.account_type === "official" || user.user_metadata?.first_name));
         await Promise.all([
           supabase.rpc("accept_my_organization_invitations"),
           supabase.rpc("accept_my_official_invitations"),
@@ -300,14 +302,9 @@ export default function Workspace() {
       <div className="shell refAssignBranded">
         <main>
           <section className="card">
-            <h1>No organization workspace</h1>
-            <p>
-              Create an organization or accept an invitation before entering
-              RefAssign.
-            </p>
-            <a className="primary" href="/tier-test">
-              Open organization setup
-            </a>
+            <h1>{testOfficialAccount ? "No officiating organizations connected" : "No organization workspace"}</h1>
+            <p>{testOfficialAccount ? "This account is valid, but its email address does not match an official invitation. Sign out and open the invitation email again so RefAssign can use the exact invited address." : "Create an organization or accept an invitation before entering RefAssign."}</p>
+            {testOfficialAccount ? <button className="primary" onClick={signOut}>Sign out and use invitation</button> : <a className="primary" href="/tier-test">Open organization setup</a>}
           </section>
         </main>
       </div>
