@@ -275,6 +275,12 @@ export default function OfficialsDirectory({
     if (!organizationId || !officialMatch) return;
     setLinkingOfficial(true);
     setError("");
+    if (officialMatch.already_connected && !officialMatch.existing_account) {
+      const sent = await sendOfficialInvitation(officialMatch.email);
+      setLinkingOfficial(false);
+      if (sent) setLinkMessage(`A new secure invitation was sent to ${officialMatch.email}.`);
+      return;
+    }
     const { data, error: linkError } = await supabase.rpc(
       "add_organization_official_by_email",
       { p_organization_id: organizationId, p_email: officialMatch.email },
@@ -292,6 +298,13 @@ export default function OfficialsDirectory({
       });
       if (nameError) { setLinkingOfficial(false); return setError(nameError.message); }
     }
+    if (!result.existing_account) {
+      const sent = await sendOfficialInvitation(result.email);
+      if (!sent) {
+        setLinkingOfficial(false);
+        return;
+      }
+    }
     setOfficialEmail("");
     setOfficialFirstName("");
     setOfficialLastName("");
@@ -299,9 +312,30 @@ export default function OfficialsDirectory({
     setLinkMessage(
       result.existing_account
         ? `${result.email} was connected to this organization.`
-        : `${result.email} was added and is ready for an invitation.`,
+        : `${result.email} was added and a secure invitation was sent.`,
     );
     await load();
+  }
+
+  async function sendOfficialInvitation(email: string) {
+    if (!organizationId) return false;
+    const { data: sessionData } = await supabase.auth.getSession();
+    const response = await fetch("/api/tier-test/official-invitations", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${sessionData.session?.access_token || ""}`,
+      },
+      body: JSON.stringify({ organizationId, emails: [email] }),
+    });
+    const notification = (await response.json().catch(() => ({}))) as {
+      error?: string;
+    };
+    if (!response.ok) {
+      setError(notification.error || "The invitation email could not be sent.");
+      return false;
+    }
+    return true;
   }
 
   async function load() {
@@ -734,11 +768,13 @@ export default function OfficialsDirectory({
                 <button
                   type="button"
                   className="primary"
-                  disabled={officialMatch.already_connected || linkingOfficial || (!officialMatch.found && (!officialFirstName.trim() || !officialLastName.trim()))}
+                  disabled={(officialMatch.already_connected && officialMatch.existing_account) || linkingOfficial || (!officialMatch.found && (!officialFirstName.trim() || !officialLastName.trim()))}
                   onClick={() => void connectOfficial()}
                 >
                   {officialMatch.already_connected
-                    ? "Already in organization"
+                    ? officialMatch.existing_account
+                      ? "Already in organization"
+                      : "Resend secure invitation"
                     : officialMatch.found
                       ? "Add to organization"
                       : "Add and prepare invitation"}
