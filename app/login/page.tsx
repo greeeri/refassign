@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   createClient,
@@ -15,6 +15,14 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [sendingLink, setSendingLink] = useState(false);
+  const [testMode, setTestMode] = useState(false);
+  const [creatingOfficial, setCreatingOfficial] = useState(false);
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+
+  useEffect(() => {
+    setTestMode(window.location.hostname === "test.ref-assign.com");
+  }, []);
 
   async function signIn(event: FormEvent) {
     event.preventDefault();
@@ -39,6 +47,38 @@ export default function LoginPage() {
           ? err.message
           : "Unable to sign in. Please try again.",
       );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function createOfficialAccount(event: FormEvent) {
+    event.preventDefault();
+    setLoading(true);
+    setMessage("");
+    try {
+      const supabase = createClient();
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            first_name: firstName.trim(),
+            last_name: lastName.trim(),
+            full_name: `${firstName.trim()} ${lastName.trim()}`.trim(),
+          },
+          emailRedirectTo: `${window.location.origin}/workspace`,
+        },
+      });
+      if (error) return setMessage(error.message);
+      if (data.session) {
+        router.replace("/workspace");
+        router.refresh();
+      } else {
+        setMessage("Account created. Open the confirmation email, then you will enter every organization that invited this email address.");
+      }
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Unable to create the official account.");
     } finally {
       setLoading(false);
     }
@@ -109,9 +149,13 @@ export default function LoginPage() {
           Ref<span>Assign</span>
         </div>
         <p>Sports Officials Management</p>
-        <h1>Sign in</h1>
-        <p>Enter your email address and password.</p>
-        <form onSubmit={signIn}>
+        <h1>{creatingOfficial ? "Create official account" : "Sign in"}</h1>
+        <p>{creatingOfficial ? "Use the same email address your organization invited." : "Enter your email address and password."}</p>
+        <form onSubmit={creatingOfficial ? createOfficialAccount : signIn}>
+          {creatingOfficial && <>
+            <label>First name<input required autoComplete="given-name" value={firstName} onChange={(e) => setFirstName(e.target.value)} /></label>
+            <label>Last name<input required autoComplete="family-name" value={lastName} onChange={(e) => setLastName(e.target.value)} /></label>
+          </>}
           <label>
             Email address
             <input
@@ -128,20 +172,24 @@ export default function LoginPage() {
             <input
               type="password"
               required
-              autoComplete="current-password"
+            autoComplete={creatingOfficial ? "new-password" : "current-password"}
+            minLength={creatingOfficial ? 8 : undefined}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Password"
             />
           </label>
           <button className="primary loginButton" disabled={loading}>
-            {loading ? "Signing in…" : "Sign in"}
+            {loading ? "Please wait…" : creatingOfficial ? "Create official account" : "Sign in"}
           </button>
         </form>
+        {testMode && <button type="button" className="secondary" style={{ marginTop: 10, width: "100%" }} onClick={() => { setCreatingOfficial((value) => !value); setMessage(""); }}>
+          {creatingOfficial ? "Back to sign in" : "Invited official? Create test account"}
+        </button>}
         <p style={{ textAlign: "center", marginTop: 16 }}>
           <a href="/register">New official? Start registration</a>
         </p>
-        <button
+        {!creatingOfficial && <button
           type="button"
           className="secondary"
           style={{ marginTop: 10, width: "100%" }}
@@ -149,8 +197,8 @@ export default function LoginPage() {
           onClick={() => void sendSignInLink()}
         >
           {sendingLink ? "Sending…" : "Email me a secure sign-in link"}
-        </button>
-        <button
+        </button>}
+        {!creatingOfficial && <button
           type="button"
           className="secondary"
           style={{ marginTop: 10, width: "100%" }}
@@ -158,7 +206,7 @@ export default function LoginPage() {
           onClick={() => void forgotPassword()}
         >
           {resetting ? "Sending…" : "Forgot password?"}
-        </button>
+        </button>}
         {message && <div className="loginMessage">{message}</div>}
       </section>
     </main>
