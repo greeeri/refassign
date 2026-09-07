@@ -4514,27 +4514,22 @@ export default function AssignmentsManagerV2() {
                                 }
                               />
                             ) : !current ? (
-                              <div
-                                style={{
-                                  display: "flex",
-                                  gap: 6,
-                                  alignItems: "center",
-                                }}
-                              >
+                              <div className="selfAssignOpenControls">
                                 <span className="badge green">Open</span>
                                 <button
                                   type="button"
-                                  className="secondary"
+                                  className="secondary selfAssignCloseButton"
                                   disabled={!canManage || selfAssignSaving}
+                                  aria-label={`Close Self Assign for ${pos.name}`}
+                                  title="Close Self Assign"
                                   onClick={() =>
                                     void withdrawSelfAssignPosition(
                                       game.id,
                                       pos.id,
                                     )
                                   }
-                                  style={{ padding: "4px 7px", fontSize: 10 }}
                                 >
-                                  Close Self Assign
+                                  Close
                                 </button>
                               </div>
                             ) : (
