@@ -268,6 +268,7 @@ export default function AssignmentsManagerV2() {
     [bulkAssignOfficial, setBulkAssignOfficial] = useState(""),
     [bulkAssignPositions, setBulkAssignPositions] = useState<Record<string, string>>({}),
     [bulkOverrideConfirmed, setBulkOverrideConfirmed] = useState(false),
+    [bulkAssignMessage, setBulkAssignMessage] = useState(""),
     [selfAssignSlots, setSelfAssignSlots] = useState<SelfAssignSlot[]>([]),
     [selfAssignSelected, setSelfAssignSelected] = useState<string[]>([]),
     [selfAssignSaving, setSelfAssignSaving] = useState(false),
@@ -1742,10 +1743,11 @@ export default function AssignmentsManagerV2() {
       ),
     );
     setBulkOverrideConfirmed(false);
+    setBulkAssignMessage("");
     setShowBulkAssign(true);
   }
-  function bulkAssignmentReview() {
-    const official = officials.find((item) => item.id === bulkAssignOfficial);
+  function bulkAssignmentReview(officialId = bulkAssignOfficial) {
+    const official = officials.find((item) => item.id === officialId);
     const targets = filteredGames.filter(
       (item) => linkSelected.includes(item.id) && bulkAssignPositions[item.id],
     );
@@ -1782,17 +1784,44 @@ export default function AssignmentsManagerV2() {
   }
   async function confirmBulkAssignment() {
     const review = bulkAssignmentReview();
-    if (!bulkAssignOfficial || !review.targets.length || review.blocking.length) return;
-    setBulkWorking(true);
-    let assigned = 0;
-    for (const target of review.targets) {
-      if (await assignToGame(target, bulkAssignPositions[target.id], bulkAssignOfficial, true)) assigned += 1;
+    if (!bulkAssignOfficial) {
+      setBulkAssignMessage("Choose an official before assigning the games.");
+      return;
     }
-    setBulkWorking(false);
-    if (assigned === review.targets.length) {
+    if (!review.targets.length) {
+      setBulkAssignMessage("None of the selected games has an open position to assign.");
+      return;
+    }
+    if (review.blocking.length) {
+      setBulkAssignMessage("This official cannot be assigned until the conflicts shown below are resolved.");
+      return;
+    }
+    if (review.warnings.length && !bulkOverrideConfirmed) {
+      setBulkAssignMessage("Confirm the eligibility override before assigning these games.");
+      return;
+    }
+    setBulkWorking(true);
+    setBulkAssignMessage(`Assigning 0 of ${review.targets.length} games…`);
+    let assigned = 0;
+    try {
+      for (const target of review.targets) {
+        const succeeded = await assignToGame(target, bulkAssignPositions[target.id], bulkAssignOfficial, true);
+        if (!succeeded) {
+          setBulkAssignMessage(`Stopped after ${assigned} of ${review.targets.length} games. Review the error and try again.`);
+          return;
+        }
+        assigned += 1;
+        setBulkAssignMessage(`Assigned ${assigned} of ${review.targets.length} games…`);
+      }
       setShowBulkAssign(false);
       setLinkSelected([]);
       setNotice(`${assigned} selected game${assigned === 1 ? "" : "s"} assigned successfully.`);
+    } catch (assignmentError) {
+      const message = assignmentError instanceof Error ? assignmentError.message : "Unexpected assignment error";
+      setError(message);
+      setBulkAssignMessage(`Bulk assignment stopped after ${assigned} of ${review.targets.length} games: ${message}`);
+    } finally {
+      setBulkWorking(false);
     }
   }
   function chooseOfficialToAssign(officialId: string) {
@@ -2790,6 +2819,17 @@ export default function AssignmentsManagerV2() {
       {showBulkAssign && (() => {
         const review = bulkAssignmentReview();
         const official = officials.find((item) => item.id === bulkAssignOfficial);
+        const officialAssessments = officials
+          .map((item) => {
+            const assessment = bulkAssignmentReview(item.id);
+            const status = assessment.blocking.length ? "blocked" : assessment.warnings.length ? "warning" : "eligible";
+            return { official: item, assessment, status };
+          })
+          .sort((a, b) => {
+            const order = { eligible: 0, warning: 1, blocked: 2 };
+            return order[a.status] - order[b.status] || a.official.last_name.localeCompare(b.official.last_name) || a.official.first_name.localeCompare(b.official.first_name);
+          });
+        const eligibleCount = officialAssessments.filter((item) => item.status === "eligible").length;
         const warnings = review.warnings.filter(
           (warning) => !review.blocking.some((blocked) => blocked.gameId === warning.gameId && warning.reason.includes(blocked.reason)),
         );
@@ -2802,13 +2842,21 @@ export default function AssignmentsManagerV2() {
                 <div><small>BULK ASSIGNMENT</small><h3 id="bulk-assign-title">Assign {review.targets.length} Selected Games</h3></div>
                 <button type="button" aria-label="Close bulk assignment" disabled={bulkWorking} onClick={() => setShowBulkAssign(false)}>×</button>
               </header>
-              <label className="bulkOfficialPicker">
-                <span>Official</span>
-                <select value={bulkAssignOfficial} disabled={bulkWorking} onChange={(event) => { setBulkAssignOfficial(event.target.value); setBulkOverrideConfirmed(false); }}>
-                  <option value="">Choose an official</option>
-                  {[...officials].sort((a, b) => a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name)).map((item) => <option key={item.id} value={item.id}>{item.last_name}, {item.first_name}</option>)}
-                </select>
-              </label>
+              <div className="bulkOfficialPicker">
+                <div className="bulkOfficialPickerHead"><span>Choose an official</span><b>{eligibleCount} eligible for all selected games</b></div>
+                <div className="bulkOfficialOptions" role="radiogroup" aria-label="Officials ranked by eligibility">
+                  {officialAssessments.map(({ official: item, assessment, status }) => {
+                    const firstIssue = assessment.blocking[0]?.reason || assessment.warnings[0]?.reason;
+                    return (
+                      <label key={item.id} className={`${status}${bulkAssignOfficial === item.id ? " selected" : ""}`}>
+                        <input type="radio" name="bulk-official" value={item.id} checked={bulkAssignOfficial === item.id} disabled={bulkWorking} onChange={() => { setBulkAssignOfficial(item.id); setBulkOverrideConfirmed(false); setBulkAssignMessage(""); }} />
+                        <span><b>{item.first_name} {item.last_name}</b><small>{status === "eligible" ? `Eligible for all ${assessment.targets.length} games` : status === "warning" ? `Override needed · ${firstIssue}` : `Unavailable · ${firstIssue}`}</small></span>
+                        <strong>{status === "eligible" ? "Eligible" : status === "warning" ? "Override" : "Conflict"}</strong>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
               <div className="bulkAssignGameList">
                 {review.targets.map((target) => {
                   const gameBlocking = review.blocking.filter((item) => item.gameId === target.id);
@@ -2826,9 +2874,10 @@ export default function AssignmentsManagerV2() {
               {review.blocking.length > 0 && <div className="tapAssignAlert blocking"><b>Assignment blocked</b><span>Resolve the schedule or duplicate-assignment conflicts shown above.</span></div>}
               {!review.blocking.length && warnings.length > 0 && <label className="bulkOverrideCheck"><input type="checkbox" checked={bulkOverrideConfirmed} onChange={(event) => setBulkOverrideConfirmed(event.target.checked)} /><span><b>Confirm eligibility overrides</b><small>{warnings.length} warning{warnings.length === 1 ? "" : "s"} will be overridden.</small></span></label>}
               {official && !review.blocking.length && !warnings.length && <div className="tapAssignAlert clear"><b>Ready to assign</b><span>No conflicts were found for {official.first_name} {official.last_name}.</span></div>}
+              {bulkAssignMessage && <div className={`bulkAssignMessage${bulkWorking ? " working" : ""}`} role="status">{bulkAssignMessage}</div>}
               <footer>
                 <button type="button" className="secondary" disabled={bulkWorking} onClick={() => setShowBulkAssign(false)}>Cancel</button>
-                <button type="button" className="primary" disabled={bulkWorking || !bulkAssignOfficial || !review.targets.length || Boolean(review.blocking.length) || Boolean(warnings.length && !bulkOverrideConfirmed)} onClick={() => void confirmBulkAssignment()}>{bulkWorking ? "Assigning…" : `Assign to ${review.targets.length} Game${review.targets.length === 1 ? "" : "s"}`}</button>
+                <button type="button" className="primary" disabled={bulkWorking} onClick={() => void confirmBulkAssignment()}>{bulkWorking ? "Assigning…" : `Assign to ${review.targets.length} Game${review.targets.length === 1 ? "" : "s"}`}</button>
               </footer>
             </section>
           </div>

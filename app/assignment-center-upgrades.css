@@ -81,3 +81,55 @@ body.officialDragActive{cursor:grabbing}
 .tapAssignAlert{display:grid;gap:4px;margin:0 20px 16px;padding:12px 14px;border-radius:9px;font-size:13px;line-height:1.35}.tapAssignAlert span{display:block}.tapAssignAlert.clear{border:1px solid #86efac;background:#f0fdf4;color:#166534}.tapAssignAlert.warning{border:1px solid #fdba74;background:#fff7ed;color:#9a3412}.tapAssignAlert.blocking{border:1px solid #fca5a5;background:#fef2f2;color:#991b1b}
 .tapAssignDialog>footer{position:sticky;bottom:0;display:flex;justify-content:flex-end;gap:10px;padding:14px 20px;border-top:1px solid #e2e8f0;background:#fff}.tapAssignDialog>footer button{min-height:44px;margin:0;padding:10px 16px}.tapAssignDialog>footer .danger{border-color:#c2410c;background:#c2410c;color:#fff}
 @media(max-width:760px){.officialDropTray{display:grid;top:auto;right:10px;bottom:10px;left:10px;width:auto;max-height:62vh}.officialDropTray header{font-size:18px}.officialTrayGame{min-height:66px}.tapAssignOverlay{align-items:end;padding:0}.tapAssignDialog{width:100%;max-height:92vh;border-width:1px 0 0;border-radius:18px 18px 0 0}.tapAssignDialog>header{padding:16px}.tapAssignGameSummary,.tapAssignPositions{padding-left:16px;padding-right:16px}.tapAssignAlert{margin-left:16px;margin-right:16px}.tapAssignDialog>footer{display:grid;grid-template-columns:1fr 1.4fr;padding:12px 16px calc(12px + env(safe-area-inset-bottom))}.assignmentStatusCell{min-width:0}.assignmentStaffingCount{justify-content:flex-start;flex-wrap:wrap}.assignmentStaffingCount small{width:100%}}
+
+/* Mobile game results are cards, not a horizontally scrolling desktop table. */
+.assignmentNoGames{display:grid;justify-items:start;gap:7px;padding:22px 16px;color:#64748b}.assignmentNoGames b{color:#334155;font-size:16px}.assignmentNoGames span{font-size:14px}.assignmentNoGames button{margin:4px 0 0}
+@media(max-width:760px){
+  .assignmentGameTable{overflow:visible!important;border:0!important;background:transparent}
+  .assignmentGameTableHeader{display:none!important}
+  .assignmentGameTable>div,.assignmentGameRows{min-width:0!important}
+  .assignmentGameRows{display:grid;gap:10px;max-height:none!important;overflow:visible!important;padding:10px 0}
+  .assignmentGameTable::after{display:none!important}
+  .assignmentGameRow{display:grid!important;grid-template-columns:30px minmax(0,1fr) auto!important;gap:7px 10px!important;min-width:0!important;min-height:0;padding:14px!important;border:1px solid #cbd5e1!important;border-radius:12px;background:#fff;box-shadow:0 2px 8px #0f172a0d}
+  .assignmentGameRow>label{grid-column:1;grid-row:1;align-self:start;padding-top:3px}
+  .assignmentGameRow>button{grid-column:2/4;grid-row:1;width:100%;min-height:42px}
+  .assignmentGameName{font-size:16px;line-height:1.3}
+  .assignmentGameRow button>small{font-size:13px}
+  .assignmentGameLocation{grid-column:2/4;grid-row:3;font-size:14px!important}
+  .assignmentGameLocation::before{content:"Location: ";font-weight:900}
+  .assignmentGameDate{grid-column:2/4;grid-row:2;display:flex;gap:7px;align-items:center;font-size:14px}
+  .assignmentGameDate small{display:inline;margin:0;font-size:14px}
+  .assignmentGamePower{grid-column:2;grid-row:4;align-self:center;font-size:14px!important}
+  .assignmentGamePower::before{content:"Power ";color:#64748b;font-weight:750}
+  .assignmentGameStatusSelect{grid-column:3;grid-row:4;width:auto!important;min-width:118px!important;font-size:14px!important}
+  .assignmentStatusCell{grid-column:2/4;grid-row:5;grid-template-columns:auto 1fr;align-items:center;gap:7px 10px;padding-top:5px;border-top:1px solid #e2e8f0}
+  .assignmentStatusBadge{justify-self:start;min-height:30px;padding:4px 10px;font-size:12px}
+  .assignmentStaffingCount{justify-self:end;justify-content:flex-end;font-size:13px}
+  .assignmentStaffingCount small{width:auto;font-size:12px}
+  .assignmentStaffingBar{grid-column:1/-1;width:100%}
+  .assignmentGameRow:has(button[title="Assign selected official to this game"]){border-color:#22c55e!important;box-shadow:0 0 0 2px #bbf7d0}
+  .assignmentGameRow button[title="Assign selected official to this game"]{min-height:48px}
+  .assignmentNoGames{border:1px dashed #cbd5e1;border-radius:12px;background:#f8fafc}
+}
+
+/* Compact selected-game header so assignment positions stay in view on phones. */
+.selectedGameUtilities{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:9px}.selectedGameUtilities .assignmentActivityLink{margin:0}.selectedGameUtilities .assignmentConfirmMessage{flex:1 1 260px;margin:0!important}.selectedGameUtilities .assignmentConfirmMessage button{margin-left:8px}
+@media(max-width:700px){
+  .assignmentMain{padding:10px!important}
+  .selectedGameStickyHeader{position:static!important;top:auto!important;z-index:auto!important;margin:-10px -10px 8px!important;padding:10px 12px!important;box-shadow:none!important;backdrop-filter:none!important}
+  .selectedGameStickyHeader h2{margin:0!important;font-size:1.15rem!important;line-height:1.2!important}
+  .selectedGameStickyHeader h2+div{margin:3px 0!important;font-size:12px!important}
+  .selectedGameStickyHeader p{display:-webkit-box;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:2;margin:3px 0 0!important;font-size:12px!important;line-height:1.35!important}
+  .selectedGameSummary{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px!important;margin-top:7px!important}
+  .selectedGameSummary span{display:grid!important;justify-items:center;gap:0!important;min-width:0;padding:4px 3px!important;border-radius:7px!important;font-size:10px!important;line-height:1.1;text-align:center}
+  .selectedGameSummary b{font-size:13px!important;line-height:1.1}
+  .selectedGameUtilities{display:grid;grid-template-columns:auto minmax(0,1fr);gap:7px;margin-top:7px}
+  .selectedGameUtilities .assignmentActivityLink{align-self:center;width:auto!important;min-height:0!important;padding:3px 0!important;background:transparent!important;font-size:12px!important;white-space:nowrap}
+  .selectedGameUtilities .assignmentConfirmMessage{min-width:0;margin:0!important;padding:6px 8px!important;border-radius:7px!important;font-size:11px!important;line-height:1.25!important}
+  .selectedGameUtilities .assignmentConfirmMessage button{min-height:28px;margin:4px 0 0 6px!important;padding:3px 7px!important;font-size:11px!important}
+  .selectedGameStickyHeader .errorBox{margin-top:7px!important;padding:7px 9px!important;font-size:11px!important;line-height:1.3}
+}
+
+/* Bulk assignment review */
+.bulkAssignDialog{max-width:760px}.bulkOfficialPicker{display:grid;gap:8px;padding:14px 20px;border-bottom:1px solid #e2e8f0}.bulkOfficialPickerHead{display:flex;align-items:center;justify-content:space-between;gap:12px;color:#334155;font-size:13px;font-weight:900}.bulkOfficialPickerHead b{color:#15803d;font-size:12px}.bulkOfficialOptions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;max-height:190px;overflow:auto}.bulkOfficialOptions label{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px;padding:9px 10px;border:1px solid #dbe4ee;border-radius:8px;background:#fff;cursor:pointer}.bulkOfficialOptions label:hover,.bulkOfficialOptions label.selected{border-color:#2563eb;box-shadow:0 0 0 2px #dbeafe}.bulkOfficialOptions label.eligible{border-left:5px solid #16a34a}.bulkOfficialOptions label.warning{border-left:5px solid #f59e0b}.bulkOfficialOptions label.blocked{border-left:5px solid #dc2626}.bulkOfficialOptions input{width:18px;height:18px}.bulkOfficialOptions span{display:grid;min-width:0;gap:2px}.bulkOfficialOptions span b{overflow:hidden;color:#0f172a;font-size:14px;text-overflow:ellipsis;white-space:nowrap}.bulkOfficialOptions span small{overflow:hidden;color:#64748b;font-size:11px;text-overflow:ellipsis;white-space:nowrap}.bulkOfficialOptions strong{padding:3px 6px;border-radius:999px;background:#dcfce7;color:#166534;font-size:10px}.bulkOfficialOptions .warning strong{background:#ffedd5;color:#9a3412}.bulkOfficialOptions .blocked strong{background:#fee2e2;color:#991b1b}.bulkAssignGameList{display:grid;gap:8px;max-height:34vh;overflow:auto;padding:12px 20px}.bulkAssignGameList article{display:grid;grid-template-columns:minmax(0,1fr) minmax(160px,220px);gap:7px 12px;padding:11px 12px;border:1px solid #dbe4ee;border-radius:9px;background:#f8fafc}.bulkAssignGameList article>div{display:grid;gap:3px}.bulkAssignGameList article>div b{color:#0f172a;font-size:14px}.bulkAssignGameList article>div span{color:#64748b;font-size:12px}.bulkAssignGameList article>label{display:grid;gap:3px;color:#64748b;font-size:11px;font-weight:850}.bulkAssignGameList select{min-height:38px;padding:6px 8px;border:1px solid #cbd5e1;border-radius:7px;background:#fff;color:#0f172a}.bulkAssignGameList article>small{grid-column:1/-1;padding:5px 7px;border-radius:5px;font-size:11px;font-weight:750}.bulkAssignGameList article>small.blocking{background:#fee2e2;color:#991b1b}.bulkAssignGameList article>small.warning{background:#ffedd5;color:#9a3412}.bulkAssignGameList article.blocked{border-color:#fca5a5}.bulkAssignGameList article.warning{border-color:#fdba74}.bulkOverrideCheck{display:flex;align-items:flex-start;gap:10px;margin:0 20px 16px;padding:11px 13px;border:1px solid #fdba74;border-radius:8px;background:#fff7ed;color:#9a3412}.bulkOverrideCheck input{width:19px;height:19px}.bulkOverrideCheck span{display:grid;gap:2px}.bulkOverrideCheck small{font-size:12px}.bulkAssignMessage{margin:0 20px 12px;padding:9px 11px;border-radius:7px;background:#fee2e2;color:#991b1b;font-size:13px;font-weight:750}.bulkAssignMessage.working{background:#dbeafe;color:#1d4ed8}
+@media(max-width:700px){.bulkAssignDialog{max-height:94vh}.bulkAssignDialog>header h3{font-size:18px}.bulkOfficialPicker{padding:10px 16px}.bulkOfficialPickerHead{align-items:flex-start;flex-direction:column;gap:2px}.bulkOfficialOptions{grid-template-columns:1fr;max-height:170px}.bulkAssignGameList{max-height:34vh;padding:10px 16px}.bulkAssignGameList article{grid-template-columns:1fr}.bulkAssignGameList article>small{grid-column:1}.bulkOverrideCheck{margin:0 16px 12px}.bulkAssignMessage{margin:0 16px 10px}.assignmentSelectionBar{position:sticky;bottom:0;z-index:30;padding:10px!important}.assignmentSelectionBar button{flex:1 1 145px}}
