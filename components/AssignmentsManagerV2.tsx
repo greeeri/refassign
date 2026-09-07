@@ -683,7 +683,7 @@ export default function AssignmentsManagerV2() {
     })),
   ].sort((a, b) => compareGames(a.games[0], b.games[0]));
   const filteredGames = gameUnits.flatMap((unit) => unit.games);
-  const assignmentSelection = filteredGames.filter((listedGame) =>
+  const assignmentSelection = games.filter((listedGame) =>
     linkSelected.includes(listedGame.id),
   );
   const assignmentSelectionGroupId = assignmentSelection.length
@@ -1751,7 +1751,7 @@ export default function AssignmentsManagerV2() {
     }
   }
   function prepareBulkAssignment() {
-    const selectedGames = filteredGames.filter((item) => linkSelected.includes(item.id));
+    const selectedGames = games.filter((item) => linkSelected.includes(item.id));
     setBulkAssignOfficial("");
     setBulkAssignPositions(
       Object.fromEntries(
@@ -1764,7 +1764,7 @@ export default function AssignmentsManagerV2() {
   }
   function bulkAssignmentReview(officialId = bulkAssignOfficial) {
     const official = officials.find((item) => item.id === officialId);
-    const targets = filteredGames.filter(
+    const targets = games.filter(
       (item) => linkSelected.includes(item.id) && bulkAssignPositions[item.id],
     );
     const blocking: { gameId: string; reason: string }[] = [];
@@ -2014,12 +2014,19 @@ export default function AssignmentsManagerV2() {
     setSaving(positionId);
     setError("");
     setNotice("");
+    const selectedGameId = assignments.find((assignment) => assignment.id === assignmentId)?.game_id || selected;
     const { error: deleteError } = await supabase
       .from("assignments")
       .delete()
       .eq("id", assignmentId);
     if (deleteError) setError(deleteError.message);
-    else announceUndoAvailable();
+    else {
+      announceUndoAvailable();
+      if (selectedGameId) {
+        setSelected(selectedGameId);
+        setLinkSelected((current) => current.includes(selectedGameId) ? current : [...current, selectedGameId]);
+      }
+    }
     await refreshAssignmentState();
     setSaving("");
   }
@@ -2416,8 +2423,13 @@ export default function AssignmentsManagerV2() {
         });
         announceUndoAvailable();
       }
-      setLinkSelected([]);
       await load();
+      if (action === "unassign") {
+        setLinkSelected(selectedIds);
+        setSelected((current) => current && selectedIds.includes(current) ? current : selectedIds[0] || "");
+      } else {
+        setLinkSelected([]);
+      }
     } catch (e) {
       setError(
         e instanceof Error ? e.message : "Unable to complete the bulk action.",
