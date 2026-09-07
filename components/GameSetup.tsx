@@ -43,6 +43,9 @@ type DirectoryLocation = Pick<
   "id" | "name" | "address" | "city" | "state"
 > & {
   postal_code: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  source?: string;
   already_connected: boolean;
 };
 export default function GameSetup({
@@ -98,10 +101,13 @@ export default function GameSetup({
 
   async function searchLocations(e: FormEvent) {
     e.preventDefault();
-    await runLocationSearch();
+    await runLocationSearch(locationQuery, true);
   }
 
-  async function runLocationSearch(query = locationQuery) {
+  async function runLocationSearch(
+    query = locationQuery,
+    includeRealPlaces = false,
+  ) {
     if (!organizationId || query.trim().length < 2) {
       setDirectoryLocations([]);
       return;
@@ -116,9 +122,43 @@ export default function GameSetup({
         p_query: query.trim(),
       },
     );
+    if (searchError) {
+      setSearchingLocations(false);
+      setError(searchError.message);
+      return;
+    }
+    let results = (data || []) as DirectoryLocation[];
+    if (includeRealPlaces) {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const params = new URLSearchParams({
+        q: query.trim(),
+        organization: organizationId,
+      });
+      const response = await fetch(`/api/tier-test/location-search?${params}`, {
+        headers: {
+          Authorization: `Bearer ${sessionData.session?.access_token || ""}`,
+        },
+      });
+      const external = (await response.json()) as {
+        results?: DirectoryLocation[];
+        error?: string;
+      };
+      if (!response.ok)
+        setError(external.error || "Real-world location search failed.");
+      else {
+        const known = new Set(
+          results.map((item) => `${item.name}|${item.city}`.toLowerCase()),
+        );
+        results = [
+          ...results,
+          ...(external.results || []).filter(
+            (item) => !known.has(`${item.name}|${item.city}`.toLowerCase()),
+          ),
+        ];
+      }
+    }
+    setDirectoryLocations(results);
     setSearchingLocations(false);
-    if (searchError) setError(searchError.message);
-    else setDirectoryLocations((data || []) as DirectoryLocation[]);
   }
 
   useEffect(() => {
@@ -134,13 +174,22 @@ export default function GameSetup({
     if (!organizationId || item.already_connected) return;
     setConnectingLocation(item.id);
     setError("");
-    const { error: connectError } = await supabase.rpc(
-      "connect_organization_location",
-      {
-        p_organization_id: organizationId,
-        p_location_id: item.id,
-      },
-    );
+    const external = item.id.startsWith("osm-");
+    const { error: connectError } = external
+      ? await supabase.rpc("create_and_connect_organization_location", {
+          p_organization_id: organizationId,
+          p_name: item.name,
+          p_address: item.address,
+          p_city: item.city,
+          p_state: item.state,
+          p_postal_code: item.postal_code,
+          p_latitude: item.latitude,
+          p_longitude: item.longitude,
+        })
+      : await supabase.rpc("connect_organization_location", {
+          p_organization_id: organizationId,
+          p_location_id: item.id,
+        });
     setConnectingLocation("");
     if (connectError) {
       setError(connectError.message);
@@ -757,7 +806,7 @@ export default function GameSetup({
                   />
                 </label>
                 <button className="primary" disabled={searchingLocations}>
-                  {searchingLocations ? "Searching…" : "Search locations"}
+                  {searchingLocations ? "Searching…" : "Search all locations"}
                 </button>
               </form>
               {locationMessage && (

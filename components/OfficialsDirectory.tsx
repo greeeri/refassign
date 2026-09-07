@@ -92,6 +92,9 @@ function newForm(): OfficialForm {
 type LinkOfficialResult = {
   email: string;
   existing_account: boolean;
+  found?: boolean;
+  display_name?: string;
+  already_connected?: boolean;
 };
 
 export default function OfficialsDirectory({
@@ -121,16 +124,36 @@ export default function OfficialsDirectory({
   const [officialEmail, setOfficialEmail] = useState("");
   const [linkingOfficial, setLinkingOfficial] = useState(false);
   const [linkMessage, setLinkMessage] = useState("");
+  const [officialMatch, setOfficialMatch] = useState<LinkOfficialResult | null>(
+    null,
+  );
 
-  async function linkOfficialByEmail(e: FormEvent<HTMLFormElement>) {
+  async function searchOfficialByEmail(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!organizationId || !officialEmail.trim()) return;
     setLinkingOfficial(true);
     setError("");
     setLinkMessage("");
+    setOfficialMatch(null);
+    const { data, error: linkError } = await supabase.rpc(
+      "search_organization_official_email",
+      { p_organization_id: organizationId, p_email: officialEmail.trim() },
+    );
+    setLinkingOfficial(false);
+    if (linkError) {
+      setError(linkError.message);
+      return;
+    }
+    setOfficialMatch(data as LinkOfficialResult);
+  }
+
+  async function connectOfficial() {
+    if (!organizationId || !officialMatch) return;
+    setLinkingOfficial(true);
+    setError("");
     const { data, error: linkError } = await supabase.rpc(
       "add_organization_official_by_email",
-      { p_organization_id: organizationId, p_email: officialEmail.trim() },
+      { p_organization_id: organizationId, p_email: officialMatch.email },
     );
     setLinkingOfficial(false);
     if (linkError) {
@@ -139,10 +162,11 @@ export default function OfficialsDirectory({
     }
     const result = data as LinkOfficialResult;
     setOfficialEmail("");
+    setOfficialMatch(null);
     setLinkMessage(
       result.existing_account
         ? `${result.email} was connected to this organization.`
-        : `${result.email} was added. An invitation is ready to be sent.`,
+        : `${result.email} was added and is ready for an invitation.`,
     );
     await load();
   }
@@ -534,7 +558,10 @@ export default function OfficialsDirectory({
               officials are created once and prepared for invitation.
             </p>
           </div>
-          <form className="directoryConnectForm" onSubmit={linkOfficialByEmail}>
+          <form
+            className="directoryConnectForm"
+            onSubmit={searchOfficialByEmail}
+          >
             <label>
               Search by email address
               <input
@@ -549,6 +576,34 @@ export default function OfficialsDirectory({
               {linkingOfficial ? "Searching…" : "Search email"}
             </button>
           </form>
+          {officialMatch && (
+            <div className="directoryResults">
+              <article>
+                <div>
+                  <strong>
+                    {officialMatch.display_name || officialMatch.email}
+                  </strong>
+                  <span>
+                    {officialMatch.found
+                      ? `${officialMatch.email} — Existing RefAssign account found`
+                      : `${officialMatch.email} — No account yet; an invitation will be prepared`}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={officialMatch.already_connected || linkingOfficial}
+                  onClick={() => void connectOfficial()}
+                >
+                  {officialMatch.already_connected
+                    ? "Already in organization"
+                    : officialMatch.found
+                      ? "Add to organization"
+                      : "Add and prepare invitation"}
+                </button>
+              </article>
+            </div>
+          )}
           {linkMessage && <div className="successBox">{linkMessage}</div>}
         </section>
       )}
