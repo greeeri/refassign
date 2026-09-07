@@ -3636,48 +3636,14 @@ export default function AssignmentsManagerV2() {
       })()}
       <div className={`assignmentCenterSplit ${game ? "hasSelectedGame" : ""}`}>
       <section className="card">
-        <div className="cardHead">
+        <div className="cardHead assignmentCompactHead">
           <div>
             <h2>Assignment Center</h2>
             <p>
               Assign, review and publish officials for upcoming games.
             </p>
           </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {canManage && (
-              <>
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() => setShowCoverageForecast(true)}
-                >
-                  Coverage Forecast
-                </button>
-                <button type="button" className="secondary" onClick={() => { const first = games.find((item) => item.league_id); if (first?.league_id) { setDeadlineLeagueId(first.league_id); setDeadlineDraft({ fill: first.leagues?.assignment_fill_target_days ?? 14, acceptance: first.leagues?.assignment_acceptance_hours ?? 24, escalation: first.leagues?.assignment_escalation_days ?? 3, reminder: first.leagues?.assignment_reminder_hours ?? 24 }); } setShowDeadlineSettings(true); }}>Deadline Settings</button>
-                <button
-                  className="secondary"
-                  disabled={!filteredGames.length}
-                  onClick={() => void exportAssignments()}
-                >
-                  Export
-                </button>
-                <button
-                  type="button"
-                  className="success"
-                  disabled={
-                    selfAssignSaving ||
-                    (!selfAssignSelected.length &&
-                      !linkSelected.length &&
-                      !game)
-                  }
-                  onClick={prepareSelfAssignPositions}
-                >
-                  {selfAssignSaving
-                    ? "Opening…"
-                    : "Open Positions for Self Assign"}
-                </button>
-              </>
-            )}
+          <div className="assignmentCompactPrimary">
             <button
               className="primary"
               disabled={!game || unpublishedCount === 0 || publishing}
@@ -3687,8 +3653,10 @@ export default function AssignmentsManagerV2() {
                 ? "Publishing & Sending…"
                 : `Publish${unpublishedCount ? ` (${unpublishedCount})` : ""}`}
             </button>
+            {canManage && <details className="assignmentCompactOverflow"><summary aria-label="More Assignment Center actions">•••</summary><div><button type="button" onClick={() => setShowCoverageForecast(true)}>Coverage Forecast</button><button type="button" onClick={() => { const first = games.find((item) => item.league_id); if (first?.league_id) { setDeadlineLeagueId(first.league_id); setDeadlineDraft({ fill: first.leagues?.assignment_fill_target_days ?? 14, acceptance: first.leagues?.assignment_acceptance_hours ?? 24, escalation: first.leagues?.assignment_escalation_days ?? 3, reminder: first.leagues?.assignment_reminder_hours ?? 24 }); } setShowDeadlineSettings(true); }}>Deadline Settings</button><button type="button" disabled={!filteredGames.length} onClick={() => void exportAssignments()}>Export</button><button type="button" disabled={selfAssignSaving || (!selfAssignSelected.length && !linkSelected.length && !game)} onClick={prepareSelfAssignPositions}>{selfAssignSaving ? "Opening…" : "Open Positions for Self Assign"}</button></div></details>}
           </div>
         </div>
+        {canManage && <nav className="assignmentCompactActionStrip" aria-label="Assignment Center tools"><b>More actions:</b><button type="button" onClick={() => setShowCoverageForecast(true)}>Coverage Forecast</button><button type="button" onClick={() => { const first = games.find((item) => item.league_id); if (first?.league_id) { setDeadlineLeagueId(first.league_id); setDeadlineDraft({ fill: first.leagues?.assignment_fill_target_days ?? 14, acceptance: first.leagues?.assignment_acceptance_hours ?? 24, escalation: first.leagues?.assignment_escalation_days ?? 3, reminder: first.leagues?.assignment_reminder_hours ?? 24 }); } setShowDeadlineSettings(true); }}>Deadline Settings</button><button type="button" disabled={!filteredGames.length} onClick={() => void exportAssignments()}>Export</button><button type="button" disabled={selfAssignSaving || (!selfAssignSelected.length && !linkSelected.length && !game)} onClick={prepareSelfAssignPositions}>{selfAssignSaving ? "Opening…" : "Open Positions for Self Assign"}</button></nav>}
         {error && (
           <div className="errorBox assignmentFeedback" role="alert">
             <span>{error}</span>
