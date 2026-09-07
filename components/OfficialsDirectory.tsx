@@ -96,6 +96,8 @@ type LinkOfficialResult = {
   display_name?: string;
   already_connected?: boolean;
   valid?: boolean;
+  first_name?: string;
+  last_name?: string;
 };
 
 export default function OfficialsDirectory({
@@ -123,6 +125,8 @@ export default function OfficialsDirectory({
   const [form, setForm] = useState<OfficialForm>(newForm());
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [officialEmail, setOfficialEmail] = useState("");
+  const [officialFirstName, setOfficialFirstName] = useState("");
+  const [officialLastName, setOfficialLastName] = useState("");
   const [linkingOfficial, setLinkingOfficial] = useState(false);
   const [linkMessage, setLinkMessage] = useState("");
   const [officialMatch, setOfficialMatch] = useState<LinkOfficialResult | null>(
@@ -133,7 +137,7 @@ export default function OfficialsDirectory({
   const [bulkResults, setBulkResults] = useState<LinkOfficialResult[]>([]);
   const [bulkBusy, setBulkBusy] = useState(false);
 
-  function parsedBulkEmails() {
+  function parsedBulkRows() {
     const lines = bulkEmailText
       .split(/\r?\n/)
       .map((line) => line.trim())
@@ -148,26 +152,27 @@ export default function OfficialsDirectory({
     const emailColumn = header.findIndex(
       (cell) => cell === "email" || cell === "email_address",
     );
+    const firstNameColumn = header.findIndex((cell) => cell === "first_name" || cell === "firstname" || cell === "first name");
+    const lastNameColumn = header.findIndex((cell) => cell === "last_name" || cell === "lastname" || cell === "last name");
     if (emailColumn >= 0)
       return lines
         .slice(1)
-        .map(
-          (line) =>
-            line
-              .split(",")
-              [emailColumn]?.trim()
-              .replace(/^['"]|['"]$/g, "") || "",
-        )
-        .filter(Boolean);
+        .map((line) => {
+          const cells=line.split(",").map((cell)=>cell.trim().replace(/^['"]|['"]$/g,""));
+          return {email:cells[emailColumn]||"",first_name:firstNameColumn>=0?cells[firstNameColumn]||"":"",last_name:lastNameColumn>=0?cells[lastNameColumn]||"":""};
+        })
+        .filter((row)=>Boolean(row.email));
     return bulkEmailText
       .split(/[\s,;]+/)
       .map((value) => value.trim().replace(/^['"]|['"]$/g, ""))
-      .filter(Boolean);
+      .filter(Boolean)
+      .map((email)=>({email,first_name:"",last_name:""}));
   }
 
   async function previewBulkOfficials() {
     if (!organizationId) return;
-    const emails = parsedBulkEmails();
+    const rows = parsedBulkRows();
+    const emails = rows.map((row)=>row.email);
     if (!emails.length)
       return setError("Paste email addresses or choose a CSV file first.");
     setBulkBusy(true);
@@ -179,7 +184,10 @@ export default function OfficialsDirectory({
     );
     setBulkBusy(false);
     if (bulkError) setError(bulkError.message);
-    else setBulkResults((data || []) as LinkOfficialResult[]);
+    else setBulkResults(((data || []) as LinkOfficialResult[]).map((item)=>{
+      const row=rows.find((candidate)=>candidate.email.toLowerCase()===item.email.toLowerCase());
+      return {...item,first_name:row?.first_name||"",last_name:row?.last_name||""};
+    }));
   }
 
   async function addBulkOfficials() {
@@ -197,6 +205,13 @@ export default function OfficialsDirectory({
     setBulkBusy(false);
     if (bulkError) return setError(bulkError.message);
     const added = (data || []) as LinkOfficialResult[];
+    for (const item of bulkResults) {
+      if (!item.first_name || !item.last_name || item.already_connected) continue;
+      const { error: nameError } = await supabase.rpc("set_organization_official_name", {
+        p_organization_id: organizationId,p_email:item.email,p_first_name:item.first_name,p_last_name:item.last_name,
+      });
+      if (nameError) return setError(nameError.message);
+    }
     const invitationEmails = added
       .filter((item) => !item.existing_account)
       .map((item) => item.email);
@@ -270,7 +285,16 @@ export default function OfficialsDirectory({
       return;
     }
     const result = data as LinkOfficialResult;
+    if (!officialMatch.found && officialFirstName.trim() && officialLastName.trim()) {
+      const { error: nameError } = await supabase.rpc("set_organization_official_name", {
+        p_organization_id:organizationId,p_email:officialMatch.email,
+        p_first_name:officialFirstName.trim(),p_last_name:officialLastName.trim(),
+      });
+      if (nameError) { setLinkingOfficial(false); return setError(nameError.message); }
+    }
     setOfficialEmail("");
+    setOfficialFirstName("");
+    setOfficialLastName("");
     setOfficialMatch(null);
     setLinkMessage(
       result.existing_account
@@ -703,10 +727,14 @@ export default function OfficialsDirectory({
                       : `${officialMatch.email} — No account yet; an invitation will be prepared`}
                   </span>
                 </div>
+                {!officialMatch.found && <div className="formGrid">
+                  <label>First name<input required value={officialFirstName} onChange={(event)=>setOfficialFirstName(event.target.value)} /></label>
+                  <label>Last name<input required value={officialLastName} onChange={(event)=>setOfficialLastName(event.target.value)} /></label>
+                </div>}
                 <button
                   type="button"
                   className="primary"
-                  disabled={officialMatch.already_connected || linkingOfficial}
+                  disabled={officialMatch.already_connected || linkingOfficial || (!officialMatch.found && (!officialFirstName.trim() || !officialLastName.trim()))}
                   onClick={() => void connectOfficial()}
                 >
                   {officialMatch.already_connected
@@ -730,8 +758,7 @@ export default function OfficialsDirectory({
             <div className="bulkOfficialPanel">
               <h3>Bulk search and add</h3>
               <p>
-                Upload a CSV with an <b>email</b> column, or paste up to 500
-                email addresses. Review matches before adding anyone.
+                Upload a CSV with <b>first_name</b>, <b>last_name</b>, and <b>email</b> columns, or paste up to 500 email addresses. Names from the CSV are saved in the directory; pasted-email names are completed when each official creates their account.
               </p>
               <label className="filePicker">
                 Choose CSV file
@@ -790,7 +817,7 @@ export default function OfficialsDirectory({
                     {bulkResults.map((item) => (
                       <article key={item.email}>
                         <div>
-                          <strong>{item.display_name || item.email}</strong>
+                          <strong>{item.first_name && item.last_name ? `${item.first_name} ${item.last_name}` : item.display_name && item.display_name !== item.email ? item.display_name : "Name pending"}</strong>
                           <span>
                             {item.valid === false
                               ? "Invalid email"
