@@ -136,6 +136,10 @@ export default function OfficialsDirectory({
   const [bulkEmailText, setBulkEmailText] = useState("");
   const [bulkResults, setBulkResults] = useState<LinkOfficialResult[]>([]);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [pendingInvitationEmails, setPendingInvitationEmails] = useState<
+    string[]
+  >([]);
+  const [sendingInvitationEmail, setSendingInvitationEmail] = useState("");
 
   function parsedBulkRows() {
     const lines = bulkEmailText
@@ -338,6 +342,15 @@ export default function OfficialsDirectory({
     return true;
   }
 
+  async function resendDirectoryInvitation(email: string) {
+    setSendingInvitationEmail(email);
+    setError("");
+    setLinkMessage("");
+    const sent = await sendOfficialInvitation(email);
+    setSendingInvitationEmail("");
+    if (sent) setLinkMessage(`A new secure invitation was sent to ${email}.`);
+  }
+
   async function load() {
     setLoading(true);
     setError("");
@@ -373,6 +386,18 @@ export default function OfficialsDirectory({
     setOfficials((o.data || []) as Official[]);
     setLeagues((lg.data || []) as Choice[]);
     setLevels((lv.data || []) as Choice[]);
+    if (organizationId) {
+      const { data: invitations, error: invitationError } = await supabase
+        .from("organization_official_invitations")
+        .select("email")
+        .eq("organization_id", organizationId)
+        .eq("status", "pending");
+      if (invitationError) setError(invitationError.message);
+      else
+        setPendingInvitationEmails(
+          (invitations || []).map((item) => item.email.toLowerCase()),
+        );
+    } else setPendingInvitationEmails([]);
 
     const { data: userData } = await supabase.auth.getUser();
     if (userData.user) {
@@ -1253,6 +1278,23 @@ export default function OfficialsDirectory({
                           </span>
                         </td>
                         <td>
+                          {organizationId &&
+                            o.email &&
+                            pendingInvitationEmails.includes(
+                              o.email.toLowerCase(),
+                            ) && (
+                              <button
+                                className="tableButton"
+                                disabled={sendingInvitationEmail === o.email}
+                                onClick={() =>
+                                  void resendDirectoryInvitation(o.email!)
+                                }
+                              >
+                                {sendingInvitationEmail === o.email
+                                  ? "Sending…"
+                                  : "Send / resend invitation"}
+                              </button>
+                            )}{" "}
                           <button
                             className="tableButton"
                             onClick={() => void startEdit(o)}
