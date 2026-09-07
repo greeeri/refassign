@@ -231,9 +231,38 @@ export default function TierTestExperience({
       "refassign-last-test-workspace",
       workspace.organization_id,
     );
-    window.location.assign(
-      `/workspace?organization=${workspace.organization_id}`,
+    setOrganizationId(workspace.organization_id);
+    setOrganization(workspace.name);
+    setSport(workspace.primary_sport || "Soccer");
+    setSelected(workspace.plan);
+    setTextingAddon(workspace.texting_addon);
+    setOfficials(
+      workspace.official_limit === null
+        ? 250
+        : workspace.official_limit +
+            workspace.additional_official_blocks * OFFICIAL_BLOCK_SIZE,
     );
+    setLeagues(
+      workspace.leagues.length
+        ? workspace.leagues.map((league, index) => ({
+            id: Date.now() + index,
+            name: league.name,
+            region: league.region || "",
+            coverage: league.coverage,
+          }))
+        : [
+            {
+              id: Date.now(),
+              name: "",
+              region: "",
+              coverage: "All locations",
+            },
+          ],
+    );
+    setSaveMessage("");
+    setSetupOpen(true);
+    setStep(1);
+    scrollAfterRender("organization-setup");
   };
   const persistWorkspace = async () => {
     setSaving(true);
@@ -461,7 +490,7 @@ export default function TierTestExperience({
                     {workspace.leagues.length}{" "}
                     {workspace.leagues.length === 1 ? "league" : "leagues"}
                   </p>
-                  <b>Open in workspace →</b>
+                  <b>Open organization setup →</b>
                 </button>
               ))}
             </div>
