@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 
 const testUrl = "https://slenztuopbfxqzjyrtzp.supabase.co";
 const testPublishableKey = "sb_publishable_Hz_2BH4cYmrogX3O15x2PQ_fU-0uSKZ";
+// This route is intentionally limited to the isolated organization preview.
 
 function esc(value: unknown) {
   return String(value ?? "").replace(/[&<>'"]/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]!);
