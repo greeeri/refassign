@@ -4563,14 +4563,6 @@ export default function AssignmentsManagerV2() {
                               )}
                               <div>
                                 <b>{shortPositionName(pos.name)}</b>
-                                {replacementNeeded && !current && (
-                                  <span
-                                    className="badge red"
-                                    style={{ marginLeft: 6 }}
-                                  >
-                                    Replacement Needed
-                                  </span>
-                                )}
                                 <small>
                                   Slot {index + 1} of {game.officials_needed}
                                 </small>
