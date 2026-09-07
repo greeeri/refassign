@@ -19,10 +19,17 @@ export default function LoginPage() {
   const [creatingOfficial, setCreatingOfficial] = useState(false);
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
+  const [officialInvitationId, setOfficialInvitationId] = useState("");
 
   useEffect(() => {
     setTestMode(window.location.hostname === "test.ref-assign.com");
-    const invitedEmail = new URLSearchParams(window.location.hash.slice(1)).get("official");
+    const hash = new URLSearchParams(window.location.hash.slice(1));
+    const invitedEmail = hash.get("official");
+    const invitationId = hash.get("official_invite");
+    if (invitationId) {
+      setOfficialInvitationId(invitationId);
+      localStorage.setItem("refassign-official-invitation", invitationId);
+    }
     if (invitedEmail) {
       setEmail(invitedEmail);
       setCreatingOfficial(true);
@@ -72,6 +79,7 @@ export default function LoginPage() {
             last_name: lastName.trim(),
             full_name: `${firstName.trim()} ${lastName.trim()}`.trim(),
             account_type: "official",
+            official_invitation_id: officialInvitationId || undefined,
           },
           emailRedirectTo: `${window.location.origin}/workspace`,
         },
