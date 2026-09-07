@@ -49,10 +49,10 @@ export async function POST(request: NextRequest) {
       { error: "Your session expired." },
       { status: 401 },
     );
-  const [{ error: accessError }, { data: workspaces }] = await Promise.all([
+  const [{ data: officialMatches, error: accessError }, { data: workspaces }] = await Promise.all([
     supabase.rpc("bulk_search_organization_official_emails", {
       p_organization_id: body.organizationId,
-      p_emails: [emails[0]],
+      p_emails: emails,
     }),
     supabase.rpc("get_my_test_workspaces"),
   ]);
@@ -68,6 +68,39 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { error: "Organization not found." },
       { status: 404 },
+    );
+
+  const connectedEmails = new Set(
+    ((officialMatches || []) as Array<{
+      email: string;
+      already_connected?: boolean;
+      valid?: boolean;
+    }>)
+      .filter((item) => item.valid !== false && item.already_connected)
+      .map((item) => item.email.toLowerCase()),
+  );
+  if (emails.some((email) => !connectedEmails.has(email)))
+    return NextResponse.json(
+      { error: "Every recipient must already be in this organization's official directory." },
+      { status: 409 },
+    );
+
+  const { error: prepareError } = await supabase
+    .from("organization_official_invitations")
+    .upsert(
+      emails.map((email) => ({
+        organization_id: body.organizationId,
+        email,
+        invited_by: userData.user.id,
+        status: "pending",
+        accepted_at: null,
+      })),
+      { onConflict: "organization_id,email" },
+    );
+  if (prepareError)
+    return NextResponse.json(
+      { error: "The secure invitation could not be prepared." },
+      { status: 500 },
     );
 
   const { data: invitationRows, error: invitationError } = await supabase
@@ -87,7 +120,7 @@ export async function POST(request: NextRequest) {
   const missing = emails.filter((email) => !invitationIds.has(email));
   if (missing.length)
     return NextResponse.json(
-      { error: "One or more officials do not have a pending invitation. Add them to the organization before sending email." },
+      { error: "One or more secure invitation records could not be prepared." },
       { status: 409 },
     );
 
