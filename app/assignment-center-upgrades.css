@@ -63,3 +63,21 @@
 .officialTrayGame.full{border-color:#cbd5e1;background:#f8fafc;opacity:.62;cursor:not-allowed}.officialTrayGame.full small{color:#64748b}
 body.officialDragActive{cursor:grabbing}
 @media(max-width:760px){.officialDragHandle{display:none}.officialDropTray{display:none}}
+
+/* Tap-to-assign review and visible game staffing */
+.assignmentStatusCell{display:grid;gap:5px;min-width:124px}
+.assignmentStaffingCount{display:flex;align-items:baseline;justify-content:space-between;gap:8px;color:#334155;font-size:12px;font-weight:700}
+.assignmentStaffingCount b{color:#0f172a;font-size:13px}.assignmentStaffingCount small{color:#64748b;font-size:11px;font-weight:800}
+.assignmentStaffingBar{display:block;height:6px;overflow:hidden;border-radius:999px;background:#e2e8f0}
+.assignmentStaffingBar>span{display:block;height:100%;border-radius:inherit;background:#16a34a;transition:width .2s ease}
+.tapAssignOverlay{position:fixed;inset:0;z-index:1200;display:grid;place-items:center;padding:20px;background:#0f172a99;backdrop-filter:blur(2px)}
+.tapAssignDialog{width:min(560px,100%);max-height:calc(100vh - 40px);overflow:auto;border:1px solid #bfdbfe;border-radius:16px;background:#fff;box-shadow:0 24px 70px #0f172a66}
+.tapAssignDialog>header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:18px 20px;background:#12335b;color:#fff}
+.tapAssignDialog>header small{display:block;color:#bfdbfe;font-size:12px;font-weight:900;letter-spacing:.08em}.tapAssignDialog>header h3{margin:3px 0 0;color:#fff;font-size:22px}
+.tapAssignDialog>header button{display:grid;place-items:center;width:36px;height:36px;padding:0;border:1px solid #93c5fd;border-radius:50%;background:#fff;color:#12335b;font-size:25px;line-height:1;cursor:pointer}
+.tapAssignGameSummary{display:grid;gap:4px;padding:16px 20px;border-bottom:1px solid #e2e8f0;color:#475569;font-size:14px}.tapAssignGameSummary b{color:#0f172a;font-size:17px}.tapAssignGameSummary span{line-height:1.35}
+.tapAssignPositions{display:grid;gap:8px;margin:0;padding:16px 20px;border:0}.tapAssignPositions legend{padding-top:16px;color:#334155;font-size:14px;font-weight:900}
+.tapAssignPositions label{display:flex;align-items:center;gap:11px;min-height:46px;padding:10px 12px;border:1px solid #cbd5e1;border-radius:9px;color:#0f172a;font-weight:800;cursor:pointer}.tapAssignPositions label:has(input:checked){border-color:#2563eb;background:#eff6ff;box-shadow:inset 0 0 0 1px #2563eb}.tapAssignPositions input{width:19px;height:19px}
+.tapAssignAlert{display:grid;gap:4px;margin:0 20px 16px;padding:12px 14px;border-radius:9px;font-size:13px;line-height:1.35}.tapAssignAlert span{display:block}.tapAssignAlert.clear{border:1px solid #86efac;background:#f0fdf4;color:#166534}.tapAssignAlert.warning{border:1px solid #fdba74;background:#fff7ed;color:#9a3412}.tapAssignAlert.blocking{border:1px solid #fca5a5;background:#fef2f2;color:#991b1b}
+.tapAssignDialog>footer{position:sticky;bottom:0;display:flex;justify-content:flex-end;gap:10px;padding:14px 20px;border-top:1px solid #e2e8f0;background:#fff}.tapAssignDialog>footer button{min-height:44px;margin:0;padding:10px 16px}.tapAssignDialog>footer .danger{border-color:#c2410c;background:#c2410c;color:#fff}
+@media(max-width:760px){.officialDropTray{display:grid;top:auto;right:10px;bottom:10px;left:10px;width:auto;max-height:62vh}.officialDropTray header{font-size:18px}.officialTrayGame{min-height:66px}.tapAssignOverlay{align-items:end;padding:0}.tapAssignDialog{width:100%;max-height:92vh;border-width:1px 0 0;border-radius:18px 18px 0 0}.tapAssignDialog>header{padding:16px}.tapAssignGameSummary,.tapAssignPositions{padding-left:16px;padding-right:16px}.tapAssignAlert{margin-left:16px;margin-right:16px}.tapAssignDialog>footer{display:grid;grid-template-columns:1fr 1.4fr;padding:12px 16px calc(12px + env(safe-area-inset-bottom))}.assignmentStatusCell{min-width:0}.assignmentStaffingCount{justify-content:flex-start;flex-wrap:wrap}.assignmentStaffingCount small{width:100%}}

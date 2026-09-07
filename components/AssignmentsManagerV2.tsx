@@ -257,6 +257,11 @@ export default function AssignmentsManagerV2() {
     [draggingOfficial, setDraggingOfficial] = useState(""),
     [officialDropGame, setOfficialDropGame] = useState(""),
     [pickedOfficial, setPickedOfficial] = useState(""),
+    [pendingTapAssignment, setPendingTapAssignment] = useState<{
+      gameId: string;
+      officialId: string;
+      positionId: string;
+    } | null>(null),
     [bulkWorking, setBulkWorking] = useState(false),
     [bulkStatus, setBulkStatus] = useState("active"),
     [selfAssignSlots, setSelfAssignSlots] = useState<SelfAssignSlot[]>([]),
@@ -526,6 +531,23 @@ export default function AssignmentsManagerV2() {
       detail:
         "Every position is filled; one or more assignments still need publishing",
     };
+  }
+  function staffingCounts(g: Game) {
+    const slots = positions
+      .filter((position) => position.sport_id === g.sport_id)
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .slice(0, Math.max(0, g.officials_needed));
+    const filled = new Set(
+      assignments
+        .filter(
+          (assignment) =>
+            assignment.game_id === g.id &&
+            assignment.status !== "declined" &&
+            slots.some((slot) => slot.id === assignment.position_id),
+        )
+        .map((assignment) => assignment.position_id),
+    ).size;
+    return { filled, total: slots.length, open: Math.max(0, slots.length - filled) };
   }
   function matchesOfficialFilter(g: Game) {
     return (
@@ -1251,6 +1273,21 @@ export default function AssignmentsManagerV2() {
     }
     return reasons;
   }
+  function duplicateAssignmentReasonsForGame(
+    officialId: string,
+    targetGame: Game,
+    positionId: string,
+  ) {
+    return assignments.some(
+      (assignment) =>
+        assignment.game_id === targetGame.id &&
+        assignment.official_id === officialId &&
+        assignment.position_id !== positionId &&
+        assignment.status !== "declined",
+    )
+      ? ["Already assigned to another position on this game"]
+      : [];
+  }
   function assignmentConflictReasons(o: Official, sourcePositionId = "") {
     return linkedAssignmentGames().flatMap((targetGame) =>
       assignmentConflictReasonsForGame(
@@ -1567,12 +1604,12 @@ export default function AssignmentsManagerV2() {
         (reasonText.includes("overlap") || reasonText.includes("assigned")));
     return matchesSearch && matchesReason;
   });
-  function openPositionForGame(targetGame: Game) {
+  function openPositionsForGame(targetGame: Game) {
     return positions
       .filter((position) => position.sport_id === targetGame.sport_id)
       .sort((a, b) => a.sort_order - b.sort_order || a.id.localeCompare(b.id))
       .slice(0, Math.max(0, targetGame.officials_needed))
-      .find(
+      .filter(
         (position) =>
           !assignments.some(
             (assignment) =>
@@ -1582,37 +1619,52 @@ export default function AssignmentsManagerV2() {
           ),
       );
   }
+  function openPositionForGame(targetGame: Game) {
+    return openPositionsForGame(targetGame)[0];
+  }
   async function assignToGame(
     targetGame: Game,
     positionId: string,
     officialId: string,
+    assignmentReviewed = false,
   ) {
     const official = officials.find((o) => o.id === officialId);
     const conflictReasons = official
-      ? assignmentConflictReasonsForGame(official, targetGame, positionId)
+      ? [
+          ...assignmentConflictReasonsForGame(official, targetGame, positionId),
+          ...duplicateAssignmentReasonsForGame(official.id, targetGame, positionId),
+        ]
       : [];
     if (officialId && official && conflictReasons.length) {
       setError(
         `${official.first_name} ${official.last_name} cannot be assigned: ${conflictReasons.join("; ")}.`,
       );
-      return;
+      return false;
     }
     const reasons = official
-      ? ineligibleReasonsForGame(official, targetGame, positionId).filter(
-          (r) => r !== "Already assigned to this game",
-        )
+      ? ineligibleReasonsForGame(official, targetGame, positionId).filter((r) => {
+          if (r !== "Already assigned to this game") return true;
+          return !assignments.some(
+            (assignment) =>
+              assignment.game_id === targetGame.id &&
+              assignment.position_id === positionId &&
+              assignment.official_id === official.id &&
+              assignment.status !== "declined",
+          );
+        })
       : [];
     if (officialId && reasons.length) {
       if (!canManage) {
         setError("This official is not eligible for this game.");
-        return;
+        return false;
       }
       if (
+        !assignmentReviewed &&
         !window.confirm(
           `Override eligibility and assign ${official?.first_name} ${official?.last_name}?\n\nWarning: ${reasons.join(", ")}`,
         )
       )
-        return;
+        return false;
     }
     setSaving(positionId);
     setError("");
@@ -1634,7 +1686,7 @@ export default function AssignmentsManagerV2() {
       });
     if (!result) {
       setSaving("");
-      return;
+      return false;
     }
     if (result.error) setError(result.error.message);
     else if (officialId) {
@@ -1649,6 +1701,7 @@ export default function AssignmentsManagerV2() {
     await refreshAssignmentState();
     setSaving("");
     setOverrideOfficial("");
+    return !result.error;
   }
   async function assign(positionId: string, officialId: string) {
     if (!game) return;
@@ -1657,16 +1710,34 @@ export default function AssignmentsManagerV2() {
   async function dropOfficialOnGame(gameId: string, officialId: string) {
     const targetGame = games.find((listedGame) => listedGame.id === gameId);
     if (!targetGame || !officialId || !canManage) return;
-    const position = openPositionForGame(targetGame);
+    const openPositions = openPositionsForGame(targetGame);
     setOfficialDropGame("");
     setDraggingOfficial("");
-    if (!position) {
+    if (!openPositions.length) {
       setError(`Game #${targetGame.game_number} has no open assignment positions.`);
       return;
     }
     setSelected(targetGame.id);
-    await assignToGame(targetGame, position.id, officialId);
-    setPickedOfficial("");
+    setPendingTapAssignment({
+      gameId: targetGame.id,
+      officialId,
+      positionId: openPositions[0].id,
+    });
+  }
+  async function confirmTapAssignment() {
+    if (!pendingTapAssignment) return;
+    const targetGame = games.find((item) => item.id === pendingTapAssignment.gameId);
+    if (!targetGame) return;
+    const assigned = await assignToGame(
+      targetGame,
+      pendingTapAssignment.positionId,
+      pendingTapAssignment.officialId,
+      true,
+    );
+    if (assigned) {
+      setPendingTapAssignment(null);
+      setPickedOfficial("");
+    }
   }
   function chooseOfficialToAssign(officialId: string) {
     const next = pickedOfficial === officialId ? "" : officialId;
@@ -2356,6 +2427,7 @@ export default function AssignmentsManagerV2() {
   function renderGameRow(g: Game, linked: boolean, showChain: boolean) {
     const d = new Date(g.starts_at);
     const completeness = assignmentCompleteness(g);
+    const staffing = staffingCounts(g);
     const normalizedStatus = g.status === "open" ? "active" : g.status;
     const isRainOut = normalizedStatus === "rained_out";
     const statusBackground =
@@ -2511,6 +2583,13 @@ export default function AssignmentsManagerV2() {
           >
             {completeness.label}
           </span>
+          <span className="assignmentStaffingCount">
+            <b>{staffing.filled} of {staffing.total}</b> filled
+            <small>{staffing.open ? `${staffing.open} open` : "Fully staffed"}</small>
+          </span>
+          <span className="assignmentStaffingBar" aria-label={`${staffing.filled} of ${staffing.total} positions filled`}>
+            <span style={{ width: `${staffing.total ? Math.round((staffing.filled / staffing.total) * 100) : 100}%` }} />
+          </span>
         </div>
       </div>
     );
@@ -2572,6 +2651,83 @@ export default function AssignmentsManagerV2() {
           </div>
         </section>
       )}
+      {pendingTapAssignment && (() => {
+        const targetGame = games.find((item) => item.id === pendingTapAssignment.gameId);
+        const official = officials.find((item) => item.id === pendingTapAssignment.officialId);
+        if (!targetGame || !official) return null;
+        const openPositions = openPositionsForGame(targetGame);
+        const conflicts = [
+          ...assignmentConflictReasonsForGame(
+            official,
+            targetGame,
+            pendingTapAssignment.positionId,
+          ),
+          ...duplicateAssignmentReasonsForGame(
+            official.id,
+            targetGame,
+            pendingTapAssignment.positionId,
+          ),
+        ];
+        const warnings = ineligibleReasonsForGame(
+          official,
+          targetGame,
+          pendingTapAssignment.positionId,
+        ).filter(
+          (reason) =>
+            !conflicts.includes(reason) &&
+            !(conflicts.length && reason === "Already assigned to this game"),
+        );
+        return (
+          <div className="tapAssignOverlay" role="presentation" onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setPendingTapAssignment(null);
+          }}>
+            <section className="tapAssignDialog" role="dialog" aria-modal="true" aria-labelledby="tap-assign-title">
+              <header>
+                <div>
+                  <small>ASSIGN OFFICIAL</small>
+                  <h3 id="tap-assign-title">{official.first_name} {official.last_name}</h3>
+                </div>
+                <button type="button" aria-label="Close assignment review" onClick={() => setPendingTapAssignment(null)}>×</button>
+              </header>
+              <div className="tapAssignGameSummary">
+                <b>{targetGame.home?.name || "TBD"} vs {targetGame.away?.name || "TBD"}</b>
+                <span>Game #{targetGame.game_number} · {new Date(targetGame.starts_at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</span>
+                <span>{targetGame.location?.name || "Location TBD"} · {targetGame.leagues?.name || "League not set"} · {targetGame.levels?.name || "Level not set"}</span>
+              </div>
+              <fieldset className="tapAssignPositions">
+                <legend>Choose an open position</legend>
+                {openPositions.map((position) => (
+                  <label key={position.id}>
+                    <input
+                      type="radio"
+                      name="tap-assignment-position"
+                      value={position.id}
+                      checked={pendingTapAssignment.positionId === position.id}
+                      onChange={() => setPendingTapAssignment({ ...pendingTapAssignment, positionId: position.id })}
+                    />
+                    <span>{position.name}</span>
+                  </label>
+                ))}
+              </fieldset>
+              {conflicts.length > 0 && (
+                <div className="tapAssignAlert blocking"><b>Cannot assign due to a schedule conflict</b>{conflicts.map((reason) => <span key={reason}>{reason}</span>)}</div>
+              )}
+              {!conflicts.length && warnings.length > 0 && (
+                <div className="tapAssignAlert warning"><b>Manager override required</b>{warnings.map((reason) => <span key={reason}>{reason}</span>)}</div>
+              )}
+              {!conflicts.length && !warnings.length && (
+                <div className="tapAssignAlert clear"><b>No conflicts found</b><span>This official is available and eligible for the selected position.</span></div>
+              )}
+              <footer>
+                <button type="button" className="secondary" onClick={() => setPendingTapAssignment(null)}>Cancel</button>
+                <button type="button" className={warnings.length ? "danger" : "primary"} disabled={Boolean(conflicts.length) || !pendingTapAssignment.positionId || Boolean(saving)} onClick={() => void confirmTapAssignment()}>
+                  {saving ? "Assigning…" : warnings.length ? "Confirm Override & Assign" : "Confirm Assignment"}
+                </button>
+              </footer>
+            </section>
+          </div>
+        );
+      })()}
       <div className={`assignmentCenterSplit ${game ? "hasSelectedGame" : ""}`}>
       <section className="card">
         <div className="cardHead">
