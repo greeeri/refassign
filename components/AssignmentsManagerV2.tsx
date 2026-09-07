@@ -1173,9 +1173,6 @@ export default function AssignmentsManagerV2() {
   const assignmentEmailIssues = gameAssignments.filter(
     (a) => a.published_at && !a.email_sent_at,
   ).length;
-  const replacementNeededAssignments = gamePositions
-    .filter((position) => game && isReplacementNeeded(game.id, position.id))
-    .map((position) => ({ position_id: position.id }));
   const cancellationEmailsSent = gameAssignments.filter(
     (a) => a.cancellation_notified_at,
   ).length;
@@ -4460,12 +4457,6 @@ export default function AssignmentsManagerV2() {
                   <span><b>{gameAssignments.filter((item) => item.status === "proposed" && item.published_at).length}</b> Awaiting</span>
                   <span><b>{gameAssignments.filter((item) => ["accepted", "confirmed"].includes(item.status)).length}</b> Confirmed</span>
                 </div>
-                {replacementNeededAssignments.length > 0 && (
-                  <div className="replacementNeededBanner" role="alert">
-                    <span><b>{replacementNeededAssignments.length} replacement{replacementNeededAssignments.length === 1 ? "" : "s"} needed</b><small>Choose a recommended official below, then use Assign & Notify.</small></span>
-                    <button type="button" onClick={() => document.getElementById(`assignment-position-${replacementNeededAssignments[0].position_id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })}>View Replacements</button>
-                  </div>
-                )}
                 <div className="selectedGameUtilities">
                   <button type="button" className="assignmentActivityLink" onClick={() => void openActivityTimeline()}>Activity timeline</button>
                   <div
@@ -4497,14 +4488,6 @@ export default function AssignmentsManagerV2() {
                     )}
                   </div>
                 </div>
-                {openPositionCount > 0 && (
-                  <div className="errorBox" style={{ marginTop: 10 }}>
-                    Publish readiness: {openPositionCount} required position
-                    {openPositionCount === 1 ? " is" : "s are"} still open.
-                    You can publish the assigned officials now or fill the open
-                    positions first.
-                  </div>
-                )}
               </div>
             </div>
             {gamePositions.length === 0 ? (
