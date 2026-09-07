@@ -72,7 +72,8 @@ export default function Workspace() {
     [testMode, setTestMode] = useState(false),
     [testOfficialAccount, setTestOfficialAccount] = useState(false),
     [testWorkspaces, setTestWorkspaces] = useState<TestWorkspace[]>([]),
-    [testWorkspace, setTestWorkspace] = useState<TestWorkspace | null>(null);
+    [testWorkspace, setTestWorkspace] = useState<TestWorkspace | null>(null),
+    [invitationClaimError, setInvitationClaimError] = useState("");
   useEffect(() => {
     async function load() {
       const {
@@ -85,6 +86,27 @@ export default function Workspace() {
       if (window.location.hostname === "test.ref-assign.com") {
         setTestMode(true);
         setTestOfficialAccount(Boolean(user.user_metadata?.account_type === "official" || user.user_metadata?.first_name));
+        const hashInvitation = new URLSearchParams(
+          window.location.hash.slice(1),
+        ).get("official_invite");
+        const invitationId =
+          hashInvitation ||
+          localStorage.getItem("refassign-official-invitation") ||
+          (typeof user.user_metadata?.official_invitation_id === "string"
+            ? user.user_metadata.official_invitation_id
+            : "");
+        if (invitationId) {
+          const { error: claimError } = await supabase.rpc(
+            "claim_official_invitation",
+            { p_invitation_id: invitationId },
+          );
+          if (claimError) setInvitationClaimError(claimError.message);
+          else {
+            localStorage.removeItem("refassign-official-invitation");
+            if (hashInvitation)
+              window.history.replaceState(null, "", window.location.pathname);
+          }
+        }
         await Promise.all([
           supabase.rpc("accept_my_organization_invitations"),
           supabase.rpc("accept_my_official_invitations"),
@@ -303,7 +325,7 @@ export default function Workspace() {
         <main>
           <section className="card">
             <h1>{testOfficialAccount ? "No officiating organizations connected" : "No organization workspace"}</h1>
-            <p>{testOfficialAccount ? "This account is valid, but its email address does not match an official invitation. Sign out and open the invitation email again so RefAssign can use the exact invited address." : "Create an organization or accept an invitation before entering RefAssign."}</p>
+            <p>{testOfficialAccount ? invitationClaimError || "This account is valid, but it has not claimed an organization invitation yet. Ask the organization to resend the invitation, then open the new email link while signed in." : "Create an organization or accept an invitation before entering RefAssign."}</p>
             {testOfficialAccount ? <button className="primary" onClick={signOut}>Sign out and use invitation</button> : <a className="primary" href="/tier-test">Open organization setup</a>}
           </section>
         </main>
