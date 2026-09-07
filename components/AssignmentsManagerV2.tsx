@@ -159,6 +159,15 @@ const gameStatusOptions = [
   ["canceled", "Cancelled"],
   ["rained_out", "Rain Out"],
 ] as const;
+function gameAcceptsAssignments(game: Pick<Game, "status">) {
+  return game.status === "active";
+}
+function inactiveGameStatusLabel(status: string) {
+  if (status === "suspended") return "On Hold";
+  if (status === "rained_out") return "Rain Out";
+  if (status === "canceled" || status === "cancelled") return "Cancelled";
+  return "Inactive";
+}
 function miles(
   a: number | null,
   b: number | null,
@@ -1884,14 +1893,16 @@ export default function AssignmentsManagerV2() {
   }
   function prepareBulkAssignment() {
     const selectedGames = games.filter((item) => linkSelected.includes(item.id));
+    const assignableGames = selectedGames.filter(gameAcceptsAssignments);
+    const excludedCount = selectedGames.length - assignableGames.length;
     setBulkAssignOfficial("");
     setBulkAssignPositions(
       Object.fromEntries(
-        selectedGames.map((item) => [item.id, openPositionForGame(item)?.id || ""]),
+        assignableGames.map((item) => [item.id, openPositionForGame(item)?.id || ""]),
       ),
     );
     setBulkOverrideConfirmed(false);
-    setBulkAssignMessage("");
+    setBulkAssignMessage(excludedCount ? `${excludedCount} inactive game${excludedCount === 1 ? " was" : "s were"} excluded from bulk assignment.` : "");
     setBulkOfficialSearch("");
     setBulkOfficialStatus("eligible");
     setShowBulkAssign(true);
@@ -1899,7 +1910,7 @@ export default function AssignmentsManagerV2() {
   function bulkAssignmentReview(officialId = bulkAssignOfficial) {
     const official = officials.find((item) => item.id === officialId);
     const targets = games.filter(
-      (item) => linkSelected.includes(item.id) && bulkAssignPositions[item.id],
+      (item) => gameAcceptsAssignments(item) && linkSelected.includes(item.id) && bulkAssignPositions[item.id],
     );
     const blocking: { gameId: string; reason: string }[] = [];
     const warnings: { gameId: string; reason: string }[] = [];
@@ -1962,6 +1973,20 @@ export default function AssignmentsManagerV2() {
       for (const target of review.targets) {
         const positionId = bulkAssignPositions[target.id];
         const position = positions.find((item) => item.id === positionId);
+        if (!gameAcceptsAssignments(target)) {
+          results.push({
+            gameId: target.id,
+            gameNumber: target.game_number,
+            matchup: `${target.home?.name || "TBD"} vs ${target.away?.name || "TBD"}`,
+            positionId,
+            positionName: position?.name || "Position",
+            officialId: bulkAssignOfficial,
+            officialName: selectedOfficial ? `${selectedOfficial.first_name} ${selectedOfficial.last_name}` : "Selected official",
+            status: "skipped",
+            error: `${inactiveGameStatusLabel(target.status)} games cannot receive assignments.`,
+          });
+          continue;
+        }
         const result = await supabase.rpc("assign_official_to_linked_games", {
           p_game_id: target.id,
           p_position_id: positionId,
@@ -2016,6 +2041,14 @@ export default function AssignmentsManagerV2() {
   }
   async function retryBulkAssignmentItem(item: BulkAssignmentItem) {
     if (!bulkAssignmentResult || bulkRetryingGame) return;
+    const target = games.find((game) => game.id === item.gameId);
+    if (!target || !gameAcceptsAssignments(target)) {
+      setBulkAssignmentResult((current) => current ? {
+        ...current,
+        items: current.items.map((listedItem) => listedItem.gameId === item.gameId ? { ...listedItem, status: "skipped", error: `${inactiveGameStatusLabel(target?.status || "")} games cannot receive assignments.` } : listedItem),
+      } : current);
+      return;
+    }
     setBulkRetryingGame(item.gameId);
     const result = await supabase.rpc("assign_official_to_linked_games", {
       p_game_id: item.gameId,
@@ -2033,7 +2066,7 @@ export default function AssignmentsManagerV2() {
     return `${gameId}:${positionId}`;
   }
   function bulkCrewSlots() {
-    return games.filter((item) => linkSelected.includes(item.id)).flatMap((target) =>
+    return games.filter((item) => gameAcceptsAssignments(item) && linkSelected.includes(item.id)).flatMap((target) =>
       openPositionsForGame(target).map((position) => ({ target, position, key: crewSlotKey(target.id, position.id) })),
     );
   }
@@ -2071,8 +2104,9 @@ export default function AssignmentsManagerV2() {
     );
   }
   function prepareBulkCrew() {
+    const excludedCount = games.filter((item) => linkSelected.includes(item.id) && !gameAcceptsAssignments(item)).length;
     setBulkCrewSelections({});
-    setBulkCrewMessage("");
+    setBulkCrewMessage(excludedCount ? `${excludedCount} inactive game${excludedCount === 1 ? " was" : "s were"} excluded from crew assignment.` : "");
     setBulkCrewOverrideConfirmed(false);
     setShowBulkCrew(true);
   }
@@ -2108,6 +2142,20 @@ export default function AssignmentsManagerV2() {
       for (const review of reviews) {
         const officialId = bulkCrewSelections[review.key];
         const official = officials.find((item) => item.id === officialId);
+        if (!gameAcceptsAssignments(review.target)) {
+          results.push({
+            gameId: review.target.id,
+            gameNumber: review.target.game_number,
+            matchup: `${review.target.home?.name || "TBD"} vs ${review.target.away?.name || "TBD"}`,
+            positionId: review.position.id,
+            positionName: review.position.name,
+            officialId,
+            officialName: official ? `${official.first_name} ${official.last_name}` : "Selected official",
+            status: "skipped",
+            error: `${inactiveGameStatusLabel(review.target.status)} games cannot receive assignments.`,
+          });
+          continue;
+        }
         const result = await supabase.rpc("assign_official_to_linked_games", { p_game_id: review.target.id, p_position_id: review.position.id, p_official_id: officialId });
         results.push({
           gameId: review.target.id,
@@ -3173,6 +3221,7 @@ export default function AssignmentsManagerV2() {
       })()}
       {showBulkAssign && (() => {
         const review = bulkAssignmentReview();
+        const excludedSelectedGames = games.filter((item) => linkSelected.includes(item.id) && !gameAcceptsAssignments(item));
         const official = officials.find((item) => item.id === bulkAssignOfficial);
         const officialAssessments = officials
           .map((item) => {
@@ -3206,6 +3255,7 @@ export default function AssignmentsManagerV2() {
                 <div><small>BULK ASSIGNMENT</small><h3 id="bulk-assign-title">Assign {review.targets.length} Selected Games</h3></div>
                 <button type="button" aria-label="Close bulk assignment" disabled={bulkWorking} onClick={() => setShowBulkAssign(false)}>×</button>
               </header>
+              {excludedSelectedGames.length > 0 && <div className="tapAssignAlert blocking"><b>{excludedSelectedGames.length} game{excludedSelectedGames.length === 1 ? "" : "s"} excluded</b><span>On Hold, Rain Out, and Cancelled games cannot receive bulk assignments.</span></div>}
               <div className="bulkOfficialPicker">
                 <div className="bulkOfficialPickerHead"><span>Choose an official</span><b>{eligibleCount} eligible for all selected games</b></div>
                 <div className="bulkOfficialFilters">
