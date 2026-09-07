@@ -40,7 +40,7 @@ type Role =
 type TestWorkspace = {
   organization_id: string;
   name: string;
-  role: "owner" | "admin" | "assignor" | "billing" | "viewer";
+  role: "owner" | "admin" | "assignor" | "billing" | "viewer" | "official";
   viewer_permissions: string[];
 };
 const labels: Record<Role, string> = {
@@ -112,14 +112,16 @@ export default function Workspace() {
             selected.organization_id,
           );
         const mapped: Role =
-          selected?.role === "assignor"
+          selected?.role === "official"
+            ? "official"
+            : selected?.role === "assignor"
             ? "assignor"
             : selected?.role === "viewer" || selected?.role === "billing"
               ? "contact"
               : "admin";
         setRoles([mapped]);
         setViewRole(mapped);
-        setSection("Dashboard");
+        setSection(mapped === "official" ? "Official Dashboard" : "Dashboard");
         setReady(true);
         return;
       }
