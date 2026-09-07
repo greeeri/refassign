@@ -303,6 +303,10 @@ export default function AssignmentsManagerV2() {
     [selfAssignSaving, setSelfAssignSaving] = useState(false),
     [showSelfAssignDialog, setShowSelfAssignDialog] = useState(false),
     [showIneligibleOfficials, setShowIneligibleOfficials] = useState(false),
+    [officialListSearch, setOfficialListSearch] = useState(""),
+    [officialListSort, setOfficialListSort] = useState<"best" | "distance" | "rank" | "leastRecent" | "name">("best"),
+    [candidateSearch, setCandidateSearch] = useState(""),
+    [candidateSort, setCandidateSort] = useState<"best" | "distance" | "rank" | "leastRecent" | "name">("best"),
     [ineligibleSearch, setIneligibleSearch] = useState(""),
     [ineligibleReasonFilter, setIneligibleReasonFilter] = useState("all"),
     [overduePromptClosed, setOverduePromptClosed] = useState(false),
@@ -1625,7 +1629,27 @@ export default function AssignmentsManagerV2() {
           (a.distance ?? 9999) - (b.distance ?? 9999),
       );
   }
-  const availableOfficials = game
+  function lastAssignmentTime(officialId: string) {
+    if (!game) return 0;
+    const currentGameTime = new Date(game.starts_at).getTime();
+    return assignments.reduce((latest, assignment) => {
+      if (assignment.official_id !== officialId || assignment.status === "declined") return latest;
+      const assignedGame = games.find((item) => item.id === assignment.game_id);
+      if (!assignedGame) return latest;
+      const time = new Date(assignedGame.starts_at).getTime();
+      return time < currentGameTime ? Math.max(latest, time) : latest;
+    }, 0);
+  }
+  function sortOfficials<T extends Official & { rank: number; distance: number | null }>(items: T[], sort: typeof officialListSort) {
+    return [...items].sort((a, b) => {
+      if (sort === "distance") return (a.distance ?? 9999) - (b.distance ?? 9999) || b.rank - a.rank;
+      if (sort === "rank") return b.rank - a.rank || (a.distance ?? 9999) - (b.distance ?? 9999);
+      if (sort === "leastRecent") return lastAssignmentTime(a.id) - lastAssignmentTime(b.id) || b.rank - a.rank;
+      if (sort === "name") return `${a.last_name} ${a.first_name}`.localeCompare(`${b.last_name} ${b.first_name}`);
+      return b.rank - a.rank || (a.distance ?? 9999) - (b.distance ?? 9999);
+    });
+  }
+  const availableOfficialsBase = game
     ? officials
         .filter((o) => eligible(o) && !workingAtGameTime(o))
         .map((o) => ({
@@ -1643,6 +1667,10 @@ export default function AssignmentsManagerV2() {
             b.rank - a.rank || (a.distance ?? 9999) - (b.distance ?? 9999),
         )
     : [];
+  const availableOfficials = sortOfficials(
+    availableOfficialsBase.filter((official) => `${official.first_name} ${official.last_name}`.toLowerCase().includes(officialListSearch.trim().toLowerCase())),
+    officialListSort,
+  );
   const ineligibleOfficials = game
     ? officials
         .map((o) => ({ ...o, reasons: ineligibleReasons(o) }))
@@ -1758,12 +1786,20 @@ export default function AssignmentsManagerV2() {
     if (result.error) setError(result.error.message);
     else if (officialId) {
       const linkedCount = Number(result.data || 1);
+      const position = positions.find((item) => item.id === positionId);
       setNotice(
-        `${official?.first_name} ${official?.last_name} assigned to ${linkedCount} ${linkedCount === 1 ? "game" : "linked games"}${reasons.length ? " with an eligibility override" : ""}.`,
+        `${official?.first_name} ${official?.last_name} assigned to ${position ? shortPositionName(position.name) : "the position"}${linkedCount > 1 ? ` across ${linkedCount} linked games` : ` on Game #${targetGame.game_number}`}${reasons.length ? " with an eligibility override" : ""}.`,
       );
-      announceUndoAvailable();
+      announceUndoAvailable(
+        `${official?.first_name || "Official"} ${official?.last_name || ""} assigned to ${position ? shortPositionName(position.name) : "the position"} on Game #${targetGame.game_number}.`.replace(/\s+/g, " "),
+      );
     } else {
-      announceUndoAvailable();
+      const removedAssignment = existing;
+      const removedOfficial = officials.find((official) => official.id === removedAssignment?.official_id);
+      const removedPosition = positions.find((position) => position.id === positionId);
+      announceUndoAvailable(
+        `${removedOfficial ? `${removedOfficial.first_name} ${removedOfficial.last_name}` : "Official"} unassigned from ${removedPosition ? shortPositionName(removedPosition.name) : "the position"}.`,
+      );
     }
     await refreshAssignmentState();
     setSaving("");
@@ -2167,14 +2203,19 @@ export default function AssignmentsManagerV2() {
     setSaving(positionId);
     setError("");
     setNotice("");
-    const selectedGameId = assignments.find((assignment) => assignment.id === assignmentId)?.game_id || selected;
+    const removedAssignment = assignments.find((assignment) => assignment.id === assignmentId);
+    const selectedGameId = removedAssignment?.game_id || selected;
+    const removedOfficial = officials.find((official) => official.id === removedAssignment?.official_id);
+    const removedPosition = positions.find((position) => position.id === positionId);
     const { error: deleteError } = await supabase
       .from("assignments")
       .delete()
       .eq("id", assignmentId);
     if (deleteError) setError(deleteError.message);
     else {
-      announceUndoAvailable();
+      const changeDescription = `${removedOfficial ? `${removedOfficial.first_name} ${removedOfficial.last_name}` : "Official"} unassigned from ${removedPosition ? shortPositionName(removedPosition.name) : "the position"}.`;
+      setNotice(changeDescription);
+      announceUndoAvailable(changeDescription);
       if (selectedGameId) {
         setSelected(selectedGameId);
         setLinkSelected((current) => current.includes(selectedGameId) ? current : [...current, selectedGameId]);
@@ -3380,7 +3421,11 @@ export default function AssignmentsManagerV2() {
           const candidatePosition = gamePositions.find((item) => item.id === candidatePositionId);
           if (!candidatePosition) return null;
           const candidatePositionIndex = gamePositions.findIndex((item) => item.id === candidatePosition.id);
-          const list = candidates(candidatePosition);
+          const candidateQuery = candidateSearch.trim().toLowerCase();
+          const list = sortOfficials(
+            candidates(candidatePosition).filter((candidate) => `${candidate.first_name} ${candidate.last_name}`.toLowerCase().includes(candidateQuery)),
+            candidateSort,
+          );
           const current = assignments.find((item) => item.game_id === game.id && item.position_id === candidatePosition.id && item.status !== "declined");
           const replacementNeeded = isReplacementNeeded(game.id, candidatePosition.id);
           const eligibleCount = list.filter((item) => item.reasons.length === 0).length;
@@ -3405,6 +3450,12 @@ export default function AssignmentsManagerV2() {
                     </div>
                   </span>
                   <span><small>CURRENT OFFICIAL</small><b>{current ? `${officials.find((item) => item.id === current.official_id)?.first_name || ""} ${officials.find((item) => item.id === current.official_id)?.last_name || ""}`.trim() : "Open"}</b></span>
+                </div>
+                <div className="officialListTools candidateListTools">
+                  <input type="search" value={candidateSearch} onChange={(event) => setCandidateSearch(event.target.value)} placeholder="Search officials" aria-label="Search officials" />
+                  <select value={candidateSort} onChange={(event) => setCandidateSort(event.target.value as typeof candidateSort)} aria-label="Sort officials">
+                    <option value="best">Best qualified</option><option value="distance">Closest</option><option value="rank">Highest rank</option><option value="leastRecent">Least recently assigned</option><option value="name">Name</option>
+                  </select>
                 </div>
                 <div className="candidatePanelList">
                   {list.map((candidate, candidateIndex) => (
@@ -4880,6 +4931,12 @@ export default function AssignmentsManagerV2() {
               Ineligible officials remain visible in red and require an
               override; overlapping assignments cannot be overridden.
             </p>
+            <div className="officialListTools">
+              <input type="search" value={officialListSearch} onChange={(event) => setOfficialListSearch(event.target.value)} placeholder="Search officials" aria-label="Search available officials" />
+              <select value={officialListSort} onChange={(event) => setOfficialListSort(event.target.value as typeof officialListSort)} aria-label="Sort available officials">
+                <option value="best">Best qualified</option><option value="distance">Closest</option><option value="rank">Highest rank</option><option value="leastRecent">Least recently assigned</option><option value="name">Name</option>
+              </select>
+            </div>
             <div className="availableOfficialsList">
               {availableOfficials.map((o, i) => (
                 <div
