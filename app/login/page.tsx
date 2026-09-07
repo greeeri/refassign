@@ -22,6 +22,11 @@ export default function LoginPage() {
 
   useEffect(() => {
     setTestMode(window.location.hostname === "test.ref-assign.com");
+    const invitedEmail = new URLSearchParams(window.location.hash.slice(1)).get("official");
+    if (invitedEmail) {
+      setEmail(invitedEmail);
+      setCreatingOfficial(true);
+    }
   }, []);
 
   async function signIn(event: FormEvent) {
@@ -66,6 +71,7 @@ export default function LoginPage() {
             first_name: firstName.trim(),
             last_name: lastName.trim(),
             full_name: `${firstName.trim()} ${lastName.trim()}`.trim(),
+            account_type: "official",
           },
           emailRedirectTo: `${window.location.origin}/workspace`,
         },
@@ -164,6 +170,7 @@ export default function LoginPage() {
               autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              readOnly={creatingOfficial && window.location.hash.includes("official=")}
               placeholder="you@example.com"
             />
           </label>
