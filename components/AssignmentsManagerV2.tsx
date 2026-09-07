@@ -122,6 +122,20 @@ type BulkActionResult = {
   succeeded: number;
   failures: string[];
 };
+type BulkAssignmentItem = {
+  gameId: string;
+  gameNumber: string;
+  matchup: string;
+  positionId: string;
+  positionName: string;
+  status: "success" | "failed" | "skipped";
+  error: string;
+};
+type BulkAssignmentResult = {
+  officialId: string;
+  officialName: string;
+  items: BulkAssignmentItem[];
+};
 type Range = "all" | "today" | "tomorrow" | "thisWeek" | "nextWeek" | "custom";
 type Completeness =
   | "all"
@@ -269,6 +283,8 @@ export default function AssignmentsManagerV2() {
     [bulkAssignPositions, setBulkAssignPositions] = useState<Record<string, string>>({}),
     [bulkOverrideConfirmed, setBulkOverrideConfirmed] = useState(false),
     [bulkAssignMessage, setBulkAssignMessage] = useState(""),
+    [bulkAssignmentResult, setBulkAssignmentResult] = useState<BulkAssignmentResult | null>(null),
+    [bulkRetryingGame, setBulkRetryingGame] = useState(""),
     [selfAssignSlots, setSelfAssignSlots] = useState<SelfAssignSlot[]>([]),
     [selfAssignSelected, setSelfAssignSelected] = useState<string[]>([]),
     [selfAssignSaving, setSelfAssignSaving] = useState(false),
@@ -1764,6 +1780,9 @@ export default function AssignmentsManagerV2() {
         if (reason !== "Already assigned to this game")
           warnings.push({ gameId: target.id, reason });
       }
+      const position = positions.find((item) => item.id === positionId);
+      if (position && isMentor(position) && positionRankFor(official.id, position) <= 1)
+        warnings.push({ gameId: target.id, reason: `Not eligible for ${position.name}` });
     }
     for (let index = 0; index < targets.length; index += 1) {
       for (let otherIndex = index + 1; otherIndex < targets.length; otherIndex += 1) {
@@ -1802,27 +1821,75 @@ export default function AssignmentsManagerV2() {
     }
     setBulkWorking(true);
     setBulkAssignMessage(`Assigning 0 of ${review.targets.length} games…`);
+    const selectedOfficial = officials.find((item) => item.id === bulkAssignOfficial);
+    const results: BulkAssignmentItem[] = [];
     let assigned = 0;
     try {
       for (const target of review.targets) {
-        const succeeded = await assignToGame(target, bulkAssignPositions[target.id], bulkAssignOfficial, true);
-        if (!succeeded) {
-          setBulkAssignMessage(`Stopped after ${assigned} of ${review.targets.length} games. Review the error and try again.`);
-          return;
-        }
-        assigned += 1;
-        setBulkAssignMessage(`Assigned ${assigned} of ${review.targets.length} games…`);
+        const positionId = bulkAssignPositions[target.id];
+        const position = positions.find((item) => item.id === positionId);
+        const result = await supabase.rpc("assign_official_to_linked_games", {
+          p_game_id: target.id,
+          p_position_id: positionId,
+          p_official_id: bulkAssignOfficial,
+        });
+        const item: BulkAssignmentItem = {
+          gameId: target.id,
+          gameNumber: target.game_number,
+          matchup: `${target.home?.name || "TBD"} vs ${target.away?.name || "TBD"}`,
+          positionId,
+          positionName: position?.name || "Position",
+          status: result.error ? "failed" : "success",
+          error: result.error?.message || "",
+        };
+        results.push(item);
+        if (!result.error) assigned += 1;
+        setBulkAssignMessage(`Processed ${results.length} of ${review.targets.length} games…`);
       }
+      await refreshAssignmentState();
       setShowBulkAssign(false);
-      setLinkSelected([]);
-      setNotice(`${assigned} selected game${assigned === 1 ? "" : "s"} assigned successfully.`);
+      if (assigned === review.targets.length) setLinkSelected([]);
+      setBulkAssignmentResult({
+        officialId: bulkAssignOfficial,
+        officialName: selectedOfficial ? `${selectedOfficial.first_name} ${selectedOfficial.last_name}` : "Selected official",
+        items: results,
+      });
+      setNotice(`${assigned} of ${review.targets.length} selected game${review.targets.length === 1 ? "" : "s"} assigned successfully.`);
     } catch (assignmentError) {
       const message = assignmentError instanceof Error ? assignmentError.message : "Unexpected assignment error";
-      setError(message);
-      setBulkAssignMessage(`Bulk assignment stopped after ${assigned} of ${review.targets.length} games: ${message}`);
+      const completedIds = new Set(results.map((item) => item.gameId));
+      const remaining = review.targets.filter((item) => !completedIds.has(item.id)).map((target) => {
+        const positionId = bulkAssignPositions[target.id];
+        return {
+          gameId: target.id,
+          gameNumber: target.game_number,
+          matchup: `${target.home?.name || "TBD"} vs ${target.away?.name || "TBD"}`,
+          positionId,
+          positionName: positions.find((item) => item.id === positionId)?.name || "Position",
+          status: "skipped" as const,
+          error: message,
+        };
+      });
+      setShowBulkAssign(false);
+      setBulkAssignmentResult({ officialId: bulkAssignOfficial, officialName: selectedOfficial ? `${selectedOfficial.first_name} ${selectedOfficial.last_name}` : "Selected official", items: [...results, ...remaining] });
     } finally {
       setBulkWorking(false);
     }
+  }
+  async function retryBulkAssignmentItem(item: BulkAssignmentItem) {
+    if (!bulkAssignmentResult || bulkRetryingGame) return;
+    setBulkRetryingGame(item.gameId);
+    const result = await supabase.rpc("assign_official_to_linked_games", {
+      p_game_id: item.gameId,
+      p_position_id: item.positionId,
+      p_official_id: bulkAssignmentResult.officialId,
+    });
+    setBulkAssignmentResult((current) => current ? {
+      ...current,
+      items: current.items.map((listedItem) => listedItem.gameId === item.gameId ? { ...listedItem, status: result.error ? "failed" : "success", error: result.error?.message || "" } : listedItem),
+    } : current);
+    if (!result.error) await refreshAssignmentState();
+    setBulkRetryingGame("");
   }
   function chooseOfficialToAssign(officialId: string) {
     const next = pickedOfficial === officialId ? "" : officialId;
@@ -2823,11 +2890,14 @@ export default function AssignmentsManagerV2() {
           .map((item) => {
             const assessment = bulkAssignmentReview(item.id);
             const status = assessment.blocking.length ? "blocked" : assessment.warnings.length ? "warning" : "eligible";
-            return { official: item, assessment, status };
+            const roleRatings = assessment.targets.map((target) => positions.find((position) => position.id === bulkAssignPositions[target.id])).filter((position): position is Position => Boolean(position)).map((position) => ({ label: rankLabel(position), rank: positionRankFor(item.id, position) }));
+            const uniqueRoleRatings = [...new Map(roleRatings.map((rating) => [rating.label, rating])).values()];
+            const averageRoleRank = uniqueRoleRatings.length ? uniqueRoleRatings.reduce((total, rating) => total + rating.rank, 0) / uniqueRoleRatings.length : 0;
+            return { official: item, assessment, status, roleRatings: uniqueRoleRatings, averageRoleRank };
           })
           .sort((a, b) => {
             const order = { eligible: 0, warning: 1, blocked: 2 };
-            return order[a.status] - order[b.status] || a.official.last_name.localeCompare(b.official.last_name) || a.official.first_name.localeCompare(b.official.first_name);
+            return order[a.status] - order[b.status] || b.averageRoleRank - a.averageRoleRank || a.official.last_name.localeCompare(b.official.last_name) || a.official.first_name.localeCompare(b.official.first_name);
           });
         const eligibleCount = officialAssessments.filter((item) => item.status === "eligible").length;
         const warnings = review.warnings.filter(
@@ -2845,12 +2915,12 @@ export default function AssignmentsManagerV2() {
               <div className="bulkOfficialPicker">
                 <div className="bulkOfficialPickerHead"><span>Choose an official</span><b>{eligibleCount} eligible for all selected games</b></div>
                 <div className="bulkOfficialOptions" role="radiogroup" aria-label="Officials ranked by eligibility">
-                  {officialAssessments.map(({ official: item, assessment, status }) => {
+                  {officialAssessments.map(({ official: item, assessment, status, roleRatings }) => {
                     const firstIssue = assessment.blocking[0]?.reason || assessment.warnings[0]?.reason;
                     return (
                       <label key={item.id} className={`${status}${bulkAssignOfficial === item.id ? " selected" : ""}`}>
                         <input type="radio" name="bulk-official" value={item.id} checked={bulkAssignOfficial === item.id} disabled={bulkWorking} onChange={() => { setBulkAssignOfficial(item.id); setBulkOverrideConfirmed(false); setBulkAssignMessage(""); }} />
-                        <span><b>{item.first_name} {item.last_name}</b><small>{status === "eligible" ? `Eligible for all ${assessment.targets.length} games` : status === "warning" ? `Override needed · ${firstIssue}` : `Unavailable · ${firstIssue}`}</small></span>
+                        <span><b>{item.first_name} {item.last_name}</b><small>{status === "eligible" ? `Eligible for all ${assessment.targets.length} selected positions` : status === "warning" ? `Override needed · ${firstIssue}` : `Unavailable · ${firstIssue}`}</small><em>{roleRatings.map((rating) => `${rating.label} ${rating.rank.toFixed(1)}`).join(" · ")}</em></span>
                         <strong>{status === "eligible" ? "Eligible" : status === "warning" ? "Override" : "Conflict"}</strong>
                       </label>
                     );
@@ -2880,6 +2950,26 @@ export default function AssignmentsManagerV2() {
                 <button type="button" className="primary" disabled={bulkWorking} onClick={() => void confirmBulkAssignment()}>{bulkWorking ? "Assigning…" : `Assign to ${review.targets.length} Game${review.targets.length === 1 ? "" : "s"}`}</button>
               </footer>
             </section>
+          </div>
+        );
+      })()}
+      {bulkAssignmentResult && (() => {
+        const completed = bulkAssignmentResult.items.filter((item) => item.status === "success").length;
+        const issues = bulkAssignmentResult.items.filter((item) => item.status !== "success");
+        return (
+          <div className="assignmentDialogBackdrop" role="presentation" onMouseDown={() => !bulkRetryingGame && setBulkAssignmentResult(null)}>
+            <div className="assignmentDialog bulkAssignmentResultDialog" role="dialog" aria-modal="true" aria-labelledby="bulkAssignmentResultTitle" onMouseDown={(event) => event.stopPropagation()}>
+              <div className="assignmentDialogHead"><div><h3 id="bulkAssignmentResultTitle">Bulk Assignment Results</h3><p>{bulkAssignmentResult.officialName}</p></div><button type="button" aria-label="Close results" disabled={Boolean(bulkRetryingGame)} onClick={() => setBulkAssignmentResult(null)}>×</button></div>
+              <div className="bulkResultTotals"><span className="success"><b>{completed}</b> assigned</span><span className={issues.length ? "failed" : "success"}><b>{issues.length}</b> need attention</span></div>
+              <div className="bulkAssignmentResultList">
+                {bulkAssignmentResult.items.map((item) => <article key={item.gameId} className={item.status}>
+                  <span className="bulkResultStatus" aria-label={item.status}>{item.status === "success" ? "✓" : "!"}</span>
+                  <div><b>Game #{item.gameNumber} · {item.positionName}</b><span>{item.matchup}</span>{item.error && <small>{item.error}</small>}</div>
+                  {item.status !== "success" && <button type="button" className="secondary" disabled={Boolean(bulkRetryingGame)} onClick={() => void retryBulkAssignmentItem(item)}>{bulkRetryingGame === item.gameId ? "Retrying…" : "Retry"}</button>}
+                </article>)}
+              </div>
+              <div className="assignmentDialogFooter"><button type="button" className="primary" disabled={Boolean(bulkRetryingGame)} onClick={() => setBulkAssignmentResult(null)}>Done</button></div>
+            </div>
           </div>
         );
       })()}
