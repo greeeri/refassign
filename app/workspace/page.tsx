@@ -6,6 +6,7 @@ import GamesManager from "../../components/SortableGamesManager";
 import GameSetup from "../../components/GameSetup";
 import AssignmentsManager from "../../components/AssignmentsManagerV2";
 import OfficialsDirectory from "../../components/OfficialsDirectory";
+import OrganizationTeamManager from "../../components/OrganizationTeamManager";
 import AvailabilityCalendar from "../../components/AvailabilityCalendar";
 import BlockRemovalRequests from "../../components/BlockRemovalRequests";
 import DashboardGames from "../../components/DashboardGames";
@@ -361,6 +362,15 @@ export default function Workspace() {
                   label: "Block Removal Requests",
                 },
               ])}
+              {testMode && testWorkspace && (
+                <button
+                  className={`topNavButton ${section === "Team & Roles" ? "active" : ""}`}
+                  onClick={() => nav("Team & Roles")}
+                >
+                  <Icon>♙</Icon>
+                  <span>Team &amp; Roles</span>
+                </button>
+              )}
               {iowaGroup()}
               <button
                 className={`topNavButton ${section === "Audit History" ? "active" : ""}`}
@@ -511,6 +521,11 @@ export default function Workspace() {
             </p>
           </div>
           <div className="headerActions">
+            {testMode && (
+              <button className="secondary" onClick={signOut}>
+                Sign out / switch account
+              </button>
+            )}
             {testMode && testWorkspace && (
               <label style={{ fontSize: 12, fontWeight: 800 }}>
                 Organization
@@ -558,6 +573,13 @@ export default function Workspace() {
         )}{" "}
         {manager && section === "Officials" && (
           <OfficialsDirectory organizationId={testWorkspace?.organization_id} />
+        )}
+        {manager && testWorkspace && section === "Team & Roles" && (
+          <OrganizationTeamManager
+            organizationId={testWorkspace.organization_id}
+            organization={testWorkspace.name}
+            canManage={testWorkspace.role === "owner" || testWorkspace.role === "admin"}
+          />
         )}
         {manager && section === "Assignments" && <AssignmentsManager />}
         {manager && section === "Audit History" && <AuditHistoryManager />}
