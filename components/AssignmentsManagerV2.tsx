@@ -2059,44 +2059,6 @@ export default function AssignmentsManagerV2() {
     const next = pickedOfficial === officialId ? "" : officialId;
     setPickedOfficial(next);
   }
-  function officialDragHandle(official: Official, requiresOverride = false) {
-    if (!canManage) return null;
-    return (
-      <span
-        className={`officialDragHandle${requiresOverride ? " overrideDrag" : ""}`}
-        draggable
-        role="button"
-        tabIndex={0}
-        aria-label={`Drag ${official.first_name} ${official.last_name} to a game`}
-        aria-pressed={pickedOfficial === official.id}
-        onClick={(event) => {
-          event.stopPropagation();
-          chooseOfficialToAssign(official.id);
-        }}
-        onDragStart={(event) => {
-          event.stopPropagation();
-          event.dataTransfer.effectAllowed = "move";
-          event.dataTransfer.setData("text/plain", official.id);
-          setDraggingOfficial(official.id);
-          setPickedOfficial("");
-          document.body.classList.add("officialDragActive");
-        }}
-        onDragEnd={() => {
-          setDraggingOfficial("");
-          setOfficialDropGame("");
-          document.body.classList.remove("officialDragActive");
-        }}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            chooseOfficialToAssign(official.id);
-          }
-        }}
-      >
-        <span aria-hidden="true">⠿</span> Drag
-      </span>
-    );
-  }
   async function assignAndPublishReplacement(
     positionId: string,
     officialId: string,
@@ -3339,6 +3301,7 @@ export default function AssignmentsManagerV2() {
         {candidatePositionId && game && (() => {
           const candidatePosition = gamePositions.find((item) => item.id === candidatePositionId);
           if (!candidatePosition) return null;
+          const candidatePositionIndex = gamePositions.findIndex((item) => item.id === candidatePosition.id);
           const list = candidates(candidatePosition);
           const current = assignments.find((item) => item.game_id === game.id && item.position_id === candidatePosition.id && item.status !== "declined");
           const replacementNeeded = isReplacementNeeded(game.id, candidatePosition.id);
@@ -3355,7 +3318,14 @@ export default function AssignmentsManagerV2() {
                   <button type="button" aria-label="Close candidates" onClick={() => setCandidatePositionId("")}>×</button>
                 </div>
                 <div className="candidatePanelSummary">
-                  <span><small>POSITION</small><b>{shortPositionName(candidatePosition.name)}</b></span>
+                  <span>
+                    <small>POSITION</small>
+                    <div className="candidatePositionNav">
+                      <button type="button" aria-label="Previous position" disabled={candidatePositionIndex === 0} onClick={() => setCandidatePositionId(gamePositions[candidatePositionIndex - 1].id)}>←</button>
+                      <b>{shortPositionName(candidatePosition.name)}</b>
+                      <button type="button" aria-label="Next position" disabled={candidatePositionIndex === gamePositions.length - 1} onClick={() => setCandidatePositionId(gamePositions[candidatePositionIndex + 1].id)}>→</button>
+                    </div>
+                  </span>
                   <span><small>CURRENT OFFICIAL</small><b>{current ? `${officials.find((item) => item.id === current.official_id)?.first_name || ""} ${officials.find((item) => item.id === current.official_id)?.last_name || ""}`.trim() : "Open"}</b></span>
                 </div>
                 <div className="candidatePanelList">
@@ -4823,17 +4793,15 @@ export default function AssignmentsManagerV2() {
               </span>
             </div>
             <p>
-              Drag an official onto a game, or select one and then choose a
-              game, to fill its next open position.
+              Select an official, then choose a game to fill its next open position.
               Ineligible officials remain visible in red and require an
               override; overlapping assignments cannot be overridden.
             </p>
             <div className="availableOfficialsList">
               {availableOfficials.map((o, i) => (
                 <div
-                  className={`availableOfficial draggableOfficial${draggingOfficial === o.id ? " dragging" : ""}`}
+                  className="availableOfficial"
                   key={o.id}
-                  title={canManage ? "Drag onto a game to assign" : undefined}
                 >
                   <span className="availableOrder">{i + 1}</span>
                   <div>
@@ -4848,7 +4816,6 @@ export default function AssignmentsManagerV2() {
                         ? ` • ${o.distance.toFixed(1)} mi`
                         : ""}
                     </small>
-                    {officialDragHandle(o)}
                     {canManage && (
                       <button
                         type="button"
@@ -4896,9 +4863,8 @@ export default function AssignmentsManagerV2() {
                       </div>
                       {visibleIneligibleOfficials.map((o) => (
                     <div
-                      className={`availableOfficial ineligibleOfficial draggableOfficial${draggingOfficial === o.id ? " dragging" : ""}`}
+                      className="availableOfficial ineligibleOfficial"
                       key={o.id}
-                      title={canManage ? "Drag onto a game to assign with override" : undefined}
                       style={{
                         background: "#fef2f2",
                         border: "1px solid #fecaca",
@@ -4918,7 +4884,6 @@ export default function AssignmentsManagerV2() {
                         <small style={{ color: "#b91c1c", fontWeight: 700 }}>
                           {o.reasons.join(" • ")}
                         </small>
-                        {officialDragHandle(o, true)}
                         {canManage && (
                           <button
                             type="button"
