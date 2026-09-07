@@ -2747,6 +2747,58 @@ export default function AssignmentsManagerV2() {
     }
     setOverdueResolving(false);
   }
+  function renderMobileInlineAssignment() {
+    if (!game) return null;
+    return (
+      <section className="card assignmentMain mobileInlineAssignment" aria-label={`Assignments for game ${game.game_number}`}>
+        <div className="mobileInlineAssignmentHead">
+          <div>
+            <h2>{game.home?.name || "TBD"} vs {game.away?.name || "TBD"}</h2>
+            <p>Game #{game.game_number} • {new Date(game.starts_at).toLocaleString()}</p>
+          </div>
+          <button type="button" className="secondary" onClick={() => setSelected("")} aria-label="Close game assignments">Close</button>
+        </div>
+        <div className="mobileInlineSummary">
+          <span><b>{activeAssignmentCount}/{game.officials_needed}</b> Filled</span>
+          <span><b>{openPositionCount}</b> Open</span>
+          <span><b>{gameAssignments.filter((item) => item.status === "proposed" && item.published_at).length}</b> Awaiting</span>
+          <span><b>{gameAssignments.filter((item) => ["accepted", "confirmed"].includes(item.status)).length}</b> Confirmed</span>
+        </div>
+        <div className="mobileInlinePositions">
+          {gamePositions.map((pos, index) => {
+            const current = assignments.find((assignment) => assignment.game_id === game.id && assignment.position_id === pos.id && assignment.status !== "declined");
+            const status = current ? assignmentStatus(current) : null;
+            const replacementNeeded = isReplacementNeeded(game.id, pos.id);
+            const eligibleCount = candidates(pos).filter((candidate) => candidate.reasons.length === 0).length;
+            const official = current ? officials.find((item) => item.id === current.official_id) : null;
+            return (
+              <article key={pos.id} className={replacementNeeded && !current ? "needsReplacement" : ""}>
+                <div className="mobileInlinePositionTop">
+                  <span><b>{shortPositionName(pos.name)}</b><small>Position {index + 1} of {game.officials_needed}</small></span>
+                  {status ? <span className={status.className}>{status.label}</span> : replacementNeeded ? <span className="badge red">Replacement Needed</span> : <span className="badge gray">Open</span>}
+                </div>
+                <div className="mobileInlineOfficial">
+                  <span><small>OFFICIAL</small><b>{official ? `${official.first_name} ${official.last_name}` : "Unassigned"}</b></span>
+                  <button type="button" className="primary candidatePanelButton" disabled={saving === pos.id} onClick={() => setCandidatePositionId(pos.id)}>
+                    {current ? "Change Official" : replacementNeeded ? "Find Replacement" : "Assign Official"}
+                    <small>{eligibleCount} eligible</small>
+                  </button>
+                </div>
+                {current && canManage && (
+                  <div className="mobileInlineActions">
+                    <button type="button" className="secondary" disabled={saving === pos.id} onClick={() => void unassign(current.id, pos.id)}>Unassign</button>
+                    {current.published_at && current.status !== "confirmed" && (
+                      <button type="button" className="confirmButton" disabled={confirming === current.id} onClick={() => void confirmAssignment(current)}>{confirming === current.id ? "Confirming…" : "Confirm Official"}</button>
+                    )}
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      </section>
+    );
+  }
   function renderGameRow(g: Game, linked: boolean, showChain: boolean) {
     const d = new Date(g.starts_at);
     const completeness = assignmentCompleteness(g);
@@ -4197,6 +4249,7 @@ export default function AssignmentsManagerV2() {
                             Boolean(unit.groupId),
                             Boolean(unit.groupId) && index > 0,
                           )}
+                          {selected === listedGame.id && renderMobileInlineAssignment()}
                         </div>
                       );
                     })}
@@ -4423,7 +4476,7 @@ export default function AssignmentsManagerV2() {
         </label>
       </section>
       {game && filteredGames.some((g) => g.id === game.id) && (
-        <div className="assignmentLayout">
+        <div className="assignmentLayout selectedGameDetailStandalone">
           <section
             id="selected-game-assignment"
             className="card assignmentMain"
