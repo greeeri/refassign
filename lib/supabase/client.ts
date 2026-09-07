@@ -18,6 +18,12 @@ function browserConfiguration() {
 }
 
 export function createClient() {
+  // The isolated setup and full workspace must share the same browser session.
+  // @supabase/ssr stores sessions differently from the supabase-js client used
+  // by the test setup, so return the cached test client on the test hostname.
+  if (typeof window !== 'undefined' && window.location.hostname === 'test.ref-assign.com') {
+    return createTierTestClient()
+  }
   const config = browserConfiguration()
   return createBrowserClient(
     config.url,
