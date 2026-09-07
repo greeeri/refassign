@@ -1,7 +1,7 @@
 import {NextRequest,NextResponse} from "next/server";
 
 export function middleware(request:NextRequest){
- const hostname=request.headers.get("host")?.split(":")[0];
+ const hostname=(request.headers.get("x-forwarded-host")||request.headers.get("host")||request.nextUrl.hostname).split(":")[0];
  const path=request.nextUrl.pathname;
  if(hostname==="test.ref-assign.com"&&(path==="/workspace"||path==="/login"))return NextResponse.next();
  const isTierPreview=process.env.VERCEL_ENV==="preview"&&process.env.VERCEL_GIT_COMMIT_REF==="feature/league-tier-foundation";
