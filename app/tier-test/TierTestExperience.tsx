@@ -13,6 +13,21 @@ import TestAuthPanel from "./TestAuthPanel";
 import { createTierTestClient as createClient } from "../../lib/supabase/client";
 import saved from "./saved.module.css";
 
+type SavedWorkspace = {
+  organization_id: string;
+  name: string;
+  primary_sport: string | null;
+  created_at?: string;
+  role: string;
+  viewer_permissions: string[];
+  plan: PlanCode;
+  official_limit: number | null;
+  additional_official_blocks: number;
+  texting_addon: boolean;
+  status: string;
+  leagues: { name: string; region: string | null; coverage: string }[];
+};
+
 const money = (cents: number | null) =>
   cents === null
     ? "Custom"
@@ -91,6 +106,7 @@ export default function TierTestExperience({
   const [saveMessage, setSaveMessage] = useState("");
   const [organizationId, setOrganizationId] = useState("");
   const [authPortal, setAuthPortal] = useState(false);
+  const [savedWorkspaces, setSavedWorkspaces] = useState<SavedWorkspace[]>([]);
   const [textingAddon, setTextingAddon] = useState(false);
   const plan = PLAN_CATALOG[selected];
   const extraBlocks =
@@ -128,9 +144,20 @@ export default function TierTestExperience({
     );
   const openTestSignIn = () => {
     if (userEmail) {
-      window.location.assign("/workspace");
+      scrollAfterRender("saved-workspaces");
       return;
     }
+    setAuthPortal(true);
+    scrollAfterRender("test-auth-portal");
+  };
+  const switchAccount = async () => {
+    await createClient().auth.signOut({ scope: "local" });
+    window.localStorage.removeItem("refassign-last-test-workspace");
+    setUserEmail("");
+    setSavedWorkspaces([]);
+    setOrganizationId("");
+    setSetupOpen(false);
+    setAuthRequired(false);
     setAuthPortal(true);
     scrollAfterRender("test-auth-portal");
   };
@@ -186,6 +213,28 @@ export default function TierTestExperience({
     );
     return () => data.subscription.unsubscribe();
   }, []);
+  useEffect(() => {
+    if (!userEmail) return;
+    const supabase = createClient();
+    void (async () => {
+      await supabase.rpc("accept_my_organization_invitations");
+      const { data, error } = await supabase.rpc("get_my_test_workspaces");
+      if (error) {
+        setSaveMessage(error.message);
+        return;
+      }
+      setSavedWorkspaces((data || []) as SavedWorkspace[]);
+    })();
+  }, [userEmail]);
+  const openSaved = (workspace: SavedWorkspace) => {
+    window.localStorage.setItem(
+      "refassign-last-test-workspace",
+      workspace.organization_id,
+    );
+    window.location.assign(
+      `/workspace?organization=${workspace.organization_id}`,
+    );
+  };
   const persistWorkspace = async () => {
     setSaving(true);
     setSaveMessage("");
@@ -242,8 +291,25 @@ export default function TierTestExperience({
         setSaving(false);
         return;
       }
+      const savedWorkspace: SavedWorkspace = {
+        organization_id: savedId,
+        name: organization,
+        primary_sport: sport,
+        role: "owner",
+        viewer_permissions: [],
+        plan: selected,
+        official_limit: plan.includedOfficials,
+        additional_official_blocks: extraBlocks,
+        texting_addon: textingAddon && !textingIncluded,
+        status: "pending",
+        leagues: savedLeagues,
+      };
       window.localStorage.setItem("refassign-last-test-workspace", savedId);
       setOrganizationId(savedId);
+      setSavedWorkspaces((rows) => [
+        savedWorkspace,
+        ...rows.filter((row) => row.organization_id !== savedId),
+      ]);
       setStep(4);
     }
     setSaving(false);
@@ -356,6 +422,50 @@ export default function TierTestExperience({
               window.location.assign("/workspace");
             }}
           />
+        </section>
+      )}
+      {userEmail && (
+        <section className={saved.workspaces} id="saved-workspaces">
+          <div className={saved.savedHead}>
+            <div>
+              <p className={styles.eyebrow}>Signed in as {userEmail}</p>
+              <h2>Organization workspaces</h2>
+            </div>
+            <div className={saved.savedActions}>
+              <button type="button" className={saved.createButton} onClick={openSetup}>
+                + Create another organization
+              </button>
+              <button type="button" onClick={() => void switchAccount()}>
+                Sign out / switch account
+              </button>
+            </div>
+          </div>
+          {savedWorkspaces.length === 0 ? (
+            <div className={saved.empty}>
+              <b>No saved organizations yet</b>
+              <p>Create an isolated organization workspace to begin testing.</p>
+              <button type="button" onClick={openSetup}>Create organization</button>
+            </div>
+          ) : (
+            <div className={saved.savedGrid}>
+              {savedWorkspaces.map((workspace) => (
+                <button
+                  type="button"
+                  key={workspace.organization_id}
+                  onClick={() => openSaved(workspace)}
+                >
+                  <span>{workspace.role}</span>
+                  <h3>{workspace.name}</h3>
+                  <p>
+                    {PLAN_CATALOG[workspace.plan]?.name || workspace.plan} ·{" "}
+                    {workspace.leagues.length}{" "}
+                    {workspace.leagues.length === 1 ? "league" : "leagues"}
+                  </p>
+                  <b>Open in workspace →</b>
+                </button>
+              ))}
+            </div>
+          )}
         </section>
       )}
       <section className={styles.plans} id="plans">
