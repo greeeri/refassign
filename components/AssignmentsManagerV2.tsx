@@ -312,6 +312,10 @@ export default function AssignmentsManagerV2() {
     [savedViews, setSavedViews] = useState<SavedAssignmentView[]>([]),
     [showCoverageForecast, setShowCoverageForecast] = useState(false),
     [replacementPublishing, setReplacementPublishing] = useState(""),
+    [pendingReplacement, setPendingReplacement] = useState<{
+      positionId: string;
+      officialId: string;
+    } | null>(null),
     [bulkResult, setBulkResult] = useState<BulkActionResult | null>(null);
   async function load() {
     setError("");
@@ -2056,6 +2060,7 @@ export default function AssignmentsManagerV2() {
     officialId: string,
   ) {
     if (!canManage || !game) return;
+    setPendingReplacement(null);
     const workKey = `${positionId}:${officialId}`;
     setReplacementPublishing(workKey);
     setError("");
@@ -3260,6 +3265,29 @@ export default function AssignmentsManagerV2() {
             </div>
           </div>
         )}
+        {pendingReplacement && game && (() => {
+          const replacementOfficial = officials.find((item) => item.id === pendingReplacement.officialId);
+          const replacementPosition = positions.find((item) => item.id === pendingReplacement.positionId);
+          return (
+            <div className="assignmentDialogBackdrop" role="presentation" onMouseDown={() => !replacementPublishing && setPendingReplacement(null)}>
+              <div className="assignmentDialog assignmentConfirmDialog" role="dialog" aria-modal="true" aria-labelledby="replacementConfirmTitle" onMouseDown={(event) => event.stopPropagation()}>
+                <div className="assignmentDialogHead">
+                  <div><h3 id="replacementConfirmTitle">Confirm Replacement</h3><p>Game #{game.game_number} — {game.home?.name || "TBD"} vs {game.away?.name || "TBD"}</p></div>
+                  <button type="button" aria-label="Close" disabled={Boolean(replacementPublishing)} onClick={() => setPendingReplacement(null)}>×</button>
+                </div>
+                <div className="replacementConfirmSummary">
+                  <span><small>POSITION</small><b>{replacementPosition?.name || "Official"}</b></span>
+                  <span><small>NEW OFFICIAL</small><b>{replacementOfficial ? `${replacementOfficial.first_name} ${replacementOfficial.last_name}` : "Selected official"}</b></span>
+                </div>
+                <div className="assignmentConfirmMessage">This will assign the replacement, publish the assignment, and immediately notify the new official by email.</div>
+                <div className="assignmentDialogFooter">
+                  <button type="button" className="secondary" disabled={Boolean(replacementPublishing)} onClick={() => setPendingReplacement(null)}>Go Back</button>
+                  <button type="button" className="primary" disabled={Boolean(replacementPublishing)} onClick={() => void assignAndPublishReplacement(pendingReplacement.positionId, pendingReplacement.officialId)}>{replacementPublishing ? "Assigning & Sending…" : "Assign & Notify Official"}</button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
         {showCoverageForecast && (
           <div className="assignmentDialogBackdrop" role="presentation" onMouseDown={() => setShowCoverageForecast(false)}>
             <div className="assignmentDialog coverageForecastDialog" role="dialog" aria-modal="true" aria-labelledby="coverageForecastTitle" onMouseDown={(event) => event.stopPropagation()}>
@@ -4717,6 +4745,10 @@ export default function AssignmentsManagerV2() {
                                 <b style={{ fontSize: 11, color: "#991b1b" }}>
                                   Recommended qualified replacements
                                 </b>
+                                {list.find((candidate) => candidate.reasons.length === 0) && (() => {
+                                  const best = list.find((candidate) => candidate.reasons.length === 0)!;
+                                  return <button type="button" className="bestReplacementButton" disabled={saving === pos.id || Boolean(replacementPublishing)} onClick={() => setPendingReplacement({ positionId: pos.id, officialId: best.id })}>Use Best Replacement</button>;
+                                })()}
                                 {list
                                   .filter(
                                     (candidate) =>
@@ -4729,7 +4761,7 @@ export default function AssignmentsManagerV2() {
                                       className="replacementRecommendation"
                                     >
                                       <button type="button" disabled={saving === pos.id || Boolean(replacementPublishing)} onClick={() => void assign(pos.id, candidate.id)}><b>{recommendationIndex + 1}. {candidate.first_name} {candidate.last_name}</b><span>{label} {candidate.rank.toFixed(1)}{candidate.distance != null ? ` • ${candidate.distance.toFixed(1)} mi` : ""}</span></button>
-                                      <button type="button" className="replacementPublishButton" disabled={saving === pos.id || Boolean(replacementPublishing)} onClick={() => void assignAndPublishReplacement(pos.id, candidate.id)}>{replacementPublishing === `${pos.id}:${candidate.id}` ? "Working…" : "Assign & Publish"}</button>
+                                      <button type="button" className="replacementPublishButton" disabled={saving === pos.id || Boolean(replacementPublishing)} onClick={() => setPendingReplacement({ positionId: pos.id, officialId: candidate.id })}>{replacementPublishing === `${pos.id}:${candidate.id}` ? "Working…" : "Assign & Notify"}</button>
                                     </div>
                                   ))}
                                 {list.every(
