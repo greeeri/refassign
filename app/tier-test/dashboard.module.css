@@ -35,6 +35,7 @@
 .checklist .done:before{content:"✓";color:#43a936;font-weight:900}
 .panel>button{border:0;background:#0b477b;color:#fff;border-radius:8px;padding:11px 15px;font-weight:900;cursor:pointer}
 .panel>button:disabled{opacity:.45}
+.roleNotice{margin:16px 0 0;padding:11px 13px;border-radius:8px;background:#edf5fb;color:#46657f!important;font-weight:700}
 .tableHead{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
 .tableHead h3{margin:0}
 .tableHead p{color:#718196;font-size:.84rem}
