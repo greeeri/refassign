@@ -4515,7 +4515,6 @@ export default function AssignmentsManagerV2() {
                               />
                             ) : !current ? (
                               <div className="selfAssignOpenControls">
-                                <span className="badge green">Open</span>
                                 <button
                                   type="button"
                                   className="secondary selfAssignCloseButton"
@@ -4529,7 +4528,7 @@ export default function AssignmentsManagerV2() {
                                     )
                                   }
                                 >
-                                  Close
+                                  Open <span aria-hidden="true">×</span>
                                 </button>
                               </div>
                             ) : (
