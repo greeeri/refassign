@@ -4515,7 +4515,6 @@ export default function AssignmentsManagerV2() {
                               />
                             ) : !current ? (
                               <div
-                                className="replacementPanel"
                                 style={{
                                   display: "flex",
                                   gap: 6,
@@ -4797,6 +4796,7 @@ export default function AssignmentsManagerV2() {
                             </details>
                             {replacementNeeded && !current && (
                               <div
+                                className="replacementPanel"
                                 style={{
                                   marginTop: 7,
                                   padding: 8,
