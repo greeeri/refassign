@@ -264,6 +264,10 @@ export default function AssignmentsManagerV2() {
     } | null>(null),
     [bulkWorking, setBulkWorking] = useState(false),
     [bulkStatus, setBulkStatus] = useState("active"),
+    [showBulkAssign, setShowBulkAssign] = useState(false),
+    [bulkAssignOfficial, setBulkAssignOfficial] = useState(""),
+    [bulkAssignPositions, setBulkAssignPositions] = useState<Record<string, string>>({}),
+    [bulkOverrideConfirmed, setBulkOverrideConfirmed] = useState(false),
     [selfAssignSlots, setSelfAssignSlots] = useState<SelfAssignSlot[]>([]),
     [selfAssignSelected, setSelfAssignSelected] = useState<string[]>([]),
     [selfAssignSaving, setSelfAssignSaving] = useState(false),
@@ -1729,6 +1733,68 @@ export default function AssignmentsManagerV2() {
       setPickedOfficial("");
     }
   }
+  function prepareBulkAssignment() {
+    const selectedGames = filteredGames.filter((item) => linkSelected.includes(item.id));
+    setBulkAssignOfficial("");
+    setBulkAssignPositions(
+      Object.fromEntries(
+        selectedGames.map((item) => [item.id, openPositionForGame(item)?.id || ""]),
+      ),
+    );
+    setBulkOverrideConfirmed(false);
+    setShowBulkAssign(true);
+  }
+  function bulkAssignmentReview() {
+    const official = officials.find((item) => item.id === bulkAssignOfficial);
+    const targets = filteredGames.filter(
+      (item) => linkSelected.includes(item.id) && bulkAssignPositions[item.id],
+    );
+    const blocking: { gameId: string; reason: string }[] = [];
+    const warnings: { gameId: string; reason: string }[] = [];
+    if (!official) return { targets, blocking, warnings };
+    for (const target of targets) {
+      const positionId = bulkAssignPositions[target.id];
+      for (const reason of [
+        ...assignmentConflictReasonsForGame(official, target, positionId),
+        ...duplicateAssignmentReasonsForGame(official.id, target, positionId),
+      ]) blocking.push({ gameId: target.id, reason });
+      for (const reason of ineligibleReasonsForGame(official, target, positionId)) {
+        if (reason !== "Already assigned to this game")
+          warnings.push({ gameId: target.id, reason });
+      }
+    }
+    for (let index = 0; index < targets.length; index += 1) {
+      for (let otherIndex = index + 1; otherIndex < targets.length; otherIndex += 1) {
+        const first = targets[index], second = targets[otherIndex];
+        if (overlaps(first.starts_at, first.duration_minutes || 110, second.starts_at, second.duration_minutes || 110)) {
+          blocking.push({
+            gameId: second.id,
+            reason: `Overlaps selected Game #${first.game_number}`,
+          });
+        }
+      }
+    }
+    return {
+      targets,
+      blocking: [...new Map(blocking.map((item) => [`${item.gameId}:${item.reason}`, item])).values()],
+      warnings: [...new Map(warnings.map((item) => [`${item.gameId}:${item.reason}`, item])).values()],
+    };
+  }
+  async function confirmBulkAssignment() {
+    const review = bulkAssignmentReview();
+    if (!bulkAssignOfficial || !review.targets.length || review.blocking.length) return;
+    setBulkWorking(true);
+    let assigned = 0;
+    for (const target of review.targets) {
+      if (await assignToGame(target, bulkAssignPositions[target.id], bulkAssignOfficial, true)) assigned += 1;
+    }
+    setBulkWorking(false);
+    if (assigned === review.targets.length) {
+      setShowBulkAssign(false);
+      setLinkSelected([]);
+      setNotice(`${assigned} selected game${assigned === 1 ? "" : "s"} assigned successfully.`);
+    }
+  }
   function chooseOfficialToAssign(officialId: string) {
     const next = pickedOfficial === officialId ? "" : officialId;
     setPickedOfficial(next);
@@ -2721,6 +2787,53 @@ export default function AssignmentsManagerV2() {
           </div>
         );
       })()}
+      {showBulkAssign && (() => {
+        const review = bulkAssignmentReview();
+        const official = officials.find((item) => item.id === bulkAssignOfficial);
+        const warnings = review.warnings.filter(
+          (warning) => !review.blocking.some((blocked) => blocked.gameId === warning.gameId && warning.reason.includes(blocked.reason)),
+        );
+        return (
+          <div className="tapAssignOverlay" role="presentation" onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !bulkWorking) setShowBulkAssign(false);
+          }}>
+            <section className="tapAssignDialog bulkAssignDialog" role="dialog" aria-modal="true" aria-labelledby="bulk-assign-title">
+              <header>
+                <div><small>BULK ASSIGNMENT</small><h3 id="bulk-assign-title">Assign {review.targets.length} Selected Games</h3></div>
+                <button type="button" aria-label="Close bulk assignment" disabled={bulkWorking} onClick={() => setShowBulkAssign(false)}>×</button>
+              </header>
+              <label className="bulkOfficialPicker">
+                <span>Official</span>
+                <select value={bulkAssignOfficial} disabled={bulkWorking} onChange={(event) => { setBulkAssignOfficial(event.target.value); setBulkOverrideConfirmed(false); }}>
+                  <option value="">Choose an official</option>
+                  {[...officials].sort((a, b) => a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name)).map((item) => <option key={item.id} value={item.id}>{item.last_name}, {item.first_name}</option>)}
+                </select>
+              </label>
+              <div className="bulkAssignGameList">
+                {review.targets.map((target) => {
+                  const gameBlocking = review.blocking.filter((item) => item.gameId === target.id);
+                  const gameWarnings = warnings.filter((item) => item.gameId === target.id);
+                  return (
+                    <article key={target.id} className={gameBlocking.length ? "blocked" : gameWarnings.length ? "warning" : ""}>
+                      <div><b>{target.home?.name || "TBD"} vs {target.away?.name || "TBD"}</b><span>Game #{target.game_number} · {new Date(target.starts_at).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}</span></div>
+                      <label><span>Position</span><select value={bulkAssignPositions[target.id] || ""} disabled={bulkWorking} onChange={(event) => setBulkAssignPositions((current) => ({ ...current, [target.id]: event.target.value }))}>{openPositionsForGame(target).map((position) => <option key={position.id} value={position.id}>{position.name}</option>)}</select></label>
+                      {gameBlocking.map((item) => <small className="blocking" key={item.reason}>{item.reason}</small>)}
+                      {gameWarnings.map((item) => <small className="warning" key={item.reason}>{item.reason}</small>)}
+                    </article>
+                  );
+                })}
+              </div>
+              {review.blocking.length > 0 && <div className="tapAssignAlert blocking"><b>Assignment blocked</b><span>Resolve the schedule or duplicate-assignment conflicts shown above.</span></div>}
+              {!review.blocking.length && warnings.length > 0 && <label className="bulkOverrideCheck"><input type="checkbox" checked={bulkOverrideConfirmed} onChange={(event) => setBulkOverrideConfirmed(event.target.checked)} /><span><b>Confirm eligibility overrides</b><small>{warnings.length} warning{warnings.length === 1 ? "" : "s"} will be overridden.</small></span></label>}
+              {official && !review.blocking.length && !warnings.length && <div className="tapAssignAlert clear"><b>Ready to assign</b><span>No conflicts were found for {official.first_name} {official.last_name}.</span></div>}
+              <footer>
+                <button type="button" className="secondary" disabled={bulkWorking} onClick={() => setShowBulkAssign(false)}>Cancel</button>
+                <button type="button" className="primary" disabled={bulkWorking || !bulkAssignOfficial || !review.targets.length || Boolean(review.blocking.length) || Boolean(warnings.length && !bulkOverrideConfirmed)} onClick={() => void confirmBulkAssignment()}>{bulkWorking ? "Assigning…" : `Assign to ${review.targets.length} Game${review.targets.length === 1 ? "" : "s"}`}</button>
+              </footer>
+            </section>
+          </div>
+        );
+      })()}
       <div className={`assignmentCenterSplit ${game ? "hasSelectedGame" : ""}`}>
       <section className="card">
         <div className="cardHead">
@@ -3257,7 +3370,8 @@ export default function AssignmentsManagerV2() {
                 </span>
               )}
             </div>
-            <button className="success" disabled={bulkWorking || selfAssignSaving || !assignmentSelectionTarget} onClick={prepareSelfAssignPositions}>Open Positions for Self Assign</button>
+            <button className="primary" disabled={bulkWorking} onClick={prepareBulkAssignment}>Assign Official</button>
+            <button className="success" disabled={bulkWorking || selfAssignSaving} onClick={prepareSelfAssignPositions}>Open Positions for Self Assign</button>
             <button className="secondary" disabled={bulkWorking} onClick={() => void runBulkAction("publish")}>Publish</button>
             <button className="secondary" disabled={bulkWorking} onClick={() => void runBulkAction("confirm")}>Confirm Officials</button>
             <details className="assignmentMoreActions">
