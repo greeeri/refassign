@@ -128,6 +128,8 @@ type BulkAssignmentItem = {
   matchup: string;
   positionId: string;
   positionName: string;
+  officialId: string;
+  officialName: string;
   status: "success" | "failed" | "skipped";
   error: string;
 };
@@ -285,6 +287,11 @@ export default function AssignmentsManagerV2() {
     [bulkAssignMessage, setBulkAssignMessage] = useState(""),
     [bulkAssignmentResult, setBulkAssignmentResult] = useState<BulkAssignmentResult | null>(null),
     [bulkRetryingGame, setBulkRetryingGame] = useState(""),
+    [showBulkCrew, setShowBulkCrew] = useState(false),
+    [bulkCrewSelections, setBulkCrewSelections] = useState<Record<string, string>>({}),
+    [bulkCrewWorking, setBulkCrewWorking] = useState(false),
+    [bulkCrewMessage, setBulkCrewMessage] = useState(""),
+    [bulkCrewOverrideConfirmed, setBulkCrewOverrideConfirmed] = useState(false),
     [selfAssignSlots, setSelfAssignSlots] = useState<SelfAssignSlot[]>([]),
     [selfAssignSelected, setSelfAssignSelected] = useState<string[]>([]),
     [selfAssignSaving, setSelfAssignSaving] = useState(false),
@@ -1839,6 +1846,8 @@ export default function AssignmentsManagerV2() {
           matchup: `${target.home?.name || "TBD"} vs ${target.away?.name || "TBD"}`,
           positionId,
           positionName: position?.name || "Position",
+          officialId: bulkAssignOfficial,
+          officialName: selectedOfficial ? `${selectedOfficial.first_name} ${selectedOfficial.last_name}` : "Selected official",
           status: result.error ? "failed" : "success",
           error: result.error?.message || "",
         };
@@ -1866,6 +1875,8 @@ export default function AssignmentsManagerV2() {
           matchup: `${target.home?.name || "TBD"} vs ${target.away?.name || "TBD"}`,
           positionId,
           positionName: positions.find((item) => item.id === positionId)?.name || "Position",
+          officialId: bulkAssignOfficial,
+          officialName: selectedOfficial ? `${selectedOfficial.first_name} ${selectedOfficial.last_name}` : "Selected official",
           status: "skipped" as const,
           error: message,
         };
@@ -1882,7 +1893,7 @@ export default function AssignmentsManagerV2() {
     const result = await supabase.rpc("assign_official_to_linked_games", {
       p_game_id: item.gameId,
       p_position_id: item.positionId,
-      p_official_id: bulkAssignmentResult.officialId,
+      p_official_id: item.officialId || bulkAssignmentResult.officialId,
     });
     setBulkAssignmentResult((current) => current ? {
       ...current,
@@ -1890,6 +1901,109 @@ export default function AssignmentsManagerV2() {
     } : current);
     if (!result.error) await refreshAssignmentState();
     setBulkRetryingGame("");
+  }
+  function crewSlotKey(gameId: string, positionId: string) {
+    return `${gameId}:${positionId}`;
+  }
+  function bulkCrewSlots() {
+    return games.filter((item) => linkSelected.includes(item.id)).flatMap((target) =>
+      openPositionsForGame(target).map((position) => ({ target, position, key: crewSlotKey(target.id, position.id) })),
+    );
+  }
+  function crewCandidatesForSlot(target: Game, position: Position, selections = bulkCrewSelections) {
+    const key = crewSlotKey(target.id, position.id);
+    return officials.map((official) => {
+      const blocking = [
+        ...assignmentConflictReasonsForGame(official, target, position.id),
+        ...duplicateAssignmentReasonsForGame(official.id, target, position.id),
+      ];
+      const warnings = ineligibleReasonsForGame(official, target, position.id).filter((reason) =>
+        !blocking.includes(reason) && reason !== "Already assigned to this game",
+      );
+      if (isMentor(position) && positionRankFor(official.id, position) <= 1)
+        warnings.push(`Not eligible for ${position.name}`);
+      for (const [otherKey, otherOfficialId] of Object.entries(selections)) {
+        if (otherKey === key || otherOfficialId !== official.id) continue;
+        const [otherGameId] = otherKey.split(":");
+        const otherGame = games.find((item) => item.id === otherGameId);
+        if (!otherGame) continue;
+        if (otherGame.id === target.id) blocking.push("Already selected for another position on this game");
+        else if (overlaps(target.starts_at, target.duration_minutes || 110, otherGame.starts_at, otherGame.duration_minutes || 110))
+          blocking.push(`Overlaps selected Game #${otherGame.game_number}`);
+      }
+      const distance = miles(official.home_latitude, official.home_longitude, target.location?.latitude ?? null, target.location?.longitude ?? null);
+      const workload = assignments.filter((assignment) => assignment.official_id === official.id && assignment.status !== "declined").length;
+      const rank = positionRankFor(official.id, position);
+      const score = rank * 100 - (distance ?? 100) - workload * 8;
+      return { official, blocking: [...new Set(blocking)], warnings: [...new Set(warnings)], distance, workload, rank, score };
+    }).sort((a, b) =>
+      (a.blocking.length ? 1 : 0) - (b.blocking.length ? 1 : 0) ||
+      (a.warnings.length ? 1 : 0) - (b.warnings.length ? 1 : 0) ||
+      b.score - a.score ||
+      a.official.last_name.localeCompare(b.official.last_name),
+    );
+  }
+  function prepareBulkCrew() {
+    setBulkCrewSelections({});
+    setBulkCrewMessage("");
+    setBulkCrewOverrideConfirmed(false);
+    setShowBulkCrew(true);
+  }
+  function applySmartCrewRecommendations() {
+    const next: Record<string, string> = {};
+    for (const slot of bulkCrewSlots()) {
+      const recommended = crewCandidatesForSlot(slot.target, slot.position, next).find((candidate) => !candidate.blocking.length && !candidate.warnings.length);
+      if (recommended) next[slot.key] = recommended.official.id;
+    }
+    setBulkCrewSelections(next);
+    setBulkCrewOverrideConfirmed(false);
+    setBulkCrewMessage(`${Object.keys(next).length} of ${bulkCrewSlots().length} open positions filled with recommendations.`);
+  }
+  async function confirmBulkCrewAssignment() {
+    const slots = bulkCrewSlots().filter((slot) => bulkCrewSelections[slot.key]);
+    if (!slots.length) {
+      setBulkCrewMessage("Choose at least one official or use Smart Fill first.");
+      return;
+    }
+    const reviews = slots.map((slot) => ({ ...slot, candidate: crewCandidatesForSlot(slot.target, slot.position).find((item) => item.official.id === bulkCrewSelections[slot.key]) }));
+    if (reviews.some((review) => review.candidate?.blocking.length)) {
+      setBulkCrewMessage("Resolve the highlighted conflicts before assigning this crew.");
+      return;
+    }
+    if (reviews.some((review) => review.candidate?.warnings.length) && !bulkCrewOverrideConfirmed) {
+      setBulkCrewMessage("Confirm the eligibility overrides before assigning this crew.");
+      return;
+    }
+    setBulkCrewWorking(true);
+    setBulkCrewMessage(`Assigning 0 of ${reviews.length} positions…`);
+    const results: BulkAssignmentItem[] = [];
+    try {
+      for (const review of reviews) {
+        const officialId = bulkCrewSelections[review.key];
+        const official = officials.find((item) => item.id === officialId);
+        const result = await supabase.rpc("assign_official_to_linked_games", { p_game_id: review.target.id, p_position_id: review.position.id, p_official_id: officialId });
+        results.push({
+          gameId: review.target.id,
+          gameNumber: review.target.game_number,
+          matchup: `${review.target.home?.name || "TBD"} vs ${review.target.away?.name || "TBD"}`,
+          positionId: review.position.id,
+          positionName: review.position.name,
+          officialId,
+          officialName: official ? `${official.first_name} ${official.last_name}` : "Selected official",
+          status: result.error ? "failed" : "success",
+          error: result.error?.message || "",
+        });
+        setBulkCrewMessage(`Processed ${results.length} of ${reviews.length} positions…`);
+      }
+      await refreshAssignmentState();
+      setShowBulkCrew(false);
+      setBulkAssignmentResult({ officialId: "", officialName: "Crew assignment", items: results });
+      if (results.every((item) => item.status === "success")) setLinkSelected([]);
+    } catch (crewError) {
+      setBulkCrewMessage(crewError instanceof Error ? crewError.message : "Unable to complete crew assignment.");
+    } finally {
+      setBulkCrewWorking(false);
+    }
   }
   function chooseOfficialToAssign(officialId: string) {
     const next = pickedOfficial === officialId ? "" : officialId;
@@ -2965,6 +3079,46 @@ export default function AssignmentsManagerV2() {
           </div>
         );
       })()}
+      {showBulkCrew && (() => {
+        const slots = bulkCrewSlots();
+        const selectedReviews = slots.map((slot) => ({ ...slot, candidate: crewCandidatesForSlot(slot.target, slot.position).find((item) => item.official.id === bulkCrewSelections[slot.key]) }));
+        const hasBlocking = selectedReviews.some((review) => review.candidate?.blocking.length);
+        const hasWarnings = selectedReviews.some((review) => review.candidate?.warnings.length);
+        const chosenCount = Object.values(bulkCrewSelections).filter(Boolean).length;
+        return (
+          <div className="tapAssignOverlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !bulkCrewWorking) setShowBulkCrew(false); }}>
+            <section className="tapAssignDialog bulkCrewDialog" role="dialog" aria-modal="true" aria-labelledby="bulk-crew-title">
+              <header><div><small>BULK CREW ASSIGNMENT</small><h3 id="bulk-crew-title">Fill {slots.length} Open Positions</h3></div><button type="button" aria-label="Close crew assignment" disabled={bulkCrewWorking} onClick={() => setShowBulkCrew(false)}>×</button></header>
+              <div className="bulkCrewTools"><div><b>Smart recommendations</b><span>Position rank, eligibility, distance, conflicts and workload are considered.</span></div><button type="button" className="success" disabled={bulkCrewWorking || !slots.length} onClick={applySmartCrewRecommendations}>Smart Fill</button></div>
+              <div className="bulkCrewList">
+                {slots.map((slot) => {
+                  const candidates = crewCandidatesForSlot(slot.target, slot.position);
+                  const eligible = candidates.filter((candidate) => !candidate.blocking.length && !candidate.warnings.length);
+                  const overrides = candidates.filter((candidate) => !candidate.blocking.length && candidate.warnings.length);
+                  const selectedCandidate = candidates.find((candidate) => candidate.official.id === bulkCrewSelections[slot.key]);
+                  const recommendation = eligible[0];
+                  return <article key={slot.key} className={selectedCandidate?.blocking.length ? "blocked" : selectedCandidate?.warnings.length ? "warning" : ""}>
+                    <div className="bulkCrewGame"><b>{slot.target.home?.name || "TBD"} vs {slot.target.away?.name || "TBD"}</b><span>Game #{slot.target.game_number} · {new Date(slot.target.starts_at).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}</span></div>
+                    <div className="bulkCrewPosition"><strong>{slot.position.name}</strong><span>{rankLabel(slot.position)} position</span></div>
+                    <label><span>Official</span><select value={bulkCrewSelections[slot.key] || ""} disabled={bulkCrewWorking} onChange={(event) => { setBulkCrewSelections((current) => ({ ...current, [slot.key]: event.target.value })); setBulkCrewOverrideConfirmed(false); setBulkCrewMessage(""); }}>
+                      <option value="">Leave open</option>
+                      {eligible.length > 0 && <optgroup label="Eligible — recommended first">{eligible.map((candidate, index) => <option key={candidate.official.id} value={candidate.official.id}>{index === 0 ? "★ " : ""}{candidate.official.last_name}, {candidate.official.first_name} — {rankLabel(slot.position)} {candidate.rank.toFixed(1)}{candidate.distance != null ? ` — ${candidate.distance.toFixed(1)} mi` : ""} — {candidate.workload} assigned</option>)}</optgroup>}
+                      {overrides.length > 0 && <optgroup label="Override required">{overrides.map((candidate) => <option key={candidate.official.id} value={candidate.official.id}>{candidate.official.last_name}, {candidate.official.first_name} — {candidate.warnings[0]}</option>)}</optgroup>}
+                    </select></label>
+                    {recommendation && <small className="recommendation">Recommended: {recommendation.official.first_name} {recommendation.official.last_name} · {rankLabel(slot.position)} {recommendation.rank.toFixed(1)}{recommendation.distance != null ? ` · ${recommendation.distance.toFixed(1)} mi` : ""}</small>}
+                    {selectedCandidate?.blocking.map((reason) => <small className="blocking" key={reason}>{reason}</small>)}
+                    {selectedCandidate?.warnings.map((reason) => <small className="warning" key={reason}>{reason}</small>)}
+                  </article>;
+                })}
+              </div>
+              {!slots.length && <div className="tapAssignAlert clear"><b>No open positions</b><span>Every selected game is already fully assigned.</span></div>}
+              {hasWarnings && !hasBlocking && <label className="bulkOverrideCheck"><input type="checkbox" checked={bulkCrewOverrideConfirmed} onChange={(event) => setBulkCrewOverrideConfirmed(event.target.checked)} /><span><b>Confirm eligibility overrides</b><small>At least one selected official requires a manager override.</small></span></label>}
+              {bulkCrewMessage && <div className={`bulkAssignMessage${bulkCrewWorking ? " working" : ""}`} role="status">{bulkCrewMessage}</div>}
+              <footer><button type="button" className="secondary" disabled={bulkCrewWorking} onClick={() => setShowBulkCrew(false)}>Cancel</button><button type="button" className="primary" disabled={bulkCrewWorking || !slots.length} onClick={() => void confirmBulkCrewAssignment()}>{bulkCrewWorking ? "Assigning Crew…" : `Assign ${chosenCount} Position${chosenCount === 1 ? "" : "s"}`}</button></footer>
+            </section>
+          </div>
+        );
+      })()}
       {bulkAssignmentResult && (() => {
         const completed = bulkAssignmentResult.items.filter((item) => item.status === "success").length;
         const issues = bulkAssignmentResult.items.filter((item) => item.status !== "success");
@@ -2976,7 +3130,7 @@ export default function AssignmentsManagerV2() {
               <div className="bulkAssignmentResultList">
                 {bulkAssignmentResult.items.map((item) => <article key={item.gameId} className={item.status}>
                   <span className="bulkResultStatus" aria-label={item.status}>{item.status === "success" ? "✓" : "!"}</span>
-                  <div><b>Game #{item.gameNumber} · {item.positionName}</b><span>{item.matchup}</span>{item.error && <small>{item.error}</small>}</div>
+                  <div><b>Game #{item.gameNumber} · {item.positionName}</b><span>{item.matchup} · {item.officialName}</span>{item.error && <small>{item.error}</small>}</div>
                   {item.status !== "success" && <button type="button" className="secondary" disabled={Boolean(bulkRetryingGame)} onClick={() => void retryBulkAssignmentItem(item)}>{bulkRetryingGame === item.gameId ? "Retrying…" : "Retry"}</button>}
                 </article>)}
               </div>
@@ -3522,6 +3676,7 @@ export default function AssignmentsManagerV2() {
               )}
             </div>
             <button className="primary" disabled={bulkWorking} onClick={prepareBulkAssignment}>Assign Official</button>
+            <button className="primary assignmentCrewButton" disabled={bulkWorking} onClick={prepareBulkCrew}>Assign Crews</button>
             <button className="success" disabled={bulkWorking || selfAssignSaving} onClick={prepareSelfAssignPositions}>Open Positions for Self Assign</button>
             <button className="secondary" disabled={bulkWorking} onClick={() => void runBulkAction("publish")}>Publish</button>
             <button className="secondary" disabled={bulkWorking} onClick={() => void runBulkAction("confirm")}>Confirm Officials</button>
