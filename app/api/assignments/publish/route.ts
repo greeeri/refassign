@@ -15,6 +15,12 @@ export async function POST(req:NextRequest){
   const {error:publishError}=await supabase.rpc('publish_game_assignments',{p_game_id:body.gameId})
   if(publishError)return NextResponse.json({error:publishError.message},{status:400})
   const service=createServiceClient()
+  const {data:deadlineGame}=await service.from('games').select('starts_at,leagues(assignment_acceptance_hours)').eq('id',body.gameId).single()
+  const deadlineLeague=Array.isArray((deadlineGame as any)?.leagues)?(deadlineGame as any).leagues[0]:(deadlineGame as any)?.leagues
+  const responseHours=Number(deadlineLeague?.assignment_acceptance_hours||24)
+  const responseAt=new Date(Math.max(Date.now()+300000,Math.min(Date.now()+responseHours*3600000,new Date((deadlineGame as any)?.starts_at||Date.now()+responseHours*3600000).getTime()-3600000))).toISOString()
+  const {error:deadlineError}=await service.from('assignments').update({accept_by:responseAt}).eq('game_id',body.gameId).not('published_at','is',null).eq('status','proposed')
+  if(deadlineError)return NextResponse.json({error:deadlineError.message},{status:400})
   const {data:rows,error:loadError}=await service.from('assignments').select('id,status,published_at,accept_by,response_token,email_sent_at,officials(first_name,last_name,email),sport_positions(name),games(starts_at,notes,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name,address,city,state),leagues(name),levels(name))').eq('game_id',body.gameId).not('published_at','is',null).is('email_sent_at',null)
   if(loadError)return NextResponse.json({error:loadError.message},{status:400})
   const apiKey=process.env.RESEND_API_KEY

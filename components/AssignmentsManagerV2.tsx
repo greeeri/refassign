@@ -15,8 +15,8 @@ type Game = {
   duration_minutes: number;
   officials_needed: number;
   sports: { name: string } | null;
-  leagues: { name: string } | null;
-  levels: { name: string } | null;
+  leagues: { name: string; assignment_fill_target_days: number; assignment_acceptance_hours: number; assignment_escalation_days: number; assignment_reminder_hours: number } | null;
+  levels: { id: string; name: string } | null;
   home: Team | null;
   away: Team | null;
   location: {
@@ -136,6 +136,7 @@ type SavedAssignmentView = {
   unpublishedOnly: boolean;
   selfAssignOnly: boolean;
 };
+type QuickEditDraft = { gameId: string; startsAt: string; durationMinutes: number; locationId: string; levelId: string };
 type BulkActionResult = {
   action: string;
   succeeded: number;
@@ -349,6 +350,12 @@ export default function AssignmentsManagerV2() {
     [activityLoading, setActivityLoading] = useState(false),
     [activityError, setActivityError] = useState(""),
     [savedViews, setSavedViews] = useState<SavedAssignmentView[]>([]),
+    [quickEdit, setQuickEdit] = useState<QuickEditDraft | null>(null),
+    [quickEditSaving, setQuickEditSaving] = useState(false),
+    [showDeadlineSettings, setShowDeadlineSettings] = useState(false),
+    [deadlineLeagueId, setDeadlineLeagueId] = useState(""),
+    [deadlineDraft, setDeadlineDraft] = useState({ fill: 14, acceptance: 24, escalation: 3, reminder: 24 }),
+    [deadlineSaving, setDeadlineSaving] = useState(false),
     [showCoverageForecast, setShowCoverageForecast] = useState(false),
     [candidatePositionId, setCandidatePositionId] = useState(""),
     [replacementPublishing, setReplacementPublishing] = useState(""),
@@ -374,7 +381,7 @@ export default function AssignmentsManagerV2() {
       supabase
         .from("games")
         .select(
-          "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,duration_minutes,officials_needed,sports(name),leagues(name),levels(name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,city,state,latitude,longitude)",
+          "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,city,state,latitude,longitude)",
         )
         .order("starts_at"),
       supabase
@@ -504,14 +511,7 @@ export default function AssignmentsManagerV2() {
   useEffect(() => {
     void load();
   }, []);
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem("refassign-assignment-views");
-      if (stored) setSavedViews(JSON.parse(stored) as SavedAssignmentView[]);
-    } catch {
-      localStorage.removeItem("refassign-assignment-views");
-    }
-  }, []);
+  useEffect(() => { void loadSavedViews(); }, []);
   async function refreshAssignmentState() {
     const [assignmentResult, selfAssignResult, unassignmentResult] = await Promise.all([
       supabase
@@ -1220,6 +1220,8 @@ export default function AssignmentsManagerV2() {
   const unpublishedAssignments = gameAssignments.filter(
     (assignment) => !assignment.published_at && assignment.status !== "declined",
   );
+  const publishMissingEmails = unpublishedAssignments.filter((assignment) => !officials.find((item) => item.id === assignment.official_id)?.email).length;
+  const publishAcceptanceHours = game?.leagues?.assignment_acceptance_hours ?? 24;
   const activeAssignmentCount = gameAssignments.filter(
     (a) => !["declined", "cancelled"].includes(a.status),
   ).length;
@@ -1237,6 +1239,10 @@ export default function AssignmentsManagerV2() {
       a.status === "cancelled" &&
       !a.cancellation_notified_at,
   ).length;
+  function workloadWindow(officialId: string, days: number) {
+    const now = Date.now(), end = now + days * 86400000;
+    return assignments.filter((item) => item.official_id === officialId && !["declined", "cancelled"].includes(item.status)).filter((item) => { const start = new Date(games.find((listed) => listed.id === item.game_id)?.starts_at || 0).getTime(); return start >= now && start <= end; }).length;
+  }
   function requestSelectedGame(nextGameId: string) {
     if (
       nextGameId &&
@@ -1291,16 +1297,15 @@ export default function AssignmentsManagerV2() {
     setSelected("");
     setLinkSelected([]);
   }
-  function storeSavedViews(next: SavedAssignmentView[]) {
-    setSavedViews(next);
-    localStorage.setItem("refassign-assignment-views", JSON.stringify(next));
+  async function loadSavedViews() {
+    const { data, error: viewError } = await supabase.from("assignment_saved_views").select("id,name,filters").order("updated_at", { ascending: false });
+    if (viewError) return;
+    setSavedViews((data || []).map((row) => ({ id: row.id, name: row.name, ...(row.filters as Omit<SavedAssignmentView, "id" | "name">) })));
   }
-  function saveCurrentView() {
+  async function saveCurrentView() {
     const name = window.prompt("Name this Assignment Center view:")?.trim();
     if (!name) return;
-    const nextView: SavedAssignmentView = {
-      id: `${Date.now()}`,
-      name,
+    const filters = {
       range,
       customDate,
       locationFilter,
@@ -1311,8 +1316,12 @@ export default function AssignmentsManagerV2() {
       unpublishedOnly,
       selfAssignOnly,
     };
-    storeSavedViews([...savedViews.filter((view) => view.name !== name), nextView]);
-    setNotice(`Saved view “${name}”.`);
+    const { data: auth } = await supabase.auth.getUser();
+    if (!auth.user) return setError("Sign in to save a shared view.");
+    const { error: saveError } = await supabase.from("assignment_saved_views").upsert({ user_id: auth.user.id, name, filters, updated_at: new Date().toISOString() }, { onConflict: "user_id,name" });
+    if (saveError) return setError(saveError.message);
+    await loadSavedViews();
+    setNotice(`Saved shared view “${name}”.`);
   }
   function applySavedView(view: SavedAssignmentView) {
     setRange(view.range);
@@ -1328,8 +1337,10 @@ export default function AssignmentsManagerV2() {
     setSelected("");
     setNotice(`Showing saved view “${view.name}”.`);
   }
-  function deleteSavedView(viewId: string) {
-    storeSavedViews(savedViews.filter((view) => view.id !== viewId));
+  async function deleteSavedView(viewId: string) {
+    const { error: deleteError } = await supabase.from("assignment_saved_views").delete().eq("id", viewId);
+    if (deleteError) return setError(deleteError.message);
+    setSavedViews((current) => current.filter((view) => view.id !== viewId));
   }
   function linkedAssignmentGames() {
     if (!game) return [];
@@ -2543,11 +2554,36 @@ export default function AssignmentsManagerV2() {
     setConfirming("");
   }
   function requestGameStatusChange(gameId: string, status: string) {
-    if (["canceled", "rained_out"].includes(status)) {
-      setPendingGameStatus({ gameId, status });
-      return;
-    }
-    void changeGameStatus(gameId, status);
+    setPendingGameStatus({ gameId, status });
+  }
+  function openQuickEdit(target: Game) {
+    const date = new Date(target.starts_at);
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    setQuickEdit({ gameId: target.id, startsAt: local, durationMinutes: target.duration_minutes, locationId: target.location_id || "", levelId: target.level_id || "" });
+  }
+  async function saveQuickEdit() {
+    if (!quickEdit) return;
+    if (!quickEdit.startsAt || quickEdit.durationMinutes < 15 || quickEdit.durationMinutes > 480) return setError("Enter a valid game time and duration between 15 and 480 minutes.");
+    setQuickEditSaving(true); setError("");
+    const { error: updateError } = await supabase.from("games").update({ starts_at: new Date(quickEdit.startsAt).toISOString(), duration_minutes: quickEdit.durationMinutes, location_id: quickEdit.locationId || null, level_id: quickEdit.levelId || null }).eq("id", quickEdit.gameId);
+    if (updateError) setError(updateError.message);
+    else { setQuickEdit(null); setNotice("Game updated. Assignment impacts were reviewed and the activity was recorded."); await load(); }
+    setQuickEditSaving(false);
+  }
+  function deadlineState(target: Game) {
+    const staffing = staffingCounts(target);
+    if (!staffing.open) return { label: "Filled", color: "#15803d" };
+    const targetAt = new Date(target.starts_at).getTime() - (target.leagues?.assignment_fill_target_days ?? 14) * 86400000;
+    const days = Math.ceil((targetAt - Date.now()) / 86400000);
+    return days < 0 ? { label: `${Math.abs(days)}d overdue`, color: "#b91c1c" } : days <= 3 ? { label: `Due in ${days}d`, color: "#b45309" } : { label: `Target ${days}d`, color: "#475569" };
+  }
+  async function saveDeadlineSettings() {
+    if (!deadlineLeagueId) return;
+    setDeadlineSaving(true);
+    const values = { assignment_fill_target_days: deadlineDraft.fill, assignment_acceptance_hours: deadlineDraft.acceptance, assignment_escalation_days: deadlineDraft.escalation, assignment_reminder_hours: deadlineDraft.reminder };
+    const { error: deadlineError } = await supabase.from("leagues").update(values).eq("id", deadlineLeagueId);
+    if (deadlineError) setError(deadlineError.message); else { setShowDeadlineSettings(false); setNotice("Assignment deadlines updated for the league."); await load(); }
+    setDeadlineSaving(false);
   }
   async function changeGameStatus(gameId: string, status: string) {
     if (!canManage) {
@@ -3295,10 +3331,12 @@ export default function AssignmentsManagerV2() {
           <span className="assignmentStaffingCount">
             <b>{staffing.filled} of {staffing.total}</b> filled
             <small>{staffing.open ? `${staffing.open} open` : "Fully staffed"}</small>
+            <small style={{ color: deadlineState(g).color }}>{deadlineState(g).label}</small>
           </span>
           <span className="assignmentStaffingBar" aria-label={`${staffing.filled} of ${staffing.total} positions filled`}>
             <span style={{ width: `${staffing.total ? Math.round((staffing.filled / staffing.total) * 100) : 100}%` }} />
           </span>
+          {canManage && <button type="button" className="secondary" style={{ padding: "3px 7px", fontSize: 10 }} onClick={(event) => { event.stopPropagation(); openQuickEdit(g); }}>Quick Edit</button>}
         </div>
       </div>
     );
@@ -3559,7 +3597,7 @@ export default function AssignmentsManagerV2() {
                     <div className="bulkCrewPosition"><strong>{slot.position.name}</strong><span>{rankLabel(slot.position)} position</span></div>
                     <label><span>Official</span><select value={bulkCrewSelections[slot.key] || ""} disabled={bulkCrewWorking} onChange={(event) => { setBulkCrewSelections((current) => ({ ...current, [slot.key]: event.target.value })); setBulkCrewOverrideConfirmed(false); setBulkCrewMessage(""); }}>
                       <option value="">Leave open</option>
-                      {eligible.length > 0 && <optgroup label="Eligible — recommended first">{eligible.map((candidate, index) => <option key={candidate.official.id} value={candidate.official.id}>{index === 0 ? "★ " : ""}{candidate.official.last_name}, {candidate.official.first_name} — {rankLabel(slot.position)} {candidate.rank.toFixed(1)}{candidate.distance != null ? ` — ${candidate.distance.toFixed(1)} mi` : ""} — {candidate.workload} assigned</option>)}</optgroup>}
+                      {eligible.length > 0 && <optgroup label="Eligible — recommended first">{eligible.map((candidate, index) => <option key={candidate.official.id} value={candidate.official.id}>{index === 0 ? "★ " : ""}{candidate.official.last_name}, {candidate.official.first_name} — {rankLabel(slot.position)} {candidate.rank.toFixed(1)}{candidate.distance != null ? ` — ${candidate.distance.toFixed(1)} mi` : ""} — {workloadWindow(candidate.official.id, 7)} in 7d / {workloadWindow(candidate.official.id, 30)} in 30d</option>)}</optgroup>}
                       {overrides.length > 0 && <optgroup label="Override required">{overrides.map((candidate) => <option key={candidate.official.id} value={candidate.official.id}>{candidate.official.last_name}, {candidate.official.first_name} — {candidate.warnings[0]}</option>)}</optgroup>}
                     </select></label>
                     {recommendation && <small className="recommendation">Recommended: {recommendation.official.first_name} {recommendation.official.last_name} · {rankLabel(slot.position)} {recommendation.rank.toFixed(1)}{recommendation.distance != null ? ` · ${recommendation.distance.toFixed(1)} mi` : ""}</small>}
@@ -3615,6 +3653,7 @@ export default function AssignmentsManagerV2() {
                 >
                   Coverage Forecast
                 </button>
+                <button type="button" className="secondary" onClick={() => { const first = games.find((item) => item.league_id); if (first?.league_id) { setDeadlineLeagueId(first.league_id); setDeadlineDraft({ fill: first.leagues?.assignment_fill_target_days ?? 14, acceptance: first.leagues?.assignment_acceptance_hours ?? 24, escalation: first.leagues?.assignment_escalation_days ?? 3, reminder: first.leagues?.assignment_reminder_hours ?? 24 }); } setShowDeadlineSettings(true); }}>Deadline Settings</button>
                 <button
                   className="secondary"
                   disabled={!filteredGames.length}
@@ -3662,6 +3701,31 @@ export default function AssignmentsManagerV2() {
             <button type="button" aria-label="Dismiss message" onClick={() => setNotice("")}>×</button>
           </div>
         )}
+        {quickEdit && (() => {
+          const target = games.find((item) => item.id === quickEdit.gameId)!;
+          const active = assignments.filter((item) => item.game_id === target.id && !["declined", "cancelled"].includes(item.status));
+          const linkedCount = linkMembers.filter((item) => item.group_id === linkGroupByGame.get(target.id)).length;
+          const changedTime = (quickEdit.startsAt ? new Date(quickEdit.startsAt).toISOString() : "") !== target.starts_at || quickEdit.durationMinutes !== target.duration_minutes;
+          const changedVenue = quickEdit.locationId !== (target.location_id || "");
+          const changedLevel = quickEdit.levelId !== (target.level_id || "");
+          return <div className="assignmentDialogBackdrop" role="presentation" onMouseDown={() => !quickEditSaving && setQuickEdit(null)}><div className="assignmentDialog assignmentPublishReview" role="dialog" aria-modal="true" aria-labelledby="quickEditTitle" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="assignmentDialogHead"><div><h3 id="quickEditTitle">Quick Edit & Impact Review</h3><p>Game #{target.game_number} — review downstream assignment effects before saving.</p></div><button type="button" aria-label="Close" onClick={() => setQuickEdit(null)}>×</button></div>
+            <div className="publishReviewSummary"><span><b>{active.length}</b> assigned officials affected</span><span className={active.some((item) => item.published_at) ? "warning" : "ready"}><b>{active.filter((item) => item.published_at).length}</b> published notifications</span><span><b>{linkedCount || 0}</b> linked games in group</span></div>
+            <div className="assignmentDirectFilters" style={{ padding: 16 }}>
+              <label>Date & time<input type="datetime-local" value={quickEdit.startsAt} onChange={(e) => setQuickEdit({ ...quickEdit, startsAt: e.target.value })}/></label>
+              <label>Duration (minutes)<input type="number" min="15" max="480" value={quickEdit.durationMinutes} onChange={(e) => setQuickEdit({ ...quickEdit, durationMinutes: Number(e.target.value) })}/></label>
+              <label>Location<select value={quickEdit.locationId} onChange={(e) => setQuickEdit({ ...quickEdit, locationId: e.target.value })}><option value="">TBD</option>{Array.from(new Map(games.filter((item) => item.location).map((item) => [item.location!.id, item.location!.name])).entries()).map(([id,name]) => <option key={id} value={id}>{name}</option>)}</select></label>
+              <label>Level<select value={quickEdit.levelId} onChange={(e) => setQuickEdit({ ...quickEdit, levelId: e.target.value })}><option value="">No level</option>{Array.from(new Map(games.filter((item) => item.levels).map((item) => [item.levels!.id, item.levels!.name])).entries()).map(([id,name]) => <option key={id} value={id}>{name}</option>)}</select></label>
+            </div>
+            <p className="publishReviewNote">Review required: {[changedTime && "time/conflict impact", changedVenue && "travel impact", changedLevel && "eligibility impact"].filter(Boolean).join(", ") || "no schedule, venue, or level changes yet"}. Published officials may need an updated notice.</p>
+            <div className="assignmentDialogFooter"><button type="button" className="secondary" onClick={() => setQuickEdit(null)}>Cancel</button><button type="button" className="primary" disabled={quickEditSaving} onClick={() => void saveQuickEdit()}>{quickEditSaving ? "Saving…" : "Save Reviewed Changes"}</button></div>
+          </div></div>;
+        })()}
+        {showDeadlineSettings && <div className="assignmentDialogBackdrop" role="presentation" onMouseDown={() => !deadlineSaving && setShowDeadlineSettings(false)}><div className="assignmentDialog assignmentConfirmDialog" role="dialog" aria-modal="true" aria-labelledby="deadlineTitle" onMouseDown={(event) => event.stopPropagation()}>
+          <div className="assignmentDialogHead"><div><h3 id="deadlineTitle">Assignment Deadlines</h3><p>Set league-level staffing targets, acceptance windows, reminders, and escalation timing.</p></div><button type="button" onClick={() => setShowDeadlineSettings(false)}>×</button></div>
+          <div className="assignmentDirectFilters" style={{ padding: 16 }}><label>League<select value={deadlineLeagueId} onChange={(e) => { const next = games.find((item) => item.league_id === e.target.value); setDeadlineLeagueId(e.target.value); if (next) setDeadlineDraft({ fill: next.leagues?.assignment_fill_target_days ?? 14, acceptance: next.leagues?.assignment_acceptance_hours ?? 24, escalation: next.leagues?.assignment_escalation_days ?? 3, reminder: next.leagues?.assignment_reminder_hours ?? 24 }); }}>{Array.from(new Map(games.filter((item) => item.league_id && item.leagues).map((item) => [item.league_id!, item.leagues!.name])).entries()).map(([id,name]) => <option key={id} value={id}>{name}</option>)}</select></label><label>Fill target (days before)<input type="number" min="0" max="90" value={deadlineDraft.fill} onChange={(e) => setDeadlineDraft({...deadlineDraft,fill:Number(e.target.value)})}/></label><label>Acceptance window (hours)<input type="number" min="1" max="168" value={deadlineDraft.acceptance} onChange={(e) => setDeadlineDraft({...deadlineDraft,acceptance:Number(e.target.value)})}/></label><label>Reminder (hours before due)<input type="number" min="1" max="168" value={deadlineDraft.reminder} onChange={(e) => setDeadlineDraft({...deadlineDraft,reminder:Number(e.target.value)})}/></label><label>Escalate after (days)<input type="number" min="0" max="30" value={deadlineDraft.escalation} onChange={(e) => setDeadlineDraft({...deadlineDraft,escalation:Number(e.target.value)})}/></label></div>
+          <div className="assignmentDialogFooter"><button type="button" className="secondary" onClick={() => setShowDeadlineSettings(false)}>Cancel</button><button type="button" className="primary" disabled={!deadlineLeagueId || deadlineSaving} onClick={() => void saveDeadlineSettings()}>{deadlineSaving ? "Saving…" : "Save Deadlines"}</button></div>
+        </div></div>}
         {pendingGameStatus && (
           <div className="assignmentDialogBackdrop" role="presentation" onMouseDown={() => !gameStatusSaving && setPendingGameStatus(null)}>
             <div className="assignmentDialog assignmentConfirmDialog" role="dialog" aria-modal="true" aria-labelledby="gameStatusConfirmTitle" onMouseDown={(event) => event.stopPropagation()}>
@@ -3674,9 +3738,7 @@ export default function AssignmentsManagerV2() {
                 </div>
                 <button type="button" aria-label="Close" disabled={Boolean(gameStatusSaving)} onClick={() => setPendingGameStatus(null)}>×</button>
               </div>
-              <div className="assignmentConfirmMessage">
-                Assigned officials will be notified of this change.
-              </div>
+              {(() => { const affected = assignments.filter((item) => item.game_id === pendingGameStatus.gameId && !["declined", "cancelled"].includes(item.status)); const published = affected.filter((item) => item.published_at); const linked = linkMembers.filter((item) => item.group_id === linkGroupByGame.get(pendingGameStatus.gameId)).length; const sends = ["canceled", "rained_out"].includes(pendingGameStatus.status); return <><div className="publishReviewSummary"><span><b>{affected.length}</b> assignments affected</span><span className={published.length ? "warning" : "ready"}><b>{sends ? published.length : 0}</b> official notices</span><span><b>{linked || 0}</b> linked games</span></div><div className="assignmentConfirmMessage">{sends ? "Published officials will receive a cancellation or rain-out notice. Assignments will be closed." : "No automatic official email is sent for this status. Existing assignments remain available for review."}</div></>; })()}
               <div className="assignmentDialogFooter">
                 <button type="button" className="secondary" disabled={Boolean(gameStatusSaving)} onClick={() => setPendingGameStatus(null)}>Keep Current Status</button>
                 <button type="button" className="danger" disabled={Boolean(gameStatusSaving)} onClick={() => void changeGameStatus(pendingGameStatus.gameId, pendingGameStatus.status)}>
@@ -3754,7 +3816,7 @@ export default function AssignmentsManagerV2() {
                     <article key={candidate.id} className={candidate.reasons.length ? "candidateWarning" : "candidateEligible"}>
                       <div>
                         <b>{candidateIndex + 1}. {candidate.first_name} {candidate.last_name}</b>
-                        <span>{label} {candidate.rank.toFixed(1)}{candidate.distance != null ? ` • ${candidate.distance.toFixed(1)} mi` : ""}</span>
+                        <span>{label} {candidate.rank.toFixed(1)}{candidate.distance != null ? ` • ${candidate.distance.toFixed(1)} mi` : ""} • {workloadWindow(candidate.id, 7)} games/7d • {workloadWindow(candidate.id, 30)} games/30d</span>
                         <small>{candidate.reasons.length ? candidate.reasons.join(" • ") : "Eligible and conflict-free"}</small>
                         <details className="candidateDetails">
                           <summary>View details</summary>
@@ -3819,6 +3881,8 @@ export default function AssignmentsManagerV2() {
               <div className="publishReviewSummary">
                 <span><b>{unpublishedCount}</b> official{unpublishedCount === 1 ? "" : "s"} will be notified</span>
                 <span className={openPositionCount ? "warning" : "ready"}><b>{openPositionCount}</b> open position{openPositionCount === 1 ? "" : "s"}</span>
+                <span className={publishMissingEmails ? "warning" : "ready"}><b>{publishMissingEmails}</b> missing email{publishMissingEmails === 1 ? "" : "s"}</span>
+                <span><b>{publishAcceptanceHours}h</b> response window</span>
               </div>
               <div className="publishRecipientList">
                 {unpublishedAssignments.map((assignment) => {
@@ -3827,10 +3891,10 @@ export default function AssignmentsManagerV2() {
                   return <div key={assignment.id}><span><b>{official ? `${official.first_name} ${official.last_name}` : "Unknown official"}</b><small>{position ? shortPositionName(position.name) : "Official"}</small></span><span className={official?.email ? "recipientReady" : "recipientMissing"}>{official?.email || "Email missing"}</span></div>;
                 })}
               </div>
-              <p className="publishReviewNote">Publishing sends each listed official an assignment email with their response deadline. Open positions are not included.</p>
+              <p className="publishReviewNote">Publishing sends each listed official an assignment email with the league response deadline. Open positions are not included.{publishMissingEmails ? " Add the missing email before publishing." : " Recipient checks passed."}</p>
               <div className="assignmentDialogFooter">
                 <button type="button" className="secondary" disabled={publishing} onClick={() => setShowPublishReview(false)}>Go Back</button>
-                <button type="button" className="primary" disabled={publishing || !unpublishedCount} onClick={() => void publishAssignments()}>{publishing ? "Publishing & Sending…" : `Publish ${unpublishedCount} Assignment${unpublishedCount === 1 ? "" : "s"}`}</button>
+                <button type="button" className="primary" disabled={publishing || !unpublishedCount || Boolean(publishMissingEmails)} onClick={() => void publishAssignments()}>{publishing ? "Publishing & Sending…" : `Publish ${unpublishedCount} Assignment${unpublishedCount === 1 ? "" : "s"}`}</button>
               </div>
             </div>
           </div>
