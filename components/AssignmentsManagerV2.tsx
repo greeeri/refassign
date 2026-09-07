@@ -104,6 +104,10 @@ type AuditEvent = {
   summary: string;
   occurred_at: string;
 };
+type UnassignmentAudit = {
+  game_id: string | null;
+  old_data: { position_id?: string } | null;
+};
 type SavedAssignmentView = {
   id: string;
   name: string;
@@ -312,6 +316,7 @@ export default function AssignmentsManagerV2() {
     [savedViews, setSavedViews] = useState<SavedAssignmentView[]>([]),
     [showCoverageForecast, setShowCoverageForecast] = useState(false),
     [replacementPublishing, setReplacementPublishing] = useState(""),
+    [unassignedSlotKeys, setUnassignedSlotKeys] = useState<string[]>([]),
     [pendingReplacement, setPendingReplacement] = useState<{
       positionId: string;
       officialId: string;
@@ -328,7 +333,7 @@ export default function AssignmentsManagerV2() {
         ),
       );
     } else setCanManage(false);
-    const [g, o, p, a, r, pr, pw, le, ve, bl, lg, lm, sas] = await Promise.all([
+    const [g, o, p, a, r, pr, pw, le, ve, bl, lg, lm, sas, ah] = await Promise.all([
       supabase
         .from("games")
         .select(
@@ -382,6 +387,10 @@ export default function AssignmentsManagerV2() {
         .from("assignment_self_assign_slots")
         .select("id,game_id,position_id,status")
         .eq("status", "open"),
+      supabase
+        .from("audit_history")
+        .select("game_id,old_data")
+        .eq("action", "unassigned"),
     ]);
     const err =
       g.error ||
@@ -396,7 +405,8 @@ export default function AssignmentsManagerV2() {
       bl.error ||
       lg.error ||
       lm.error ||
-      sas.error;
+      sas.error ||
+      ah.error;
     if (err) {
       setError(err.message);
       return;
@@ -433,6 +443,13 @@ export default function AssignmentsManagerV2() {
     setLinkGroups((lg.data || []) as LinkGroup[]);
     setLinkMembers((lm.data || []) as LinkMember[]);
     setSelfAssignSlots((sas.data || []) as SelfAssignSlot[]);
+    setUnassignedSlotKeys(
+      [...new Set(((ah.data || []) as UnassignmentAudit[]).flatMap((row) =>
+        row.game_id && row.old_data?.position_id
+          ? [`${row.game_id}:${row.old_data.position_id}`]
+          : [],
+      ))],
+    );
     const sorted = ((g.data || []) as unknown as Game[]).sort(
       (x, y) =>
         gamePower(y, pm) - gamePower(x, pm) ||
@@ -453,7 +470,7 @@ export default function AssignmentsManagerV2() {
     }
   }, []);
   async function refreshAssignmentState() {
-    const [assignmentResult, selfAssignResult] = await Promise.all([
+    const [assignmentResult, selfAssignResult, unassignmentResult] = await Promise.all([
       supabase
         .from("assignments")
         .select(
@@ -463,14 +480,25 @@ export default function AssignmentsManagerV2() {
         .from("assignment_self_assign_slots")
         .select("id,game_id,position_id,status")
         .eq("status", "open"),
+      supabase
+        .from("audit_history")
+        .select("game_id,old_data")
+        .eq("action", "unassigned"),
     ]);
-    const refreshError = assignmentResult.error || selfAssignResult.error;
+    const refreshError = assignmentResult.error || selfAssignResult.error || unassignmentResult.error;
     if (refreshError) {
       setError(refreshError.message);
       return false;
     }
     setAssignments((assignmentResult.data || []) as Assignment[]);
     setSelfAssignSlots((selfAssignResult.data || []) as SelfAssignSlot[]);
+    setUnassignedSlotKeys(
+      [...new Set(((unassignmentResult.data || []) as UnassignmentAudit[]).flatMap((row) =>
+        row.game_id && row.old_data?.position_id
+          ? [`${row.game_id}:${row.old_data.position_id}`]
+          : [],
+      ))],
+    );
     return true;
   }
   function gamePower(g: Game, map = powers) {
@@ -478,6 +506,24 @@ export default function AssignmentsManagerV2() {
       ((g.home ? (map[g.home.id] ?? 1) : 1) +
         (g.away ? (map[g.away.id] ?? 1) : 1)) /
       2
+    );
+  }
+  function isReplacementNeeded(gameId: string, positionId: string) {
+    const hasActiveAssignment = assignments.some(
+      (assignment) =>
+        assignment.game_id === gameId &&
+        assignment.position_id === positionId &&
+        assignment.status !== "declined",
+    );
+    if (hasActiveAssignment) return false;
+    return (
+      unassignedSlotKeys.includes(`${gameId}:${positionId}`) ||
+      assignments.some(
+        (assignment) =>
+          assignment.game_id === gameId &&
+          assignment.position_id === positionId &&
+          assignment.status === "declined",
+      )
     );
   }
   function isUnpublishedGame(g: Game) {
@@ -498,18 +544,13 @@ export default function AssignmentsManagerV2() {
           slots.some((slot) => slot.id === assignment.position_id),
       ),
       filled = new Set(active.map((assignment) => assignment.position_id)).size,
-      declined = assignments.filter(
-        (assignment) =>
-          assignment.game_id === g.id &&
-          assignment.status === "declined" &&
-          slots.some((slot) => slot.id === assignment.position_id),
-      );
-    if (declined.length)
+      replacementCount = slots.filter((slot) => isReplacementNeeded(g.id, slot.id)).length;
+    if (replacementCount)
       return {
         key: "attention" as const,
         label: "Needs Attention",
         color: "#dc2626",
-        detail: `${declined.length} declined position${declined.length === 1 ? "" : "s"} need replacement`,
+        detail: `${replacementCount} position${replacementCount === 1 ? "" : "s"} need replacement`,
       };
     if (!slots.length || filled === 0)
       return {
@@ -1131,15 +1172,9 @@ export default function AssignmentsManagerV2() {
   const assignmentEmailIssues = gameAssignments.filter(
     (a) => a.published_at && !a.email_sent_at,
   ).length;
-  const replacementNeededAssignments = gameAssignments.filter(
-    (assignment) =>
-      assignment.status === "declined" &&
-      !gameAssignments.some(
-        (active) =>
-          active.position_id === assignment.position_id &&
-          active.status !== "declined",
-      ),
-  );
+  const replacementNeededAssignments = gamePositions
+    .filter((position) => game && isReplacementNeeded(game.id, position.id))
+    .map((position) => ({ position_id: position.id }));
   const cancellationEmailsSent = gameAssignments.filter(
     (a) => a.cancellation_notified_at,
   ).length;
@@ -2579,17 +2614,10 @@ export default function AssignmentsManagerV2() {
   ];
   const attentionQueue = {
     replacements: rangeGames.filter((listedGame) =>
-      assignments.some(
-        (assignment) =>
-          assignment.game_id === listedGame.id &&
-          assignment.status === "declined" &&
-          !assignments.some(
-            (active) =>
-              active.game_id === listedGame.id &&
-              active.position_id === assignment.position_id &&
-              active.status !== "declined",
-          ),
-      ),
+      positions
+        .filter((position) => position.sport_id === listedGame.sport_id)
+        .slice(0, listedGame.officials_needed)
+        .some((position) => isReplacementNeeded(listedGame.id, position.id)),
     ).length,
     needsAction: rangeGames.filter(
       (listedGame) => assignmentCompleteness(listedGame).key === "attention",
@@ -3531,7 +3559,7 @@ export default function AssignmentsManagerV2() {
             <div><h3 id="attentionQueueTitle">Needs Attention</h3><p>Open the work that should be handled next.</p></div>
             <button type="button" onClick={() => {
               chooseCompleteness("attention");
-              const replacementGame = rangeGames.find((listedGame) => assignments.some((assignment) => assignment.game_id === listedGame.id && assignment.status === "declined" && !assignments.some((active) => active.game_id === listedGame.id && active.position_id === assignment.position_id && active.status !== "declined")));
+              const replacementGame = rangeGames.find((listedGame) => positions.filter((position) => position.sport_id === listedGame.sport_id).slice(0, listedGame.officials_needed).some((position) => isReplacementNeeded(listedGame.id, position.id)));
               if (replacementGame) setSelected(replacementGame.id);
             }}><b>{attentionQueue.replacements}</b><span>Replacement needed</span></button>
             <button type="button" onClick={() => chooseCompleteness("unassigned")}><b>{attentionQueue.unassigned}</b><span>Unassigned games</span></button>
@@ -4458,7 +4486,8 @@ export default function AssignmentsManagerV2() {
                             a.game_id === game.id &&
                             a.position_id === pos.id &&
                             a.status === "declined",
-                        ),
+                          ),
+                        replacementNeeded = isReplacementNeeded(game.id, pos.id),
                         list = candidates(pos),
                         label = rankLabel(pos),
                         status = current ? assignmentStatus(current) : null;
@@ -4534,7 +4563,7 @@ export default function AssignmentsManagerV2() {
                               )}
                               <div>
                                 <b>{shortPositionName(pos.name)}</b>
-                                {declined && !current && (
+                                {replacementNeeded && !current && (
                                   <span
                                     className="badge red"
                                     style={{ marginLeft: 6 }}
@@ -4666,12 +4695,12 @@ export default function AssignmentsManagerV2() {
                                     </div>
                                   )}
                               </div>
-                            ) : declined ? (
+                            ) : replacementNeeded ? (
                               <div>
                                 <b style={{ color: "#b91c1c" }}>
-                                  Open — official declined
+                                  {declined ? "Open — official declined" : "Open — replacement needed"}
                                 </b>
-                                <small>
+                                {declined && <small>
                                   {
                                     officials.find(
                                       (o) => o.id === declined.official_id,
@@ -4688,7 +4717,7 @@ export default function AssignmentsManagerV2() {
                                   {declined.responded_at
                                     ? ` • ${new Date(declined.responded_at).toLocaleString()}`
                                     : ""}
-                                </small>
+                                </small>}
                               </div>
                             ) : (
                               "Open"
@@ -4708,8 +4737,8 @@ export default function AssignmentsManagerV2() {
                                     </small>
                                   )}
                               </>
-                            ) : declined ? (
-                              <span className="badge red">Declined</span>
+                            ) : replacementNeeded ? (
+                              <span className="badge red">Replacement Needed</span>
                             ) : (
                               <span>—</span>
                             )}
@@ -4765,7 +4794,7 @@ export default function AssignmentsManagerV2() {
                                 )}
                               </div>
                             </details>
-                            {declined && !current && (
+                            {replacementNeeded && !current && (
                               <div
                                 style={{
                                   marginTop: 7,
