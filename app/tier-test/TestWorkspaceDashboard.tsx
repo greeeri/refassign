@@ -18,6 +18,7 @@ const viewerSections=[
  ["training_documents","Training and documents"]
 ] as const;
 const editableRoles=["assignor","admin","billing","viewer"] as const;
+// Keep the test workspace navigation aligned with persisted organization access.
 const sectionDetails:Record<Exclude<Tab,"team">,{label:string;nav:string;icon:string}>={
  overview:{label:"Overview",nav:"Overview",icon:"⌂"},leagues:{label:"Leagues & coverage",nav:"Leagues & coverage",icon:"▦"},
  games:{label:"Games & schedules",nav:"Games & schedules",icon:"▣"},assignments:{label:"Assignments",nav:"Assignments",icon:"⇄"},
