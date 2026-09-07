@@ -97,6 +97,21 @@ type SelfAssignSlot = {
   position_id: string;
   status: "open" | "claimed" | "withdrawn";
 };
+type AssignmentTemplateSlot = {
+  id: string;
+  position_id: string;
+  official_id: string;
+  sort_order: number;
+};
+type AssignmentTemplate = {
+  id: string;
+  name: string;
+  sport_id: string;
+  league_id: string | null;
+  created_by: string;
+  updated_at: string;
+  assignment_template_slots: AssignmentTemplateSlot[];
+};
 type AuditEvent = {
   id: number;
   action: string;
@@ -307,6 +322,12 @@ export default function AssignmentsManagerV2() {
     [bulkCrewWorking, setBulkCrewWorking] = useState(false),
     [bulkCrewMessage, setBulkCrewMessage] = useState(""),
     [bulkCrewOverrideConfirmed, setBulkCrewOverrideConfirmed] = useState(false),
+    [assignmentTemplates, setAssignmentTemplates] = useState<AssignmentTemplate[]>([]),
+    [showCrewTemplates, setShowCrewTemplates] = useState(false),
+    [crewTemplateName, setCrewTemplateName] = useState(""),
+    [copyCrewSourceGameId, setCopyCrewSourceGameId] = useState(""),
+    [crewTemplateWorking, setCrewTemplateWorking] = useState(false),
+    [crewTemplateMessage, setCrewTemplateMessage] = useState(""),
     [selfAssignSlots, setSelfAssignSlots] = useState<SelfAssignSlot[]>([]),
     [selfAssignSelected, setSelfAssignSelected] = useState<string[]>([]),
     [selfAssignSaving, setSelfAssignSaving] = useState(false),
@@ -349,7 +370,7 @@ export default function AssignmentsManagerV2() {
         ),
       );
     } else setCanManage(false);
-    const [g, o, p, a, r, pr, pw, le, ve, bl, lg, lm, sas, ah] = await Promise.all([
+    const [g, o, p, a, r, pr, pw, le, ve, bl, lg, lm, sas, ah, at] = await Promise.all([
       supabase
         .from("games")
         .select(
@@ -407,6 +428,10 @@ export default function AssignmentsManagerV2() {
         .from("audit_history")
         .select("game_id,old_data")
         .eq("action", "unassigned"),
+      supabase
+        .from("assignment_templates")
+        .select("id,name,sport_id,league_id,created_by,updated_at,assignment_template_slots(id,position_id,official_id,sort_order)")
+        .order("updated_at", { ascending: false }),
     ]);
     const err =
       g.error ||
@@ -422,7 +447,8 @@ export default function AssignmentsManagerV2() {
       lg.error ||
       lm.error ||
       sas.error ||
-      ah.error;
+      ah.error ||
+      at.error;
     if (err) {
       setError(err.message);
       return;
@@ -459,6 +485,7 @@ export default function AssignmentsManagerV2() {
     setLinkGroups((lg.data || []) as LinkGroup[]);
     setLinkMembers((lm.data || []) as LinkMember[]);
     setSelfAssignSlots((sas.data || []) as SelfAssignSlot[]);
+    setAssignmentTemplates((at.data || []) as AssignmentTemplate[]);
     setUnassignedSlotKeys(
       [...new Set(((ah.data || []) as UnassignmentAudit[]).flatMap((row) =>
         row.game_id && row.old_data?.position_id
@@ -2180,6 +2207,197 @@ export default function AssignmentsManagerV2() {
       setBulkCrewWorking(false);
     }
   }
+  function crewTemplateTargetGames() {
+    const requested = linkSelected.length
+      ? games.filter((item) => linkSelected.includes(item.id))
+      : game
+        ? [game]
+        : [];
+    const seen = new Set<string>();
+    return requested.filter((target) => {
+      const unitKey = linkGroupByGame.get(target.id) || target.id;
+      if (seen.has(unitKey)) return false;
+      seen.add(unitKey);
+      return true;
+    });
+  }
+  function availableCrewTemplates() {
+    const target = crewTemplateTargetGames()[0];
+    if (!target) return [];
+    return assignmentTemplates.filter(
+      (template) =>
+        template.sport_id === target.sport_id &&
+        (!template.league_id || template.league_id === target.league_id),
+    );
+  }
+  function previousCrewGames() {
+    const target = crewTemplateTargetGames()[0];
+    if (!target) return [];
+    const targetIds = new Set(linkSelected.length ? linkSelected : [target.id]);
+    return games
+      .filter(
+        (listedGame) =>
+          listedGame.sport_id === target.sport_id &&
+          !targetIds.has(listedGame.id) &&
+          assignments.some(
+            (assignment) =>
+              assignment.game_id === listedGame.id &&
+              !["declined", "cancelled", "canceled"].includes(assignment.status),
+          ),
+      )
+      .sort(
+        (a, b) =>
+          Math.abs(new Date(a.starts_at).getTime() - new Date(target.starts_at).getTime()) -
+          Math.abs(new Date(b.starts_at).getTime() - new Date(target.starts_at).getTime()),
+      )
+      .slice(0, 40);
+  }
+  function openCrewTemplateTools() {
+    const target = crewTemplateTargetGames()[0];
+    if (!target) return;
+    setCrewTemplateName(`${target.leagues?.name || target.sports?.name || "Saved"} Crew`);
+    setCopyCrewSourceGameId(previousCrewGames()[0]?.id || "");
+    setCrewTemplateMessage("");
+    setShowCrewTemplates(true);
+  }
+  async function refreshCrewTemplates() {
+    const { data, error: templateError } = await supabase
+      .from("assignment_templates")
+      .select("id,name,sport_id,league_id,created_by,updated_at,assignment_template_slots(id,position_id,official_id,sort_order)")
+      .order("updated_at", { ascending: false });
+    if (templateError) throw templateError;
+    setAssignmentTemplates((data || []) as AssignmentTemplate[]);
+  }
+  async function saveCurrentCrewTemplate() {
+    const source = crewTemplateTargetGames()[0];
+    if (!source || !crewTemplateName.trim()) {
+      setCrewTemplateMessage("Enter a template name first.");
+      return;
+    }
+    const sourceAssignments = assignments.filter(
+      (assignment) =>
+        assignment.game_id === source.id &&
+        !["declined", "cancelled", "canceled"].includes(assignment.status),
+    );
+    if (!sourceAssignments.length) {
+      setCrewTemplateMessage("Assign at least one official before saving this crew.");
+      return;
+    }
+    setCrewTemplateWorking(true);
+    setCrewTemplateMessage("Saving crew template…");
+    const { data: userData } = await supabase.auth.getUser();
+    const { data: template, error: templateError } = await supabase
+      .from("assignment_templates")
+      .insert({
+        name: crewTemplateName.trim(),
+        sport_id: source.sport_id,
+        league_id: source.league_id,
+        created_by: userData.user?.id,
+      })
+      .select("id")
+      .single();
+    if (templateError || !template) {
+      setCrewTemplateMessage(templateError?.message || "Unable to save the crew template.");
+      setCrewTemplateWorking(false);
+      return;
+    }
+    const { error: slotsError } = await supabase.from("assignment_template_slots").insert(
+      sourceAssignments.map((assignment, index) => ({
+        template_id: template.id,
+        position_id: assignment.position_id,
+        official_id: assignment.official_id,
+        sort_order: index,
+      })),
+    );
+    if (slotsError) {
+      await supabase.from("assignment_templates").delete().eq("id", template.id);
+      setCrewTemplateMessage(slotsError.message);
+    } else {
+      await refreshCrewTemplates();
+      setCrewTemplateMessage(`Saved “${crewTemplateName.trim()}” for future games.`);
+    }
+    setCrewTemplateWorking(false);
+  }
+  async function applyCrewSlots(
+    slots: Pick<AssignmentTemplateSlot, "position_id" | "official_id">[],
+    label: string,
+  ) {
+    const targets = crewTemplateTargetGames();
+    if (!targets.length || !slots.length) return;
+    setCrewTemplateWorking(true);
+    setCrewTemplateMessage(`Applying ${label}…`);
+    let assigned = 0;
+    let skipped = 0;
+    const failures: string[] = [];
+    for (const target of targets) {
+      if (!gameAcceptsAssignments(target)) {
+        skipped += slots.length;
+        continue;
+      }
+      for (const slot of slots) {
+        const validPosition = positions.some(
+          (position) => position.id === slot.position_id && position.sport_id === target.sport_id,
+        );
+        const alreadyFilled = assignments.some(
+          (assignment) =>
+            assignment.game_id === target.id &&
+            assignment.position_id === slot.position_id &&
+            !["declined", "cancelled", "canceled"].includes(assignment.status),
+        );
+        if (!validPosition || alreadyFilled) {
+          skipped += 1;
+          continue;
+        }
+        const result = await supabase.rpc("assign_official_to_linked_games", {
+          p_game_id: target.id,
+          p_position_id: slot.position_id,
+          p_official_id: slot.official_id,
+        });
+        if (result.error) failures.push(result.error.message);
+        else assigned += 1;
+      }
+    }
+    await refreshAssignmentState();
+    const detail = [
+      `${assigned} position${assigned === 1 ? "" : "s"} assigned`,
+      skipped ? `${skipped} filled or inactive position${skipped === 1 ? "" : "s"} skipped` : "",
+      failures.length ? `${failures.length} conflict${failures.length === 1 ? "" : "s"} not assigned` : "",
+    ].filter(Boolean).join(" • ");
+    setCrewTemplateMessage(detail);
+    setNotice(`${label}: ${detail}. Review the crew, then Publish when ready.`);
+    setCrewTemplateWorking(false);
+  }
+  async function copyCrewFromGame() {
+    const source = games.find((item) => item.id === copyCrewSourceGameId);
+    if (!source) {
+      setCrewTemplateMessage("Choose a previous game first.");
+      return;
+    }
+    const slots = assignments
+      .filter(
+        (assignment) =>
+          assignment.game_id === source.id &&
+          !["declined", "cancelled", "canceled"].includes(assignment.status),
+      )
+      .map((assignment) => ({
+        position_id: assignment.position_id,
+        official_id: assignment.official_id,
+      }));
+    await applyCrewSlots(slots, `Crew from Game #${source.game_number}`);
+  }
+  async function deleteCrewTemplate(templateId: string) {
+    setCrewTemplateWorking(true);
+    const { error: deleteError } = await supabase
+      .from("assignment_templates")
+      .delete()
+      .eq("id", templateId);
+    if (deleteError) setCrewTemplateMessage(deleteError.message);
+    else {
+      await refreshCrewTemplates();
+      setCrewTemplateMessage("Crew template deleted.");
+    }
+    setCrewTemplateWorking(false);
+  }
   function chooseOfficialToAssign(officialId: string) {
     const next = pickedOfficial === officialId ? "" : officialId;
     setPickedOfficial(next);
@@ -3630,6 +3848,52 @@ export default function AssignmentsManagerV2() {
             </div>
           </div>
         )}
+        {showCrewTemplates && crewTemplateTargetGames()[0] && (() => {
+          const targets = crewTemplateTargetGames();
+          const templates = availableCrewTemplates();
+          const previousGames = previousCrewGames();
+          const source = targets[0];
+          return (
+            <div className="assignmentDialogBackdrop" role="presentation" onMouseDown={() => !crewTemplateWorking && setShowCrewTemplates(false)}>
+              <div className="assignmentDialog crewTemplateDialog" role="dialog" aria-modal="true" aria-labelledby="crewTemplateTitle" onMouseDown={(event) => event.stopPropagation()}>
+                <div className="assignmentDialogHead">
+                  <div>
+                    <h3 id="crewTemplateTitle">Crew Templates</h3>
+                    <p>{targets.length === 1 ? `Game #${source.game_number}` : `${targets.length} selected games`} — assignments remain unpublished until reviewed.</p>
+                  </div>
+                  <button type="button" aria-label="Close crew templates" disabled={crewTemplateWorking} onClick={() => setShowCrewTemplates(false)}>×</button>
+                </div>
+                <div className="crewTemplateBody">
+                  <section className="crewTemplateCreate">
+                    <div><b>Save this crew</b><span>Reuse the officials currently assigned to this game.</span></div>
+                    <label><span>Template name</span><input value={crewTemplateName} maxLength={80} disabled={crewTemplateWorking} onChange={(event) => setCrewTemplateName(event.target.value)} /></label>
+                    <button type="button" className="success" disabled={crewTemplateWorking} onClick={() => void saveCurrentCrewTemplate()}>Save Current Crew</button>
+                  </section>
+                  <section className="crewTemplateCopy">
+                    <div><b>Copy from another game</b><span>Only open positions are filled; existing assignments are preserved.</span></div>
+                    <select value={copyCrewSourceGameId} disabled={crewTemplateWorking || !previousGames.length} onChange={(event) => setCopyCrewSourceGameId(event.target.value)}>
+                      {!previousGames.length && <option value="">No games with crews available</option>}
+                      {previousGames.map((listedGame) => <option key={listedGame.id} value={listedGame.id}>Game #{listedGame.game_number} — {listedGame.home?.name || "TBD"} vs {listedGame.away?.name || "TBD"} — {new Date(listedGame.starts_at).toLocaleDateString()}</option>)}
+                    </select>
+                    <button type="button" className="primary" disabled={crewTemplateWorking || !copyCrewSourceGameId} onClick={() => void copyCrewFromGame()}>Copy Crew</button>
+                  </section>
+                  <section className="crewTemplateSaved">
+                    <div className="crewTemplateSectionHead"><div><b>Saved crews</b><span>League-specific crews appear for matching games.</span></div><strong>{templates.length}</strong></div>
+                    {templates.length ? <div className="crewTemplateList">{templates.map((template) => (
+                      <article key={template.id}>
+                        <div><b>{template.name}</b><span>{template.assignment_template_slots.length} position{template.assignment_template_slots.length === 1 ? "" : "s"} • {template.league_id ? "League crew" : "All leagues"}</span><small>{template.assignment_template_slots.map((slot) => officials.find((official) => official.id === slot.official_id)).filter(Boolean).map((official) => `${official!.first_name} ${official!.last_name}`).join(", ") || "No available officials"}</small></div>
+                        <button type="button" className="primary" disabled={crewTemplateWorking || !template.assignment_template_slots.length} onClick={() => void applyCrewSlots(template.assignment_template_slots, template.name)}>Apply</button>
+                        <button type="button" className="secondary crewTemplateDelete" disabled={crewTemplateWorking} onClick={() => void deleteCrewTemplate(template.id)}>Delete</button>
+                      </article>
+                    ))}</div> : <div className="crewTemplateEmpty">No saved crews match this game yet. Save the current crew to create the first one.</div>}
+                  </section>
+                  {crewTemplateMessage && <div className="crewTemplateMessage" role="status">{crewTemplateMessage}</div>}
+                </div>
+                <div className="assignmentDialogFooter"><button type="button" className="secondary" disabled={crewTemplateWorking} onClick={() => setShowCrewTemplates(false)}>Done</button></div>
+              </div>
+            </div>
+          );
+        })()}
         {showSelfAssignDialog && (
           <div className="assignmentDialogBackdrop" role="presentation" onMouseDown={() => !selfAssignSaving && setShowSelfAssignDialog(false)}>
             <div className="assignmentDialog" role="dialog" aria-modal="true" aria-labelledby="selfAssignDialogTitle" onMouseDown={(event) => event.stopPropagation()}>
@@ -4014,6 +4278,7 @@ export default function AssignmentsManagerV2() {
             </div>
             <button className="primary" disabled={bulkWorking} onClick={prepareBulkAssignment}>Assign Official</button>
             <button className="primary assignmentCrewButton" disabled={bulkWorking} onClick={prepareBulkCrew}>Assign Crews</button>
+            <button className="secondary assignmentTemplateButton" disabled={bulkWorking} onClick={openCrewTemplateTools}>Crew Templates</button>
             <button className="success" disabled={bulkWorking || selfAssignSaving} onClick={prepareSelfAssignPositions}>Open Positions for Self Assign</button>
             <button className="secondary" disabled={bulkWorking} onClick={() => void runBulkAction("publish")}>Publish</button>
             <button className="secondary" disabled={bulkWorking} onClick={() => void runBulkAction("confirm")}>Confirm Officials</button>
@@ -4637,6 +4902,7 @@ export default function AssignmentsManagerV2() {
                 </div>
                 <div className="selectedGameUtilities">
                   <button type="button" className="assignmentActivityLink" onClick={() => void openActivityTimeline()}>Activity timeline</button>
+                  {canManage && <button type="button" className="assignmentActivityLink" onClick={openCrewTemplateTools}>Crew templates</button>}
                   <div
                     className="assignmentConfirmMessage"
                     aria-label="Notification history"
