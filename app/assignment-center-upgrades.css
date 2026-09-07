@@ -12,7 +12,7 @@
 @media(max-width:760px){.assignmentFilterPanel{display:grid!important;grid-template-columns:1fr!important}.assignmentDateFilters,.assignmentSavedViews{grid-template-columns:1fr!important;width:100%}.assignmentDateFilters .assignmentFilterLabel,.assignmentSavedViews .assignmentFilterLabel{grid-column:1}.assignmentDateFilters select,.assignmentSavedViews select{min-width:0}.assignmentMoreFilters,.assignmentMoreFilters>summary{width:100%}.assignmentMoreFilters[open]>summary{width:100%}.assignmentDirectFilters{grid-template-columns:1fr}.manageSavedViews,.manageSavedViews>summary{width:100%}.manageSavedViews>div{position:static;min-width:0;margin-top:6px}.assignmentAttentionQueue{grid-template-columns:1fr 1fr}.assignmentAttentionQueue>button{min-height:68px}}
 
 /* Compact Assignment Center toolbar */
-.assignmentFilterPanel.assignmentCompactToolbar{display:grid!important;grid-template-columns:minmax(150px,.8fr) minmax(190px,1fr) auto minmax(190px,1fr) auto auto;align-items:end!important;gap:10px!important;padding:14px 16px!important;border:1px solid #dbe4ee;border-radius:12px;background:#f8fafc}
+.assignmentFilterPanel.assignmentCompactToolbar{display:grid!important;grid-template-columns:minmax(150px,.8fr) minmax(190px,1fr) minmax(190px,1fr) auto auto;align-items:end!important;gap:10px!important;padding:14px 16px!important;border:1px solid #dbe4ee;border-radius:12px;background:#f8fafc}
 .assignmentToolbarField{display:grid;gap:5px;min-width:0;color:#52667a;font-size:14px;font-weight:850;letter-spacing:.04em;text-transform:uppercase}
 .assignmentToolbarField select,.assignmentToolbarField input{box-sizing:border-box;width:100%;min-width:0;height:42px;margin:0;padding:0 12px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#172b4d;font-size:16px;font-weight:650;letter-spacing:normal;text-transform:none}
 .assignmentToolbarButton{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;height:42px;min-height:42px;margin:0;padding:0 14px!important;white-space:nowrap}
@@ -53,13 +53,13 @@
 
 /* Safari-safe official drag tray */
 .officialDragHandle{display:inline-flex;align-items:center;gap:5px;margin-top:8px;margin-right:7px;padding:6px 10px;border:1px solid #93c5fd;border-radius:7px;background:#fff;color:#1d4ed8;font-size:13px;font-weight:850;cursor:grab;user-select:none;-webkit-user-select:none}
-.officialDragHandle:active{cursor:grabbing}.officialDragHandle.overrideDrag{border-color:#fca5a5;color:#b91c1c}
+.officialDragHandle:active{cursor:grabbing}.officialDragHandle[aria-pressed=true]{border-color:#16a34a;background:#dcfce7;color:#166534}.officialDragHandle.overrideDrag{border-color:#fca5a5;color:#b91c1c}
 .officialDropTray{position:fixed;top:88px;right:22px;z-index:1000;display:grid;width:min(420px,calc(100vw - 44px));max-height:calc(100vh - 112px);overflow:hidden;border:2px solid #2563eb;border-radius:14px;background:#fff;box-shadow:0 20px 55px #0f172a4d}
 .officialDropTray header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 15px;background:#1d4ed8;color:#fff;font-size:20px}
-.officialDropTray header>span:first-child{display:grid;gap:2px}.officialDropTray header small{color:#dbeafe;font-size:13px;font-weight:700}.officialDropTray>div{display:grid;gap:8px;overflow:auto;padding:10px}
-.officialTrayGame{display:grid;gap:3px;padding:12px;border:2px dashed #93c5fd;border-radius:9px;background:#eff6ff;color:#172b4d}
+.officialDropTray header>span:first-child{display:grid;gap:2px}.officialDropTray header small{color:#dbeafe;font-size:13px;font-weight:700}.officialDropTray header>button{display:grid;place-items:center;width:34px;height:34px;padding:0;border:1px solid #93c5fd;border-radius:50%;background:#fff;color:#1d4ed8;font-size:24px;line-height:1;cursor:pointer}.officialDropTray>div{display:grid;gap:8px;overflow:auto;padding:10px}
+.officialTrayGame{display:grid;gap:3px;padding:12px;border:2px dashed #93c5fd;border-radius:9px;background:#eff6ff;color:#172b4d;cursor:pointer}
 .officialTrayGame b{font-size:15px}.officialTrayGame span,.officialTrayGame small{font-size:13px;color:#52667a}.officialTrayGame small{font-weight:800;color:#1d4ed8}
 .officialTrayGame.active{border-style:solid;border-color:#16a34a;background:#dcfce7;transform:scale(1.01)}.officialTrayGame.active small{color:#166534}
-.officialTrayGame.full{border-color:#cbd5e1;background:#f8fafc;opacity:.62}.officialTrayGame.full small{color:#64748b}
+.officialTrayGame.full{border-color:#cbd5e1;background:#f8fafc;opacity:.62;cursor:not-allowed}.officialTrayGame.full small{color:#64748b}
 body.officialDragActive{cursor:grabbing}
 @media(max-width:760px){.officialDragHandle{display:none}.officialDropTray{display:none}}
