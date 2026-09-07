@@ -132,6 +132,52 @@ p {
   display: flex;
   gap: 9px;
 }
+.officialOrganizationsCard {
+  margin-bottom: 20px;
+  padding: 20px;
+}
+.officialOrganizationChoices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+.officialOrganizationChoice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 64px;
+  padding: 12px 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #173b66;
+  text-align: left;
+  cursor: pointer;
+}
+.officialOrganizationChoice span {
+  font-weight: 800;
+}
+.officialOrganizationChoice small {
+  color: #64748b;
+  white-space: nowrap;
+}
+.officialOrganizationChoice.active {
+  border-color: #2563eb;
+  background: #eaf3ff;
+  box-shadow: inset 4px 0 #2563eb;
+}
+.officialOrganizationChoice.active small {
+  color: #166534;
+  font-weight: 800;
+}
+.officialOrganizationHint {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f1f5f9;
+}
 button,
 select,
 input,
@@ -1611,6 +1657,15 @@ td small {
   margin: 0;
 }
 @media (max-width: 600px) {
+  .officialOrganizationsCard {
+    padding: 16px;
+  }
+  .officialOrganizationChoices {
+    grid-template-columns: 1fr;
+  }
+  .officialOrganizationChoice {
+    width: 100%;
+  }
   .assignmentDetailGrid,
   .responseActions {
     grid-template-columns: 1fr;
