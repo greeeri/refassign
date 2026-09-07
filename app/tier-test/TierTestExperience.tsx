@@ -12,6 +12,7 @@ import wizard from "./wizard.module.css";
 import TestAuthPanel from "./TestAuthPanel";
 import { createTierTestClient as createClient } from "../../lib/supabase/client";
 import saved from "./saved.module.css";
+import OrganizationTeamSetup from "./OrganizationTeamSetup";
 
 type SavedWorkspace = {
   organization_id: string;
@@ -98,7 +99,7 @@ export default function TierTestExperience({
   const [setupOpen, setSetupOpen] = useState(false);
   const [organization, setOrganization] = useState("");
   const [sport, setSport] = useState("Soccer");
-  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
   const [leagues, setLeagues] = useState([
     { id: 1, name: "", region: "", coverage: "All locations" },
   ]);
@@ -463,7 +464,11 @@ export default function TierTestExperience({
               <h2>Organization workspaces</h2>
             </div>
             <div className={saved.savedActions}>
-              <button type="button" className={saved.createButton} onClick={openSetup}>
+              <button
+                type="button"
+                className={saved.createButton}
+                onClick={openSetup}
+              >
                 + Create another organization
               </button>
               <button type="button" onClick={() => void switchAccount()}>
@@ -475,7 +480,9 @@ export default function TierTestExperience({
             <div className={saved.empty}>
               <b>No saved organizations yet</b>
               <p>Create an isolated organization workspace to begin testing.</p>
-              <button type="button" onClick={openSetup}>Create organization</button>
+              <button type="button" onClick={openSetup}>
+                Create organization
+              </button>
             </div>
           ) : (
             <div className={saved.savedGrid}>
@@ -561,7 +568,7 @@ export default function TierTestExperience({
           <div className={styles.setupIntro}>
             <p className={styles.eyebrow}>Organization setup</p>
             <h2>
-              {step === 4
+              {step === 5
                 ? "Your test workspace is ready."
                 : "Let’s configure your RefAssign workspace."}
             </h2>
@@ -577,6 +584,7 @@ export default function TierTestExperience({
                 League coverage
               </li>
               <li className={step === 3 ? styles.currentStep : ""}>Review</li>
+              <li className={step === 4 ? styles.currentStep : ""}>Team</li>
             </ol>
           </div>
           {step === 1 && (
@@ -881,7 +889,15 @@ export default function TierTestExperience({
               </small>
             </div>
           )}
-          {step === 4 && (
+          {step === 4 && organizationId && (
+            <OrganizationTeamSetup
+              organizationId={organizationId}
+              organization={organization}
+              onBack={() => setStep(3)}
+              onContinue={() => setStep(5)}
+            />
+          )}
+          {step === 5 && (
             <div className={`${styles.form} ${wizard.complete}`}>
               <div className={wizard.check}>✓</div>
               <span>Test workspace created</span>
