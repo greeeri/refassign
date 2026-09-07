@@ -97,11 +97,12 @@ export default function GameSetup({
     ),
     [searchingLocations, setSearchingLocations] = useState(false),
     [connectingLocation, setConnectingLocation] = useState(""),
-    [locationMessage, setLocationMessage] = useState("");
+    [locationMessage, setLocationMessage] = useState(""),
+    [locationSource, setLocationSource] = useState<"system" | "all">("system");
 
   async function searchLocations(e: FormEvent) {
     e.preventDefault();
-    await runLocationSearch(locationQuery, true);
+    await runLocationSearch(locationQuery, locationSource === "all");
   }
 
   async function runLocationSearch(
@@ -809,6 +810,27 @@ export default function GameSetup({
                   {searchingLocations ? "Searching…" : "Search all locations"}
                 </button>
               </form>
+              <fieldset className="locationSourceOptions">
+                <legend>Where should RefAssign search?</legend>
+                <label>
+                  <input
+                    type="radio"
+                    name="location-source"
+                    checked={locationSource === "system"}
+                    onChange={() => setLocationSource("system")}
+                  />
+                  Existing RefAssign locations
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="location-source"
+                    checked={locationSource === "all"}
+                    onChange={() => setLocationSource("all")}
+                  />
+                  Search for a new real-world location
+                </label>
+              </fieldset>
               {locationMessage && (
                 <div className="successBox">{locationMessage}</div>
               )}
@@ -850,6 +872,15 @@ export default function GameSetup({
                   ))}
                 </div>
               )}
+              {!searchingLocations &&
+                locationQuery.trim().length >= 2 &&
+                directoryLocations.length === 0 && (
+                  <div className="emptySearchResult">
+                    {locationSource === "system"
+                      ? "No existing RefAssign locations matched. Select “Search for a new real-world location” to look outside the system."
+                      : "No locations matched that search."}
+                  </div>
+                )}
             </section>
           )}
           <section className="card">

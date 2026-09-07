@@ -86,7 +86,10 @@ export default function Workspace() {
       }
       if (window.location.hostname === "test.ref-assign.com") {
         setTestMode(true);
-        await supabase.rpc("accept_my_organization_invitations");
+        await Promise.all([
+          supabase.rpc("accept_my_organization_invitations"),
+          supabase.rpc("accept_my_official_invitations"),
+        ]);
         const { data, error } = await supabase.rpc("get_my_test_workspaces");
         if (error) {
           console.error(error);

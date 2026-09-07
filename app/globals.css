@@ -542,6 +542,83 @@ td small {
   color: #2f6f35;
   font-weight: 700;
 }
+.bulkToggle {
+  justify-self: start;
+}
+.bulkOfficialPanel {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid #dbe4ec;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+.bulkOfficialPanel label {
+  display: grid;
+  gap: 6px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+}
+.bulkOfficialPanel textarea {
+  width: 100%;
+  padding: 11px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
+}
+.filePicker input {
+  margin-top: 5px;
+}
+.bulkSummary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.bulkSummary b {
+  padding: 12px;
+  border-radius: 8px;
+  background: #eaf3fb;
+  color: #163a61;
+  text-align: center;
+}
+.compactResults {
+  max-height: 280px;
+  overflow: auto;
+}
+.compactResults article {
+  padding: 10px 12px;
+}
+.locationSourceOptions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  padding: 14px;
+  border: 1px solid #dbe4ec;
+  border-radius: 10px;
+}
+.locationSourceOptions legend {
+  padding: 0 6px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+}
+.locationSourceOptions label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+.locationSourceOptions input {
+  width: auto;
+}
+.emptySearchResult {
+  padding: 14px;
+  border-radius: 9px;
+  background: #f1f5f9;
+  color: #64748b;
+}
 @media (max-width: 680px) {
   .directoryConnectForm,
   .directoryResults article {
@@ -551,6 +628,12 @@ td small {
   .directoryConnectForm button,
   .directoryResults article button {
     width: 100%;
+  }
+  .bulkSummary {
+    grid-template-columns: 1fr;
+  }
+  .locationSourceOptions {
+    display: grid;
   }
 }
 .venueModalBackdrop {

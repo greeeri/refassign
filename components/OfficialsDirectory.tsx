@@ -95,6 +95,7 @@ type LinkOfficialResult = {
   found?: boolean;
   display_name?: string;
   already_connected?: boolean;
+  valid?: boolean;
 };
 
 export default function OfficialsDirectory({
@@ -127,6 +128,114 @@ export default function OfficialsDirectory({
   const [officialMatch, setOfficialMatch] = useState<LinkOfficialResult | null>(
     null,
   );
+  const [showBulkAdd, setShowBulkAdd] = useState(false);
+  const [bulkEmailText, setBulkEmailText] = useState("");
+  const [bulkResults, setBulkResults] = useState<LinkOfficialResult[]>([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  function parsedBulkEmails() {
+    const lines = bulkEmailText
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (!lines.length) return [];
+    const header = lines[0].split(",").map((cell) =>
+      cell
+        .trim()
+        .replace(/^['"]|['"]$/g, "")
+        .toLowerCase(),
+    );
+    const emailColumn = header.findIndex(
+      (cell) => cell === "email" || cell === "email_address",
+    );
+    if (emailColumn >= 0)
+      return lines
+        .slice(1)
+        .map(
+          (line) =>
+            line
+              .split(",")
+              [emailColumn]?.trim()
+              .replace(/^['"]|['"]$/g, "") || "",
+        )
+        .filter(Boolean);
+    return bulkEmailText
+      .split(/[\s,;]+/)
+      .map((value) => value.trim().replace(/^['"]|['"]$/g, ""))
+      .filter(Boolean);
+  }
+
+  async function previewBulkOfficials() {
+    if (!organizationId) return;
+    const emails = parsedBulkEmails();
+    if (!emails.length)
+      return setError("Paste email addresses or choose a CSV file first.");
+    setBulkBusy(true);
+    setError("");
+    setLinkMessage("");
+    const { data, error: bulkError } = await supabase.rpc(
+      "bulk_search_organization_official_emails",
+      { p_organization_id: organizationId, p_emails: emails },
+    );
+    setBulkBusy(false);
+    if (bulkError) setError(bulkError.message);
+    else setBulkResults((data || []) as LinkOfficialResult[]);
+  }
+
+  async function addBulkOfficials() {
+    if (!organizationId) return;
+    const emails = bulkResults
+      .filter((item) => item.valid !== false && !item.already_connected)
+      .map((item) => item.email);
+    if (!emails.length) return;
+    setBulkBusy(true);
+    setError("");
+    const { data, error: bulkError } = await supabase.rpc(
+      "bulk_add_organization_official_emails",
+      { p_organization_id: organizationId, p_emails: emails },
+    );
+    setBulkBusy(false);
+    if (bulkError) return setError(bulkError.message);
+    const added = (data || []) as LinkOfficialResult[];
+    const invitationEmails = added
+      .filter((item) => !item.existing_account)
+      .map((item) => item.email);
+    let sent = 0;
+    if (invitationEmails.length) {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const response = await fetch("/api/tier-test/official-invitations", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${sessionData.session?.access_token || ""}`,
+        },
+        body: JSON.stringify({ organizationId, emails: invitationEmails }),
+      });
+      const notification = (await response.json().catch(() => ({}))) as {
+        sent?: number;
+        error?: string;
+      };
+      sent = notification.sent || 0;
+      if (!response.ok) {
+        setError(
+          notification.error ||
+            "The officials were added, but invitation emails could not be sent.",
+        );
+      }
+    }
+    setBulkResults([]);
+    setBulkEmailText("");
+    setLinkMessage(
+      `${added.length} officials added.${invitationEmails.length ? ` ${sent} invitation emails sent to missing accounts.` : " All already had RefAssign accounts."}`,
+    );
+    await load();
+  }
+
+  async function readBulkFile(file?: File) {
+    if (!file) return;
+    setBulkEmailText(await file.text());
+    setBulkResults([]);
+  }
 
   async function searchOfficialByEmail(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -605,6 +714,111 @@ export default function OfficialsDirectory({
             </div>
           )}
           {linkMessage && <div className="successBox">{linkMessage}</div>}
+          <button
+            type="button"
+            className="secondary bulkToggle"
+            onClick={() => setShowBulkAdd((open) => !open)}
+          >
+            {showBulkAdd ? "Close bulk upload" : "Bulk add officials"}
+          </button>
+          {showBulkAdd && (
+            <div className="bulkOfficialPanel">
+              <h3>Bulk search and add</h3>
+              <p>
+                Upload a CSV with an <b>email</b> column, or paste up to 500
+                email addresses. Review matches before adding anyone.
+              </p>
+              <label className="filePicker">
+                Choose CSV file
+                <input
+                  type="file"
+                  accept=".csv,text/csv,text/plain"
+                  onChange={(event) =>
+                    void readBulkFile(event.target.files?.[0])
+                  }
+                />
+              </label>
+              <label>
+                Email addresses
+                <textarea
+                  rows={6}
+                  value={bulkEmailText}
+                  placeholder="official1@example.com&#10;official2@example.com"
+                  onChange={(event) => {
+                    setBulkEmailText(event.target.value);
+                    setBulkResults([]);
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                className="primary"
+                disabled={bulkBusy}
+                onClick={() => void previewBulkOfficials()}
+              >
+                {bulkBusy ? "Checking…" : "Review email matches"}
+              </button>
+              {bulkResults.length > 0 && (
+                <>
+                  <div className="bulkSummary">
+                    <b>
+                      {bulkResults.filter((item) => item.found).length} existing
+                      accounts
+                    </b>
+                    <b>
+                      {
+                        bulkResults.filter(
+                          (item) => item.valid !== false && !item.found,
+                        ).length
+                      }{" "}
+                      invitations needed
+                    </b>
+                    <b>
+                      {
+                        bulkResults.filter((item) => item.valid === false)
+                          .length
+                      }{" "}
+                      invalid
+                    </b>
+                  </div>
+                  <div className="directoryResults compactResults">
+                    {bulkResults.map((item) => (
+                      <article key={item.email}>
+                        <div>
+                          <strong>{item.display_name || item.email}</strong>
+                          <span>
+                            {item.valid === false
+                              ? "Invalid email"
+                              : item.already_connected
+                                ? "Already in organization"
+                                : item.found
+                                  ? "Existing RefAssign account"
+                                  : "New invitation required"}
+                          </span>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={
+                      bulkBusy ||
+                      !bulkResults.some(
+                        (item) =>
+                          item.valid !== false && !item.already_connected,
+                      )
+                    }
+                    onClick={() => void addBulkOfficials()}
+                  >
+                    {bulkBusy
+                      ? "Adding…"
+                      : "Add officials and email invitations"}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </section>
       )}
       {showRoster && <OfficialsRosterManager />}
