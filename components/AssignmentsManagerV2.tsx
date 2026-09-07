@@ -315,6 +315,7 @@ export default function AssignmentsManagerV2() {
     [activityError, setActivityError] = useState(""),
     [savedViews, setSavedViews] = useState<SavedAssignmentView[]>([]),
     [showCoverageForecast, setShowCoverageForecast] = useState(false),
+    [candidatePositionId, setCandidatePositionId] = useState(""),
     [replacementPublishing, setReplacementPublishing] = useState(""),
     [unassignedSlotKeys, setUnassignedSlotKeys] = useState<string[]>([]),
     [pendingReplacement, setPendingReplacement] = useState<{
@@ -3338,6 +3339,55 @@ export default function AssignmentsManagerV2() {
             </div>
           );
         })()}
+        {candidatePositionId && game && (() => {
+          const candidatePosition = gamePositions.find((item) => item.id === candidatePositionId);
+          if (!candidatePosition) return null;
+          const list = candidates(candidatePosition);
+          const current = assignments.find((item) => item.game_id === game.id && item.position_id === candidatePosition.id && item.status !== "declined");
+          const replacementNeeded = isReplacementNeeded(game.id, candidatePosition.id);
+          const eligibleCount = list.filter((item) => item.reasons.length === 0).length;
+          const label = rankLabel(candidatePosition);
+          return (
+            <div className="assignmentDialogBackdrop candidatePanelBackdrop" role="presentation" onMouseDown={() => setCandidatePositionId("")}>
+              <div className="assignmentDialog candidatePanelDialog" role="dialog" aria-modal="true" aria-labelledby="candidatePanelTitle" onMouseDown={(event) => event.stopPropagation()}>
+                <div className="assignmentDialogHead">
+                  <div>
+                    <h3 id="candidatePanelTitle">{replacementNeeded && !current ? "Choose a Replacement" : current ? "Change Official" : "Choose an Official"}</h3>
+                    <p>{shortPositionName(candidatePosition.name)} • Game #{game.game_number} • {eligibleCount} eligible</p>
+                  </div>
+                  <button type="button" aria-label="Close candidates" onClick={() => setCandidatePositionId("")}>×</button>
+                </div>
+                <div className="candidatePanelSummary">
+                  <span><small>POSITION</small><b>{shortPositionName(candidatePosition.name)}</b></span>
+                  <span><small>CURRENT OFFICIAL</small><b>{current ? `${officials.find((item) => item.id === current.official_id)?.first_name || ""} ${officials.find((item) => item.id === current.official_id)?.last_name || ""}`.trim() : "Open"}</b></span>
+                </div>
+                <div className="candidatePanelList">
+                  {list.map((candidate, candidateIndex) => (
+                    <article key={candidate.id} className={candidate.reasons.length ? "candidateWarning" : "candidateEligible"}>
+                      <div>
+                        <b>{candidateIndex + 1}. {candidate.first_name} {candidate.last_name}</b>
+                        <span>{label} {candidate.rank.toFixed(1)}{candidate.distance != null ? ` • ${candidate.distance.toFixed(1)} mi` : ""}{teamRecencyLabel(candidate.id)}</span>
+                        <small>{candidate.reasons.length ? candidate.reasons.join(" • ") : "Eligible and conflict-free"}</small>
+                      </div>
+                      <div className="candidatePanelActions">
+                        <button type="button" className={candidate.reasons.length ? "secondary" : "primary"} disabled={saving === candidatePosition.id || current?.official_id === candidate.id} onClick={() => void assign(candidatePosition.id, candidate.id)}>
+                          {current?.official_id === candidate.id ? "Assigned" : candidate.reasons.length ? "Override" : "Assign"}
+                        </button>
+                        {replacementNeeded && !current && candidate.reasons.length === 0 && (
+                          <button type="button" className="success" disabled={saving === candidatePosition.id || Boolean(replacementPublishing)} onClick={() => { setCandidatePositionId(""); setPendingReplacement({ positionId: candidatePosition.id, officialId: candidate.id }); }}>Assign & Notify</button>
+                        )}
+                      </div>
+                    </article>
+                  ))}
+                  {!list.length && <div className="emptyState"><p>No officials are available for this position.</p></div>}
+                </div>
+                <div className="assignmentDialogFooter">
+                  <button type="button" className="secondary" onClick={() => setCandidatePositionId("")}>Close</button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
         {showCoverageForecast && (
           <div className="assignmentDialogBackdrop" role="presentation" onMouseDown={() => setShowCoverageForecast(false)}>
             <div className="assignmentDialog coverageForecastDialog" role="dialog" aria-modal="true" aria-labelledby="coverageForecastTitle" onMouseDown={(event) => event.stopPropagation()}>
@@ -4470,7 +4520,7 @@ export default function AssignmentsManagerV2() {
                       <th>Position</th>
                       <th>Assigned Official</th>
                       <th>Status</th>
-                      <th>Eligible Candidates</th>
+                      <th>Assign</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -4730,32 +4780,15 @@ export default function AssignmentsManagerV2() {
                             )}
                           </td>
                           <td>
-                            <select
+                            <button
+                              type="button"
+                              className="primary candidatePanelButton"
                               disabled={saving === pos.id}
-                              value={current?.official_id || ""}
-                              onChange={(e) =>
-                                void assign(pos.id, e.target.value)
-                              }
+                              onClick={() => setCandidatePositionId(pos.id)}
                             >
-                              <option value="">Select Official / Leave Open</option>
-                              {list.map((o) => (
-                                <option key={o.id} value={o.id}>
-                                  {o.reasons.length ? "⚠ OVERRIDE — " : ""}
-                                  {o.first_name} {o.last_name}
-                                  {o.reasons.length
-                                    ? ` — ${o.reasons.join(", ")}`
-                                    : ""}
-                                  {hasFutureTeamAssignment(o.id)
-                                    ? " — Future+"
-                                    : ""}{" "}
-                                  — {label} {o.rank.toFixed(1)}
-                                  {teamRecencyLabel(o.id)}
-                                  {o.distance != null
-                                    ? ` • ${o.distance.toFixed(1)} mi`
-                                    : ""}
-                                </option>
-                              ))}
-                            </select>
+                              {current ? "Change Official" : replacementNeeded ? "Find Replacement" : "View Candidates"}
+                              <small>{list.filter((candidate) => candidate.reasons.length === 0).length} eligible</small>
+                            </button>
                             <details className="mobileAssignmentDetails">
                               <summary>More Details</summary>
                               <div>
@@ -4780,51 +4813,6 @@ export default function AssignmentsManagerV2() {
                                 )}
                               </div>
                             </details>
-                            {replacementNeeded && !current && (
-                              <div
-                                className="replacementPanel"
-                                style={{
-                                  marginTop: 7,
-                                  padding: 8,
-                                  background: "#fff",
-                                  border: "1px solid #fecaca",
-                                  borderRadius: 7,
-                                }}
-                              >
-                                <b style={{ fontSize: 11, color: "#991b1b" }}>
-                                  Recommended qualified replacements
-                                </b>
-                                {list.find((candidate) => candidate.reasons.length === 0) && (() => {
-                                  const best = list.find((candidate) => candidate.reasons.length === 0)!;
-                                  return <button type="button" className="bestReplacementButton" disabled={saving === pos.id || Boolean(replacementPublishing)} onClick={() => setPendingReplacement({ positionId: pos.id, officialId: best.id })}>Use Best Replacement</button>;
-                                })()}
-                                {list
-                                  .filter(
-                                    (candidate) =>
-                                      candidate.reasons.length === 0,
-                                  )
-                                  .slice(0, 3)
-                                  .map((candidate, recommendationIndex) => (
-                                    <div
-                                      key={candidate.id}
-                                      className="replacementRecommendation"
-                                    >
-                                      <button type="button" disabled={saving === pos.id || Boolean(replacementPublishing)} onClick={() => void assign(pos.id, candidate.id)}><b>{recommendationIndex + 1}. {candidate.first_name} {candidate.last_name}</b><span>{label} {candidate.rank.toFixed(1)}{candidate.distance != null ? ` • ${candidate.distance.toFixed(1)} mi` : ""}</span></button>
-                                      <button type="button" className="replacementPublishButton" disabled={saving === pos.id || Boolean(replacementPublishing)} onClick={() => setPendingReplacement({ positionId: pos.id, officialId: candidate.id })}>{replacementPublishing === `${pos.id}:${candidate.id}` ? "Working…" : "Assign & Notify"}</button>
-                                    </div>
-                                  ))}
-                                {list.every(
-                                  (candidate) => candidate.reasons.length > 0,
-                                ) && (
-                                  <small
-                                    style={{ display: "block", marginTop: 5 }}
-                                  >
-                                    No fully qualified, conflict-free
-                                    replacements are currently available.
-                                  </small>
-                                )}
-                              </div>
-                            )}
                           </td>
                         </tr>
                       );
