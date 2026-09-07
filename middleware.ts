@@ -1,10 +1,16 @@
 import {NextRequest,NextResponse} from "next/server";
 
 export function middleware(request:NextRequest){
+ const hostname=request.headers.get("host")?.split(":")[0];
+ const path=request.nextUrl.pathname;
+ if(hostname==="test.ref-assign.com"&&path==="/workspace"){
+  const destination=request.nextUrl.clone();
+  destination.pathname="/tier-test/workspace";
+  return NextResponse.rewrite(destination);
+ }
  const isTierPreview=process.env.VERCEL_ENV==="preview"&&process.env.VERCEL_GIT_COMMIT_REF==="feature/league-tier-foundation";
  if(!isTierPreview)return NextResponse.next();
- const path=request.nextUrl.pathname;
- if(path==="/tier-test"||path==="/api/tier-test/team-invitation"||path.startsWith("/_next/")||path.startsWith("/brand/")||path==="/favicon.ico")return NextResponse.next();
+ if(path.startsWith("/tier-test")||path==="/api/tier-test/team-invitation"||path.startsWith("/_next/")||path.startsWith("/brand/")||path==="/favicon.ico")return NextResponse.next();
  if(path.startsWith("/api/"))return NextResponse.json({error:"This isolated preview does not permit production API access."},{status:403});
  return NextResponse.redirect(new URL("/tier-test",request.url));
 }
