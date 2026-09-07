@@ -1278,11 +1278,7 @@ export default function OfficialsDirectory({
                           </span>
                         </td>
                         <td>
-                          {organizationId &&
-                            o.email &&
-                            pendingInvitationEmails.includes(
-                              o.email.toLowerCase(),
-                            ) && (
+                          {organizationId && o.email && (
                               <button
                                 className="tableButton"
                                 disabled={sendingInvitationEmail === o.email}
@@ -1292,7 +1288,11 @@ export default function OfficialsDirectory({
                               >
                                 {sendingInvitationEmail === o.email
                                   ? "Sending…"
-                                  : "Send / resend invitation"}
+                                  : pendingInvitationEmails.includes(
+                                        o.email.toLowerCase(),
+                                      )
+                                    ? "Resend invitation"
+                                    : "Send invitation"}
                               </button>
                             )}{" "}
                           <button
