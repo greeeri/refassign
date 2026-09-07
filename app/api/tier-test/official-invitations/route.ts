@@ -76,13 +76,12 @@ export async function POST(request: NextRequest) {
       { error: "Invitation email is not configured." },
       { status: 503 },
     );
-  const actionLink = "https://test.ref-assign.com/workspace";
   const messages = emails.map((email) => ({
     from: "RefAssign <notifications@assignments.ref-assign.com>",
     to: [email],
     reply_to: "assignments@ref-assign.com",
     subject: `Invitation to officiate with ${workspace.name} in RefAssign`,
-    html: `<div style="font-family:Arial,sans-serif;background:#eef4f9;padding:28px"><div style="max-width:620px;margin:auto;background:#fff;border:1px solid #dbe5ed;border-radius:16px;overflow:hidden"><div style="background:#0b2748;color:#fff;padding:24px 28px"><div style="font-size:24px;font-weight:800">REF<span style="color:#4ba3e3">ASSIGN</span></div><div style="font-size:12px;color:#b9cbe0;margin-top:4px">Assign · Develop · Manage</div></div><div style="padding:30px"><h2 style="color:#102f57;margin-top:0">You’re invited to officiate with ${esc(workspace.name)}</h2><p style="color:#52677d;line-height:1.6">Your email was added to this organization’s official roster. Sign in or create your free RefAssign official account using this same email address.</p><p style="margin:26px 0"><a href="${actionLink}" style="display:inline-block;background:#75dc43;color:#0b2748;text-decoration:none;font-weight:800;padding:14px 22px;border-radius:9px">Open RefAssign</a></p></div></div></div>`,
+    html: `<div style="font-family:Arial,sans-serif;background:#eef4f9;padding:28px"><div style="max-width:620px;margin:auto;background:#fff;border:1px solid #dbe5ed;border-radius:16px;overflow:hidden"><div style="background:#0b2748;color:#fff;padding:24px 28px"><div style="font-size:24px;font-weight:800">REF<span style="color:#4ba3e3">ASSIGN</span></div><div style="font-size:12px;color:#b9cbe0;margin-top:4px">Assign · Develop · Manage</div></div><div style="padding:30px"><h2 style="color:#102f57;margin-top:0">You’re invited to officiate with ${esc(workspace.name)}</h2><p style="color:#52677d;line-height:1.6">Your email was added to this organization’s official roster. Sign in or create your free RefAssign official account using this same email address.</p><p style="margin:26px 0"><a href="https://test.ref-assign.com/login#official=${encodeURIComponent(email)}" style="display:inline-block;background:#75dc43;color:#0b2748;text-decoration:none;font-weight:800;padding:14px 22px;border-radius:9px">Create or open official account</a></p></div></div></div>`,
   }));
   let sent = 0;
   for (let index = 0; index < messages.length; index += 100) {
