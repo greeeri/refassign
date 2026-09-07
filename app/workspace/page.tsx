@@ -620,7 +620,51 @@ export default function Workspace() {
         {manager && section === "Contacts" && <ContactsManager />}
         {manager && section === "Sports & Rules" && <SportsRulesManager />}
         {viewRole === "official" && section === "Official Dashboard" && (
-          <OfficialDashboard onNavigate={setSection} />
+          <>
+            {testMode && testWorkspace && (
+              <section className="card officialOrganizationsCard">
+                <div>
+                  <p className="eyebrow">My organizations</p>
+                  <h2>Officiating organizations</h2>
+                  <p>
+                    Select an organization to view its games, assignments,
+                    availability, and schedule.
+                  </p>
+                </div>
+                <div className="officialOrganizationChoices">
+                  {testWorkspaces.map((item) => (
+                    <button
+                      type="button"
+                      key={item.organization_id}
+                      className={
+                        item.organization_id === testWorkspace.organization_id
+                          ? "officialOrganizationChoice active"
+                          : "officialOrganizationChoice"
+                      }
+                      onClick={() =>
+                        switchTestWorkspace(item.organization_id)
+                      }
+                    >
+                      <span>{item.name}</span>
+                      <small>
+                        {item.organization_id === testWorkspace.organization_id
+                          ? "Currently viewing"
+                          : "Open organization"}
+                      </small>
+                    </button>
+                  ))}
+                </div>
+                {testWorkspaces.length === 1 && (
+                  <p className="officialOrganizationHint">
+                    One organization is currently connected. Additional
+                    organizations will appear here after you accept their
+                    invitations.
+                  </p>
+                )}
+              </section>
+            )}
+            <OfficialDashboard onNavigate={setSection} />
+          </>
         )}{" "}
         {viewRole === "official" && section === "My Schedule" && (
           <OfficialSchedule />
