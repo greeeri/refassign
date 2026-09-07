@@ -307,6 +307,7 @@ export default function AssignmentsManagerV2() {
     [officialListSort, setOfficialListSort] = useState<"best" | "distance" | "rank" | "leastRecent" | "name">("best"),
     [candidateSearch, setCandidateSearch] = useState(""),
     [candidateSort, setCandidateSort] = useState<"best" | "distance" | "rank" | "leastRecent" | "name">("best"),
+    [needsAssignmentView, setNeedsAssignmentView] = useState<Record<string, boolean>>({}),
     [ineligibleSearch, setIneligibleSearch] = useState(""),
     [ineligibleReasonFilter, setIneligibleReasonFilter] = useState("all"),
     [overduePromptClosed, setOverduePromptClosed] = useState(false),
@@ -1164,6 +1165,19 @@ export default function AssignmentsManagerV2() {
   const gameAssignments = game
     ? assignments.filter((a) => a.game_id === game.id)
     : [];
+  const needsAssignmentOnly = game ? Boolean(needsAssignmentView[game.id]) : false;
+  function positionNeedsAssignment(position: Position) {
+    if (!game) return false;
+    return !assignments.some(
+      (assignment) =>
+        assignment.game_id === game.id &&
+        assignment.position_id === position.id &&
+        !["declined", "cancelled"].includes(assignment.status),
+    );
+  }
+  const visibleGamePositions = needsAssignmentOnly
+    ? gamePositions.filter(positionNeedsAssignment)
+    : gamePositions;
   const unpublishedCount = gameAssignments.filter(
     (a) => !a.published_at && a.status !== "declined",
   ).length;
@@ -1831,7 +1845,10 @@ export default function AssignmentsManagerV2() {
     if (!game) return;
     const nextPosition = nextOpenPositionAfter(positionId);
     const assigned = await assignToGame(game, positionId, officialId);
-    if (assigned) setCandidatePositionId(nextPosition?.id || positionId);
+    if (assigned) {
+      setCandidateSearch("");
+      setCandidatePositionId(nextPosition?.id || positionId);
+    }
   }
   async function dropOfficialOnGame(gameId: string, officialId: string) {
     const targetGame = games.find((listedGame) => listedGame.id === gameId);
@@ -2163,6 +2180,7 @@ export default function AssignmentsManagerV2() {
         );
       announceUndoAvailable();
       await refreshAssignmentState();
+      setCandidateSearch("");
       setCandidatePositionId(nextPositionId || positionId);
     } catch (replacementError) {
       setError(
@@ -2805,8 +2823,13 @@ export default function AssignmentsManagerV2() {
           <span><b>{gameAssignments.filter((item) => item.status === "proposed" && item.published_at).length}</b> Awaiting</span>
           <span><b>{gameAssignments.filter((item) => ["accepted", "confirmed"].includes(item.status)).length}</b> Confirmed</span>
         </div>
+        <div className="positionFocusToggle" role="group" aria-label="Positions shown">
+          <button type="button" className={!needsAssignmentOnly ? "active" : ""} onClick={() => setNeedsAssignmentView((current) => ({...current, [game.id]: false}))}>All Positions</button>
+          <button type="button" className={needsAssignmentOnly ? "active" : ""} onClick={() => setNeedsAssignmentView((current) => ({...current, [game.id]: true}))}>Needs Assignment ({openPositionCount})</button>
+        </div>
         <div className="mobileInlinePositions">
-          {gamePositions.map((pos, index) => {
+          {visibleGamePositions.map((pos) => {
+            const index = gamePositions.findIndex((position) => position.id === pos.id);
             const current = assignments.find((assignment) => assignment.game_id === game.id && assignment.position_id === pos.id && assignment.status !== "declined");
             const status = current ? assignmentStatus(current) : null;
             const replacementNeeded = isReplacementNeeded(game.id, pos.id);
@@ -2836,6 +2859,7 @@ export default function AssignmentsManagerV2() {
               </article>
             );
           })}
+          {!visibleGamePositions.length && <div className="positionsFilledMessage"><b>Every position is filled</b><span>Switch to All Positions to review or change the crew.</span></div>}
         </div>
       </section>
     );
@@ -4599,7 +4623,12 @@ export default function AssignmentsManagerV2() {
                 No assignment positions are configured for this sport.
               </div>
             ) : (
-              <div className="tableWrap">
+              <>
+              <div className="positionFocusToggle desktopPositionFocus" role="group" aria-label="Positions shown">
+                <button type="button" className={!needsAssignmentOnly ? "active" : ""} onClick={() => setNeedsAssignmentView((current) => ({...current, [game.id]: false}))}>All Positions</button>
+                <button type="button" className={needsAssignmentOnly ? "active" : ""} onClick={() => setNeedsAssignmentView((current) => ({...current, [game.id]: true}))}>Needs Assignment ({openPositionCount})</button>
+              </div>
+              {visibleGamePositions.length ? <div className="tableWrap">
                 <table>
                   <thead>
                     <tr>
@@ -4611,7 +4640,8 @@ export default function AssignmentsManagerV2() {
                     </tr>
                   </thead>
                   <tbody>
-                    {gamePositions.map((pos, index) => {
+                    {visibleGamePositions.map((pos) => {
+                      const index = gamePositions.findIndex((position) => position.id === pos.id);
                       const current = assignments.find(
                           (a) =>
                             a.game_id === game.id &&
@@ -4906,7 +4936,8 @@ export default function AssignmentsManagerV2() {
                     })}
                   </tbody>
                 </table>
-              </div>
+              </div> : <div className="positionsFilledMessage"><b>Every position is filled</b><span>Switch to All Positions to review or change the crew.</span></div>}
+              </>
             )}
             <p>
               <small>
