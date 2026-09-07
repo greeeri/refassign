@@ -132,6 +132,7 @@ p {
   display: flex;
   gap: 9px;
 }
+/* Official workspace organization selector */
 .officialOrganizationsCard {
   margin-bottom: 20px;
   padding: 20px;
