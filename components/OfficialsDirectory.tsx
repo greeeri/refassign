@@ -89,7 +89,16 @@ function newForm(): OfficialForm {
   };
 }
 
-export default function OfficialsDirectory() {
+type LinkOfficialResult = {
+  email: string;
+  existing_account: boolean;
+};
+
+export default function OfficialsDirectory({
+  organizationId,
+}: {
+  organizationId?: string;
+}) {
   const supabase = useMemo(() => createClient(), []);
   const [officials, setOfficials] = useState<Official[]>([]);
   const [positionRanks, setPositionRanks] = useState<
@@ -109,6 +118,34 @@ export default function OfficialsDirectory() {
   const [sportFilter, setSportFilter] = useState("All");
   const [form, setForm] = useState<OfficialForm>(newForm());
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [officialEmail, setOfficialEmail] = useState("");
+  const [linkingOfficial, setLinkingOfficial] = useState(false);
+  const [linkMessage, setLinkMessage] = useState("");
+
+  async function linkOfficialByEmail(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!organizationId || !officialEmail.trim()) return;
+    setLinkingOfficial(true);
+    setError("");
+    setLinkMessage("");
+    const { data, error: linkError } = await supabase.rpc(
+      "add_organization_official_by_email",
+      { p_organization_id: organizationId, p_email: officialEmail.trim() },
+    );
+    setLinkingOfficial(false);
+    if (linkError) {
+      setError(linkError.message);
+      return;
+    }
+    const result = data as LinkOfficialResult;
+    setOfficialEmail("");
+    setLinkMessage(
+      result.existing_account
+        ? `${result.email} was connected to this organization.`
+        : `${result.email} was added. An invitation is ready to be sent.`,
+    );
+    await load();
+  }
 
   async function load() {
     setLoading(true);
@@ -148,7 +185,9 @@ export default function OfficialsDirectory() {
         .select("role")
         .eq("id", userData.user.id)
         .maybeSingle();
-      const allowed = ["admin", "assignor"].includes(profile?.role || "");
+      const allowed =
+        Boolean(organizationId) ||
+        ["admin", "assignor"].includes(profile?.role || "");
       setCanManage(allowed);
       if (allowed) {
         const { data: pr, error: rankError } = await supabase
@@ -176,7 +215,7 @@ export default function OfficialsDirectory() {
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [organizationId]);
 
   function toggleSport(sport: string) {
     setForm((current) => ({
@@ -342,23 +381,19 @@ export default function OfficialsDirectory() {
           .eq("official_id", officialId),
       ]);
       if (form.league_ids.length)
-        await supabase
-          .from("official_league_eligibility")
-          .insert(
-            form.league_ids.map((league_id) => ({
-              official_id: officialId!,
-              league_id,
-            })),
-          );
+        await supabase.from("official_league_eligibility").insert(
+          form.league_ids.map((league_id) => ({
+            official_id: officialId!,
+            league_id,
+          })),
+        );
       if (form.level_ids.length)
-        await supabase
-          .from("official_level_eligibility")
-          .insert(
-            form.level_ids.map((level_id) => ({
-              official_id: officialId!,
-              level_id,
-            })),
-          );
+        await supabase.from("official_level_eligibility").insert(
+          form.level_ids.map((level_id) => ({
+            official_id: officialId!,
+            level_id,
+          })),
+        );
     }
 
     setSaving(false);
@@ -472,7 +507,9 @@ export default function OfficialsDirectory() {
                 setShowForm(false);
               }}
             >
-              {showCommunications ? "Back to Official Directory" : "Communications"}
+              {showCommunications
+                ? "Back to Official Directory"
+                : "Communications"}
             </button>
             <button
               className="secondary"
@@ -487,379 +524,420 @@ export default function OfficialsDirectory() {
           </div>
         </div>
       )}
-      {showRoster && <OfficialsRosterManager />}
-      {showCommunications ? <CommunicationCenter /> : <section className="card">
-        <div className="cardHead">
+      {canManage && organizationId && (
+        <section className="card directoryConnectCard">
           <div>
-            <h2>Officials Directory</h2>
-            <p>{officials.length} officials</p>
+            <p className="eyebrow">Add an official</p>
+            <h2>Connect by email address</h2>
+            <p>
+              Existing officials are connected to this organization. New
+              officials are created once and prepared for invitation.
+            </p>
           </div>
-          <div className="headerActions">
-            {canManage && (
-              <>
-                <button
-                  className="secondary"
-                  disabled={!selectedIds.length}
-                  onClick={emailSelected}
-                >
-                  Email Selected
-                  {selectedIds.length ? ` (${selectedIds.length})` : ""}
-                </button>
-                <button
-                  className="secondary"
-                  disabled={!selectedIds.length}
-                  onClick={textSelected}
-                >
-                  Text Selected
-                  {selectedIds.length ? ` (${selectedIds.length})` : ""}
-                </button>
-              </>
-            )}
-            <button
-              className="primary"
-              onClick={showForm ? () => setShowForm(false) : startAdd}
-            >
-              {showForm ? "Cancel" : "+ Add Official"}
-            </button>
-          </div>
-        </div>
-        <div className="toolbar">
-          <input
-            placeholder="Search officials…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          <select
-            value={sportFilter}
-            onChange={(e) => setSportFilter(e.target.value)}
-          >
-            <option>All</option>
-            {SPORTS.map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </select>
-        </div>
-        {showForm && (
-          <form className="officialForm" onSubmit={saveOfficial}>
+          <form className="directoryConnectForm" onSubmit={linkOfficialByEmail}>
             <label>
-              First name
-              <input
-                required
-                value={form.first_name}
-                onChange={(e) =>
-                  setForm((current) => ({
-                    ...current,
-                    first_name: e.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label>
-              Last name
-              <input
-                required
-                value={form.last_name}
-                onChange={(e) =>
-                  setForm((current) => ({
-                    ...current,
-                    last_name: e.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label>
-              Email
+              Official email
               <input
                 type="email"
-                value={form.email}
-                onChange={(e) =>
-                  setForm((current) => ({ ...current, email: e.target.value }))
-                }
+                required
+                placeholder="official@example.com"
+                value={officialEmail}
+                onChange={(event) => setOfficialEmail(event.target.value)}
               />
             </label>
-            <label>
-              Phone
-              <input
-                value={form.phone}
-                onChange={(e) =>
-                  setForm((current) => ({ ...current, phone: e.target.value }))
-                }
-              />
-            </label>
-            <label>
-              Home Address
-              <input
-                value={form.home_address}
-                onChange={(e) =>
-                  setForm((current) => ({
-                    ...current,
-                    home_address: e.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label>
-              Home City
-              <input
-                value={form.home_city}
-                onChange={(e) =>
-                  setForm((current) => ({
-                    ...current,
-                    home_city: e.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label>
-              Home State
-              <input
-                value={form.home_state}
-                onChange={(e) =>
-                  setForm((current) => ({
-                    ...current,
-                    home_state: e.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label>
-              Home ZIP
-              <input
-                value={form.home_zip}
-                onChange={(e) =>
-                  setForm((current) => ({
-                    ...current,
-                    home_zip: e.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label>
-              Certification
-              <input
-                value={form.certification_level}
-                onChange={(e) =>
-                  setForm((current) => ({
-                    ...current,
-                    certification_level: e.target.value,
-                  }))
-                }
-              />
-            </label>
-            <fieldset>
-              <legend>Sports</legend>
-              <div className="sportChecks">
-                {SPORTS.map((s) => (
-                  <label key={s}>
-                    <input
-                      type="checkbox"
-                      checked={form.sports.includes(s)}
-                      onChange={() => toggleSport(s)}
-                    />
-                    {s}
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-            {canManage && (
-              <>
-                {rankInput("ref_rank", "REF Rank")}
-                {rankInput("ar1_rank", "AR1 Rank")}
-                {rankInput("ar2_rank", "AR2 Rank")}
-                {rankInput("fourth_rank", "4th Rank")}
-                {rankInput("mentor_rank", "Mentor Rank")}
-                <fieldset>
-                  <legend>Eligible Leagues</legend>
-                  <div className="sportChecks">
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={allLeaguesSelected}
-                        onChange={() => toggleAllChoices("league_ids", leagues)}
-                      />
-                      <b>
-                        {allLeaguesSelected
-                          ? "Clear All Leagues"
-                          : "Select All Leagues"}
-                      </b>
-                    </label>
-                    {leagues.map((x) => (
-                      <label key={x.id}>
-                        <input
-                          type="checkbox"
-                          checked={form.league_ids.includes(x.id)}
-                          onChange={() => toggleChoice("league_ids", x.id)}
-                        />
-                        {x.name}
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
-                <fieldset>
-                  <legend>Eligible Levels</legend>
-                  <div className="sportChecks">
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={allLevelsSelected}
-                        onChange={() => toggleAllChoices("level_ids", levels)}
-                      />
-                      <b>
-                        {allLevelsSelected
-                          ? "Clear All Levels"
-                          : "Select All Levels"}
-                      </b>
-                    </label>
-                    {levels.map((x) => (
-                      <label key={x.id}>
-                        <input
-                          type="checkbox"
-                          checked={form.level_ids.includes(x.id)}
-                          onChange={() => toggleChoice("level_ids", x.id)}
-                        />
-                        {x.name}
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
-              </>
-            )}
-            <div className="formActions">
+            <button className="primary" disabled={linkingOfficial}>
+              {linkingOfficial ? "Checking…" : "Find or invite official"}
+            </button>
+          </form>
+          {linkMessage && <div className="successBox">{linkMessage}</div>}
+        </section>
+      )}
+      {showRoster && <OfficialsRosterManager />}
+      {showCommunications ? (
+        <CommunicationCenter />
+      ) : (
+        <section className="card">
+          <div className="cardHead">
+            <div>
+              <h2>Officials Directory</h2>
+              <p>{officials.length} officials</p>
+            </div>
+            <div className="headerActions">
+              {canManage && (
+                <>
+                  <button
+                    className="secondary"
+                    disabled={!selectedIds.length}
+                    onClick={emailSelected}
+                  >
+                    Email Selected
+                    {selectedIds.length ? ` (${selectedIds.length})` : ""}
+                  </button>
+                  <button
+                    className="secondary"
+                    disabled={!selectedIds.length}
+                    onClick={textSelected}
+                  >
+                    Text Selected
+                    {selectedIds.length ? ` (${selectedIds.length})` : ""}
+                  </button>
+                </>
+              )}
               <button
-                type="button"
-                className="secondary"
-                onClick={() => setShowForm(false)}
+                className="primary"
+                onClick={showForm ? () => setShowForm(false) : startAdd}
               >
-                Cancel
-              </button>
-              <button className="primary" disabled={saving}>
-                {saving
-                  ? "Saving…"
-                  : editingId
-                    ? "Save Changes"
-                    : "Save Official"}
+                {showForm ? "Cancel" : "+ Add Official"}
               </button>
             </div>
-          </form>
-        )}
-        {error && <div className="errorBox">{error}</div>}
-        {loading ? (
-          <p>Loading officials…</p>
-        ) : (
-          <div className="tableWrap">
-            <table>
-              <thead>
-                <tr>
-                  {canManage && (
-                    <th>
+          </div>
+          <div className="toolbar">
+            <input
+              placeholder="Search officials…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            <select
+              value={sportFilter}
+              onChange={(e) => setSportFilter(e.target.value)}
+            >
+              <option>All</option>
+              {SPORTS.map((s) => (
+                <option key={s}>{s}</option>
+              ))}
+            </select>
+          </div>
+          {showForm && (
+            <form className="officialForm" onSubmit={saveOfficial}>
+              <label>
+                First name
+                <input
+                  required
+                  value={form.first_name}
+                  onChange={(e) =>
+                    setForm((current) => ({
+                      ...current,
+                      first_name: e.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Last name
+                <input
+                  required
+                  value={form.last_name}
+                  onChange={(e) =>
+                    setForm((current) => ({
+                      ...current,
+                      last_name: e.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Email
+                <input
+                  type="email"
+                  value={form.email}
+                  onChange={(e) =>
+                    setForm((current) => ({
+                      ...current,
+                      email: e.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Phone
+                <input
+                  value={form.phone}
+                  onChange={(e) =>
+                    setForm((current) => ({
+                      ...current,
+                      phone: e.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Home Address
+                <input
+                  value={form.home_address}
+                  onChange={(e) =>
+                    setForm((current) => ({
+                      ...current,
+                      home_address: e.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Home City
+                <input
+                  value={form.home_city}
+                  onChange={(e) =>
+                    setForm((current) => ({
+                      ...current,
+                      home_city: e.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Home State
+                <input
+                  value={form.home_state}
+                  onChange={(e) =>
+                    setForm((current) => ({
+                      ...current,
+                      home_state: e.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Home ZIP
+                <input
+                  value={form.home_zip}
+                  onChange={(e) =>
+                    setForm((current) => ({
+                      ...current,
+                      home_zip: e.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Certification
+                <input
+                  value={form.certification_level}
+                  onChange={(e) =>
+                    setForm((current) => ({
+                      ...current,
+                      certification_level: e.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <fieldset>
+                <legend>Sports</legend>
+                <div className="sportChecks">
+                  {SPORTS.map((s) => (
+                    <label key={s}>
                       <input
                         type="checkbox"
-                        aria-label="Select visible officials"
-                        checked={
-                          visible.filter((o) => o.email || o.phone).length > 0 &&
-                          visible
-                            .filter((o) => o.email || o.phone)
-                            .every((o) => selectedIds.includes(o.id))
-                        }
-                        onChange={toggleAllVisible}
+                        checked={form.sports.includes(s)}
+                        onChange={() => toggleSport(s)}
                       />
-                    </th>
-                  )}
-                  <th>Official</th>
-                  <th>Sports</th>
-                  <th>Home</th>
-                  {canManage && (
-                    <>
-                      <th>Ref</th>
-                      <th>AR1</th>
-                      <th>AR2</th>
-                      <th>4th</th>
-                      <th>Mentor</th>
-                    </>
-                  )}
-                  <th>Status</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {visible.map((o) => {
-                  const pr = positionRanks[o.id];
-                  return (
-                    <tr key={o.id}>
-                      {canManage && (
-                        <td>
+                      {s}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+              {canManage && (
+                <>
+                  {rankInput("ref_rank", "REF Rank")}
+                  {rankInput("ar1_rank", "AR1 Rank")}
+                  {rankInput("ar2_rank", "AR2 Rank")}
+                  {rankInput("fourth_rank", "4th Rank")}
+                  {rankInput("mentor_rank", "Mentor Rank")}
+                  <fieldset>
+                    <legend>Eligible Leagues</legend>
+                    <div className="sportChecks">
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={allLeaguesSelected}
+                          onChange={() =>
+                            toggleAllChoices("league_ids", leagues)
+                          }
+                        />
+                        <b>
+                          {allLeaguesSelected
+                            ? "Clear All Leagues"
+                            : "Select All Leagues"}
+                        </b>
+                      </label>
+                      {leagues.map((x) => (
+                        <label key={x.id}>
                           <input
                             type="checkbox"
-                            aria-label={`Select ${o.first_name} ${o.last_name}`}
-                            checked={selectedIds.includes(o.id)}
-                            disabled={!o.email && !o.phone}
-                            onChange={() => toggleSelected(o.id)}
+                            checked={form.league_ids.includes(x.id)}
+                            onChange={() => toggleChoice("league_ids", x.id)}
                           />
-                        </td>
-                      )}
-                      <td>
+                          {x.name}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                  <fieldset>
+                    <legend>Eligible Levels</legend>
+                    <div className="sportChecks">
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={allLevelsSelected}
+                          onChange={() => toggleAllChoices("level_ids", levels)}
+                        />
                         <b>
-                          {o.first_name} {o.last_name}
+                          {allLevelsSelected
+                            ? "Clear All Levels"
+                            : "Select All Levels"}
                         </b>
-                        <small>{o.email || "No email"}</small>
-                        <small>{o.phone || "No phone"}</small>
-                      </td>
-                      <td>{o.sports.join(", ")}</td>
-                      <td>
-                        {[o.home_city, o.home_state]
-                          .filter(Boolean)
-                          .join(", ") ||
-                          o.home_area ||
-                          "—"}
-                      </td>
-                      {canManage && (
-                        <>
+                      </label>
+                      {levels.map((x) => (
+                        <label key={x.id}>
+                          <input
+                            type="checkbox"
+                            checked={form.level_ids.includes(x.id)}
+                            onChange={() => toggleChoice("level_ids", x.id)}
+                          />
+                          {x.name}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                </>
+              )}
+              <div className="formActions">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setShowForm(false)}
+                >
+                  Cancel
+                </button>
+                <button className="primary" disabled={saving}>
+                  {saving
+                    ? "Saving…"
+                    : editingId
+                      ? "Save Changes"
+                      : "Save Official"}
+                </button>
+              </div>
+            </form>
+          )}
+          {error && <div className="errorBox">{error}</div>}
+          {loading ? (
+            <p>Loading officials…</p>
+          ) : (
+            <div className="tableWrap">
+              <table>
+                <thead>
+                  <tr>
+                    {canManage && (
+                      <th>
+                        <input
+                          type="checkbox"
+                          aria-label="Select visible officials"
+                          checked={
+                            visible.filter((o) => o.email || o.phone).length >
+                              0 &&
+                            visible
+                              .filter((o) => o.email || o.phone)
+                              .every((o) => selectedIds.includes(o.id))
+                          }
+                          onChange={toggleAllVisible}
+                        />
+                      </th>
+                    )}
+                    <th>Official</th>
+                    <th>Sports</th>
+                    <th>Home</th>
+                    {canManage && (
+                      <>
+                        <th>Ref</th>
+                        <th>AR1</th>
+                        <th>AR2</th>
+                        <th>4th</th>
+                        <th>Mentor</th>
+                      </>
+                    )}
+                    <th>Status</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visible.map((o) => {
+                    const pr = positionRanks[o.id];
+                    return (
+                      <tr key={o.id}>
+                        {canManage && (
                           <td>
-                            <b>{(pr?.ref_rank ?? 1).toFixed(1)}</b>
+                            <input
+                              type="checkbox"
+                              aria-label={`Select ${o.first_name} ${o.last_name}`}
+                              checked={selectedIds.includes(o.id)}
+                              disabled={!o.email && !o.phone}
+                              onChange={() => toggleSelected(o.id)}
+                            />
                           </td>
-                          <td>
-                            <b>{(pr?.ar1_rank ?? 1).toFixed(1)}</b>
-                          </td>
-                          <td>
-                            <b>{(pr?.ar2_rank ?? 1).toFixed(1)}</b>
-                          </td>
-                          <td>
-                            <b>{(pr?.fourth_rank ?? 1).toFixed(1)}</b>
-                          </td>
-                          <td>
-                            <b>{(pr?.mentor_rank ?? 1).toFixed(1)}</b>
-                          </td>
-                        </>
-                      )}
-                      <td>
-                        <span
-                          className={o.active ? "badge green" : "badge red"}
-                        >
-                          {o.active ? "Active" : "Inactive"}
-                        </span>
-                      </td>
-                      <td>
-                        <button
-                          className="tableButton"
-                          onClick={() => void startEdit(o)}
-                        >
-                          Edit
-                        </button>{" "}
-                        <button
-                          className="tableButton"
-                          onClick={() => void toggleActive(o)}
-                        >
-                          {o.active ? "Deactivate" : "Activate"}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>}
+                        )}
+                        <td>
+                          <b>
+                            {o.first_name} {o.last_name}
+                          </b>
+                          <small>{o.email || "No email"}</small>
+                          <small>{o.phone || "No phone"}</small>
+                        </td>
+                        <td>{o.sports.join(", ")}</td>
+                        <td>
+                          {[o.home_city, o.home_state]
+                            .filter(Boolean)
+                            .join(", ") ||
+                            o.home_area ||
+                            "—"}
+                        </td>
+                        {canManage && (
+                          <>
+                            <td>
+                              <b>{(pr?.ref_rank ?? 1).toFixed(1)}</b>
+                            </td>
+                            <td>
+                              <b>{(pr?.ar1_rank ?? 1).toFixed(1)}</b>
+                            </td>
+                            <td>
+                              <b>{(pr?.ar2_rank ?? 1).toFixed(1)}</b>
+                            </td>
+                            <td>
+                              <b>{(pr?.fourth_rank ?? 1).toFixed(1)}</b>
+                            </td>
+                            <td>
+                              <b>{(pr?.mentor_rank ?? 1).toFixed(1)}</b>
+                            </td>
+                          </>
+                        )}
+                        <td>
+                          <span
+                            className={o.active ? "badge green" : "badge red"}
+                          >
+                            {o.active ? "Active" : "Inactive"}
+                          </span>
+                        </td>
+                        <td>
+                          <button
+                            className="tableButton"
+                            onClick={() => void startEdit(o)}
+                          >
+                            Edit
+                          </button>{" "}
+                          <button
+                            className="tableButton"
+                            onClick={() => void toggleActive(o)}
+                          >
+                            {o.active ? "Deactivate" : "Activate"}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
     </>
   );
 }

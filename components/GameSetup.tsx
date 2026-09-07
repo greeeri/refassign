@@ -38,7 +38,20 @@ type Location = {
   contact_email: string | null;
 };
 type View = "Leagues" | "Levels" | "Teams" | "Locations";
-export default function GameSetup({ view }: { view: View }) {
+type DirectoryLocation = Pick<
+  Location,
+  "id" | "name" | "address" | "city" | "state"
+> & {
+  postal_code: string | null;
+  already_connected: boolean;
+};
+export default function GameSetup({
+  view,
+  organizationId,
+}: {
+  view: View;
+  organizationId?: string;
+}) {
   const supabase = useMemo(() => createClient(), []);
   const [allowed, setAllowed] = useState(false),
     [sports, setSports] = useState<Sport[]>([]),
@@ -68,11 +81,63 @@ export default function GameSetup({ view }: { view: View }) {
     });
   const [editingTeamId, setEditingTeamId] = useState<string | null>(null),
     [editingLocationId, setEditingLocationId] = useState<string | null>(null),
-    [openLeagueDocuments, setOpenLeagueDocuments] = useState<string | null>(null),
+    [openLeagueDocuments, setOpenLeagueDocuments] = useState<string | null>(
+      null,
+    ),
     [savingPower, setSavingPower] = useState(""),
     [showTeamImport, setShowTeamImport] = useState(false),
     [showLocationImport, setShowLocationImport] = useState(false),
     [error, setError] = useState("");
+  const [locationQuery, setLocationQuery] = useState(""),
+    [directoryLocations, setDirectoryLocations] = useState<DirectoryLocation[]>(
+      [],
+    ),
+    [searchingLocations, setSearchingLocations] = useState(false),
+    [connectingLocation, setConnectingLocation] = useState(""),
+    [locationMessage, setLocationMessage] = useState("");
+
+  async function searchLocations(e: FormEvent) {
+    e.preventDefault();
+    if (!organizationId || locationQuery.trim().length < 2) return;
+    setSearchingLocations(true);
+    setError("");
+    setLocationMessage("");
+    const { data, error: searchError } = await supabase.rpc(
+      "search_location_directory",
+      {
+        p_organization_id: organizationId,
+        p_query: locationQuery.trim(),
+      },
+    );
+    setSearchingLocations(false);
+    if (searchError) setError(searchError.message);
+    else setDirectoryLocations((data || []) as DirectoryLocation[]);
+  }
+
+  async function connectLocation(item: DirectoryLocation) {
+    if (!organizationId || item.already_connected) return;
+    setConnectingLocation(item.id);
+    setError("");
+    const { error: connectError } = await supabase.rpc(
+      "connect_organization_location",
+      {
+        p_organization_id: organizationId,
+        p_location_id: item.id,
+      },
+    );
+    setConnectingLocation("");
+    if (connectError) {
+      setError(connectError.message);
+      return;
+    }
+    setDirectoryLocations((current) =>
+      current.map((entry) =>
+        entry.id === item.id ? { ...entry, already_connected: true } : entry,
+      ),
+    );
+    setLocationMessage(`${item.name} is now available to this organization.`);
+    await load();
+  }
   async function load() {
     setError("");
     const { data: u } = await supabase.auth.getUser();
@@ -82,7 +147,8 @@ export default function GameSetup({ view }: { view: View }) {
       .select("role")
       .eq("id", u.user.id)
       .maybeSingle();
-    const ok = ["admin", "assignor"].includes(p?.role || "");
+    const ok =
+      Boolean(organizationId) || ["admin", "assignor"].includes(p?.role || "");
     setAllowed(ok);
     if (!ok) return;
     const [s, l, lg, t, loc, pw] = await Promise.all([
@@ -132,7 +198,7 @@ export default function GameSetup({ view }: { view: View }) {
   }
   useEffect(() => {
     load();
-  }, []);
+  }, [organizationId]);
   async function addLevel(e: FormEvent) {
     e.preventDefault();
     const n = Number(levelOfficials);
@@ -241,11 +307,17 @@ export default function GameSetup({ view }: { view: View }) {
     if (location.address.trim() || location.name.trim()) {
       try {
         coordinates = await coordinatesForVenue(
-          [location.address, location.city, location.state].filter(Boolean).join(", "),
+          [location.address, location.city, location.state]
+            .filter(Boolean)
+            .join(", "),
           location.name,
         );
       } catch (geocodeError) {
-        setError(geocodeError instanceof Error ? geocodeError.message : "The venue address could not be located.");
+        setError(
+          geocodeError instanceof Error
+            ? geocodeError.message
+            : "The venue address could not be located.",
+        );
         return;
       }
     }
@@ -372,53 +444,62 @@ export default function GameSetup({ view }: { view: View }) {
               <tbody>
                 {leagues.map((l) => (
                   <Fragment key={l.id}>
-                  <tr>
-                    <td>
-                      <b>{l.name}</b>
-                    </td>
-                    <td>
-                      <select
-                        aria-label={`Mileage plan for ${l.name}`}
-                        value={l.mileage_plan}
-                        onChange={(e) =>
-                          void updateLeagueMileagePlan(
-                            l.id,
-                            e.target.value as MileagePlan,
-                          )
-                        }
-                      >
-                        {mileagePlans.map(([value, label]) => (
-                          <option key={value} value={value}>
-                            {label}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      <button
-                        className="secondary"
-                        type="button"
-                        onClick={() => setOpenLeagueDocuments(openLeagueDocuments === l.id ? null : l.id)}
-                      >
-                        {openLeagueDocuments === l.id ? "Close Documents" : "Manage Documents"}
-                      </button>
-                    </td>
-                    <td>
-                      <button
-                        className="tableButton"
-                        onClick={() => remove("leagues", l.id)}
-                      >
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                  {openLeagueDocuments === l.id && (
-                    <tr className="leagueDocumentsTableRow">
-                      <td colSpan={4}>
-                        <LeagueDocumentsManager leagueId={l.id} leagueName={l.name} />
+                    <tr>
+                      <td>
+                        <b>{l.name}</b>
+                      </td>
+                      <td>
+                        <select
+                          aria-label={`Mileage plan for ${l.name}`}
+                          value={l.mileage_plan}
+                          onChange={(e) =>
+                            void updateLeagueMileagePlan(
+                              l.id,
+                              e.target.value as MileagePlan,
+                            )
+                          }
+                        >
+                          {mileagePlans.map(([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <button
+                          className="secondary"
+                          type="button"
+                          onClick={() =>
+                            setOpenLeagueDocuments(
+                              openLeagueDocuments === l.id ? null : l.id,
+                            )
+                          }
+                        >
+                          {openLeagueDocuments === l.id
+                            ? "Close Documents"
+                            : "Manage Documents"}
+                        </button>
+                      </td>
+                      <td>
+                        <button
+                          className="tableButton"
+                          onClick={() => remove("leagues", l.id)}
+                        >
+                          Remove
+                        </button>
                       </td>
                     </tr>
-                  )}
+                    {openLeagueDocuments === l.id && (
+                      <tr className="leagueDocumentsTableRow">
+                        <td colSpan={4}>
+                          <LeagueDocumentsManager
+                            leagueId={l.id}
+                            leagueName={l.name}
+                          />
+                        </td>
+                      </tr>
+                    )}
                   </Fragment>
                 ))}
               </tbody>
@@ -637,219 +718,288 @@ export default function GameSetup({ view }: { view: View }) {
         </section>
       )}
       {view === "Locations" && (
-        <section className="card">
-          <div className="cardHead">
-            <div>
-              <h2>Locations</h2>
-              <p>
-                Manage game locations independently of Level, or bulk update
-                them with the uploader.
-              </p>
-            </div>
-            <button
-              className="secondary"
-              onClick={() => setShowLocationImport(!showLocationImport)}
-            >
-              {showLocationImport
-                ? "Close Location Uploader"
-                : "Location Import / Export"}
-            </button>
-          </div>
-          {showLocationImport && <LocationsRosterManager />}
-          <form className="officialForm" onSubmit={saveLocation}>
-            <label>
-              Location Name
-              <input
-                required
-                value={location.name}
-                onChange={(e) =>
-                  setLocation({ ...location, name: e.target.value })
-                }
-              />
-            </label>
-            <label>
-              Address
-              <input
-                value={location.address}
-                onChange={(e) =>
-                  setLocation({ ...location, address: e.target.value })
-                }
-              />
-            </label>
-            <label>
-              City
-              <input
-                value={location.city}
-                onChange={(e) =>
-                  setLocation({ ...location, city: e.target.value })
-                }
-              />
-            </label>
-            <label>
-              State
-              <input
-                value={location.state}
-                onChange={(e) =>
-                  setLocation({ ...location, state: e.target.value })
-                }
-              />
-            </label>
-            <label>
-              Preferred Map Link
-              <input
-                type="url"
-                placeholder="https://maps.google.com/…"
-                value={location.map_url}
-                onChange={(e) =>
-                  setLocation({ ...location, map_url: e.target.value })
-                }
-              />
-            </label>
-            <label>
-              Venue Contact
-              <input
-                value={location.contact_name}
-                onChange={(e) =>
-                  setLocation({ ...location, contact_name: e.target.value })
-                }
-              />
-            </label>
-            <label>
-              Contact Phone
-              <input
-                type="tel"
-                value={location.contact_phone}
-                onChange={(e) =>
-                  setLocation({ ...location, contact_phone: e.target.value })
-                }
-              />
-            </label>
-            <label>
-              Contact Email
-              <input
-                type="email"
-                value={location.contact_email}
-                onChange={(e) =>
-                  setLocation({ ...location, contact_email: e.target.value })
-                }
-              />
-            </label>
-            <label style={{ gridColumn: "1 / -1" }}>
-              Field-Specific Directions
-              <textarea
-                rows={2}
-                value={location.directions}
-                onChange={(e) =>
-                  setLocation({ ...location, directions: e.target.value })
-                }
-              />
-            </label>
-            <label style={{ gridColumn: "1 / -1" }}>
-              Parking Instructions
-              <textarea
-                rows={2}
-                value={location.parking_instructions}
-                onChange={(e) =>
-                  setLocation({
-                    ...location,
-                    parking_instructions: e.target.value,
-                  })
-                }
-              />
-            </label>
-            <label style={{ gridColumn: "1 / -1" }}>
-              Entrance Information
-              <textarea
-                rows={2}
-                value={location.entrance_information}
-                onChange={(e) =>
-                  setLocation({
-                    ...location,
-                    entrance_information: e.target.value,
-                  })
-                }
-              />
-            </label>
-            <div className="formActions">
-              {editingLocationId && (
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() => {
-                    setEditingLocationId(null);
-                    setLocation({
-                      name: "",
-                      address: "",
-                      city: "",
-                      state: "IA",
-                      directions: "",
-                      parking_instructions: "",
-                      entrance_information: "",
-                      map_url: "",
-                      contact_name: "",
-                      contact_phone: "",
-                      contact_email: "",
-                    });
-                  }}
-                >
-                  Cancel Edit
+        <>
+          {organizationId && (
+            <section className="card directorySearchCard">
+              <div>
+                <p className="eyebrow">Shared location directory</p>
+                <h2>Find a location before adding a new one</h2>
+                <p>Search by venue name, address, city, state, or ZIP code.</p>
+              </div>
+              <form className="directoryConnectForm" onSubmit={searchLocations}>
+                <label>
+                  Location search
+                  <input
+                    value={locationQuery}
+                    minLength={2}
+                    required
+                    placeholder="Venue name or address"
+                    onChange={(event) => setLocationQuery(event.target.value)}
+                  />
+                </label>
+                <button className="primary" disabled={searchingLocations}>
+                  {searchingLocations ? "Searching…" : "Search locations"}
                 </button>
+              </form>
+              {locationMessage && (
+                <div className="successBox">{locationMessage}</div>
               )}
-              <button className="primary">
-                {editingLocationId ? "Save Location Changes" : "Add Location"}
+              {directoryLocations.length > 0 && (
+                <div className="directoryResults">
+                  {directoryLocations.map((item) => (
+                    <article key={item.id}>
+                      <div>
+                        <strong>{item.name}</strong>
+                        <span>
+                          {[
+                            item.address,
+                            item.city,
+                            item.state,
+                            item.postal_code,
+                          ]
+                            .filter(Boolean)
+                            .join(", ") || "Address not yet provided"}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className={
+                          item.already_connected ? "secondary" : "primary"
+                        }
+                        disabled={
+                          item.already_connected ||
+                          connectingLocation === item.id
+                        }
+                        onClick={() => void connectLocation(item)}
+                      >
+                        {item.already_connected
+                          ? "Already in workspace"
+                          : connectingLocation === item.id
+                            ? "Adding…"
+                            : "Use this location"}
+                      </button>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+          <section className="card">
+            <div className="cardHead">
+              <div>
+                <h2>Locations</h2>
+                <p>
+                  Manage game locations independently of Level, or bulk update
+                  them with the uploader.
+                </p>
+              </div>
+              <button
+                className="secondary"
+                onClick={() => setShowLocationImport(!showLocationImport)}
+              >
+                {showLocationImport
+                  ? "Close Location Uploader"
+                  : "Location Import / Export"}
               </button>
             </div>
-          </form>
-          <div className="tableWrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Location</th>
-                  <th>Address</th>
-                  <th>Venue Details</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {locations.map((v) => (
-                  <tr key={v.id}>
-                    <td>{v.name}</td>
-                    <td>
-                      {[v.address, v.city, v.state].filter(Boolean).join(", ")}
-                    </td>
-                    <td>
-                      {[
-                        v.directions && "Directions",
-                        v.parking_instructions && "Parking",
-                        v.entrance_information && "Entrance",
-                        (v.contact_name ||
-                          v.contact_phone ||
-                          v.contact_email) &&
-                          "Contact",
-                      ]
-                        .filter(Boolean)
-                        .join(" • ") || "Not added"}
-                    </td>
-                    <td>
-                      <button
-                        className="tableButton"
-                        onClick={() => editLocation(v)}
-                      >
-                        Edit
-                      </button>{" "}
-                      <button
-                        className="tableButton"
-                        onClick={() => remove("locations", v.id)}
-                      >
-                        Remove
-                      </button>
-                    </td>
+            {showLocationImport && <LocationsRosterManager />}
+            <form className="officialForm" onSubmit={saveLocation}>
+              <label>
+                Location Name
+                <input
+                  required
+                  value={location.name}
+                  onChange={(e) =>
+                    setLocation({ ...location, name: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Address
+                <input
+                  value={location.address}
+                  onChange={(e) =>
+                    setLocation({ ...location, address: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                City
+                <input
+                  value={location.city}
+                  onChange={(e) =>
+                    setLocation({ ...location, city: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                State
+                <input
+                  value={location.state}
+                  onChange={(e) =>
+                    setLocation({ ...location, state: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Preferred Map Link
+                <input
+                  type="url"
+                  placeholder="https://maps.google.com/…"
+                  value={location.map_url}
+                  onChange={(e) =>
+                    setLocation({ ...location, map_url: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Venue Contact
+                <input
+                  value={location.contact_name}
+                  onChange={(e) =>
+                    setLocation({ ...location, contact_name: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Contact Phone
+                <input
+                  type="tel"
+                  value={location.contact_phone}
+                  onChange={(e) =>
+                    setLocation({ ...location, contact_phone: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Contact Email
+                <input
+                  type="email"
+                  value={location.contact_email}
+                  onChange={(e) =>
+                    setLocation({ ...location, contact_email: e.target.value })
+                  }
+                />
+              </label>
+              <label style={{ gridColumn: "1 / -1" }}>
+                Field-Specific Directions
+                <textarea
+                  rows={2}
+                  value={location.directions}
+                  onChange={(e) =>
+                    setLocation({ ...location, directions: e.target.value })
+                  }
+                />
+              </label>
+              <label style={{ gridColumn: "1 / -1" }}>
+                Parking Instructions
+                <textarea
+                  rows={2}
+                  value={location.parking_instructions}
+                  onChange={(e) =>
+                    setLocation({
+                      ...location,
+                      parking_instructions: e.target.value,
+                    })
+                  }
+                />
+              </label>
+              <label style={{ gridColumn: "1 / -1" }}>
+                Entrance Information
+                <textarea
+                  rows={2}
+                  value={location.entrance_information}
+                  onChange={(e) =>
+                    setLocation({
+                      ...location,
+                      entrance_information: e.target.value,
+                    })
+                  }
+                />
+              </label>
+              <div className="formActions">
+                {editingLocationId && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => {
+                      setEditingLocationId(null);
+                      setLocation({
+                        name: "",
+                        address: "",
+                        city: "",
+                        state: "IA",
+                        directions: "",
+                        parking_instructions: "",
+                        entrance_information: "",
+                        map_url: "",
+                        contact_name: "",
+                        contact_phone: "",
+                        contact_email: "",
+                      });
+                    }}
+                  >
+                    Cancel Edit
+                  </button>
+                )}
+                <button className="primary">
+                  {editingLocationId ? "Save Location Changes" : "Add Location"}
+                </button>
+              </div>
+            </form>
+            <div className="tableWrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Location</th>
+                    <th>Address</th>
+                    <th>Venue Details</th>
+                    <th></th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+                </thead>
+                <tbody>
+                  {locations.map((v) => (
+                    <tr key={v.id}>
+                      <td>{v.name}</td>
+                      <td>
+                        {[v.address, v.city, v.state]
+                          .filter(Boolean)
+                          .join(", ")}
+                      </td>
+                      <td>
+                        {[
+                          v.directions && "Directions",
+                          v.parking_instructions && "Parking",
+                          v.entrance_information && "Entrance",
+                          (v.contact_name ||
+                            v.contact_phone ||
+                            v.contact_email) &&
+                            "Contact",
+                        ]
+                          .filter(Boolean)
+                          .join(" • ") || "Not added"}
+                      </td>
+                      <td>
+                        <button
+                          className="tableButton"
+                          onClick={() => editLocation(v)}
+                        >
+                          Edit
+                        </button>{" "}
+                        <button
+                          className="tableButton"
+                          onClick={() => remove("locations", v.id)}
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
       )}
     </>
   );

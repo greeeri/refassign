@@ -77,7 +77,11 @@ export default function Workspace() {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) {
-        window.location.replace(window.location.hostname === "test.ref-assign.com" ? "/tier-test" : "/login");
+        window.location.replace(
+          window.location.hostname === "test.ref-assign.com"
+            ? "/tier-test"
+            : "/login",
+        );
         return;
       }
       if (window.location.hostname === "test.ref-assign.com") {
@@ -90,13 +94,29 @@ export default function Workspace() {
           return;
         }
         const available = (data || []) as TestWorkspace[];
-        const requested = new URLSearchParams(window.location.search).get("organization");
+        const requested = new URLSearchParams(window.location.search).get(
+          "organization",
+        );
         const stored = localStorage.getItem("refassign-last-test-workspace");
-        const selected = available.find((item) => item.organization_id === (requested || stored)) || available[0] || null;
+        const selected =
+          available.find(
+            (item) => item.organization_id === (requested || stored),
+          ) ||
+          available[0] ||
+          null;
         setTestWorkspaces(available);
         setTestWorkspace(selected);
-        if (selected) localStorage.setItem("refassign-last-test-workspace", selected.organization_id);
-        const mapped: Role = selected?.role === "assignor" ? "assignor" : selected?.role === "viewer" || selected?.role === "billing" ? "contact" : "admin";
+        if (selected)
+          localStorage.setItem(
+            "refassign-last-test-workspace",
+            selected.organization_id,
+          );
+        const mapped: Role =
+          selected?.role === "assignor"
+            ? "assignor"
+            : selected?.role === "viewer" || selected?.role === "billing"
+              ? "contact"
+              : "admin";
         setRoles([mapped]);
         setViewRole(mapped);
         setSection("Dashboard");
@@ -176,7 +196,9 @@ export default function Workspace() {
     location.href = testMode ? "/tier-test" : "/login";
   }
   function switchTestWorkspace(organizationId: string) {
-    const next = testWorkspaces.find((item) => item.organization_id === organizationId);
+    const next = testWorkspaces.find(
+      (item) => item.organization_id === organizationId,
+    );
     if (!next) return;
     localStorage.setItem("refassign-last-test-workspace", next.organization_id);
     window.location.assign(`/workspace?organization=${next.organization_id}`);
@@ -272,7 +294,22 @@ export default function Workspace() {
     );
   };
   if (testMode && !testWorkspace)
-    return <div className="shell refAssignBranded"><main><section className="card"><h1>No organization workspace</h1><p>Create an organization or accept an invitation before entering RefAssign.</p><a className="primary" href="/tier-test">Open organization setup</a></section></main></div>;
+    return (
+      <div className="shell refAssignBranded">
+        <main>
+          <section className="card">
+            <h1>No organization workspace</h1>
+            <p>
+              Create an organization or accept an invitation before entering
+              RefAssign.
+            </p>
+            <a className="primary" href="/tier-test">
+              Open organization setup
+            </a>
+          </section>
+        </main>
+      </div>
+    );
   return (
     <div className="shell refAssignBranded">
       {mobileNavOpen && (
@@ -478,8 +515,19 @@ export default function Workspace() {
             {testMode && testWorkspace && (
               <label style={{ fontSize: 12, fontWeight: 800 }}>
                 Organization
-                <select value={testWorkspace.organization_id} onChange={(event) => switchTestWorkspace(event.target.value)} style={{ marginLeft: 8, width: "auto", minWidth: 150 }}>
-                  {testWorkspaces.map((item) => <option key={item.organization_id} value={item.organization_id}>{item.name}</option>)}
+                <select
+                  value={testWorkspace.organization_id}
+                  onChange={(event) => switchTestWorkspace(event.target.value)}
+                  style={{ marginLeft: 8, width: "auto", minWidth: 150 }}
+                >
+                  {testWorkspaces.map((item) => (
+                    <option
+                      key={item.organization_id}
+                      value={item.organization_id}
+                    >
+                      {item.name}
+                    </option>
+                  ))}
                 </select>
               </label>
             )}
@@ -503,8 +551,15 @@ export default function Workspace() {
           <DashboardGames onNavigate={setSection} />
         )}{" "}
         {manager && section === "Games" && <GamesManager />}
-        {manager && isSetup && <GameSetup view={section as SetupView} />}{" "}
-        {manager && section === "Officials" && <OfficialsDirectory />}
+        {manager && isSetup && (
+          <GameSetup
+            view={section as SetupView}
+            organizationId={testWorkspace?.organization_id}
+          />
+        )}{" "}
+        {manager && section === "Officials" && (
+          <OfficialsDirectory organizationId={testWorkspace?.organization_id} />
+        )}
         {manager && section === "Assignments" && <AssignmentsManager />}
         {manager && section === "Audit History" && <AuditHistoryManager />}
         {manager && section === "Auto Assign" && <AutoAssignManager />}
