@@ -418,9 +418,8 @@ export default function TierTestExperience({
       {authPortal && !userEmail && (
         <section className={saved.authWrap} id="test-auth-portal">
           <TestAuthPanel
-            onAuthenticated={(email) => {
-              setUserEmail(email);
-              setAuthPortal(false);
+            onAuthenticated={() => {
+              window.location.assign("/workspace");
             }}
           />
         </section>

@@ -77,11 +77,7 @@ export default function Workspace() {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) {
-        window.location.replace(
-          window.location.hostname === "test.ref-assign.com"
-            ? "/tier-test"
-            : "/login",
-        );
+        window.location.replace("/login");
         return;
       }
       if (window.location.hostname === "test.ref-assign.com") {
@@ -196,7 +192,7 @@ export default function Workspace() {
   }
   async function signOut() {
     await supabase.auth.signOut();
-    location.href = testMode ? "/tier-test" : "/login";
+    location.href = "/login";
   }
   function switchTestWorkspace(organizationId: string) {
     const next = testWorkspaces.find(

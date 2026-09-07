@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
       { error: "Invitation email is not configured." },
       { status: 503 },
     );
-  const actionLink = "https://test.ref-assign.com/tier-test";
+  const actionLink = "https://test.ref-assign.com/workspace";
   const messages = emails.map((email) => ({
     from: "RefAssign <notifications@assignments.ref-assign.com>",
     to: [email],

@@ -14,6 +14,7 @@ export default function LoginPage() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [sendingLink, setSendingLink] = useState(false);
 
   async function signIn(event: FormEvent) {
     event.preventDefault();
@@ -71,6 +72,36 @@ export default function LoginPage() {
     }
   }
 
+  async function sendSignInLink() {
+    if (!email) {
+      setMessage("Enter your email address first, then request a sign-in link.");
+      return;
+    }
+    setSendingLink(true);
+    setMessage("");
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: `${window.location.origin}/workspace`,
+          shouldCreateUser: true,
+        },
+      });
+      setMessage(
+        error
+          ? error.message
+          : "Sign-in email sent. The secure link will open your RefAssign workspace.",
+      );
+    } catch (err) {
+      setMessage(
+        err instanceof Error ? err.message : "Unable to send a sign-in link.",
+      );
+    } finally {
+      setSendingLink(false);
+    }
+  }
+
   return (
     <main className="loginPage">
       <section className="loginCard">
@@ -110,6 +141,15 @@ export default function LoginPage() {
         <p style={{ textAlign: "center", marginTop: 16 }}>
           <a href="/register">New official? Start registration</a>
         </p>
+        <button
+          type="button"
+          className="secondary"
+          style={{ marginTop: 10, width: "100%" }}
+          disabled={sendingLink || loading}
+          onClick={() => void sendSignInLink()}
+        >
+          {sendingLink ? "Sending…" : "Email me a secure sign-in link"}
+        </button>
         <button
           type="button"
           className="secondary"
