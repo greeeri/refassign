@@ -7,6 +7,8 @@
 .shell aside nav{grid-column:1/-1;display:grid;gap:5px;margin-top:21px}
 .shell aside nav button{border:0;background:transparent;color:#c0d0df;padding:12px 13px;border-radius:9px;text-align:left;font-weight:800;cursor:pointer}
 .shell aside nav .active{background:#fff;color:#0b3967}
+.switchAccount{grid-column:1/-1;margin-top:14px;border:1px solid #527494;background:#0c365f;color:#fff;padding:11px 13px;border-radius:9px;text-align:left;font-weight:800;cursor:pointer}
+.switchAccount:hover{background:#12446f}
 .testBadge{grid-column:1/-1;margin-top:230px;border:1px solid #315577;background:#0c365f;border-radius:10px;padding:13px}
 .testBadge b{font-size:.77rem;color:#81e65a;text-transform:uppercase}
 .testBadge p{font-size:.75rem;color:#adc1d2;margin:5px 0 0}
