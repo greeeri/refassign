@@ -9,14 +9,16 @@ type TeamAccess = {
   email: string;
   role: string;
   viewer_permissions: string[];
+  league_ids: string[];
   status: string;
 };
 type TeamData = { members: TeamAccess[]; invitations: TeamAccess[] };
+type LeagueChoice = { league_id: string; name: string };
 const roles = [
   ["assignor", "Assignor"],
   ["admin", "Organization administrator"],
   ["billing", "Billing manager"],
-  ["viewer", "Read-only viewer"],
+  ["viewer", "Contact (read-only)"],
 ] as const;
 const viewerSections = [
   ["overview", "Overview dashboard"],
@@ -47,21 +49,32 @@ export default function OrganizationTeamSetup({
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("assignor");
   const [permissions, setPermissions] = useState<string[]>(["overview"]);
+  const [leagues, setLeagues] = useState<LeagueChoice[]>([]);
+  const [leagueIds, setLeagueIds] = useState<string[]>([]);
   const [team, setTeam] = useState<TeamData>({ members: [], invitations: [] });
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
   const loadTeam = async () => {
-    const { data, error } = await createClient().rpc("get_organization_team", {
-      p_organization_id: organizationId,
-    });
+    const client = createClient();
+    const [{ data, error }, { data: workspaces }] = await Promise.all([
+      client.rpc("get_organization_team", { p_organization_id: organizationId }),
+      client.rpc("get_my_test_workspaces"),
+    ]);
     if (error) setMessage(error.message);
-    else setTeam((data || { members: [], invitations: [] }) as TeamData);
+    else {
+      setTeam((data || { members: [], invitations: [] }) as TeamData);
+      const workspace = ((workspaces || []) as Array<{organization_id:string;leagues:LeagueChoice[]}>).find(item => item.organization_id === organizationId);
+      const choices = workspace?.leagues || [];
+      setLeagues(choices);
+      setLeagueIds(current => current.length ? current : choices.map(league => league.league_id));
+    }
   };
   useEffect(() => {
     void loadTeam();
   }, [organizationId]);
   const invite = async () => {
-    if (!email.includes("@") || sending) return;
+    const needsLeagues = role === "assignor" || role === "viewer";
+    if (!email.includes("@") || sending || needsLeagues && !leagueIds.length) return;
     setSending(true);
     setMessage("");
     const supabase = createClient();
@@ -73,6 +86,7 @@ export default function OrganizationTeamSetup({
           email,
           role,
           viewerPermissions: role === "viewer" ? permissions : [],
+          leagueIds: needsLeagues ? leagueIds : [],
         },
       },
     );
@@ -116,6 +130,7 @@ export default function OrganizationTeamSetup({
     setEmail("");
     setRole("assignor");
     setPermissions(["overview"]);
+    setLeagueIds(leagues.map(league => league.league_id));
     await loadTeam();
     setMessage("Invitation sent and saved to this organization.");
     setSending(false);
@@ -150,6 +165,21 @@ export default function OrganizationTeamSetup({
               placeholder="assignor@example.com"
             />
           </label>
+          {(role === "assignor" || role === "viewer") && (
+            <fieldset className={wizard.viewerPermissions}>
+              <legend>League access</legend>
+              {leagues.map(league => (
+                <label key={league.league_id}>
+                  <input
+                    type="checkbox"
+                    checked={leagueIds.includes(league.league_id)}
+                    onChange={(event) => setLeagueIds(event.target.checked ? [...leagueIds, league.league_id] : leagueIds.filter(id => id !== league.league_id))}
+                  />
+                  <span>{league.name}</span>
+                </label>
+              ))}
+            </fieldset>
+          )}
           <label>
             Workspace role
             <select
@@ -190,6 +220,7 @@ export default function OrganizationTeamSetup({
             disabled={
               sending ||
               !email.includes("@") ||
+              ((role === "assignor" || role === "viewer") && leagueIds.length === 0) ||
               (role === "viewer" && permissions.length === 0)
             }
             onClick={() => void invite()}
