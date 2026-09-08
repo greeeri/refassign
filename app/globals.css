@@ -2023,6 +2023,59 @@ td small {
   background: #dcfce7;
   color: #15803d;
 }
+.forecastTable {
+  min-width: 1260px;
+}
+.forecastTable td small {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+}
+.forecastStatus,
+.forecastRisk {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.forecastStatus.onTrack,
+.forecastRisk.low {
+  background: #dcfce7;
+  color: #15803d;
+}
+.forecastStatus.late,
+.forecastRisk.critical {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+.forecastRisk.moderate {
+  background: #fef3c7;
+  color: #92400e;
+}
+.forecastRisk.high {
+  background: #ffedd5;
+  color: #c2410c;
+}
+.forecastBar.critical em {
+  background: #dc2626;
+}
+.forecastBar.high em {
+  background: #f97316;
+}
+.forecastBar.moderate em {
+  background: #eab308;
+}
+.forecastBar.low em {
+  background: #16a34a;
+}
+.reportFootnote {
+  margin: 14px 0 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.55;
+}
 .reportChart {
   min-width: 0;
   padding: 16px;
