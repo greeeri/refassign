@@ -30,6 +30,29 @@
   .declineAlerts { grid-template-columns:1fr; }
   .declineTrend { gap:7px; }
 }
+
+/* Compliance and eligibility reporting */
+.complianceFilters { grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); }
+.compliancePremiumHead { display:flex; justify-content:flex-end; margin:18px 0 12px; }
+.compliancePremiumHead label { display:grid; gap:5px; color:#475569; font-size:.78rem; font-weight:700; }
+.complianceBar em { background:#16a34a; }
+.complianceExpirations { display:grid; gap:0; }
+.complianceExpirations p { display:flex; justify-content:space-between; gap:12px; margin:0; padding:10px 2px; border-bottom:1px solid #e2e8f0; }
+.complianceExpirations p span { color:#b45309; font-weight:700; }
+.complianceFollowUp { margin:18px 0 24px; padding:16px; border:1px solid #e2e8f0; border-radius:12px; background:#f8fafc; }
+.complianceFollowUp h3 { margin:0 0 8px; }
+.complianceFollowUp article { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid #e2e8f0; }
+.complianceFollowUp article:last-child { border-bottom:0; }
+.complianceFollowUp article div { display:grid; gap:3px; }
+.complianceFollowUp article span { color:#64748b; font-size:.78rem; }
+.complianceFollowUp article strong { color:#b42318; font-size:.78rem; text-align:right; }
+.complianceTable td small { display:block; color:#64748b; margin-top:3px; }
+.complianceTable .complianceIssue { color:#b42318; font-weight:700; }
+@media (max-width:760px) {
+  .compliancePremiumHead { justify-content:stretch; }
+  .compliancePremiumHead label { width:100%; }
+  .complianceFollowUp article { align-items:flex-start; flex-direction:column; }
+}
 body {
   margin: 0;
   background: #f5f7fb;
