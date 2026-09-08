@@ -1837,6 +1837,163 @@ td small {
 .officialReportTable td:last-child {
   text-align: right;
 }
+.reportCharts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 18px 0 24px;
+}
+.reportChart {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid #dbe4ee;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.05);
+}
+.reportChart h4 {
+  margin: 0 0 14px;
+  color: #0c1e37;
+}
+.reportBars,
+.trendRows {
+  display: grid;
+  gap: 9px;
+}
+.reportBarRow {
+  display: grid;
+  grid-template-columns: minmax(80px, 1fr) minmax(80px, 1.4fr) 28px;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.reportBarRow > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+.reportBarRow > i {
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+.reportBarRow em {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2563eb, #38a3ff);
+}
+.reportBarRow b {
+  text-align: right;
+  color: #2563eb;
+}
+.positionChart {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  align-items: center;
+  gap: 20px;
+}
+.positionDonut {
+  display: grid;
+  place-items: center;
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+}
+.positionDonut::after {
+  content: "";
+  grid-area: 1 / 1;
+  width: 78px;
+  height: 78px;
+  border-radius: 50%;
+  background: #fff;
+}
+.positionDonut span {
+  z-index: 1;
+  grid-area: 1 / 1;
+  text-align: center;
+  color: #64748b;
+  font-size: 11px;
+}
+.positionDonut span b {
+  display: block;
+  color: #0c1e37;
+  font-size: 22px;
+}
+.positionLegend {
+  display: grid;
+  gap: 8px;
+}
+.positionLegend > div {
+  display: grid;
+  grid-template-columns: 10px 1fr auto;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+}
+.positionLegend i,
+.reportChartTitle i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+.reportTrend {
+  grid-column: 1 / -1;
+}
+.reportChartTitle {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.reportChartTitle > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #64748b;
+  font-size: 11px;
+}
+.reportChartTitle .gamesKey {
+  background: #2563eb;
+}
+.reportChartTitle .milesKey {
+  margin-left: 6px;
+  background: #61d430;
+}
+.trendRows > div {
+  display: grid;
+  grid-template-columns: 58px 1fr;
+  align-items: center;
+  gap: 10px;
+  color: #64748b;
+  font-size: 11px;
+}
+.trendRows > div > div {
+  display: grid;
+  gap: 3px;
+}
+.trendRows i {
+  display: block;
+  min-width: 28px;
+  height: 13px;
+  border-radius: 3px;
+  font-style: normal;
+}
+.trendRows i b {
+  display: block;
+  padding-left: 5px;
+  color: #fff;
+  font-size: 9px;
+  line-height: 13px;
+  white-space: nowrap;
+}
+.gamesTrend {
+  background: #2563eb;
+}
+.milesTrend {
+  background: #61d430;
+}
 @media (max-width: 900px) {
   .reportMetrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1846,6 +2003,23 @@ td small {
   }
   .officialReportTable {
     min-width: 760px;
+  }
+  .reportCharts {
+    grid-template-columns: 1fr;
+  }
+  .reportTrend {
+    grid-column: auto;
+  }
+  .positionChart {
+    grid-template-columns: 112px 1fr;
+  }
+  .positionDonut {
+    width: 104px;
+    height: 104px;
+  }
+  .positionDonut::after {
+    width: 62px;
+    height: 62px;
   }
 }
 
@@ -1866,10 +2040,9 @@ td small {
 }
 .leagueDocumentForm {
   display: grid;
-  grid-template-columns: minmax(180px, 1.6fr) minmax(130px, 0.7fr) minmax(
-      220px,
-      1.4fr
-    ) auto;
+  grid-template-columns:
+    minmax(180px, 1.6fr) minmax(130px, 0.7fr) minmax(220px, 1.4fr)
+    auto;
   gap: 12px;
   align-items: end;
 }
