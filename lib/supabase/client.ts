@@ -7,8 +7,14 @@ const testUrl = 'https://slenztuopbfxqzjyrtzp.supabase.co'
 const testPublishableKey = 'sb_publishable_Hz_2BH4cYmrogX3O15x2PQ_fU-0uSKZ'
 let tierTestBrowserClient: ReturnType<typeof createBrowserClient> | undefined
 
+export function isTierTestRuntime() {
+  if (typeof window === 'undefined') return false
+  return window.location.hostname === 'test.ref-assign.com' ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL === testUrl
+}
+
 function browserConfiguration() {
-  if (typeof window !== 'undefined' && window.location.hostname === 'test.ref-assign.com') {
+  if (isTierTestRuntime()) {
     return { url: testUrl, key: testPublishableKey }
   }
   return {
@@ -21,7 +27,7 @@ export function createClient() {
   // The isolated setup and full workspace must share the same browser session.
   // @supabase/ssr stores sessions differently from the supabase-js client used
   // by the test setup, so return the cached test client on the test hostname.
-  if (typeof window !== 'undefined' && window.location.hostname === 'test.ref-assign.com') {
+  if (isTierTestRuntime()) {
     return createTierTestClient()
   }
   const config = browserConfiguration()
