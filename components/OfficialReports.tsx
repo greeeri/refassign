@@ -22,7 +22,11 @@ type Assignment = {
   id: string;
   official_id: string;
   status: string;
+  game_fee: number;
   mileage_miles: number;
+  mileage_rate: number;
+  payment_status: "unpaid" | "approved" | "paid" | "void";
+  paid_at: string | null;
   officials: Official | null;
   sport_positions: { name: string } | null;
   games: {
@@ -40,11 +44,11 @@ type Assignment = {
       longitude: number | null;
     } | null;
     levels: { name: string } | null;
-    leagues: { mileage_plan: MileagePlan } | null;
+    leagues: { name: string; mileage_plan: MileagePlan } | null;
   } | null;
 };
 type Dimension = "team" | "location" | "level" | "position";
-type Period = "all" | "season" | "30" | "year";
+type Period = "all" | "season" | "30" | "year" | "custom";
 type CountRow = [string, number];
 
 const nameOf = (official: Official | null) =>
@@ -183,9 +187,15 @@ export default function OfficialReports({
     [origins, setOrigins] = useState<Origin[]>([]);
   const [officialId, setOfficialId] = useState(""),
     [period, setPeriod] = useState<Period>("season"),
-    [dimension, setDimension] = useState<Dimension>("team");
+    [dimension, setDimension] = useState<Dimension>("team"),
+    [payer, setPayer] = useState("all"),
+    [startDate, setStartDate] = useState(""),
+    [endDate, setEndDate] = useState("");
   const [loading, setLoading] = useState(true),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [reportingAccess, setReportingAccess] = useState<"standard" | "premium">(
+      "standard",
+    );
 
   async function load(nextOfficialId = officialId) {
     setLoading(true);
@@ -213,6 +223,9 @@ export default function OfficialReports({
       setOfficialId(selectedId);
       setAssignments((result.assignments || []) as Assignment[]);
       setOrigins((result.weekdayOrigins || []) as Origin[]);
+      setReportingAccess(
+        result.reportingAccess === "premium" ? "premium" : "standard",
+      );
       if (managerView && !nextOfficialId && selectedId) {
         const selectedResponse = await fetch(
             `/api/reports/officials?scope=manager&officialId=${encodeURIComponent(selectedId)}`,
@@ -225,6 +238,9 @@ export default function OfficialReports({
           );
         setAssignments((selectedResult.assignments || []) as Assignment[]);
         setOrigins((selectedResult.weekdayOrigins || []) as Origin[]);
+        setReportingAccess(
+          selectedResult.reportingAccess === "premium" ? "premium" : "standard",
+        );
       }
     } catch (reason) {
       setError(
@@ -270,17 +286,36 @@ export default function OfficialReports({
     if (period === "year") cutoff.setFullYear(now.getFullYear() - 1);
     if (period === "season") cutoff.setMonth(now.getMonth() - 6);
     return assignments
-      .filter(
-        (assignment) =>
-          period === "all" ||
-          new Date(assignment.games?.starts_at || 0) >= cutoff,
-      )
+      .filter((assignment) => {
+        const date = new Date(assignment.games?.starts_at || 0),
+          payerMatches =
+            payer === "all" || assignment.games?.leagues?.name === payer;
+        if (!payerMatches) return false;
+        if (period === "custom") {
+          const afterStart =
+              !startDate || date >= new Date(`${startDate}T00:00:00`),
+            beforeEnd = !endDate || date <= new Date(`${endDate}T23:59:59`);
+          return afterStart && beforeEnd;
+        }
+        return period === "all" || date >= cutoff;
+      })
       .sort(
         (a, b) =>
           new Date(b.games?.starts_at || 0).getTime() -
           new Date(a.games?.starts_at || 0).getTime(),
       );
-  }, [assignments, period]);
+  }, [assignments, period, payer, startDate, endDate]);
+  const payers = useMemo(
+    () =>
+      [
+        ...new Set(
+          assignments.map(
+            (item) => item.games?.leagues?.name || "Not specified",
+          ),
+        ),
+      ].sort(),
+    [assignments],
+  );
   const summary = useMemo(() => {
     const counts = new Map<string, number>(),
       add = (label: string | null | undefined) =>
@@ -359,14 +394,77 @@ export default function OfficialReports({
       (total, assignment) => total + effectiveMiles(assignment),
       0,
     ),
+    gameFees = visible.reduce(
+      (total, assignment) =>
+        total +
+        (assignment.payment_status === "void"
+          ? 0
+          : Number(assignment.game_fee || 0)),
+      0,
+    ),
+    mileagePay = visible.reduce(
+      (total, assignment) =>
+        total +
+        (assignment.payment_status === "void"
+          ? 0
+          : effectiveMiles(assignment) * Number(assignment.mileage_rate || 0)),
+      0,
+    ),
+    totalPay = gameFees + mileagePay,
+    unpaidPay = visible.reduce(
+      (total, assignment) =>
+        total +
+        (["unpaid", "approved"].includes(assignment.payment_status)
+          ? Number(assignment.game_fee || 0) +
+            effectiveMiles(assignment) * Number(assignment.mileage_rate || 0)
+          : 0),
+      0,
+    ),
     selectedOfficial =
       officials.find((official) => official.id === officialId) || null;
+  const payerSummary = useMemo(() => {
+    const rows = new Map<
+      string,
+      {
+        games: number;
+        fees: number;
+        miles: number;
+        mileagePay: number;
+        total: number;
+        unpaid: number;
+      }
+    >();
+    visible.forEach((assignment) => {
+      const label = assignment.games?.leagues?.name || "Not specified",
+        row = rows.get(label) || {
+          games: 0,
+          fees: 0,
+          miles: 0,
+          mileagePay: 0,
+          total: 0,
+          unpaid: 0,
+        },
+        miles = effectiveMiles(assignment),
+        active = assignment.payment_status !== "void",
+        fee = active ? Number(assignment.game_fee || 0) : 0,
+        travel = active ? miles * Number(assignment.mileage_rate || 0) : 0;
+      row.games += 1;
+      row.fees += fee;
+      row.miles += miles;
+      row.mileagePay += travel;
+      row.total += fee + travel;
+      if (["unpaid", "approved"].includes(assignment.payment_status))
+        row.unpaid += fee + travel;
+      rows.set(label, row);
+    });
+    return [...rows.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [visible, origins]);
   const csv = () => {
     const cells = (value: unknown) =>
       `"${String(value ?? "").replaceAll('"', '""')}"`;
     const rows = visible.map((assignment) => {
       const game = assignment.games;
-      return [
+      const standard = [
         game?.starts_at ? new Date(game.starts_at).toLocaleDateString() : "",
         game?.game_number || "",
         game?.home?.name || "TBD",
@@ -374,15 +472,31 @@ export default function OfficialReports({
         game?.location?.name || "",
         game?.levels?.name || "",
         assignment.sport_positions?.name || "",
+        game?.leagues?.name || "Not specified",
         effectiveMiles(assignment).toFixed(1),
-      ]
+      ];
+      const premium = [
+        Number(assignment.game_fee || 0).toFixed(2),
+        Number(assignment.mileage_rate || 0).toFixed(3),
+        (
+          effectiveMiles(assignment) * Number(assignment.mileage_rate || 0)
+        ).toFixed(2),
+        (
+          Number(assignment.game_fee || 0) +
+          effectiveMiles(assignment) * Number(assignment.mileage_rate || 0)
+        ).toFixed(2),
+        assignment.payment_status,
+      ];
+      return [...standard, ...(reportingAccess === "premium" ? premium : [])]
         .map(cells)
         .join(",");
     });
     const blob = new Blob(
         [
           [
-            "Date,Game Number,Home Team,Away Team,Location,Level,Position,Miles",
+            reportingAccess === "premium"
+              ? "Date,Game Number,Home Team,Away Team,Location,Level,Position,Paying Organization,Miles,Game Fee,Mileage Rate,Mileage Reimbursement,Total Compensation,Payment Status"
+              : "Date,Game Number,Home Team,Away Team,Location,Level,Position,Paying Organization,Miles",
             ...rows,
           ].join("\n"),
         ],
@@ -413,7 +527,9 @@ export default function OfficialReports({
           ? "Last 6 months"
           : period === "year"
             ? "Last 12 months"
-            : "All assignments";
+            : period === "custom"
+              ? `${startDate || "Beginning"} through ${endDate || "Today"}`
+              : "All assignments";
     const header = () => {
       document.setFillColor(...navy);
       document.rect(0, 0, 612, 74, "F");
@@ -532,24 +648,74 @@ export default function OfficialReports({
         align: "right",
       });
     });
+    if (reportingAccess === "premium") {
+      document.addPage();
+      header();
+      section("Compensation by paying organization", 106);
+      autoTable(document, {
+        startY: 118,
+        head: [
+          [
+            "Organization",
+            "Games",
+            "Game fees",
+            "Miles",
+            "Mileage pay",
+            "Total",
+            "Unpaid",
+          ],
+        ],
+        body: payerSummary.map(([label, row]) => [
+          label,
+          row.games,
+          `$${row.fees.toFixed(2)}`,
+          row.miles.toFixed(1),
+          `$${row.mileagePay.toFixed(2)}`,
+          `$${row.total.toFixed(2)}`,
+          `$${row.unpaid.toFixed(2)}`,
+        ]),
+        margin: { top: 90, right: 36, left: 36 },
+        styles: { fontSize: 8, cellPadding: 5, textColor: navy },
+        headStyles: { fillColor: navy, textColor: [255, 255, 255] },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+      });
+    }
     document.addPage();
     header();
-    section("Assignment detail", 106);
+    section("Assignment and tax mileage detail", 106);
     autoTable(document, {
       startY: 118,
       head: [
-        ["Date", "Game", "Teams", "Location", "Level", "Position", "Miles"],
+        [
+          "Date",
+          "Game",
+          "Organization",
+          "Position",
+          ...(reportingAccess === "premium" ? ["Fee"] : []),
+          "Miles",
+          ...(reportingAccess === "premium"
+            ? ["Mileage pay", "Total", "Status"]
+            : []),
+        ],
       ],
       body: visible.map((assignment) => {
         const game = assignment.games;
         return [
           game?.starts_at ? new Date(game.starts_at).toLocaleDateString() : "-",
           game?.game_number || "-",
-          `${game?.home?.name || "TBD"} vs ${game?.away?.name || "TBD"}`,
-          game?.location?.name || "-",
-          game?.levels?.name || "-",
+          game?.leagues?.name || "Not specified",
           assignment.sport_positions?.name || "-",
+          ...(reportingAccess === "premium"
+            ? [`$${Number(assignment.game_fee || 0).toFixed(2)}`]
+            : []),
           effectiveMiles(assignment).toFixed(1),
+          ...(reportingAccess === "premium"
+            ? [
+                `$${(effectiveMiles(assignment) * Number(assignment.mileage_rate || 0)).toFixed(2)}`,
+                `$${(Number(assignment.game_fee || 0) + effectiveMiles(assignment) * Number(assignment.mileage_rate || 0)).toFixed(2)}`,
+                assignment.payment_status,
+              ]
+            : []),
         ];
       }),
       margin: { top: 90, right: 36, bottom: 42, left: 36 },
@@ -557,9 +723,11 @@ export default function OfficialReports({
       headStyles: { fillColor: navy, textColor: [255, 255, 255] },
       alternateRowStyles: { fillColor: [248, 250, 252] },
       columnStyles: {
-        2: { cellWidth: 125 },
-        3: { cellWidth: 90 },
+        2: { cellWidth: 90 },
+        4: { halign: "right" },
+        5: { halign: "right" },
         6: { halign: "right" },
+        7: { halign: "right" },
       },
       didDrawPage: () => {
         if (document.getCurrentPageInfo().pageNumber > 2) header();
@@ -584,6 +752,11 @@ export default function OfficialReports({
             Game counts by team, location, level and position, with mileage for
             every assignment.
           </p>
+          <span className="badge">
+            {reportingAccess === "premium"
+              ? "Premium reporting"
+              : "Standard reporting"}
+          </span>
         </div>
         <div className="headerActions">
           <button
@@ -631,7 +804,42 @@ export default function OfficialReports({
             <option value="season">Last 6 months</option>
             <option value="30">Last 30 days</option>
             <option value="year">Last 12 months</option>
+            <option value="custom">Custom dates</option>
             <option value="all">All assignments</option>
+          </select>
+        </label>
+        {period === "custom" && (
+          <>
+            <label>
+              Start date
+              <input
+                type="date"
+                value={startDate}
+                onChange={(event) => setStartDate(event.target.value)}
+              />
+            </label>
+            <label>
+              End date
+              <input
+                type="date"
+                value={endDate}
+                onChange={(event) => setEndDate(event.target.value)}
+              />
+            </label>
+          </>
+        )}
+        <label>
+          Paying organization
+          <select
+            value={payer}
+            onChange={(event) => setPayer(event.target.value)}
+          >
+            <option value="all">All organizations</option>
+            {payers.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
           </select>
         </label>
       </div>
@@ -661,7 +869,72 @@ export default function OfficialReports({
                   : "0.0"}
               </b>
             </div>
+            {reportingAccess === "premium" && (
+              <>
+                <div>
+                  <span>Game fees</span>
+                  <b>${gameFees.toFixed(2)}</b>
+                </div>
+                <div>
+                  <span>Mileage reimbursement</span>
+                  <b>${mileagePay.toFixed(2)}</b>
+                </div>
+                <div>
+                  <span>Total compensation</span>
+                  <b>${totalPay.toFixed(2)}</b>
+                </div>
+                <div>
+                  <span>Unpaid / awaiting payment</span>
+                  <b>${unpaidPay.toFixed(2)}</b>
+                </div>
+              </>
+            )}
           </div>
+          {reportingAccess === "premium" && (
+            <>
+              <h3>Compensation by paying organization</h3>
+              <div className="tableWrap">
+                <table className="officialReportTable">
+                  <thead>
+                    <tr>
+                      <th>Organization</th>
+                      <th>Games</th>
+                      <th>Game fees</th>
+                      <th>Miles</th>
+                      <th>Mileage pay</th>
+                      <th>Total</th>
+                      <th>Unpaid</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {payerSummary.length ? (
+                      payerSummary.map(([label, row]) => (
+                        <tr key={label}>
+                          <td>
+                            <b>{label}</b>
+                          </td>
+                          <td>{row.games}</td>
+                          <td>${row.fees.toFixed(2)}</td>
+                          <td>{row.miles.toFixed(1)}</td>
+                          <td>${row.mileagePay.toFixed(2)}</td>
+                          <td>
+                            <b>${row.total.toFixed(2)}</b>
+                          </td>
+                          <td>${row.unpaid.toFixed(2)}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={7}>
+                          No compensation in this reporting period.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
           <div className="reportCharts">
             <BarChart title="Games by team" rows={breakdowns.team} />
             <BarChart title="Games by location" rows={breakdowns.location} />
@@ -707,7 +980,16 @@ export default function OfficialReports({
                   <th>Location</th>
                   <th>Level</th>
                   <th>Position</th>
+                  <th>Paying organization</th>
                   <th>Miles</th>
+                  {reportingAccess === "premium" && (
+                    <>
+                      <th>Game fee</th>
+                      <th>Mileage pay</th>
+                      <th>Total</th>
+                      <th>Payment</th>
+                    </>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -746,15 +1028,41 @@ export default function OfficialReports({
                         </td>
                         <td>{game?.levels?.name || "—"}</td>
                         <td>{assignment.sport_positions?.name || "—"}</td>
+                        <td>{game?.leagues?.name || "Not specified"}</td>
                         <td>
                           <b>{effectiveMiles(assignment).toFixed(1)}</b>
                         </td>
+                        {reportingAccess === "premium" && (
+                          <>
+                            <td>
+                              ${Number(assignment.game_fee || 0).toFixed(2)}
+                            </td>
+                            <td>
+                              $
+                              {(
+                                effectiveMiles(assignment) *
+                                Number(assignment.mileage_rate || 0)
+                              ).toFixed(2)}
+                            </td>
+                            <td>
+                              <b>
+                                $
+                                {(
+                                  Number(assignment.game_fee || 0) +
+                                  effectiveMiles(assignment) *
+                                    Number(assignment.mileage_rate || 0)
+                                ).toFixed(2)}
+                              </b>
+                            </td>
+                            <td>{assignment.payment_status}</td>
+                          </>
+                        )}
                       </tr>
                     );
                   })
                 ) : (
                   <tr>
-                    <td colSpan={7}>
+                    <td colSpan={reportingAccess === "premium" ? 12 : 8}>
                       No assignments in this reporting period.
                     </td>
                   </tr>

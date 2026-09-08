@@ -16,6 +16,30 @@ export async function GET(request: NextRequest) {
   const service = createServiceClient();
   let officialId = requestedOfficialId;
 
+  // Prefer the organization subscription when organization workspaces are
+  // enabled; direct subscriptions remain supported for legacy accounts.
+  const { data: memberships } = await service
+    .from("organization_memberships")
+    .select("organization_id")
+    .eq("user_id", user.id);
+  const organizationIds = (memberships || []).map((row) => row.organization_id);
+  let subscriptionQuery = service
+    .from("refassign_subscriptions")
+    .select("reporting_access")
+    .in("status", ["active", "trialing", "pending"])
+    .order("created_at", { ascending: false })
+    .limit(1);
+  subscriptionQuery = organizationIds.length
+    ? subscriptionQuery.in("organization_id", organizationIds)
+    : subscriptionQuery.eq("user_id", user.id);
+  const { data: reportingSubscription } = await subscriptionQuery.maybeSingle();
+  // Existing accounts are grandfathered into premium until a Super Admin
+  // explicitly assigns standard access.
+  const reportingAccess =
+    reportingSubscription?.reporting_access === "standard"
+      ? "standard"
+      : "premium";
+
   // Reports are self-scoped by default, including for users who also hold a
   // manager role. The manager report UI must explicitly request manager scope.
   if (!managerScope || !canManage) {
@@ -49,7 +73,7 @@ export async function GET(request: NextRequest) {
   let assignmentsQuery = service
     .from("assignments")
     .select(
-      "id,official_id,status,mileage_miles,officials(id,first_name,last_name,home_latitude,home_longitude),sport_positions(name),games(id,game_number,starts_at,status,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name,city,state,latitude,longitude),levels(name),leagues(mileage_plan))",
+      "id,official_id,status,game_fee,mileage_miles,mileage_rate,payment_status,paid_at,officials(id,first_name,last_name,home_latitude,home_longitude),sport_positions(name),games(id,game_number,starts_at,status,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name,city,state,latitude,longitude),levels(name),leagues(name,mileage_plan))",
     )
     .in("status", ["accepted", "confirmed"])
     .order("assigned_at", { ascending: false });
@@ -74,10 +98,22 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     canManage: Boolean(managerScope && canManage),
     selectedOfficialId: officialId,
-    officials: managerScope && canManage
-      ? officialResult.data || []
-      : (officialResult.data || []).filter((item) => item.id === officialId),
-    assignments: assignmentResult.data || [],
+    officials:
+      managerScope && canManage
+        ? officialResult.data || []
+        : (officialResult.data || []).filter((item) => item.id === officialId),
+    reportingAccess,
+    assignments: (assignmentResult.data || []).map((assignment) =>
+      reportingAccess === "premium"
+        ? assignment
+        : {
+            ...assignment,
+            game_fee: 0,
+            mileage_rate: 0,
+            payment_status: "unpaid",
+            paid_at: null,
+          },
+    ),
     weekdayOrigins: originResult.data || [],
   });
 }
