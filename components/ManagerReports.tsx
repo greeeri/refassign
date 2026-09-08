@@ -4,127 +4,109 @@ import { useState } from "react";
 import AssignmentCoverageReport from "./AssignmentCoverageReport";
 import ComplianceEligibilityReport from "./ComplianceEligibilityReport";
 import CommunicationEffectivenessReport from "./CommunicationEffectivenessReport";
+import CustomReportBuilder from "./CustomReportBuilder";
 import DeclineReplacementReport from "./DeclineReplacementReport";
 import ExecutiveReportingDashboard from "./ExecutiveReportingDashboard";
 import FinancialForecastReport from "./FinancialForecastReport";
-import OrganizationOperationsReport from "./OrganizationOperationsReport";
 import OrganizationBenchmarkDashboard from "./OrganizationBenchmarkDashboard";
+import OrganizationOperationsReport from "./OrganizationOperationsReport";
 import OfficialReports from "./OfficialReports";
 import OfficialUtilizationReport from "./OfficialUtilizationReport";
 import PayrollPaymentReport from "./PayrollPaymentReport";
 import StaffingForecastReport from "./StaffingForecastReport";
 import TrainingDevelopmentReport from "./TrainingDevelopmentReport";
-import CustomReportBuilder from "./CustomReportBuilder";
+
+type ReportKey =
+  | "executive"
+  | "operations"
+  | "benchmarks"
+  | "coverage"
+  | "compliance"
+  | "communications"
+  | "declines"
+  | "financial"
+  | "forecast"
+  | "utilization"
+  | "development"
+  | "officials"
+  | "payroll"
+  | "custom";
+type ReportGroup = "standard" | "premium";
+
+const standardReports: Array<{ key: ReportKey; label: string }> = [
+  { key: "operations", label: "Organization Operations" },
+  { key: "coverage", label: "Assignment Coverage" },
+  { key: "declines", label: "Declines & Replacements" },
+  { key: "compliance", label: "Compliance & Eligibility" },
+  { key: "development", label: "Training & Development" },
+  { key: "communications", label: "Communication Effectiveness" },
+  { key: "utilization", label: "Official Utilization" },
+  { key: "officials", label: "Official Activity" },
+  { key: "payroll", label: "Payroll & Payments" },
+];
+
+const premiumReports: Array<{ key: ReportKey; label: string }> = [
+  { key: "executive", label: "Executive Dashboard" },
+  { key: "forecast", label: "Staffing Forecast" },
+  { key: "financial", label: "Financial Forecast" },
+  { key: "benchmarks", label: "Organization Benchmarks" },
+  { key: "custom", label: "Custom Builder" },
+];
+
+const premiumKeys = new Set<ReportKey>(premiumReports.map((item) => item.key));
 
 export default function ManagerReports({ organizationId }: { organizationId?: string }) {
-  const [report, setReport] = useState<
-    | "executive"
-    | "operations"
-    | "benchmarks"
-    | "coverage"
-    | "compliance"
-    | "communications"
-    | "declines"
-    | "financial"
-    | "forecast"
-    | "utilization"
-    | "development"
-    | "officials"
-    | "payroll"
-    | "custom"
-  >("executive");
+  const [group, setGroup] = useState<ReportGroup>("standard");
+  const [report, setReport] = useState<ReportKey>("operations");
+  const visibleReports = group === "standard" ? standardReports : premiumReports;
+
+  const chooseGroup = (nextGroup: ReportGroup) => {
+    setGroup(nextGroup);
+    setReport(nextGroup === "standard" ? standardReports[0].key : premiumReports[0].key);
+  };
+
+  const openReport = (nextReport: ReportKey) => {
+    setGroup(premiumKeys.has(nextReport) ? "premium" : "standard");
+    setReport(nextReport);
+  };
   return (
     <>
-      <section className="card">
+      <section className="card reportNavigationCard">
+        <div className="reportGroupTabs" role="tablist" aria-label="Reporting level">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={group === "standard"}
+            className={group === "standard" ? "active" : ""}
+            onClick={() => chooseGroup("standard")}
+          >
+            Standard Reports
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={group === "premium"}
+            className={group === "premium" ? "active premium" : "premium"}
+            onClick={() => chooseGroup("premium")}
+          >
+            <span aria-hidden="true">◆</span> Premium Reports
+          </button>
+        </div>
         <div className="reportDimensionTabs">
-          <button
-            className={report === "executive" ? "active" : ""}
-            onClick={() => setReport("executive")}
-          >
-            Executive Dashboard
-          </button>
-          <button
-            className={report === "operations" ? "active" : ""}
-            onClick={() => setReport("operations")}
-          >
-            Organization Operations
-          </button>
-          <button
-            className={report === "benchmarks" ? "active" : ""}
-            onClick={() => setReport("benchmarks")}
-          >
-            Organization Benchmarks <span className="premiumTabMark">◆</span>
-          </button>
-          <button
-            className={report === "coverage" ? "active" : ""}
-            onClick={() => setReport("coverage")}
-          >
-            Assignment Coverage
-          </button>
-          <button
-            className={report === "declines" ? "active" : ""}
-            onClick={() => setReport("declines")}
-          >
-            Declines &amp; Replacements
-          </button>
-          <button
-            className={report === "compliance" ? "active" : ""}
-            onClick={() => setReport("compliance")}
-          >
-            Compliance &amp; Eligibility
-          </button>
-          <button
-            className={report === "development" ? "active" : ""}
-            onClick={() => setReport("development")}
-          >
-            Training &amp; Development
-          </button>
-          <button
-            className={report === "communications" ? "active" : ""}
-            onClick={() => setReport("communications")}
-          >
-            Communication Effectiveness
-          </button>
-          <button
-            className={report === "forecast" ? "active" : ""}
-            onClick={() => setReport("forecast")}
-          >
-            Staffing Forecast
-          </button>
-          <button
-            className={report === "financial" ? "active" : ""}
-            onClick={() => setReport("financial")}
-          >
-            Financial Forecast
-          </button>
-          <button
-            className={report === "utilization" ? "active" : ""}
-            onClick={() => setReport("utilization")}
-          >
-            Official Utilization
-          </button>
-          <button
-            className={report === "officials" ? "active" : ""}
-            onClick={() => setReport("officials")}
-          >
-            Official Activity
-          </button>
-          <button
-            className={report === "custom" ? "active" : ""}
-            onClick={() => setReport("custom")}
-          >
-            Custom Builder <span className="premiumTabMark">◆</span>
-          </button>
-          <button
-            className={report === "payroll" ? "active" : ""}
-            onClick={() => setReport("payroll")}
-          >
-            Payroll & Payments
-          </button>
+          {visibleReports.map((item) => (
+            <button
+              type="button"
+              key={item.key}
+              className={report === item.key ? "active" : ""}
+              onClick={() => openReport(item.key)}
+            >
+              {item.label}
+            </button>
+          ))}
         </div>
       </section>
       {report === "executive" ? (
-        <ExecutiveReportingDashboard onOpenReport={setReport} />
+        <ExecutiveReportingDashboard onOpenReport={openReport} />
       ) : report === "operations" ? (
         <OrganizationOperationsReport />
       ) : report === "benchmarks" ? (

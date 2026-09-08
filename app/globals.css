@@ -2067,6 +2067,52 @@ td small {
   background: #2563eb;
   color: #fff;
 }
+.reportNavigationCard {
+  padding-bottom: 10px;
+}
+.reportGroupTabs {
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #dbe3ee;
+  border-radius: 11px;
+  background: #f1f5f9;
+}
+.reportGroupTabs button {
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #64748b;
+  font-weight: 850;
+  cursor: pointer;
+}
+.reportGroupTabs button.active {
+  background: #fff;
+  color: #1d4ed8;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, .12);
+}
+.reportGroupTabs button.premium span {
+  margin-right: 4px;
+  color: #7c3aed;
+  font-size: 9px;
+}
+.reportGroupTabs button.premium.active {
+  color: #6d28d9;
+}
+.reportNavigationCard .reportDimensionTabs {
+  margin-bottom: 0;
+}
+@media (max-width: 560px) {
+  .reportGroupTabs {
+    display: grid;
+    width: 100%;
+  }
+  .reportGroupTabs button {
+    padding-inline: 10px;
+  }
+}
 .reportCountGrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
