@@ -41,6 +41,7 @@ type TestWorkspace = {
   organization_id: string;
   name: string;
   role: "owner" | "admin" | "assignor" | "billing" | "viewer" | "official";
+  roles?: Array<"owner" | "admin" | "assignor" | "billing" | "viewer" | "official">;
   viewer_permissions: string[];
 };
 const labels: Record<Role, string> = {
@@ -139,15 +140,23 @@ export default function Workspace() {
             "refassign-last-test-workspace",
             selected.organization_id,
           );
-        const mapped: Role =
-          selected?.role === "official"
+        const mapWorkspaceRole = (role: TestWorkspace["role"]): Role =>
+          role === "official"
             ? "official"
-            : selected?.role === "assignor"
-            ? "assignor"
-            : selected?.role === "viewer" || selected?.role === "billing"
-              ? "contact"
-              : "admin";
-        setRoles([mapped]);
+            : role === "assignor"
+              ? "assignor"
+              : role === "viewer" || role === "billing"
+                ? "contact"
+                : "admin";
+        const availableRoles = Array.from(
+          new Set((selected?.roles || (selected ? [selected.role] : [])).map(mapWorkspaceRole)),
+        );
+        const savedRole = localStorage.getItem("refassign-view-role") as Role | null;
+        const mapped =
+          (savedRole && availableRoles.includes(savedRole) ? savedRole : null) ||
+          availableRoles[0] ||
+          "official";
+        setRoles(availableRoles);
         setViewRole(mapped);
         setSection(mapped === "official" ? "Official Dashboard" : "Dashboard");
         setReady(true);
