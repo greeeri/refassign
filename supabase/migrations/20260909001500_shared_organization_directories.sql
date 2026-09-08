@@ -40,15 +40,23 @@ alter table public.organization_teams enable row level security;
 
 create policy "Members read organization levels" on public.organization_levels
 for select to authenticated using (private.can_access_organization(organization_id));
-create policy "Managers manage organization levels" on public.organization_levels
-for all to authenticated using (private.can_manage_organization(organization_id))
+create policy "Managers add organization levels" on public.organization_levels
+for insert to authenticated with check (private.can_manage_organization(organization_id));
+create policy "Managers update organization levels" on public.organization_levels
+for update to authenticated using (private.can_manage_organization(organization_id))
 with check (private.can_manage_organization(organization_id));
+create policy "Managers remove organization levels" on public.organization_levels
+for delete to authenticated using (private.can_manage_organization(organization_id));
 
 create policy "Members read organization teams" on public.organization_teams
 for select to authenticated using (private.can_access_organization(organization_id));
-create policy "Managers manage organization teams" on public.organization_teams
-for all to authenticated using (private.can_manage_organization(organization_id))
+create policy "Managers add organization teams" on public.organization_teams
+for insert to authenticated with check (private.can_manage_organization(organization_id));
+create policy "Managers update organization teams" on public.organization_teams
+for update to authenticated using (private.can_manage_organization(organization_id))
 with check (private.can_manage_organization(organization_id));
+create policy "Managers remove organization teams" on public.organization_teams
+for delete to authenticated using (private.can_manage_organization(organization_id));
 
 drop policy if exists "Organization users read connected levels" on public.levels;
 create policy "Organization users read connected levels" on public.levels
