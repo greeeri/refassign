@@ -87,6 +87,9 @@ export default function GameSetup({
     [openLeagueDocuments, setOpenLeagueDocuments] = useState<string | null>(
       null,
     ),
+    [leagueDrafts, setLeagueDrafts] = useState<Record<string, MileagePlan>>({}),
+    [savingLeagueId, setSavingLeagueId] = useState(""),
+    [leagueMessage, setLeagueMessage] = useState(""),
     [savingPower, setSavingPower] = useState(""),
     [showTeamImport, setShowTeamImport] = useState(false),
     [showLocationImport, setShowLocationImport] = useState(false),
@@ -262,6 +265,14 @@ export default function GameSetup({
       setSports(s.data || []);
       setLevels((l.data || []) as Level[]);
       setLeagues(lg.data || []);
+      setLeagueDrafts(
+        Object.fromEntries(
+          ((lg.data || []) as League[]).map((league) => [
+            league.id,
+            league.mileage_plan,
+          ]),
+        ),
+      );
       setTeams(t.data || []);
       setPowers(powerMap);
       setLocations((loc.data || []) as Location[]);
@@ -302,9 +313,15 @@ export default function GameSetup({
   }
   async function addLeague(e: FormEvent) {
     e.preventDefault();
-    const r = await supabase
-      .from("leagues")
-      .insert({ name: leagueName.trim(), mileage_plan: leagueMileagePlan });
+    const r = organizationId
+      ? await supabase.rpc("create_organization_league", {
+          p_organization_id: organizationId,
+          p_name: leagueName.trim(),
+          p_mileage_plan: leagueMileagePlan,
+        })
+      : await supabase
+          .from("leagues")
+          .insert({ name: leagueName.trim(), mileage_plan: leagueMileagePlan });
     if (r.error) setError(r.error.message);
     else {
       setLeagueName("");
@@ -314,17 +331,28 @@ export default function GameSetup({
   }
   async function updateLeagueMileagePlan(id: string, mileagePlan: MileagePlan) {
     setError("");
-    const { error: updateError } = await supabase
-      .from("leagues")
-      .update({ mileage_plan: mileagePlan })
-      .eq("id", id);
+    setLeagueMessage("");
+    setSavingLeagueId(id);
+    const { error: updateError } = organizationId
+      ? await supabase.rpc("update_organization_league_mileage_plan", {
+          p_organization_id: organizationId,
+          p_league_id: id,
+          p_mileage_plan: mileagePlan,
+        })
+      : await supabase
+          .from("leagues")
+          .update({ mileage_plan: mileagePlan })
+          .eq("id", id);
+    setSavingLeagueId("");
     if (updateError) setError(updateError.message);
-    else
+    else {
       setLeagues((current) =>
         current.map((league) =>
           league.id === id ? { ...league, mileage_plan: mileagePlan } : league,
         ),
       );
+      setLeagueMessage("League changes saved.");
+    }
   }
   async function saveTeam(e: FormEvent) {
     e.preventDefault();
@@ -498,6 +526,7 @@ export default function GameSetup({
       {view === "Leagues" && (
         <section className="card">
           <h2>Leagues</h2>
+          {leagueMessage && <div className="loginMessage">{leagueMessage}</div>}
           <form className="toolbar" onSubmit={addLeague}>
             <input
               required
@@ -538,22 +567,43 @@ export default function GameSetup({
                         <b>{l.name}</b>
                       </td>
                       <td>
-                        <select
-                          aria-label={`Mileage plan for ${l.name}`}
-                          value={l.mileage_plan}
-                          onChange={(e) =>
-                            void updateLeagueMileagePlan(
-                              l.id,
-                              e.target.value as MileagePlan,
-                            )
-                          }
-                        >
-                          {mileagePlans.map(([value, label]) => (
-                            <option key={value} value={value}>
-                              {label}
-                            </option>
-                          ))}
-                        </select>
+                        <div className="headerActions">
+                          <select
+                            aria-label={`Mileage plan for ${l.name}`}
+                            value={leagueDrafts[l.id] ?? l.mileage_plan}
+                            onChange={(e) =>
+                              setLeagueDrafts((current) => ({
+                                ...current,
+                                [l.id]: e.target.value as MileagePlan,
+                              }))
+                            }
+                          >
+                            {mileagePlans.map(([value, label]) => (
+                              <option key={value} value={value}>
+                                {label}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            className="primary"
+                            type="button"
+                            disabled={
+                              savingLeagueId === l.id ||
+                              (leagueDrafts[l.id] ?? l.mileage_plan) ===
+                                l.mileage_plan
+                            }
+                            onClick={() =>
+                              void updateLeagueMileagePlan(
+                                l.id,
+                                leagueDrafts[l.id] ?? l.mileage_plan,
+                              )
+                            }
+                          >
+                            {savingLeagueId === l.id
+                              ? "Saving…"
+                              : "Save changes"}
+                          </button>
+                        </div>
                       </td>
                       <td>
                         <button
