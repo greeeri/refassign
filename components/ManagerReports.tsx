@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import AssignmentCoverageReport from "./AssignmentCoverageReport";
+import AuditHistoryManager from "./AuditHistoryManager";
 import ComplianceEligibilityReport from "./ComplianceEligibilityReport";
 import CommunicationEffectivenessReport from "./CommunicationEffectivenessReport";
 import CustomReportBuilder from "./CustomReportBuilder";
@@ -20,6 +21,7 @@ type ReportKey =
   | "executive"
   | "operations"
   | "benchmarks"
+  | "audit"
   | "coverage"
   | "compliance"
   | "communications"
@@ -35,6 +37,7 @@ type ReportGroup = "standard" | "premium";
 
 const standardReports: Array<{ key: ReportKey; label: string }> = [
   { key: "operations", label: "Organization Operations" },
+  { key: "audit", label: "Change & Audit" },
   { key: "coverage", label: "Assignment Coverage" },
   { key: "declines", label: "Declines & Replacements" },
   { key: "compliance", label: "Compliance & Eligibility" },
@@ -109,6 +112,8 @@ export default function ManagerReports({ organizationId }: { organizationId?: st
         <ExecutiveReportingDashboard key={organizationId} onOpenReport={openReport} organizationId={organizationId} />
       ) : report === "operations" ? (
         <OrganizationOperationsReport key={organizationId} organizationId={organizationId} />
+      ) : report === "audit" ? (
+        <AuditHistoryManager key={organizationId} organizationId={organizationId} />
       ) : report === "benchmarks" ? (
         <OrganizationBenchmarkDashboard key={organizationId} organizationId={organizationId} />
       ) : report === "coverage" ? (
