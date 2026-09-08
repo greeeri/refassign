@@ -70,9 +70,11 @@ export default function LoginPage() {
     setMessage("");
     try {
       const supabase = createClient();
-      const { data, error } = await supabase.auth.signUp({
+      const invitationQuery = officialInvitationId
+        ? `?official_invite=${encodeURIComponent(officialInvitationId)}`
+        : "";
+      const { error } = await supabase.auth.signInWithOtp({
         email,
-        password,
         options: {
           data: {
             first_name: firstName.trim(),
@@ -81,16 +83,14 @@ export default function LoginPage() {
             account_type: "official",
             official_invitation_id: officialInvitationId || undefined,
           },
-          emailRedirectTo: `${window.location.origin}/workspace`,
+          emailRedirectTo: `${window.location.origin}/workspace${invitationQuery}`,
+          shouldCreateUser: true,
         },
       });
       if (error) return setMessage(error.message);
-      if (data.session) {
-        router.replace("/workspace");
-        router.refresh();
-      } else {
-        setMessage("Account created. Open the confirmation email, then you will enter every organization that invited this email address.");
-      }
+      setMessage(
+        "Secure account link sent. Open the email to sign in and select your officiating organization.",
+      );
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Unable to create the official account.");
     } finally {
@@ -182,7 +182,7 @@ export default function LoginPage() {
               placeholder="you@example.com"
             />
           </label>
-          <label>
+          {!creatingOfficial && <label>
             Password
             <input
               type="password"
@@ -193,9 +193,9 @@ export default function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Password"
             />
-          </label>
+          </label>}
           <button className="primary loginButton" disabled={loading}>
-            {loading ? "Please wait…" : creatingOfficial ? "Create official account" : "Sign in"}
+            {loading ? "Please wait…" : creatingOfficial ? "Email my secure account link" : "Sign in"}
           </button>
         </form>
         {testMode && <button type="button" className="secondary" style={{ marginTop: 10, width: "100%" }} onClick={() => { setCreatingOfficial((value) => !value); setMessage(""); }}>
