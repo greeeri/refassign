@@ -264,3 +264,5 @@ grant execute on function private.can_read_organization_game(uuid,uuid) to authe
 grant select,insert,update,delete on public.organization_member_league_access to authenticated;
 
 notify pgrst,'reload schema';
+
+-- Deployment marker: complete application and migration set uploaded together.
