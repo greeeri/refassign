@@ -41,7 +41,9 @@ type TestWorkspace = {
   organization_id: string;
   name: string;
   role: "owner" | "admin" | "assignor" | "billing" | "viewer" | "official";
-  roles?: Array<"owner" | "admin" | "assignor" | "billing" | "viewer" | "official">;
+  roles?: Array<
+    "owner" | "admin" | "assignor" | "billing" | "viewer" | "official"
+  >;
   viewer_permissions: string[];
 };
 const labels: Record<Role, string> = {
@@ -86,13 +88,18 @@ export default function Workspace() {
       }
       if (window.location.hostname === "test.ref-assign.com") {
         setTestMode(true);
-        setTestOfficialAccount(Boolean(user.user_metadata?.account_type === "official" || user.user_metadata?.first_name));
+        setTestOfficialAccount(
+          Boolean(
+            user.user_metadata?.account_type === "official" ||
+            user.user_metadata?.first_name,
+          ),
+        );
         const hashInvitation = new URLSearchParams(
           window.location.hash.slice(1),
         ).get("official_invite");
-        const queryInvitation = new URLSearchParams(
-          window.location.search,
-        ).get("official_invite");
+        const queryInvitation = new URLSearchParams(window.location.search).get(
+          "official_invite",
+        );
         const invitationId =
           queryInvitation ||
           hashInvitation ||
@@ -149,11 +156,19 @@ export default function Workspace() {
                 ? "contact"
                 : "admin";
         const availableRoles = Array.from(
-          new Set((selected?.roles || (selected ? [selected.role] : [])).map(mapWorkspaceRole)),
+          new Set(
+            (selected?.roles || (selected ? [selected.role] : [])).map(
+              mapWorkspaceRole,
+            ),
+          ),
         );
-        const savedRole = localStorage.getItem("refassign-view-role") as Role | null;
+        const savedRole = localStorage.getItem(
+          "refassign-view-role",
+        ) as Role | null;
         const mapped =
-          (savedRole && availableRoles.includes(savedRole) ? savedRole : null) ||
+          (savedRole && availableRoles.includes(savedRole)
+            ? savedRole
+            : null) ||
           availableRoles[0] ||
           "official";
         setRoles(availableRoles);
@@ -337,9 +352,26 @@ export default function Workspace() {
       <div className="shell refAssignBranded">
         <main>
           <section className="card">
-            <h1>{testOfficialAccount ? "No officiating organizations connected" : "No organization workspace"}</h1>
-            <p>{testOfficialAccount ? invitationClaimError || "This account is valid, but it has not claimed an organization invitation yet. Ask the organization to resend the invitation, then open the new email link while signed in." : "Create an organization or accept an invitation before entering RefAssign."}</p>
-            {testOfficialAccount ? <button className="primary" onClick={signOut}>Sign out and use invitation</button> : <a className="primary" href="/tier-test">Open organization setup</a>}
+            <h1>
+              {testOfficialAccount
+                ? "No officiating organizations connected"
+                : "No organization workspace"}
+            </h1>
+            <p>
+              {testOfficialAccount
+                ? invitationClaimError ||
+                  "This account is valid, but it has not claimed an organization invitation yet. Ask the organization to resend the invitation, then open the new email link while signed in."
+                : "Create an organization or accept an invitation before entering RefAssign."}
+            </p>
+            {testOfficialAccount ? (
+              <button className="primary" onClick={signOut}>
+                Sign out and use invitation
+              </button>
+            ) : (
+              <a className="primary" href="/tier-test">
+                Open organization setup
+              </a>
+            )}
           </section>
         </main>
       </div>
@@ -598,7 +630,9 @@ export default function Workspace() {
         {manager && section === "Dashboard" && (
           <DashboardGames onNavigate={setSection} />
         )}{" "}
-        {manager && section === "Games" && <GamesManager />}
+        {manager && section === "Games" && (
+          <GamesManager organizationId={testWorkspace?.organization_id} />
+        )}
         {manager && isSetup && (
           <GameSetup
             view={section as SetupView}
@@ -612,7 +646,9 @@ export default function Workspace() {
           <OrganizationTeamManager
             organizationId={testWorkspace.organization_id}
             organization={testWorkspace.name}
-            canManage={testWorkspace.role === "owner" || testWorkspace.role === "admin"}
+            canManage={
+              testWorkspace.role === "owner" || testWorkspace.role === "admin"
+            }
           />
         )}
         {manager && section === "Assignments" && <AssignmentsManager />}
@@ -654,9 +690,7 @@ export default function Workspace() {
                           ? "officialOrganizationChoice active"
                           : "officialOrganizationChoice"
                       }
-                      onClick={() =>
-                        switchTestWorkspace(item.organization_id)
-                      }
+                      onClick={() => switchTestWorkspace(item.organization_id)}
                     >
                       <span>{item.name}</span>
                       <small>
