@@ -5,6 +5,7 @@ import { coordinatesForVenue } from "../lib/client-geocode";
 import TeamsRosterManager from "./TeamsRosterManager";
 import LocationsRosterManager from "./LocationsRosterManager";
 import LeagueDocumentsManager from "./LeagueDocumentsManager";
+import SharedDirectorySearch from "./SharedDirectorySearch";
 type Sport = { id: string; name: string };
 type Level = { id: string; name: string; officials_needed: number };
 type MileagePlan = "one_way" | "round_trip" | "actual" | "none";
@@ -231,7 +232,12 @@ export default function GameSetup({
           )
           .eq("active", true)
           .order("name");
-    const [s, l, lg, t, loc, pw] = await Promise.all([
+    const organizationSetupRequest = organizationId
+      ? supabase.rpc("get_organization_setup_directory", {
+          p_organization_id: organizationId,
+        })
+      : Promise.resolve({ data: null, error: null });
+    const [s, l, lg, t, loc, pw, organizationSetup] = await Promise.all([
       supabase
         .from("sports")
         .select("id,name")
@@ -253,9 +259,16 @@ export default function GameSetup({
         .order("name"),
       locationRequest,
       supabase.from("team_power_rankings").select("team_id,power"),
+      organizationSetupRequest,
     ]);
     const err =
-      s.error || l.error || lg.error || t.error || loc.error || pw.error;
+      s.error ||
+      l.error ||
+      lg.error ||
+      t.error ||
+      loc.error ||
+      pw.error ||
+      organizationSetup.error;
     if (err) setError(err.message);
     else {
       const powerMap: Record<string, number> = {};
@@ -263,17 +276,28 @@ export default function GameSetup({
         powerMap[item.team_id] = Number(item.power);
       });
       setSports(s.data || []);
-      setLevels((l.data || []) as Level[]);
-      setLeagues(lg.data || []);
+      const scoped = organizationSetup.data as {
+        leagues: League[];
+        levels: Level[];
+        teams: Team[];
+      } | null;
+      const visibleLevels = organizationId
+        ? scoped?.levels || []
+        : ((l.data || []) as Level[]);
+      const visibleLeagues = organizationId
+        ? scoped?.leagues || []
+        : ((lg.data || []) as League[]);
+      const visibleTeams = organizationId
+        ? scoped?.teams || []
+        : ((t.data || []) as Team[]);
+      setLevels(visibleLevels);
+      setLeagues(visibleLeagues);
       setLeagueDrafts(
         Object.fromEntries(
-          ((lg.data || []) as League[]).map((league) => [
-            league.id,
-            league.mileage_plan,
-          ]),
+          visibleLeagues.map((league) => [league.id, league.mileage_plan]),
         ),
       );
-      setTeams(t.data || []);
+      setTeams(visibleTeams);
       setPowers(powerMap);
       setLocations((loc.data || []) as Location[]);
     }
@@ -288,9 +312,15 @@ export default function GameSetup({
       setError("Officials Needed must be a whole number from 1-20.");
       return;
     }
-    const r = await supabase
-      .from("levels")
-      .insert({ name: levelName.trim(), officials_needed: n });
+    const r = organizationId
+      ? await supabase.rpc("create_or_connect_organization_level", {
+          p_organization_id: organizationId,
+          p_name: levelName.trim(),
+          p_officials_needed: n,
+        })
+      : await supabase
+          .from("levels")
+          .insert({ name: levelName.trim(), officials_needed: n });
     if (r.error) setError(r.error.message);
     else {
       setLevelName("");
@@ -365,7 +395,14 @@ export default function GameSetup({
     };
     const r = editingTeamId
       ? await supabase.from("teams").update(payload).eq("id", editingTeamId)
-      : await supabase.from("teams").insert(payload);
+      : organizationId
+        ? await supabase.rpc("create_or_connect_organization_team", {
+            p_organization_id: organizationId,
+            p_name: payload.name,
+            p_sport_id: payload.sport_id,
+            p_level_id: payload.level_id,
+          })
+        : await supabase.from("teams").insert(payload);
     if (r.error) setError(r.error.message);
     else {
       setTeam({ name: "", sport_id: "", level_id: "" });
@@ -505,7 +542,15 @@ export default function GameSetup({
       )
     )
       return;
-    const r = await supabase.from(table).delete().eq("id", id);
+    const entity = table.slice(0, -1);
+    const r =
+      organizationId && table !== "locations"
+        ? await supabase.rpc("disconnect_shared_directory_record", {
+            p_organization_id: organizationId,
+            p_entity: entity,
+            p_record_id: id,
+          })
+        : await supabase.from(table).delete().eq("id", id);
     if (r.error) setError(r.error.message);
     else load();
   }
@@ -527,6 +572,13 @@ export default function GameSetup({
         <section className="card">
           <h2>Leagues</h2>
           {leagueMessage && <div className="loginMessage">{leagueMessage}</div>}
+          {organizationId && (
+            <SharedDirectorySearch
+              organizationId={organizationId}
+              entity="league"
+              onConnected={load}
+            />
+          )}
           <form className="toolbar" onSubmit={addLeague}>
             <input
               required
@@ -653,6 +705,13 @@ export default function GameSetup({
             Set the required number of officials independently for each game
             level.
           </p>
+          {organizationId && (
+            <SharedDirectorySearch
+              organizationId={organizationId}
+              entity="level"
+              onConnected={load}
+            />
+          )}
           <form className="toolbar" onSubmit={addLevel}>
             <input
               required
@@ -732,6 +791,13 @@ export default function GameSetup({
             </button>
           </div>
           {showTeamImport && <TeamsRosterManager />}
+          {organizationId && (
+            <SharedDirectorySearch
+              organizationId={organizationId}
+              entity="team"
+              onConnected={load}
+            />
+          )}
           <form className="officialForm" onSubmit={saveTeam}>
             <label>
               Team Name

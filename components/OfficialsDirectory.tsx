@@ -5,6 +5,7 @@ import type { FormEvent } from "react";
 import { createClient } from "../lib/supabase/client";
 import OfficialsRosterManager from "./OfficialsRosterManager";
 import CommunicationCenter from "./CommunicationCenter";
+import SharedDirectorySearch from "./SharedDirectorySearch";
 
 type Official = {
   id: string;
@@ -156,27 +157,40 @@ export default function OfficialsDirectory({
     const emailColumn = header.findIndex(
       (cell) => cell === "email" || cell === "email_address",
     );
-    const firstNameColumn = header.findIndex((cell) => cell === "first_name" || cell === "firstname" || cell === "first name");
-    const lastNameColumn = header.findIndex((cell) => cell === "last_name" || cell === "lastname" || cell === "last name");
+    const firstNameColumn = header.findIndex(
+      (cell) =>
+        cell === "first_name" || cell === "firstname" || cell === "first name",
+    );
+    const lastNameColumn = header.findIndex(
+      (cell) =>
+        cell === "last_name" || cell === "lastname" || cell === "last name",
+    );
     if (emailColumn >= 0)
       return lines
         .slice(1)
         .map((line) => {
-          const cells=line.split(",").map((cell)=>cell.trim().replace(/^['"]|['"]$/g,""));
-          return {email:cells[emailColumn]||"",first_name:firstNameColumn>=0?cells[firstNameColumn]||"":"",last_name:lastNameColumn>=0?cells[lastNameColumn]||"":""};
+          const cells = line
+            .split(",")
+            .map((cell) => cell.trim().replace(/^['"]|['"]$/g, ""));
+          return {
+            email: cells[emailColumn] || "",
+            first_name:
+              firstNameColumn >= 0 ? cells[firstNameColumn] || "" : "",
+            last_name: lastNameColumn >= 0 ? cells[lastNameColumn] || "" : "",
+          };
         })
-        .filter((row)=>Boolean(row.email));
+        .filter((row) => Boolean(row.email));
     return bulkEmailText
       .split(/[\s,;]+/)
       .map((value) => value.trim().replace(/^['"]|['"]$/g, ""))
       .filter(Boolean)
-      .map((email)=>({email,first_name:"",last_name:""}));
+      .map((email) => ({ email, first_name: "", last_name: "" }));
   }
 
   async function previewBulkOfficials() {
     if (!organizationId) return;
     const rows = parsedBulkRows();
-    const emails = rows.map((row)=>row.email);
+    const emails = rows.map((row) => row.email);
     if (!emails.length)
       return setError("Paste email addresses or choose a CSV file first.");
     setBulkBusy(true);
@@ -188,10 +202,20 @@ export default function OfficialsDirectory({
     );
     setBulkBusy(false);
     if (bulkError) setError(bulkError.message);
-    else setBulkResults(((data || []) as LinkOfficialResult[]).map((item)=>{
-      const row=rows.find((candidate)=>candidate.email.toLowerCase()===item.email.toLowerCase());
-      return {...item,first_name:row?.first_name||"",last_name:row?.last_name||""};
-    }));
+    else
+      setBulkResults(
+        ((data || []) as LinkOfficialResult[]).map((item) => {
+          const row = rows.find(
+            (candidate) =>
+              candidate.email.toLowerCase() === item.email.toLowerCase(),
+          );
+          return {
+            ...item,
+            first_name: row?.first_name || "",
+            last_name: row?.last_name || "",
+          };
+        }),
+      );
   }
 
   async function addBulkOfficials() {
@@ -210,10 +234,17 @@ export default function OfficialsDirectory({
     if (bulkError) return setError(bulkError.message);
     const added = (data || []) as LinkOfficialResult[];
     for (const item of bulkResults) {
-      if (!item.first_name || !item.last_name || item.already_connected) continue;
-      const { error: nameError } = await supabase.rpc("set_organization_official_name", {
-        p_organization_id: organizationId,p_email:item.email,p_first_name:item.first_name,p_last_name:item.last_name,
-      });
+      if (!item.first_name || !item.last_name || item.already_connected)
+        continue;
+      const { error: nameError } = await supabase.rpc(
+        "set_organization_official_name",
+        {
+          p_organization_id: organizationId,
+          p_email: item.email,
+          p_first_name: item.first_name,
+          p_last_name: item.last_name,
+        },
+      );
       if (nameError) return setError(nameError.message);
     }
     const invitationEmails = added
@@ -282,7 +313,10 @@ export default function OfficialsDirectory({
     if (officialMatch.already_connected && !officialMatch.existing_account) {
       const sent = await sendOfficialInvitation(officialMatch.email);
       setLinkingOfficial(false);
-      if (sent) setLinkMessage(`A new secure invitation was sent to ${officialMatch.email}.`);
+      if (sent)
+        setLinkMessage(
+          `A new secure invitation was sent to ${officialMatch.email}.`,
+        );
       return;
     }
     const { data, error: linkError } = await supabase.rpc(
@@ -295,12 +329,24 @@ export default function OfficialsDirectory({
       return;
     }
     const result = data as LinkOfficialResult;
-    if (!officialMatch.found && officialFirstName.trim() && officialLastName.trim()) {
-      const { error: nameError } = await supabase.rpc("set_organization_official_name", {
-        p_organization_id:organizationId,p_email:officialMatch.email,
-        p_first_name:officialFirstName.trim(),p_last_name:officialLastName.trim(),
-      });
-      if (nameError) { setLinkingOfficial(false); return setError(nameError.message); }
+    if (
+      !officialMatch.found &&
+      officialFirstName.trim() &&
+      officialLastName.trim()
+    ) {
+      const { error: nameError } = await supabase.rpc(
+        "set_organization_official_name",
+        {
+          p_organization_id: organizationId,
+          p_email: officialMatch.email,
+          p_first_name: officialFirstName.trim(),
+          p_last_name: officialLastName.trim(),
+        },
+      );
+      if (nameError) {
+        setLinkingOfficial(false);
+        return setError(nameError.message);
+      }
     }
     if (!result.existing_account) {
       const sent = await sendOfficialInvitation(result.email);
@@ -747,6 +793,11 @@ export default function OfficialsDirectory({
       )}
       {organizationId && (
         <section className="card directoryConnectCard">
+          <SharedDirectorySearch
+            organizationId={organizationId}
+            entity="official"
+            onConnected={load}
+          />
           <div>
             <p className="eyebrow">Official email search</p>
             <h2>Find an existing official or send an invitation</h2>
@@ -786,14 +837,40 @@ export default function OfficialsDirectory({
                       : `${officialMatch.email} — No account yet; an invitation will be prepared`}
                   </span>
                 </div>
-                {!officialMatch.found && <div className="formGrid">
-                  <label>First name<input required value={officialFirstName} onChange={(event)=>setOfficialFirstName(event.target.value)} /></label>
-                  <label>Last name<input required value={officialLastName} onChange={(event)=>setOfficialLastName(event.target.value)} /></label>
-                </div>}
+                {!officialMatch.found && (
+                  <div className="formGrid">
+                    <label>
+                      First name
+                      <input
+                        required
+                        value={officialFirstName}
+                        onChange={(event) =>
+                          setOfficialFirstName(event.target.value)
+                        }
+                      />
+                    </label>
+                    <label>
+                      Last name
+                      <input
+                        required
+                        value={officialLastName}
+                        onChange={(event) =>
+                          setOfficialLastName(event.target.value)
+                        }
+                      />
+                    </label>
+                  </div>
+                )}
                 <button
                   type="button"
                   className="primary"
-                  disabled={(officialMatch.already_connected && officialMatch.existing_account) || linkingOfficial || (!officialMatch.found && (!officialFirstName.trim() || !officialLastName.trim()))}
+                  disabled={
+                    (officialMatch.already_connected &&
+                      officialMatch.existing_account) ||
+                    linkingOfficial ||
+                    (!officialMatch.found &&
+                      (!officialFirstName.trim() || !officialLastName.trim()))
+                  }
                   onClick={() => void connectOfficial()}
                 >
                   {officialMatch.already_connected
@@ -819,7 +896,10 @@ export default function OfficialsDirectory({
             <div className="bulkOfficialPanel">
               <h3>Bulk search and add</h3>
               <p>
-                Upload a CSV with <b>first_name</b>, <b>last_name</b>, and <b>email</b> columns, or paste up to 500 email addresses. Names from the CSV are saved in the directory; pasted-email names are completed when each official creates their account.
+                Upload a CSV with <b>first_name</b>, <b>last_name</b>, and{" "}
+                <b>email</b> columns, or paste up to 500 email addresses. Names
+                from the CSV are saved in the directory; pasted-email names are
+                completed when each official creates their account.
               </p>
               <label className="filePicker">
                 Choose CSV file
@@ -878,7 +958,14 @@ export default function OfficialsDirectory({
                     {bulkResults.map((item) => (
                       <article key={item.email}>
                         <div>
-                          <strong>{item.first_name && item.last_name ? `${item.first_name} ${item.last_name}` : item.display_name && item.display_name !== item.email ? item.display_name : "Name pending"}</strong>
+                          <strong>
+                            {item.first_name && item.last_name
+                              ? `${item.first_name} ${item.last_name}`
+                              : item.display_name &&
+                                  item.display_name !== item.email
+                                ? item.display_name
+                                : "Name pending"}
+                          </strong>
                           <span>
                             {item.valid === false
                               ? "Invalid email"
@@ -1279,22 +1366,22 @@ export default function OfficialsDirectory({
                         </td>
                         <td>
                           {organizationId && o.email && (
-                              <button
-                                className="tableButton"
-                                disabled={sendingInvitationEmail === o.email}
-                                onClick={() =>
-                                  void resendDirectoryInvitation(o.email!)
-                                }
-                              >
-                                {sendingInvitationEmail === o.email
-                                  ? "Sending…"
-                                  : pendingInvitationEmails.includes(
-                                        o.email.toLowerCase(),
-                                      )
-                                    ? "Resend invitation"
-                                    : "Send invitation"}
-                              </button>
-                            )}{" "}
+                            <button
+                              className="tableButton"
+                              disabled={sendingInvitationEmail === o.email}
+                              onClick={() =>
+                                void resendDirectoryInvitation(o.email!)
+                              }
+                            >
+                              {sendingInvitationEmail === o.email
+                                ? "Sending…"
+                                : pendingInvitationEmails.includes(
+                                      o.email.toLowerCase(),
+                                    )
+                                  ? "Resend invitation"
+                                  : "Send invitation"}
+                            </button>
+                          )}{" "}
                           <button
                             className="tableButton"
                             onClick={() => void startEdit(o)}
