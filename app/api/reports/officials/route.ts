@@ -11,11 +11,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const requestedOfficialId = request.nextUrl.searchParams.get("officialId");
+  const managerScope = request.nextUrl.searchParams.get("scope") === "manager";
   const { data: canManage } = await session.rpc("can_manage_game_setup");
   const service = createServiceClient();
   let officialId = requestedOfficialId;
 
-  if (!canManage) {
+  // Reports are self-scoped by default, including for users who also hold a
+  // manager role. The manager report UI must explicitly request manager scope.
+  if (!managerScope || !canManage) {
     const { data: ownOfficial, error: officialError } = await service
       .from("officials")
       .select("id")
@@ -69,9 +72,9 @@ export async function GET(request: NextRequest) {
   if (error)
     return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({
-    canManage: Boolean(canManage),
+    canManage: Boolean(managerScope && canManage),
     selectedOfficialId: officialId,
-    officials: canManage
+    officials: managerScope && canManage
       ? officialResult.data || []
       : (officialResult.data || []).filter((item) => item.id === officialId),
     assignments: assignmentResult.data || [],

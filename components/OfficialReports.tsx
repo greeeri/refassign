@@ -191,9 +191,10 @@ export default function OfficialReports({
     setLoading(true);
     setError("");
     try {
-      const query = nextOfficialId
-        ? `?officialId=${encodeURIComponent(nextOfficialId)}`
-        : "";
+      const params = new URLSearchParams();
+      if (managerView) params.set("scope", "manager");
+      if (nextOfficialId) params.set("officialId", nextOfficialId);
+      const query = params.size ? `?${params.toString()}` : "";
       const response = await fetch(`/api/reports/officials${query}`, {
           cache: "no-store",
         }),
@@ -214,7 +215,7 @@ export default function OfficialReports({
       setOrigins((result.weekdayOrigins || []) as Origin[]);
       if (managerView && !nextOfficialId && selectedId) {
         const selectedResponse = await fetch(
-            `/api/reports/officials?officialId=${encodeURIComponent(selectedId)}`,
+            `/api/reports/officials?scope=manager&officialId=${encodeURIComponent(selectedId)}`,
             { cache: "no-store" },
           ),
           selectedResult = await selectedResponse.json();
