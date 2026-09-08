@@ -184,6 +184,53 @@ p {
   display: flex;
   gap: 9px;
 }
+/* Official workspace organization selector */
+.officialOrganizationsCard {
+  margin-bottom: 20px;
+  padding: 20px;
+}
+.officialOrganizationChoices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+.officialOrganizationChoice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 64px;
+  padding: 12px 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #173b66;
+  text-align: left;
+  cursor: pointer;
+}
+.officialOrganizationChoice span {
+  font-weight: 800;
+}
+.officialOrganizationChoice small {
+  color: #64748b;
+  white-space: nowrap;
+}
+.officialOrganizationChoice.active {
+  border-color: #2563eb;
+  background: #eaf3ff;
+  box-shadow: inset 4px 0 #2563eb;
+}
+.officialOrganizationChoice.active small {
+  color: #166534;
+  font-weight: 800;
+}
+.officialOrganizationHint {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f1f5f9;
+}
 button,
 select,
 input,
@@ -543,6 +590,160 @@ td small {
 .officialForm textarea {
   resize: vertical;
 }
+.directoryConnectCard,
+.directorySearchCard {
+  display: grid;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+.directoryConnectForm {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+}
+.directoryConnectForm label {
+  display: grid;
+  flex: 1;
+  gap: 6px;
+  min-width: 0;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+}
+.directoryConnectForm input {
+  width: 100%;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
+}
+.directoryResults {
+  display: grid;
+  gap: 10px;
+}
+.directoryResults article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px;
+  border: 1px solid #dbe4ec;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+.directoryResults article div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.directoryResults article span {
+  color: #64748b;
+  overflow-wrap: anywhere;
+}
+.successBox {
+  padding: 11px 13px;
+  border: 1px solid #bbdfb6;
+  border-radius: 8px;
+  background: #effbea;
+  color: #2f6f35;
+  font-weight: 700;
+}
+.bulkToggle {
+  justify-self: start;
+}
+.bulkOfficialPanel {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid #dbe4ec;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+.bulkOfficialPanel label {
+  display: grid;
+  gap: 6px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+}
+.bulkOfficialPanel textarea {
+  width: 100%;
+  padding: 11px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
+}
+.filePicker input {
+  margin-top: 5px;
+}
+.bulkSummary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.bulkSummary b {
+  padding: 12px;
+  border-radius: 8px;
+  background: #eaf3fb;
+  color: #163a61;
+  text-align: center;
+}
+.compactResults {
+  max-height: 280px;
+  overflow: auto;
+}
+.compactResults article {
+  padding: 10px 12px;
+}
+.locationSourceOptions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  padding: 14px;
+  border: 1px solid #dbe4ec;
+  border-radius: 10px;
+}
+.locationSourceOptions legend {
+  padding: 0 6px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+}
+.locationSourceOptions label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+.locationSourceOptions input {
+  width: auto;
+}
+.emptySearchResult {
+  padding: 14px;
+  border-radius: 9px;
+  background: #f1f5f9;
+  color: #64748b;
+}
+@media (max-width: 680px) {
+  .directoryConnectForm,
+  .directoryResults article {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .directoryConnectForm button,
+  .directoryResults article button {
+    width: 100%;
+  }
+  .bulkSummary {
+    grid-template-columns: 1fr;
+  }
+  .locationSourceOptions {
+    display: grid;
+  }
+}
 .venueModalBackdrop {
   position: fixed;
   inset: 0;
@@ -769,6 +970,9 @@ td small {
   text-align: center;
   font-size: 11px;
   z-index: 20;
+}
+#tier-test-page + .globalCopyright {
+  display: none;
 }
 .publicAssignment {
   margin: 0;
@@ -1515,6 +1719,15 @@ td small {
   margin: 0;
 }
 @media (max-width: 600px) {
+  .officialOrganizationsCard {
+    padding: 16px;
+  }
+  .officialOrganizationChoices {
+    grid-template-columns: 1fr;
+  }
+  .officialOrganizationChoice {
+    width: 100%;
+  }
   .assignmentDetailGrid,
   .responseActions {
     grid-template-columns: 1fr;
