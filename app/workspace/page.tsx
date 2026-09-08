@@ -89,8 +89,9 @@ export default function Workspace() {
         window.location.replace("/login");
         return;
       }
-      if (isTierTestRuntime()) {
-        setTestMode(true);
+      const tierRuntime = isTierTestRuntime();
+      setTestMode(tierRuntime);
+      if (tierRuntime) {
         setTestOfficialAccount(
           Boolean(
             user.user_metadata?.account_type === "official" ||
@@ -122,59 +123,64 @@ export default function Workspace() {
               window.history.replaceState(null, "", window.location.pathname);
           }
         }
-        await Promise.all([
-          supabase.rpc("accept_my_organization_invitations"),
-          supabase.rpc("accept_my_official_invitations"),
-        ]);
-        const { data, error } = await supabase.rpc("get_my_test_workspaces");
-        if (error) {
-          console.error(error);
+      }
+      await Promise.all([
+        supabase.rpc("accept_my_organization_invitations"),
+        supabase.rpc("accept_my_official_invitations"),
+      ]);
+      const { data: workspaceData, error: workspaceError } = await supabase.rpc(
+        "get_my_test_workspaces",
+      );
+      if (workspaceError) console.error(workspaceError);
+      const availableWorkspaces = (workspaceData || []) as TestWorkspace[];
+      const requested = new URLSearchParams(window.location.search).get(
+        "organization",
+      );
+      const stored = localStorage.getItem("refassign-last-test-workspace");
+      const selectedWorkspace =
+        availableWorkspaces.find(
+          (item) => item.organization_id === (requested || stored),
+        ) ||
+        availableWorkspaces[0] ||
+        null;
+      setTestWorkspaces(availableWorkspaces);
+      setTestWorkspace(selectedWorkspace);
+      if (selectedWorkspace)
+        localStorage.setItem(
+          "refassign-last-test-workspace",
+          selectedWorkspace.organization_id,
+        );
+      const mapWorkspaceRole = (role: TestWorkspace["role"]): Role =>
+        role === "official"
+          ? "official"
+          : role === "assignor"
+            ? "assignor"
+            : role === "viewer" || role === "billing"
+              ? "contact"
+              : "admin";
+      const workspaceRoles = Array.from(
+        new Set(
+          (
+            selectedWorkspace?.roles ||
+            (selectedWorkspace ? [selectedWorkspace.role] : [])
+          ).map(mapWorkspaceRole),
+        ),
+      );
+      if (tierRuntime) {
+        if (workspaceError) {
           setReady(true);
           return;
         }
-        const available = (data || []) as TestWorkspace[];
-        const requested = new URLSearchParams(window.location.search).get(
-          "organization",
-        );
-        const stored = localStorage.getItem("refassign-last-test-workspace");
-        const selected =
-          available.find(
-            (item) => item.organization_id === (requested || stored),
-          ) ||
-          available[0] ||
-          null;
-        setTestWorkspaces(available);
-        setTestWorkspace(selected);
-        if (selected)
-          localStorage.setItem(
-            "refassign-last-test-workspace",
-            selected.organization_id,
-          );
-        const mapWorkspaceRole = (role: TestWorkspace["role"]): Role =>
-          role === "official"
-            ? "official"
-            : role === "assignor"
-              ? "assignor"
-              : role === "viewer" || role === "billing"
-                ? "contact"
-                : "admin";
-        const availableRoles = Array.from(
-          new Set(
-            (selected?.roles || (selected ? [selected.role] : [])).map(
-              mapWorkspaceRole,
-            ),
-          ),
-        );
         const savedRole = localStorage.getItem(
           "refassign-view-role",
         ) as Role | null;
         const mapped =
-          (savedRole && availableRoles.includes(savedRole)
+          (savedRole && workspaceRoles.includes(savedRole)
             ? savedRole
             : null) ||
-          availableRoles[0] ||
+          workspaceRoles[0] ||
           "official";
-        setRoles(availableRoles);
+        setRoles(workspaceRoles);
         setViewRole(mapped);
         setSection(mapped === "official" ? "Official Dashboard" : "Dashboard");
         setReady(true);
@@ -198,10 +204,13 @@ export default function Workspace() {
       setIowaDevelopmentStaff(Boolean(staff));
       setIowaMentorAccess(Boolean(mentor));
       const found = (data || []) as Role[],
-        available =
-          Boolean(mentor) && !found.includes("mentor")
-            ? [...found, "mentor" as Role]
-            : found;
+        available = Array.from(
+          new Set([
+            ...workspaceRoles,
+            ...found,
+            ...(Boolean(mentor) ? (["mentor"] as Role[]) : []),
+          ]),
+        );
       setRoles(available);
       const saved = localStorage.getItem("refassign-view-role") as Role | null,
         initial =
@@ -431,7 +440,7 @@ export default function Workspace() {
                   label: "Block Removal Requests",
                 },
               ])}
-              {testMode && testWorkspace && (
+              {testWorkspace && (
                 <button
                   className={`topNavButton ${section === "Team & Roles" ? "active" : ""}`}
                   onClick={() => nav("Team & Roles")}
@@ -603,7 +612,7 @@ export default function Workspace() {
                 Sign out / switch account
               </button>
             )}
-            {testMode && testWorkspace && (
+            {testWorkspace && (
               <label style={{ fontSize: 12, fontWeight: 800 }}>
                 Organization
                 <select
@@ -683,7 +692,7 @@ export default function Workspace() {
         {manager && section === "Sports & Rules" && <SportsRulesManager />}
         {viewRole === "official" && section === "Official Dashboard" && (
           <>
-            {testMode && testWorkspace && (
+            {testWorkspace && (
               <section className="card officialOrganizationsCard">
                 <div>
                   <p className="eyebrow">My organizations</p>
