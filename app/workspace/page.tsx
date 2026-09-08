@@ -1,5 +1,5 @@
 "use client";
-// Manager reporting deployment retry.
+// Manager reporting production retry.
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../../lib/supabase/client";
 import { RefAssignMark } from "../../components/BrandMarks";
