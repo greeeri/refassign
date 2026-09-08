@@ -27,6 +27,7 @@ import IowaSoccerDevelopmentAdmin from "../../components/IowaSoccerDevelopmentAd
 import IowaProgramReferees from "../../components/IowaProgramReferees";
 import IowaDevelopmentMentors from "../../components/IowaDevelopmentMentors";
 import OfficialReports from "../../components/OfficialReports";
+import ManagerReports from "../../components/ManagerReports";
 const setupNav = ["Leagues", "Levels", "Teams", "Locations"] as const;
 type SetupView = (typeof setupNav)[number];
 type Role =
@@ -286,16 +287,16 @@ export default function Workspace() {
                   label: "Block Removal Requests",
                 },
               ])}
-            {iowaGroup()}
-            <button
-              className={`topNavButton ${section === "Reports" ? "active" : ""}`}
-              onClick={() => nav("Reports")}
-            >
-              <Icon>▥</Icon>
-              <span>Reports</span>
-            </button>
-            <button
-              className={`topNavButton ${section === "Audit History" ? "active" : ""}`}
+              {iowaGroup()}
+              <button
+                className={`topNavButton ${section === "Reports" ? "active" : ""}`}
+                onClick={() => nav("Reports")}
+              >
+                <Icon>▥</Icon>
+                <span>Reports</span>
+              </button>
+              <button
+                className={`topNavButton ${section === "Audit History" ? "active" : ""}`}
                 onClick={() => nav("Audit History")}
               >
                 <Icon>▤</Icon>
@@ -340,8 +341,8 @@ export default function Workspace() {
                     "Official Dashboard",
                     "Self Assign",
                     "My Schedule",
-                "My Reports",
-                "My Availability",
+                    "My Reports",
+                    "My Availability",
                     "My Profile",
                   ].map((n) => (
                     <button
@@ -467,7 +468,7 @@ export default function Workspace() {
         {manager && isSetup && <GameSetup view={section as SetupView} />}{" "}
         {manager && section === "Officials" && <OfficialsDirectory />}
         {manager && section === "Assignments" && <AssignmentsManager />}
-        {manager && section === "Reports" && <OfficialReports managerView />}
+        {manager && section === "Reports" && <ManagerReports />}
         {manager && section === "Audit History" && <AuditHistoryManager />}
         {manager && section === "Auto Assign" && <AutoAssignManager />}
         {manager && section === "Payroll" && (
