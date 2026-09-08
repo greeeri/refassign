@@ -14,7 +14,10 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   const isTierPreview =
     process.env.VERCEL_ENV === "preview" &&
-    process.env.VERCEL_GIT_COMMIT_REF === "feature/league-tier-foundation";
+    [
+      "feature/league-tier-foundation",
+      "integration/league-workspace-safe",
+    ].includes(process.env.VERCEL_GIT_COMMIT_REF || "");
   if (!isTierPreview) return NextResponse.next();
   if (
     path.startsWith("/tier-test") ||
