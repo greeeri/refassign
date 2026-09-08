@@ -2558,3 +2558,109 @@ td small {
     padding-left: 50px;
   }
 }
+
+.developmentControls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin: 14px 0;
+}
+.developmentControls label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 700;
+}
+.developmentControls input {
+  width: 68px;
+  padding: 7px;
+}
+.developmentTopic.warning em {
+  background: #f59e0b;
+}
+.developmentFollowUp {
+  margin: 18px 0 24px;
+  padding: 18px;
+  border: 1px solid #dbe4ee;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+.developmentFollowUp h3 {
+  margin: 0 0 12px;
+}
+.developmentFollowUp article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 0;
+  border-top: 1px solid #e2e8f0;
+}
+.developmentFollowUp article:first-of-type {
+  border-top: 0;
+}
+.developmentFollowUp article div,
+.developmentFollowUp article b,
+.developmentFollowUp article span {
+  display: block;
+}
+.developmentFollowUp article span {
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 12px;
+}
+.developmentFollowUp strong {
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.developmentFollowUp strong.stalled {
+  background: #ffedd5;
+  color: #c2410c;
+}
+.developmentStatus {
+  display: inline-block;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.developmentStatus.ready {
+  background: #dcfce7;
+  color: #15803d;
+}
+.developmentStatus.in-progress {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+.developmentStatus.stalled {
+  background: #ffedd5;
+  color: #c2410c;
+}
+.developmentTable small {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+}
+.developmentTable .secondary {
+  width: auto;
+  min-width: 54px;
+  padding: 6px 10px;
+}
+@media (max-width: 900px) {
+  .developmentControls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .developmentFollowUp article {
+    align-items: flex-start;
+  }
+}
