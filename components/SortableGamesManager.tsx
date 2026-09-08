@@ -1,3 +1,4 @@
+// Organization context is passed through to enforce league-scoped workspace access.
 "use client";
 import { useEffect, useRef } from "react";
 import GamesManagerV3 from "./GamesManagerV3";
