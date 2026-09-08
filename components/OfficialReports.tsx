@@ -179,8 +179,10 @@ function TrendChart({
 
 export default function OfficialReports({
   managerView = false,
+  organizationId,
 }: {
   managerView?: boolean;
+  organizationId?: string;
 }) {
   const [officials, setOfficials] = useState<Official[]>([]),
     [assignments, setAssignments] = useState<Assignment[]>([]),
@@ -203,6 +205,7 @@ export default function OfficialReports({
     try {
       const params = new URLSearchParams();
       if (managerView) params.set("scope", "manager");
+      if (organizationId) params.set("organizationId", organizationId);
       if (nextOfficialId) params.set("officialId", nextOfficialId);
       const query = params.size ? `?${params.toString()}` : "";
       const response = await fetch(`/api/reports/officials${query}`, {
@@ -228,7 +231,7 @@ export default function OfficialReports({
       );
       if (managerView && !nextOfficialId && selectedId) {
         const selectedResponse = await fetch(
-            `/api/reports/officials?scope=manager&officialId=${encodeURIComponent(selectedId)}`,
+            `/api/reports/officials?scope=manager&officialId=${encodeURIComponent(selectedId)}&organizationId=${encodeURIComponent(organizationId || "")}`,
             { cache: "no-store" },
           ),
           selectedResult = await selectedResponse.json();
@@ -253,7 +256,7 @@ export default function OfficialReports({
   }
   useEffect(() => {
     void load("");
-  }, []);
+  }, [organizationId]);
 
   const effectiveMiles = (assignment: Assignment) => {
     const saved = Number(assignment.mileage_miles || 0);

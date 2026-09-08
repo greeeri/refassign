@@ -16,7 +16,7 @@ import StaffingForecastReport from "./StaffingForecastReport";
 import TrainingDevelopmentReport from "./TrainingDevelopmentReport";
 import CustomReportBuilder from "./CustomReportBuilder";
 
-export default function ManagerReports() {
+export default function ManagerReports({ organizationId }: { organizationId?: string }) {
   const [report, setReport] = useState<
     | "executive"
     | "operations"
@@ -150,7 +150,7 @@ export default function ManagerReports() {
       ) : report === "custom" ? (
         <CustomReportBuilder />
       ) : (
-        <OfficialReports managerView />
+        <OfficialReports managerView organizationId={organizationId} />
       )}
     </>
   );

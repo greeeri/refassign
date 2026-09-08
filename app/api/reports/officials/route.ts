@@ -10,28 +10,53 @@ export async function GET(request: NextRequest) {
   if (!user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  const organizationId = request.nextUrl.searchParams.get("organizationId");
+  if (!organizationId)
+    return NextResponse.json({ error: "Select an organization." }, { status: 400 });
   const requestedOfficialId = request.nextUrl.searchParams.get("officialId");
   const managerScope = request.nextUrl.searchParams.get("scope") === "manager";
-  const { data: canManage } = await session.rpc("can_manage_game_setup");
   const service = createServiceClient();
   let officialId = requestedOfficialId;
 
+  const [{ data: managerMembership }, { data: ownOfficial }] = await Promise.all([
+    service
+      .from("organization_memberships")
+      .select("role")
+      .eq("organization_id", organizationId)
+      .eq("user_id", user.id)
+      .in("role", ["owner", "admin", "assignor"])
+      .maybeSingle(),
+    service
+      .from("officials")
+      .select("id")
+      .eq("auth_user_id", user.id)
+      .maybeSingle(),
+  ]);
+  const canManage = Boolean(managerMembership);
+  const { data: ownOfficialLink } = ownOfficial
+    ? await service
+        .from("organization_officials")
+        .select("official_id")
+        .eq("organization_id", organizationId)
+        .eq("official_id", ownOfficial.id)
+        .eq("active", true)
+        .maybeSingle()
+    : { data: null };
+  if (!canManage && !ownOfficialLink)
+    return NextResponse.json(
+      { error: "You do not have access to this organization." },
+      { status: 403 },
+    );
+
   // Prefer the organization subscription when organization workspaces are
   // enabled; direct subscriptions remain supported for legacy accounts.
-  const { data: memberships } = await service
-    .from("organization_memberships")
-    .select("organization_id")
-    .eq("user_id", user.id);
-  const organizationIds = (memberships || []).map((row) => row.organization_id);
   let subscriptionQuery = service
     .from("refassign_subscriptions")
     .select("reporting_access")
     .in("status", ["active", "trialing", "pending"])
     .order("created_at", { ascending: false })
     .limit(1);
-  subscriptionQuery = organizationIds.length
-    ? subscriptionQuery.in("organization_id", organizationIds)
-    : subscriptionQuery.eq("user_id", user.id);
+  subscriptionQuery = subscriptionQuery.eq("organization_id", organizationId);
   const { data: reportingSubscription } = await subscriptionQuery.maybeSingle();
   // Existing accounts are grandfathered into premium until a Super Admin
   // explicitly assigns standard access.
@@ -43,18 +68,9 @@ export async function GET(request: NextRequest) {
   // Reports are self-scoped by default, including for users who also hold a
   // manager role. The manager report UI must explicitly request manager scope.
   if (!managerScope || !canManage) {
-    const { data: ownOfficial, error: officialError } = await service
-      .from("officials")
-      .select("id")
-      .eq("auth_user_id", user.id)
-      .maybeSingle();
-    if (officialError || !ownOfficial)
+    if (!ownOfficial || !ownOfficialLink)
       return NextResponse.json(
-        {
-          error:
-            officialError?.message ||
-            "Your login is not linked to an official record.",
-        },
+        { error: "Your official profile is not linked to this organization." },
         { status: 403 },
       );
     if (officialId && officialId !== ownOfficial.id)
@@ -65,11 +81,32 @@ export async function GET(request: NextRequest) {
     officialId = ownOfficial.id;
   }
 
-  const officialsQuery = service
+  const [{ data: organizationOfficials, error: organizationOfficialError }, { data: organizationGames, error: organizationGameError }] = await Promise.all([
+    service
+      .from("organization_officials")
+      .select("official_id")
+      .eq("organization_id", organizationId)
+      .eq("active", true),
+    service.from("games").select("id").eq("organization_id", organizationId),
+  ]);
+  if (organizationOfficialError || organizationGameError)
+    return NextResponse.json(
+      { error: organizationOfficialError?.message || organizationGameError?.message },
+      { status: 400 },
+    );
+  const organizationOfficialIds = (organizationOfficials || []).map((row) => row.official_id);
+  const organizationGameIds = (organizationGames || []).map((row) => row.id);
+  if (managerScope && canManage && officialId && !organizationOfficialIds.includes(officialId))
+    return NextResponse.json({ error: "That official is not active in this organization." }, { status: 403 });
+
+  let officialsQuery = service
     .from("officials")
     .select("id,first_name,last_name,active,home_latitude,home_longitude")
     .order("last_name")
     .order("first_name");
+  if (organizationOfficialIds.length)
+    officialsQuery = officialsQuery.in("id", organizationOfficialIds);
+  else officialsQuery = officialsQuery.eq("id", "00000000-0000-0000-0000-000000000000");
   let assignmentsQuery = service
     .from("assignments")
     .select(
@@ -79,6 +116,9 @@ export async function GET(request: NextRequest) {
     .order("assigned_at", { ascending: false });
   if (officialId)
     assignmentsQuery = assignmentsQuery.eq("official_id", officialId);
+  if (organizationGameIds.length)
+    assignmentsQuery = assignmentsQuery.in("game_id", organizationGameIds);
+  else assignmentsQuery = assignmentsQuery.eq("game_id", "00000000-0000-0000-0000-000000000000");
   let originsQuery = service
     .from("official_weekday_origins")
     .select(

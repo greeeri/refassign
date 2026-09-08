@@ -21,7 +21,7 @@ type Slot = {
   location_state: string | null;
 };
 
-export default function SelfAssignBoard() {
+export default function SelfAssignBoard({ organizationId }: { organizationId?: string }) {
   const supabase = useMemo(() => createClient(), []);
   const [slots, setSlots] = useState<Slot[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,8 +32,14 @@ export default function SelfAssignBoard() {
   async function load() {
     setLoading(true);
     setError("");
+    if (!organizationId) {
+      setSlots([]);
+      setLoading(false);
+      return;
+    }
     const { data, error: loadError } = await supabase.rpc(
       "list_my_self_assign_positions",
+      { p_organization_id: organizationId },
     );
     if (loadError) setError(loadError.message);
     else setSlots((data || []) as Slot[]);
@@ -42,7 +48,7 @@ export default function SelfAssignBoard() {
 
   useEffect(() => {
     void load();
-  }, [supabase]);
+  }, [organizationId, supabase]);
 
   async function claim(slot: Slot) {
     if (
@@ -56,7 +62,7 @@ export default function SelfAssignBoard() {
     setNotice("");
     const { error: claimError } = await supabase.rpc(
       "claim_self_assign_position",
-      { p_slot_id: slot.slot_id },
+      { p_slot_id: slot.slot_id, p_organization_id: organizationId },
     );
     if (claimError) setError(claimError.message);
     else setNotice("The game has been added to My Schedule as an accepted assignment.");

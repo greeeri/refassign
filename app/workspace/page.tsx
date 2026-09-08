@@ -673,7 +673,7 @@ export default function Workspace() {
           />
         )}
         {manager && section === "Assignments" && <AssignmentsManager organizationId={testWorkspace?.organization_id} />}
-        {manager && section === "Reports" && <ManagerReports />}
+        {manager && section === "Reports" && <ManagerReports organizationId={testWorkspace?.organization_id} />}
         {manager && section === "Audit History" && <AuditHistoryManager organizationId={testWorkspace?.organization_id} />}
         {manager && section === "Auto Assign" && <AutoAssignManager organizationId={testWorkspace?.organization_id} />}
         {manager && section === "Payroll" && (
@@ -732,17 +732,20 @@ export default function Workspace() {
                 )}
               </section>
             )}
-            <OfficialDashboard onNavigate={setSection} />
+            <OfficialDashboard
+              organizationId={testWorkspace?.organization_id}
+              onNavigate={setSection}
+            />
           </>
         )}{" "}
         {viewRole === "official" && section === "My Schedule" && (
-          <OfficialSchedule />
+          <OfficialSchedule organizationId={testWorkspace?.organization_id} />
         )}
         {viewRole === "official" && section === "Self Assign" && (
-          <SelfAssignBoard />
+          <SelfAssignBoard organizationId={testWorkspace?.organization_id} />
         )}
         {viewRole === "official" && section === "My Reports" && (
-          <OfficialReports />
+          <OfficialReports organizationId={testWorkspace?.organization_id} />
         )}
         {viewRole === "official" && section === "My Availability" && (
           <AvailabilityCalendar organizationId={testWorkspace?.organization_id} />

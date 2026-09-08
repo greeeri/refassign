@@ -67,8 +67,10 @@ function icsDate(value: Date) {
     .replace(/\.\d{3}Z$/, "Z");
 }
 export default function OfficialDashboard({
+  organizationId,
   onNavigate,
 }: {
+  organizationId?: string;
   onNavigate: (section: string) => void;
 }) {
   const supabase = useMemo(() => createClient(), []),
@@ -113,13 +115,19 @@ export default function OfficialDashboard({
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
+    if (!organizationId) {
+      setRows([]);
+      setLoading(false);
+      return;
+    }
     const { data, error: loadError } = await supabase.rpc(
       "my_official_assignments",
+      { p_organization_id: organizationId },
     );
     if (loadError) setError(loadError.message);
     else setRows((data || []) as Assignment[]);
     setLoading(false);
-  }, [supabase]);
+  }, [organizationId, supabase]);
   useEffect(() => {
     void load();
   }, [load]);

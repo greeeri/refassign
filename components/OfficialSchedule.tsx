@@ -78,7 +78,7 @@ const reasons = [
   "Already Assigned",
   "Other",
 ];
-export default function OfficialSchedule() {
+export default function OfficialSchedule({ organizationId }: { organizationId?: string }) {
   const sb = useMemo(() => createClient(), []);
   const [assignments, setAssignments] = useState<Assignment[]>([]),
     [blocks, setBlocks] = useState<Block[]>([]),
@@ -101,6 +101,15 @@ export default function OfficialSchedule() {
   async function load() {
     setLoading(true);
     setError("");
+    if (!organizationId) {
+      setAssignments([]);
+      setBlocks([]);
+      setObservations([]);
+      setLocations([]);
+      setTeams([]);
+      setLoading(false);
+      return;
+    }
     const { data: u } = await sb.auth.getUser();
     if (!u.user) {
       setLoading(false);
@@ -118,26 +127,29 @@ export default function OfficialSchedule() {
       setLoading(false);
       return;
     }
-    const [a, b, l, t, m] = await Promise.all([
-      sb.rpc("my_official_assignments"),
+    const [a, b, locationLinks, t, m] = await Promise.all([
+      sb.rpc("my_official_assignments", { p_organization_id: organizationId }),
       sb
         .from("official_availability_blocks")
         .select(
           "id,block_type,start_date,end_date,starts_at,ends_at,location_id,team_id,notes,source_assignment_id",
         )
         .eq("official_id", o.id),
-      sb.from("locations").select("id,name"),
-      sb.from("teams").select("id,name"),
-      sb.rpc("list_my_mentor_observations"),
+      sb.from("organization_locations").select("location_id,locations(id,name)").eq("organization_id", organizationId).eq("active", true),
+      sb.from("teams").select("id,name").eq("organization_id", organizationId),
+      sb.rpc("list_my_mentor_observations", { p_organization_id: organizationId }),
     ]);
-    const e = a.error || b.error || l.error || t.error || m.error;
+    const e = a.error || b.error || locationLinks.error || t.error || m.error;
     if (e) setError(e.message);
     else {
       const rows = (a.data || []) as Assignment[];
       setAssignments(rows);
       setBlocks((b.data || []) as Block[]);
       setObservations((m.data || []) as MentorObservation[]);
-      setLocations((l.data || []) as Choice[]);
+      setLocations((locationLinks.data || []).flatMap((row: any) => {
+        const location = Array.isArray(row.locations) ? row.locations[0] : row.locations;
+        return location ? [location as Choice] : [];
+      }));
       setTeams((t.data || []) as Choice[]);
       const ids = [...new Set(rows.map((x) => x.game_id).filter(Boolean))];
       const bundles = await Promise.all(
@@ -154,7 +166,7 @@ export default function OfficialSchedule() {
   }
   useEffect(() => {
     void load();
-  }, []);
+  }, [organizationId]);
   async function respond(r: Assignment, response: "accepted" | "declined") {
     const why =
       response === "declined"
