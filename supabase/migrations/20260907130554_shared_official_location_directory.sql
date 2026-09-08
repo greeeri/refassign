@@ -41,7 +41,10 @@ create index if not exists organization_officials_official_idx on public.organiz
 create index if not exists organization_official_invitations_email_idx on public.organization_official_invitations(lower(email));
 create index if not exists organization_locations_location_idx on public.organization_locations(location_id);
 create index if not exists locations_search_idx on public.locations(lower(name), lower(city), lower(state));
-create unique index if not exists locations_address_unique_ci on public.locations(
+-- Existing operational data can legitimately contain two venues at the same
+-- normalized address (for example, separate fields in one complex). Keep this
+-- as a lookup index; location reuse is resolved by the connection functions.
+create index if not exists locations_address_lookup_ci on public.locations(
   lower(coalesce(address,'')), lower(coalesce(city,'')), lower(coalesce(state,'')), lower(coalesce(postal_code,''))
 ) where address is not null;
 

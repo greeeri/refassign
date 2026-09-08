@@ -1,6 +1,6 @@
--- Return every way the signed-in account can access each organization so a
--- manager who also officiates can switch views without using another account.
-
+-- PostgreSQL cannot array_agg empty text arrays because it attempts to build a
+-- multidimensional array. Preserve viewer permissions as JSON while returning
+-- all roles for accounts such as an organization owner who also officiates.
 create or replace function private.get_my_test_workspaces_impl()
 returns jsonb language sql stable security definer set search_path='' as $$
   with access_candidates as (
@@ -37,3 +37,8 @@ returns jsonb language sql stable security definer set search_path='' as $$
     left join lateral (select * from public.refassign_subscriptions rs where rs.organization_id=o.id order by rs.created_at desc limit 1) s on true
   ) rows;
 $$;
+
+revoke all on function private.get_my_test_workspaces_impl() from public,anon;
+grant execute on function private.get_my_test_workspaces_impl() to authenticated;
+
+notify pgrst,'reload schema';
