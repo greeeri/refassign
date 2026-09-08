@@ -1,4 +1,5 @@
 "use client";
+// Manager reporting deployment marker.
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../../lib/supabase/client";
 import { RefAssignMark } from "../../components/BrandMarks";
