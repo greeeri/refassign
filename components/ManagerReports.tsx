@@ -5,6 +5,7 @@ import AssignmentCoverageReport from "./AssignmentCoverageReport";
 import ComplianceEligibilityReport from "./ComplianceEligibilityReport";
 import CommunicationEffectivenessReport from "./CommunicationEffectivenessReport";
 import DeclineReplacementReport from "./DeclineReplacementReport";
+import ExecutiveReportingDashboard from "./ExecutiveReportingDashboard";
 import FinancialForecastReport from "./FinancialForecastReport";
 import OrganizationOperationsReport from "./OrganizationOperationsReport";
 import OfficialReports from "./OfficialReports";
@@ -15,6 +16,7 @@ import TrainingDevelopmentReport from "./TrainingDevelopmentReport";
 
 export default function ManagerReports() {
   const [report, setReport] = useState<
+    | "executive"
     | "operations"
     | "coverage"
     | "compliance"
@@ -26,11 +28,17 @@ export default function ManagerReports() {
     | "development"
     | "officials"
     | "payroll"
-  >("operations");
+  >("executive");
   return (
     <>
       <section className="card">
         <div className="reportDimensionTabs">
+          <button
+            className={report === "executive" ? "active" : ""}
+            onClick={() => setReport("executive")}
+          >
+            Executive Dashboard
+          </button>
           <button
             className={report === "operations" ? "active" : ""}
             onClick={() => setReport("operations")}
@@ -99,7 +107,9 @@ export default function ManagerReports() {
           </button>
         </div>
       </section>
-      {report === "operations" ? (
+      {report === "executive" ? (
+        <ExecutiveReportingDashboard onOpenReport={setReport} />
+      ) : report === "operations" ? (
         <OrganizationOperationsReport />
       ) : report === "coverage" ? (
         <AssignmentCoverageReport />

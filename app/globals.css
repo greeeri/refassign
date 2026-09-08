@@ -1895,6 +1895,59 @@ td small {
   gap: 14px;
   margin: 18px 0 24px;
 }
+.executiveMetrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.executiveMetrics small {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+}
+.executiveSectionHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 24px 0 12px;
+}
+.executiveSectionHead h3,
+.executiveSectionHead p { margin: 0; }
+.executiveSectionHead p { color: #64748b; font-size: 13px; }
+.executiveAttention,
+.executiveReportLinks {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 22px;
+}
+.executiveAttention button,
+.executiveReportLinks button {
+  display: grid;
+  gap: 5px;
+  padding: 14px;
+  border: 1px solid #dbe4ee;
+  border-radius: 11px;
+  background: #fff;
+  color: #0f172a;
+  text-align: left;
+  cursor: pointer;
+}
+.executiveAttention button.needsAction { border-color: #fbbf24; background: #fffbeb; }
+.executiveAttention button.onTrack { border-color: #86efac; background: #f0fdf4; }
+.executiveAttention span { color: #64748b; font-size: 10px; font-weight: 800; text-transform: uppercase; }
+.executiveAttention small,
+.executiveReportLinks span { color: #64748b; }
+.executiveReportLinks button:hover { border-color: #60a5fa; box-shadow: 0 4px 14px rgba(37,99,235,.09); }
+.executiveReportLinks i { color: #2563eb; font-size: 12px; font-style: normal; font-weight: 800; }
+.premiumPlaceholder { display: grid; place-items: center; min-height: 130px; border: 1px dashed #93c5fd; border-radius: 9px; background: #eff6ff; color: #1d4ed8; font-weight: 800; }
+.executiveSettings { margin-top: 24px; padding: 18px; border: 1px solid #bfdbfe; border-radius: 12px; background: #f8fbff; }
+.executiveSchedule label { min-width: 180px; }
+.executiveToggle { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px; align-self: end; padding-bottom: 10px; font-weight: 800; }
+.executiveToggle input { width: auto !important; margin: 0 !important; }
+.executiveTargets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
+.executiveTargets label { position: relative; color: #475569; font-size: 12px; font-weight: 800; }
+.executiveTargets input { width: 100%; margin-top: 5px; padding-right: 30px; }
+.executiveTargets span { position: absolute; right: 11px; bottom: 10px; color: #64748b; }
 .operationsFilters label {
   min-width: 180px;
   flex: 1 1 180px;
@@ -2442,6 +2495,10 @@ td small {
   .operationsMetrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .executiveMetrics,
+  .executiveAttention,
+  .executiveReportLinks,
+  .executiveTargets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .reportPremiumNotice,
   .operationsBreakdownHead {
     align-items: stretch;
