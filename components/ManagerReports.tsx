@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import AssignmentCoverageReport from "./AssignmentCoverageReport";
+import DeclineReplacementReport from "./DeclineReplacementReport";
 import FinancialForecastReport from "./FinancialForecastReport";
 import OrganizationOperationsReport from "./OrganizationOperationsReport";
 import OfficialReports from "./OfficialReports";
@@ -13,6 +14,7 @@ export default function ManagerReports() {
   const [report, setReport] = useState<
     | "operations"
     | "coverage"
+    | "declines"
     | "financial"
     | "forecast"
     | "utilization"
@@ -34,6 +36,12 @@ export default function ManagerReports() {
             onClick={() => setReport("coverage")}
           >
             Assignment Coverage
+          </button>
+          <button
+            className={report === "declines" ? "active" : ""}
+            onClick={() => setReport("declines")}
+          >
+            Declines &amp; Replacements
           </button>
           <button
             className={report === "forecast" ? "active" : ""}
@@ -71,6 +79,8 @@ export default function ManagerReports() {
         <OrganizationOperationsReport />
       ) : report === "coverage" ? (
         <AssignmentCoverageReport />
+      ) : report === "declines" ? (
+        <DeclineReplacementReport />
       ) : report === "forecast" ? (
         <StaffingForecastReport />
       ) : report === "financial" ? (
