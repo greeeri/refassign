@@ -453,7 +453,7 @@ export default function Workspace() {
                 onClick={() => nav("Audit History")}
               >
                 <Icon>▤</Icon>
-                <span>Audit History</span>
+                <span>Change &amp; Audit</span>
               </button>
               <button
                 className={`topNavButton ${section === "Contacts" ? "active" : ""}`}
