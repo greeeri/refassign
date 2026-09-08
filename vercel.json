@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/executive-reports",
       "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/cron/custom-reports",
+      "schedule": "0 13 * * *"
     }
   ],
   "redirects": [

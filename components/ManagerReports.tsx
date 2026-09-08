@@ -13,6 +13,7 @@ import OfficialUtilizationReport from "./OfficialUtilizationReport";
 import PayrollPaymentReport from "./PayrollPaymentReport";
 import StaffingForecastReport from "./StaffingForecastReport";
 import TrainingDevelopmentReport from "./TrainingDevelopmentReport";
+import CustomReportBuilder from "./CustomReportBuilder";
 
 export default function ManagerReports() {
   const [report, setReport] = useState<
@@ -28,6 +29,7 @@ export default function ManagerReports() {
     | "development"
     | "officials"
     | "payroll"
+    | "custom"
   >("executive");
   return (
     <>
@@ -100,6 +102,12 @@ export default function ManagerReports() {
             Official Activity
           </button>
           <button
+            className={report === "custom" ? "active" : ""}
+            onClick={() => setReport("custom")}
+          >
+            Custom Builder <span className="premiumTabMark">◆</span>
+          </button>
+          <button
             className={report === "payroll" ? "active" : ""}
             onClick={() => setReport("payroll")}
           >
@@ -129,6 +137,8 @@ export default function ManagerReports() {
         <OfficialUtilizationReport />
       ) : report === "payroll" ? (
         <PayrollPaymentReport />
+      ) : report === "custom" ? (
+        <CustomReportBuilder />
       ) : (
         <OfficialReports managerView />
       )}
