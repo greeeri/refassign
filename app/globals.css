@@ -2076,6 +2076,139 @@ td small {
   font-size: 12px;
   line-height: 1.55;
 }
+.financialPlanningHead {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 24px 0 10px;
+}
+.financialPlanningHead h3,
+.financialPlanningHead p {
+  margin: 0;
+}
+.financialPlanningHead p {
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 13px;
+}
+.financialPlanningHead label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 800;
+}
+.financialPlanningHead input {
+  width: 64px;
+  padding: 7px;
+}
+.financialAssumptionsTable {
+  min-width: 760px;
+}
+.financialAssumptionsTable th:not(:first-child),
+.financialAssumptionsTable td:not(:first-child),
+.financialSummaryTable th:not(:first-child),
+.financialSummaryTable td:not(:first-child) {
+  text-align: right;
+}
+.financialAssumptionsTable small {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+}
+.currencyInput {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #64748b;
+  font-weight: 800;
+}
+.currencyInput input {
+  width: 120px;
+}
+.financialTrend {
+  display: grid;
+  gap: 10px;
+}
+.financialTrend > div {
+  display: grid;
+  grid-template-columns: 36px 1fr 86px;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.financialTrend > div > div {
+  display: grid;
+  gap: 3px;
+}
+.financialTrend i {
+  display: block;
+  min-width: 1px;
+  height: 7px;
+  border-radius: 999px;
+}
+.financialTrend i.actual,
+.financialLegend i.actual {
+  background: #2563eb;
+}
+.financialTrend i.projected,
+.financialLegend i.projected {
+  background: #22c55e;
+}
+.financialTrend b {
+  text-align: right;
+}
+.financialLegend {
+  display: flex;
+  gap: 14px;
+  margin-top: 14px;
+  color: #64748b;
+  font-size: 12px;
+}
+.financialLegend span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.financialLegend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+.budgetBar.warning em {
+  background: linear-gradient(90deg, #f59e0b, #ef4444);
+}
+.budgetStatus {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.budgetStatus.onTrack {
+  background: #dcfce7;
+  color: #15803d;
+}
+.budgetStatus.warning {
+  background: #fef3c7;
+  color: #92400e;
+}
+.budgetStatus.over {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+.financialForecastTable,
+.financialDetailTable {
+  min-width: 980px;
+}
+.financialForecastTable td small,
+.financialDetailTable td small {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+}
 .reportChart {
   min-width: 0;
   padding: 16px;
@@ -2269,6 +2402,10 @@ td small {
     align-items: stretch;
     flex-direction: column;
     gap: 10px;
+  }
+  .financialPlanningHead {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 
