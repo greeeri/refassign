@@ -152,10 +152,10 @@ function normalizedRecord(record: Record<string, unknown>) {
   );
 }
 
-export default function PayrollManager() {
+export default function PayrollManager({ organizationId }: { organizationId?: string }) {
   const supabase = useMemo(() => createClient(), []);
   const fileInput = useRef<HTMLInputElement>(null);
-  const geocodeBackfillStarted = useRef(false);
+  const geocodeBackfillOrganization = useRef("");
   const [rows, setRows] = useState<PayrollRow[]>([]);
   const [weekdayOrigins, setWeekdayOrigins] = useState<WeekdayOrigin[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
@@ -175,7 +175,8 @@ export default function PayrollManager() {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/payroll", { cache: "no-store" });
+      const query = organizationId ? `?organizationId=${encodeURIComponent(organizationId)}` : "";
+      const response = await fetch(`/api/payroll${query}`, { cache: "no-store" });
       const result = (await response.json()) as {
         assignments?: PayrollRow[];
         weekdayOrigins?: WeekdayOrigin[];
@@ -204,12 +205,14 @@ export default function PayrollManager() {
     setLoading(false);
   }
   useEffect(() => {
-    if (geocodeBackfillStarted.current) return;
-    geocodeBackfillStarted.current = true;
+    if (!organizationId || geocodeBackfillOrganization.current === organizationId)
+      return;
+    geocodeBackfillOrganization.current = organizationId;
     void (async () => {
       await load();
       try {
-        const response = await fetch("/api/geocode/backfill", { method: "POST" });
+        const query = organizationId ? `?organizationId=${encodeURIComponent(organizationId)}` : "";
+        const response = await fetch(`/api/geocode/backfill${query}`, { method: "POST" });
         const result = (await response.json()) as {
           updated?: number;
           failed?: number;
@@ -234,7 +237,7 @@ export default function PayrollManager() {
         );
       }
     })();
-  }, []);
+  }, [organizationId]);
 
   const mileagePlan = mileagePlanFor;
   const originFor = (row: PayrollRow) => {

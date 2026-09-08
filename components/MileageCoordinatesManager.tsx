@@ -18,7 +18,7 @@ const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", 
 const addressText = (...values: Array<string | null | undefined>) =>
   values.filter(Boolean).join(", ");
 
-export default function MileageCoordinatesManager() {
+export default function MileageCoordinatesManager({ organizationId }: { organizationId?: string }) {
   const supabase = useMemo(() => createClient(), []);
   const [rows, setRows] = useState<CoordinateRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,10 +29,27 @@ export default function MileageCoordinatesManager() {
   async function load() {
     setLoading(true);
     setError("");
+    if (!organizationId) {
+      setRows([]);
+      setLoading(false);
+      return;
+    }
+    const [locationLinks, officialLinks] = await Promise.all([
+      supabase.from("organization_locations").select("location_id").eq("organization_id", organizationId).eq("active", true),
+      supabase.from("organization_officials").select("official_id").eq("organization_id", organizationId).eq("active", true),
+    ]);
+    const linkError = locationLinks.error || officialLinks.error;
+    if (linkError) {
+      setError(linkError.message);
+      setLoading(false);
+      return;
+    }
+    const locationIds = (locationLinks.data || []).map((row) => row.location_id);
+    const officialIds = (officialLinks.data || []).map((row) => row.official_id);
     const [locations, officials, origins] = await Promise.all([
-      supabase.from("locations").select("id,name,address,city,state,latitude,longitude").order("name"),
-      supabase.from("officials").select("id,first_name,last_name,home_address,home_city,home_state,home_zip,home_latitude,home_longitude").eq("active", true).order("last_name").order("first_name"),
-      supabase.from("official_weekday_origins").select("official_id,weekday,use_home,alternate_label,alternate_address,alternate_city,alternate_state,alternate_zip,alternate_latitude,alternate_longitude").eq("use_home", false).order("weekday"),
+      locationIds.length ? supabase.from("locations").select("id,name,address,city,state,latitude,longitude").in("id", locationIds).order("name") : Promise.resolve({ data: [], error: null }),
+      officialIds.length ? supabase.from("officials").select("id,first_name,last_name,home_address,home_city,home_state,home_zip,home_latitude,home_longitude").in("id", officialIds).eq("active", true).order("last_name").order("first_name") : Promise.resolve({ data: [], error: null }),
+      officialIds.length ? supabase.from("official_weekday_origins").select("official_id,weekday,use_home,alternate_label,alternate_address,alternate_city,alternate_state,alternate_zip,alternate_latitude,alternate_longitude").in("official_id", officialIds).eq("use_home", false).order("weekday") : Promise.resolve({ data: [], error: null }),
     ]);
     const loadError = locations.error || officials.error || origins.error;
     if (loadError) {
@@ -79,7 +96,7 @@ export default function MileageCoordinatesManager() {
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [organizationId]);
 
   function patch(key: string, values: Partial<CoordinateRow>) {
     setRows((current) => current.map((row) => (row.key === key ? { ...row, ...values } : row)));

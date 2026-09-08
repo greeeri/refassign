@@ -674,19 +674,19 @@ export default function Workspace() {
         )}
         {manager && section === "Assignments" && <AssignmentsManager organizationId={testWorkspace?.organization_id} />}
         {manager && section === "Reports" && <ManagerReports />}
-        {manager && section === "Audit History" && <AuditHistoryManager />}
-        {manager && section === "Auto Assign" && <AutoAssignManager />}
+        {manager && section === "Audit History" && <AuditHistoryManager organizationId={testWorkspace?.organization_id} />}
+        {manager && section === "Auto Assign" && <AutoAssignManager organizationId={testWorkspace?.organization_id} />}
         {manager && section === "Payroll" && (
           <>
-            <PayrollManager />
-            <MileageCoordinatesManager />
+            <PayrollManager organizationId={testWorkspace?.organization_id} />
+            <MileageCoordinatesManager organizationId={testWorkspace?.organization_id} />
           </>
         )}
         {manager && section === "Blocks" && (
-          <AvailabilityCalendar managerView />
+          <AvailabilityCalendar managerView organizationId={testWorkspace?.organization_id} />
         )}
         {manager && section === "Block Removal Requests" && (
-          <BlockRemovalRequests />
+          <BlockRemovalRequests organizationId={testWorkspace?.organization_id} />
         )}
         {manager && section === "Contacts" && <ContactsManager />}
         {manager && section === "Sports & Rules" && <SportsRulesManager />}
@@ -745,7 +745,7 @@ export default function Workspace() {
           <OfficialReports />
         )}
         {viewRole === "official" && section === "My Availability" && (
-          <AvailabilityCalendar />
+          <AvailabilityCalendar organizationId={testWorkspace?.organization_id} />
         )}
         {viewRole === "official" && section === "My Profile" && (
           <OfficialProfile />

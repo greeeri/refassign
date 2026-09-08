@@ -6,20 +6,25 @@ import {createClient} from '../lib/supabase/client'
 type RequestRow={id:string;block_id:string|null;official_id:string;status:'pending'|'approved'|'denied';request_note:string|null;requested_at:string;review_note:string|null;reviewed_at:string|null;block_type:string|null;block_start_date:string|null;block_end_date:string|null;block_starts_at:string|null;block_ends_at:string|null;block_notes:string|null}
 type Official={id:string;first_name:string;last_name:string}
 
-export default function BlockRemovalRequests(){
+export default function BlockRemovalRequests({organizationId}:{organizationId?:string}){
   const supabase=useMemo(()=>createClient(),[])
   const [rows,setRows]=useState<RequestRow[]>([]),[officials,setOfficials]=useState<Official[]>([]),[error,setError]=useState(''),[busy,setBusy]=useState('')
 
   async function load(){
     setError('')
+    if(!organizationId){setRows([]);setOfficials([]);return}
+    const {data:links,error:linkError}=await supabase.from('organization_officials').select('official_id').eq('organization_id',organizationId).eq('active',true)
+    if(linkError){setError(linkError.message);return}
+    const officialIds=(links||[]).map(row=>row.official_id)
+    if(!officialIds.length){setRows([]);setOfficials([]);return}
     const [r,o]=await Promise.all([
-      supabase.from('block_removal_requests').select('id,block_id,official_id,status,request_note,requested_at,review_note,reviewed_at,block_type,block_start_date,block_end_date,block_starts_at,block_ends_at,block_notes').order('requested_at',{ascending:false}),
-      supabase.from('officials').select('id,first_name,last_name')
+      supabase.from('block_removal_requests').select('id,block_id,official_id,status,request_note,requested_at,review_note,reviewed_at,block_type,block_start_date,block_end_date,block_starts_at,block_ends_at,block_notes').in('official_id',officialIds).order('requested_at',{ascending:false}),
+      supabase.from('officials').select('id,first_name,last_name').in('id',officialIds)
     ])
     if(r.error||o.error){setError((r.error||o.error)?.message||'Unable to load removal requests.');return}
     setRows((r.data||[]) as RequestRow[]);setOfficials((o.data||[]) as Official[])
   }
-  useEffect(()=>{void load()},[])
+  useEffect(()=>{void load()},[organizationId])
   function officialName(id:string){const o=officials.find(x=>x.id===id);return o?`${o.last_name}, ${o.first_name}`:'Official'}
   function blockLabel(r:RequestRow){if(r.block_type==='time'&&r.block_starts_at){const s=new Date(r.block_starts_at),e=r.block_ends_at?new Date(r.block_ends_at):null;return `${s.toLocaleDateString()} ${s.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}${e?`–${e.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}`:''}`}if(r.block_type==='date')return r.block_start_date===r.block_end_date?(r.block_start_date||'Date'):`${r.block_start_date||''} through ${r.block_end_date||''}`;return r.block_type?`${r.block_type.charAt(0).toUpperCase()}${r.block_type.slice(1)} block`:'Availability block'}
   async function review(r:RequestRow,status:'approved'|'denied'){const action=status==='approved'?'approve and remove this availability block':'decline this removal request';if(!window.confirm(`Are you sure you want to ${action}?`))return;const note=window.prompt('Optional review note:')||null;setBusy(r.id);setError('');const {error}=await supabase.from('block_removal_requests').update({status,review_note:note}).eq('id',r.id).eq('status','pending');if(error)setError(error.message);else await load();setBusy('')}
