@@ -215,6 +215,68 @@ function inRange(g: Game, r: Range, customDate = "") {
   if (r === "thisWeek") return t >= week && t < next;
   return t >= next && t < afterNext;
 }
+function describeGameConflict(
+  games: Game[],
+  candidate: {
+    home_team_id: string;
+    away_team_id: string;
+    location_id: string;
+    starts_at: string;
+    duration_minutes: number;
+  },
+  editingId: string | null,
+) {
+  const start = new Date(candidate.starts_at);
+  const end = new Date(start.getTime() + candidate.duration_minutes * 60_000);
+  const teamIds = [candidate.home_team_id, candidate.away_team_id].filter(Boolean);
+
+  for (const game of games) {
+    if (game.id === editingId || ["cancelled", "canceled"].includes(game.status))
+      continue;
+    const gameStart = new Date(game.starts_at);
+    const gameEnd = new Date(
+      gameStart.getTime() + (game.duration_minutes || 110) * 60_000,
+    );
+    if (gameStart >= end || gameEnd <= start) continue;
+
+    const conflictingTeams = [game.home_team_id, game.away_team_id].filter(
+      (id): id is string => Boolean(id && teamIds.includes(id)),
+    );
+    const sameLocation = Boolean(
+      candidate.location_id && game.location_id === candidate.location_id,
+    );
+    if (!conflictingTeams.length && !sameLocation) continue;
+
+    const teamNames = conflictingTeams.map(
+      (id) =>
+        teamsForConflict(game, id) ||
+        (id === candidate.home_team_id ? "home team" : "away team"),
+    );
+    const reasons = [
+      teamNames.length
+        ? `${teamNames.join(" and ")} ${teamNames.length === 1 ? "is" : "are"} already scheduled`
+        : "",
+      sameLocation
+        ? `${game.location?.name || "This location"} is already in use`
+        : "",
+    ].filter(Boolean);
+    const date = gameStart.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+    const time = (value: Date) =>
+      value.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    const matchup = [game.home?.name, game.away?.name].filter(Boolean).join(" vs. ");
+    return `Schedule conflict: ${reasons.join("; ")}. Conflicting game: #${game.game_number || "unassigned"}${matchup ? ` — ${matchup}` : ""}, ${date}, ${time(gameStart)}–${time(gameEnd)}${game.location?.name ? ` at ${game.location.name}` : ""}.`;
+  }
+  return null;
+}
+function teamsForConflict(game: Game, teamId: string) {
+  if (game.home_team_id === teamId) return game.home?.name || null;
+  if (game.away_team_id === teamId) return game.away?.name || null;
+  return null;
+}
 export default function GamesManagerV3({
   organizationId,
 }: {
@@ -373,7 +435,17 @@ export default function GamesManagerV3({
         ? sb.from("games").update(payload).eq("id", editing)
         : sb.from("games").insert({ ...payload, status: "open" });
       const { error: e2 } = await q;
-      if (e2) throw e2;
+      if (e2) {
+        const databaseMessage = [e2.message, e2.details, e2.hint]
+          .filter(Boolean)
+          .join(" ");
+        const isScheduleConflict =
+          e2.code === "23514" || /double-book|overlap|conflict/i.test(databaseMessage);
+        const detailedConflict = isScheduleConflict
+          ? describeGameConflict(games, payload, editing)
+          : null;
+        throw new Error(detailedConflict || databaseMessage || "Unable to save game");
+      }
       setMessage(editing ? "Game updated." : "Game added.");
       setEditing(null);
       setForm(blank);
