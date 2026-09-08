@@ -387,8 +387,15 @@ export default function AssignmentsManagerV2({
           "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,city,state,latitude,longitude)",
         )
         .order("starts_at");
-    const [g, o, p, a, r, pr, pw, le, ve, bl, lg, lm, sas, ah, at] = await Promise.all([
+    const [g, oo, o, p, a, r, pr, pw, le, ve, bl, lg, lm, sas, ah, at] = await Promise.all([
       organizationId ? gamesQuery.eq("organization_id", organizationId) : gamesQuery,
+      organizationId
+        ? supabase
+            .from("organization_officials")
+            .select("official_id")
+            .eq("organization_id", organizationId)
+            .eq("active", true)
+        : Promise.resolve({ data: null, error: null }),
       supabase
         .from("officials")
         .select(
@@ -447,6 +454,7 @@ export default function AssignmentsManagerV2({
     ]);
     const err =
       g.error ||
+      oo.error ||
       o.error ||
       p.error ||
       a.error ||
@@ -488,7 +496,15 @@ export default function AssignmentsManagerV2({
     setRanks(rm);
     setPositionRanks(prm);
     setPowers(pm);
-    setOfficials((o.data || []) as Official[]);
+    const organizationOfficialIds = organizationId
+      ? new Set((oo.data || []).map((link) => link.official_id))
+      : null;
+    setOfficials(
+      ((o.data || []) as Official[]).filter(
+        (official) =>
+          !organizationOfficialIds || organizationOfficialIds.has(official.id),
+      ),
+    );
     setPositions((p.data || []) as Position[]);
     const scopedGames = (g.data || []) as unknown as Game[];
     const scopedGameIds = new Set(scopedGames.map(game => game.id));
