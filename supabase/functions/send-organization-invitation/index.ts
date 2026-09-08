@@ -36,12 +36,14 @@ Deno.serve(async (request) => {
     const email = String(body.email ?? "").trim().toLowerCase();
     const role = String(body.role ?? "");
     const viewerPermissions = Array.isArray(body.viewerPermissions) ? body.viewerPermissions.map(String) : [];
+    const leagueIds = Array.isArray(body.leagueIds) ? body.leagueIds.map(String) : [];
 
     const { data: invitationId, error: invitationError } = await userClient.rpc("create_organization_invitation", {
       p_organization_id: organizationId,
       p_email: email,
       p_role: role,
       p_viewer_permissions: role === "viewer" ? viewerPermissions : [],
+      p_league_ids: role === "assignor" || role === "viewer" ? leagueIds : [],
     });
     if (invitationError) return json({ error: invitationError.message }, 403);
 
