@@ -1843,6 +1843,99 @@ td small {
   gap: 14px;
   margin: 18px 0 24px;
 }
+.operationsFilters label {
+  min-width: 180px;
+  flex: 1 1 180px;
+}
+.operationsFilters input {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+}
+.operationsMetrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.operationsMetrics .premiumMetric {
+  border-color: #93c5fd;
+  background: linear-gradient(135deg, #eff6ff, #f0fdf4);
+}
+.reportPremiumNotice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0 20px;
+  padding: 13px 15px;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  background: #eff6ff;
+  color: #334155;
+}
+.reportPremiumNotice b {
+  flex: 0 0 auto;
+  color: #1d4ed8;
+}
+.operationsStatusGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+}
+.operationsStatusGrid > div {
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+.operationsStatusGrid span,
+.operationsStatusGrid b {
+  display: block;
+}
+.operationsStatusGrid span {
+  min-height: 32px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+.operationsStatusGrid b {
+  margin-top: 5px;
+  color: #0c1e37;
+  font-size: 24px;
+}
+.operationsCostChart .reportBarRow {
+  grid-template-columns: minmax(120px, 0.8fr) minmax(120px, 1.5fr) minmax(78px, auto);
+}
+.operationsBreakdownHead {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 22px;
+}
+.operationsBreakdownHead h3,
+.operationsBreakdownHead p {
+  margin: 0;
+}
+.operationsBreakdownHead p {
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 13px;
+}
+.operationsBreakdownHead label {
+  min-width: 210px;
+  font-size: 13px;
+  font-weight: 800;
+}
+.operationsBreakdownHead select {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+}
+.operationsSummaryTable th:not(:first-child),
+.operationsSummaryTable td:not(:first-child) {
+  text-align: right;
+}
+.operationsDetailTable {
+  min-width: 1080px;
+}
 .reportChart {
   min-width: 0;
   padding: 16px;
@@ -2020,6 +2113,17 @@ td small {
   .positionDonut::after {
     width: 62px;
     height: 62px;
+  }
+  .operationsMetrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .reportPremiumNotice,
+  .operationsBreakdownHead {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .operationsBreakdownHead label {
+    min-width: 100%;
   }
 }
 

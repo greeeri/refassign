@@ -2,17 +2,24 @@
 
 import { useState } from "react";
 import AssignmentCoverageReport from "./AssignmentCoverageReport";
+import OrganizationOperationsReport from "./OrganizationOperationsReport";
 import OfficialReports from "./OfficialReports";
 import PayrollPaymentReport from "./PayrollPaymentReport";
 
 export default function ManagerReports() {
-  const [report, setReport] = useState<"coverage" | "officials" | "payroll">(
-    "coverage",
-  );
+  const [report, setReport] = useState<
+    "operations" | "coverage" | "officials" | "payroll"
+  >("operations");
   return (
     <>
       <section className="card">
         <div className="reportDimensionTabs">
+          <button
+            className={report === "operations" ? "active" : ""}
+            onClick={() => setReport("operations")}
+          >
+            Organization Operations
+          </button>
           <button
             className={report === "coverage" ? "active" : ""}
             onClick={() => setReport("coverage")}
@@ -33,7 +40,9 @@ export default function ManagerReports() {
           </button>
         </div>
       </section>
-      {report === "coverage" ? (
+      {report === "operations" ? (
+        <OrganizationOperationsReport />
+      ) : report === "coverage" ? (
         <AssignmentCoverageReport />
       ) : report === "payroll" ? (
         <PayrollPaymentReport />
