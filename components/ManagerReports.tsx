@@ -106,31 +106,31 @@ export default function ManagerReports({ organizationId }: { organizationId?: st
         </div>
       </section>
       {report === "executive" ? (
-        <ExecutiveReportingDashboard onOpenReport={openReport} />
+        <ExecutiveReportingDashboard key={organizationId} onOpenReport={openReport} organizationId={organizationId} />
       ) : report === "operations" ? (
-        <OrganizationOperationsReport />
+        <OrganizationOperationsReport key={organizationId} organizationId={organizationId} />
       ) : report === "benchmarks" ? (
-        <OrganizationBenchmarkDashboard />
+        <OrganizationBenchmarkDashboard key={organizationId} organizationId={organizationId} />
       ) : report === "coverage" ? (
-        <AssignmentCoverageReport />
+        <AssignmentCoverageReport key={organizationId} organizationId={organizationId} />
       ) : report === "declines" ? (
-        <DeclineReplacementReport />
+        <DeclineReplacementReport key={organizationId} organizationId={organizationId} />
       ) : report === "compliance" ? (
-        <ComplianceEligibilityReport />
+        <ComplianceEligibilityReport key={organizationId} organizationId={organizationId} />
       ) : report === "development" ? (
-        <TrainingDevelopmentReport />
+        <TrainingDevelopmentReport key={organizationId} organizationId={organizationId} />
       ) : report === "communications" ? (
-        <CommunicationEffectivenessReport />
+        <CommunicationEffectivenessReport key={organizationId} organizationId={organizationId} />
       ) : report === "forecast" ? (
-        <StaffingForecastReport />
+        <StaffingForecastReport key={organizationId} organizationId={organizationId} />
       ) : report === "financial" ? (
-        <FinancialForecastReport />
+        <FinancialForecastReport key={organizationId} organizationId={organizationId} />
       ) : report === "utilization" ? (
-        <OfficialUtilizationReport />
+        <OfficialUtilizationReport key={organizationId} organizationId={organizationId} />
       ) : report === "payroll" ? (
-        <PayrollPaymentReport />
+        <PayrollPaymentReport key={organizationId} organizationId={organizationId} />
       ) : report === "custom" ? (
-        <CustomReportBuilder />
+        <CustomReportBuilder key={organizationId} organizationId={organizationId} />
       ) : (
         <OfficialReports managerView organizationId={organizationId} />
       )}

@@ -688,7 +688,7 @@ export default function Workspace() {
         {manager && section === "Block Removal Requests" && (
           <BlockRemovalRequests organizationId={testWorkspace?.organization_id} />
         )}
-        {manager && section === "Contacts" && <ContactsManager />}
+        {manager && section === "Contacts" && <ContactsManager organizationId={testWorkspace?.organization_id} />}
         {manager && section === "Sports & Rules" && <SportsRulesManager />}
         {viewRole === "official" && section === "Official Dashboard" && (
           <>

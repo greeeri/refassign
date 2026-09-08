@@ -38,7 +38,7 @@ const mileagePay = (row: Row) =>
     ? 0
     : Number(row.mileage_miles || 0) * Number(row.mileage_rate || 0);
 
-export default function PayrollPaymentReport() {
+export default function PayrollPaymentReport({ organizationId }: { organizationId?: string }) {
   const [rows, setRows] = useState<Row[]>([]),
     [period, setPeriod] = useState<Period>("90"),
     [league, setLeague] = useState("all"),
@@ -50,7 +50,7 @@ export default function PayrollPaymentReport() {
     [error, setError] = useState("");
   useEffect(() => {
     void (async () => {
-      const response = await fetch("/api/reports/payroll", {
+      const response = await fetch(`/api/reports/payroll?organizationId=${encodeURIComponent(organizationId || "")}`, {
           cache: "no-store",
         }),
         result = await response.json();

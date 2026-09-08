@@ -66,7 +66,7 @@ const titleCase = (value: string) =>
 const pct = (filled: number, slots: number) =>
   slots ? `${Math.round((filled / slots) * 100)}%` : "—";
 
-export default function OrganizationOperationsReport() {
+export default function OrganizationOperationsReport({ organizationId }: { organizationId?: string }) {
   const [games, setGames] = useState<Game[]>([]),
     [assignments, setAssignments] = useState<Assignment[]>([]),
     [audit, setAudit] = useState<Audit[]>([]),
@@ -88,7 +88,7 @@ export default function OrganizationOperationsReport() {
   useEffect(() => {
     void (async () => {
       try {
-        const response = await fetch("/api/reports/operations", {
+        const response = await fetch(`/api/reports/operations?organizationId=${encodeURIComponent(organizationId || "")}`, {
             cache: "no-store",
           }),
           result = await response.json();

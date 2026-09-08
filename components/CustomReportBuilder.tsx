@@ -1,46 +1,863 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { buildCustomReport, defaultCustomReport, dimensionLabels, metricLabels, normalizeReportFacts, type CustomReportDefinition, type ReportDimension, type ReportMetric } from "../lib/customReportBuilder";
+import {
+  buildCustomReport,
+  defaultCustomReport,
+  dimensionLabels,
+  metricLabels,
+  normalizeReportFacts,
+  type CustomReportDefinition,
+  type ReportDimension,
+  type ReportMetric,
+} from "../lib/customReportBuilder";
 
 type Organization = { id: string; name: string };
-type Template = { id: string; organization_id: string; name: string; definition: CustomReportDefinition; recipient_email: string | null; frequency: "weekly" | "monthly"; send_day: number; schedule_enabled: boolean; last_sent_at: string | null; next_send_at: string | null; updated_at: string };
-const dimensions: ReportDimension[] = ["organization", "league", "team", "level", "location", "official", "position", "gameStatus", "assignmentStatus", "paymentStatus", "month"];
-const metrics: ReportMetric[] = ["games", "assignments", "officials", "positions", "openPositions", "coverageRate", "declines", "gameFees", "miles", "mileagePay", "totalCost", "averageFee", "averageMiles"];
-const assignmentOnly = new Set<ReportDimension>(["official", "position", "assignmentStatus", "paymentStatus"]);
-const moneyMetrics = new Set<ReportMetric>(["gameFees", "mileagePay", "totalCost", "averageFee"]);
+type Template = {
+  id: string;
+  organization_id: string;
+  name: string;
+  definition: CustomReportDefinition;
+  recipient_email: string | null;
+  frequency: "weekly" | "monthly";
+  send_day: number;
+  schedule_enabled: boolean;
+  last_sent_at: string | null;
+  next_send_at: string | null;
+  updated_at: string;
+};
+const dimensions: ReportDimension[] = [
+  "organization",
+  "league",
+  "team",
+  "level",
+  "location",
+  "official",
+  "position",
+  "gameStatus",
+  "assignmentStatus",
+  "paymentStatus",
+  "month",
+];
+const metrics: ReportMetric[] = [
+  "games",
+  "assignments",
+  "officials",
+  "positions",
+  "openPositions",
+  "coverageRate",
+  "declines",
+  "gameFees",
+  "miles",
+  "mileagePay",
+  "totalCost",
+  "averageFee",
+  "averageMiles",
+];
+const assignmentOnly = new Set<ReportDimension>([
+  "official",
+  "position",
+  "assignmentStatus",
+  "paymentStatus",
+]);
+const moneyMetrics = new Set<ReportMetric>([
+  "gameFees",
+  "mileagePay",
+  "totalCost",
+  "averageFee",
+]);
 const decimalMetrics = new Set<ReportMetric>(["miles", "averageMiles"]);
-const colors = ["#2563eb", "#62c943", "#f59e0b", "#7c3aed", "#ef4444", "#0891b2", "#ec4899", "#64748b"];
-const quote = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
-const format = (metric: ReportMetric, value: number) => moneyMetrics.has(metric) ? value.toLocaleString("en-US", { style: "currency", currency: "USD" }) : metric === "coverageRate" ? `${value.toFixed(1)}%` : decimalMetrics.has(metric) ? value.toFixed(1) : Math.round(value).toLocaleString();
+const colors = [
+  "#2563eb",
+  "#62c943",
+  "#f59e0b",
+  "#7c3aed",
+  "#ef4444",
+  "#0891b2",
+  "#ec4899",
+  "#64748b",
+];
+const quote = (value: unknown) =>
+  `"${String(value ?? "").replaceAll('"', '""')}"`;
+const format = (metric: ReportMetric, value: number) =>
+  moneyMetrics.has(metric)
+    ? value.toLocaleString("en-US", { style: "currency", currency: "USD" })
+    : metric === "coverageRate"
+      ? `${value.toFixed(1)}%`
+      : decimalMetrics.has(metric)
+        ? value.toFixed(1)
+        : Math.round(value).toLocaleString();
 
-export default function CustomReportBuilder() {
-  const [access, setAccess] = useState<"loading" | "standard" | "premium">("loading"), [games, setGames] = useState<any[]>([]), [assignments, setAssignments] = useState<any[]>([]), [organizations, setOrganizations] = useState<Organization[]>([]), [templates, setTemplates] = useState<Template[]>([]), [definition, setDefinition] = useState<CustomReportDefinition>(defaultCustomReport), [templateId, setTemplateId] = useState(""), [templateName, setTemplateName] = useState(""), [recipientEmail, setRecipientEmail] = useState(""), [frequency, setFrequency] = useState<"weekly" | "monthly">("weekly"), [sendDay, setSendDay] = useState(1), [scheduleEnabled, setScheduleEnabled] = useState(false), [message, setMessage] = useState(""), [busy, setBusy] = useState(false), [error, setError] = useState("");
-  const load = async () => { setError(""); try { const response = await fetch("/api/reports/custom", { cache: "no-store" }), result = await response.json(); if (!response.ok) throw new Error(result.error || "Custom reporting could not be loaded."); const premium = result.reportingAccess === "premium"; setAccess(premium ? "premium" : "standard"); if (premium) { setGames(result.games || []); setAssignments(result.assignments || []); setOrganizations(result.organizations || []); setTemplates(result.templates || []); setRecipientEmail((current) => current || result.defaultEmail || ""); } } catch (reason) { setError(reason instanceof Error ? reason.message : "Custom reporting could not be loaded."); setAccess("standard"); } };
-  useEffect(() => { void load(); }, []);
-  const facts = useMemo(() => normalizeReportFacts(games, assignments, organizations), [games, assignments, organizations]), rows = useMemo(() => buildCustomReport(facts, definition), [facts, definition]);
-  const visibleDimensions = dimensions.filter((item) => definition.dataset === "assignments" || !assignmentOnly.has(item));
-  const optionValues = useMemo(() => Object.fromEntries(dimensions.map((dimension) => [dimension, [...new Set(facts.flatMap((fact) => dimension === "team" ? [fact.homeTeam, fact.awayTeam] : [String((fact as any)[dimension] || "")]).filter(Boolean))].sort()])), [facts]);
-  const update = <K extends keyof CustomReportDefinition>(key: K, value: CustomReportDefinition[K]) => setDefinition((current) => ({ ...current, [key]: value }));
-  const setDataset = (dataset: "games" | "assignments") => setDefinition((current) => ({ ...current, dataset, groupBy: current.groupBy.filter((item) => dataset === "assignments" || !assignmentOnly.has(item)), filters: Object.fromEntries(Object.entries(current.filters).filter(([item]) => dataset === "assignments" || !assignmentOnly.has(item as ReportDimension))) }));
-  const toggleMetric = (metric: ReportMetric) => update("metrics", definition.metrics.includes(metric) ? definition.metrics.filter((item) => item !== metric) : [...definition.metrics, metric]);
-  const setGroup = (index: number, value: string) => { const next = [...definition.groupBy]; if (!value) next.splice(index, 1); else next[index] = value as ReportDimension; update("groupBy", [...new Set(next)].slice(0, 2)); };
-  const exportCsv = () => { const body = rows.map((row) => [...row.dimensions, ...definition.metrics.map((metric) => row.values[metric])]), csv = [[...definition.groupBy.map((item) => dimensionLabels[item]), ...definition.metrics.map((item) => metricLabels[item])], ...body].map((row) => row.map(quote).join(",")).join("\n"), url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })), anchor = document.createElement("a"); anchor.href = url; anchor.download = `${definition.title.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "custom-report"}.csv`; anchor.click(); URL.revokeObjectURL(url); };
-  const exportPdf = async () => { const [{ jsPDF }, { default: autoTable }] = await Promise.all([import("jspdf"), import("jspdf-autotable")]), document = new jsPDF({ orientation: "landscape" }); document.setTextColor(12, 30, 55); document.setFontSize(18); document.text(definition.title || "RefAssign Custom Report", 14, 17); document.setFontSize(9); document.text(`${organizations.filter((item) => !definition.organizationIds.length || definition.organizationIds.includes(item.id)).map((item) => item.name).join(" • ") || "Authorized organizations"} • Generated ${new Date().toLocaleString()}`, 14, 25); autoTable(document, { startY: 32, head: [[...definition.groupBy.map((item) => dimensionLabels[item]), ...definition.metrics.map((item) => metricLabels[item])]], body: rows.map((row) => [...row.dimensions, ...definition.metrics.map((metric) => format(metric, row.values[metric]))]), styles: { fontSize: 7 }, headStyles: { fillColor: [37, 99, 235] } }); document.save(`${definition.title.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "custom-report"}.pdf`); };
-  const save = async () => { setBusy(true); setMessage(""); setError(""); const response = await fetch("/api/reports/custom", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: templateId || undefined, name: templateName || definition.title, definition, recipientEmail, frequency, sendDay, scheduleEnabled }) }), result = await response.json(); setBusy(false); if (!response.ok) return setError(result.error || "The report template could not be saved."); setTemplateId(result.template.id); setTemplateName(result.template.name); setTemplates((current) => [result.template, ...current.filter((item) => item.id !== result.template.id)]); setMessage("Report template saved."); };
-  const openTemplate = (template: Template) => { setDefinition({ ...defaultCustomReport, ...template.definition, filters: template.definition.filters || {} }); setTemplateId(template.id); setTemplateName(template.name); setRecipientEmail(template.recipient_email || ""); setFrequency(template.frequency); setSendDay(template.send_day); setScheduleEnabled(template.schedule_enabled); setMessage(""); };
-  const removeTemplate = async (template: Template) => { if (!window.confirm(`Delete “${template.name}”?`)) return; const response = await fetch("/api/reports/custom", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", id: template.id }) }), result = await response.json(); if (!response.ok) return setError(result.error || "The template could not be deleted."); setTemplates((current) => current.filter((item) => item.id !== template.id)); if (templateId === template.id) { setTemplateId(""); setTemplateName(""); } };
-  const newReport = () => { setDefinition(defaultCustomReport); setTemplateId(""); setTemplateName(""); setScheduleEnabled(false); setMessage(""); };
-  const chartMetric = definition.metrics[0], chartRows = rows.slice(0, 8), chartMax = Math.max(1, ...chartRows.map((row) => row.values[chartMetric] || 0)), chartTotal = chartRows.reduce((sum, row) => sum + (row.values[chartMetric] || 0), 0), donut = chartRows.reduce((current, row, index) => { const start = current.end, end = start + (chartTotal ? row.values[chartMetric] / chartTotal * 360 : 0); return { end, stops: [...current.stops, `${colors[index % colors.length]} ${start}deg ${end}deg`] }; }, { end: 0, stops: [] as string[] });
-  if (access === "loading") return <section className="card"><p>Loading Custom Report Builder…</p></section>;
-  if (access === "standard") return <section className="card premiumBuilderLock"><span className="premiumLockIcon">◆</span><div><span className="premiumEyebrow">Premium Reporting</span><h2>Custom Report Builder</h2><p>Build reports from games, assignments, officials, payroll, mileage, teams, levels, locations, and organizations.</p><div className="premiumFeatureGrid">{["Custom fields and filters", "Paying-organization breakdowns", "Saved templates", "Charts and comparisons", "CSV and PDF exports", "Scheduled email delivery", "Organization-branded reports", "Cross-organization comparisons"].map((item) => <span key={item}>✓ {item}</span>)}</div><p className="reportFootnote">A Super Admin can enable Premium Reporting for this account.</p></div></section>;
-  return <section className="card officialReports customReportBuilder"><div className="cardHead"><div><span className="premiumEyebrow">Premium Reporting</span><h2>Custom Report Builder</h2><p>Choose the data, dimensions, metrics, and delivery options your organization needs.</p></div><div className="headerActions"><button className="secondary" onClick={newReport}>New report</button><button className="secondary" disabled={!rows.length} onClick={exportCsv}>Export CSV</button><button className="secondary" disabled={!rows.length} onClick={() => void exportPdf()}>Export PDF</button></div></div>{error && <div className="errorBox">{error}</div>}{message && <div className="successBox">{message}</div>}
-    <div className="customBuilderLayout"><aside className="customTemplatePanel"><h3>Saved reports</h3>{templates.map((template) => <div className={template.id === templateId ? "customTemplate active" : "customTemplate"} key={template.id}><button onClick={() => openTemplate(template)}><b>{template.name}</b><small>{template.schedule_enabled ? `${template.frequency} delivery` : "Saved template"}</small></button><button className="templateDelete" aria-label={`Delete ${template.name}`} onClick={() => void removeTemplate(template)}>×</button></div>)}{!templates.length && <p>No saved reports yet.</p>}</aside>
-      <div className="customBuilderMain"><div className="customBuilderSection"><h3>1. Report foundation</h3><div className="reportFilters customFoundation"><label>Report title<input value={definition.title} maxLength={100} onChange={(event) => update("title", event.target.value)} /></label><label>Data source<select value={definition.dataset} onChange={(event) => setDataset(event.target.value as "games" | "assignments")}><option value="games">Games &amp; operations</option><option value="assignments">Assignments &amp; payments</option></select></label><label>Reporting period<select value={definition.period} onChange={(event) => update("period", event.target.value as CustomReportDefinition["period"])}><option value="season">Current year</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="custom">Custom dates</option><option value="all">All records</option></select></label>{definition.period === "custom" && <><label>Start date<input type="date" value={definition.startDate} onChange={(event) => update("startDate", event.target.value)} /></label><label>End date<input type="date" value={definition.endDate} onChange={(event) => update("endDate", event.target.value)} /></label></>}<label>Organization<select value={definition.organizationIds[0] || "all"} onChange={(event) => update("organizationIds", event.target.value === "all" ? [] : [event.target.value])}><option value="all">All authorized organizations</option>{organizations.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div></div>
-      <div className="customBuilderSection"><h3>2. Group and filter</h3><div className="reportFilters"><label>Primary grouping<select value={definition.groupBy[0] || ""} onChange={(event) => setGroup(0, event.target.value)}><option value="">No grouping</option>{visibleDimensions.map((item) => <option value={item} key={item}>{dimensionLabels[item]}</option>)}</select></label><label>Secondary grouping<select value={definition.groupBy[1] || ""} onChange={(event) => setGroup(1, event.target.value)}><option value="">None</option>{visibleDimensions.filter((item) => item !== definition.groupBy[0]).map((item) => <option value={item} key={item}>{dimensionLabels[item]}</option>)}</select></label>{visibleDimensions.filter((item) => !["organization", "month"].includes(item)).map((item) => <label key={item}>{dimensionLabels[item]} filter<select value={definition.filters[item] || "all"} onChange={(event) => update("filters", { ...definition.filters, [item]: event.target.value })}><option value="all">All</option>{(optionValues[item] || []).map((value: string) => <option key={value}>{value}</option>)}</select></label>)}</div></div>
-      <div className="customBuilderSection"><h3>3. Choose metrics</h3><div className="customMetricPicker">{metrics.map((metric) => <label className={definition.metrics.includes(metric) ? "selected" : ""} key={metric}><input type="checkbox" checked={definition.metrics.includes(metric)} onChange={() => toggleMetric(metric)} />{metricLabels[metric]}</label>)}</div></div>
-      <div className="customBuilderSection customResults"><div className="customResultHead"><div><h3>Report results</h3><p>{rows.length} grouped result{rows.length === 1 ? "" : "s"}</p></div><label>Graphic<select value={definition.chart} onChange={(event) => update("chart", event.target.value as CustomReportDefinition["chart"])}><option value="bar">Bar chart</option><option value="donut">Donut chart</option><option value="none">No graphic</option></select></label></div>{definition.chart !== "none" && chartMetric && chartRows.length > 0 && <article className="customChart"><h4>{metricLabels[chartMetric]} by {definition.groupBy.map((item) => dimensionLabels[item]).join(" / ") || "all records"}</h4>{definition.chart === "bar" ? <div className="reportBars">{chartRows.map((row) => <div className="reportBarRow" key={row.key}><span>{row.dimensions.join(" / ") || "All records"}</span><i><em style={{ width: `${row.values[chartMetric] / chartMax * 100}%` }} /></i><b>{format(chartMetric, row.values[chartMetric])}</b></div>)}</div> : <div className="customDonutWrap"><div className="customDonut" style={{ background: `conic-gradient(${donut.stops.join(",")})` }}><span>{format(chartMetric, chartTotal)}</span></div><div>{chartRows.map((row, index) => <p key={row.key}><i style={{ background: colors[index % colors.length] }} />{row.dimensions.join(" / ") || "All records"}<b>{format(chartMetric, row.values[chartMetric])}</b></p>)}</div></div>}</article>}
-      <div className="tableWrap"><table className="officialReportTable customReportTable"><thead><tr>{definition.groupBy.map((item) => <th key={item}>{dimensionLabels[item]}</th>)}{definition.metrics.map((item) => <th key={item}>{metricLabels[item]}</th>)}</tr></thead><tbody>{rows.map((row) => <tr key={row.key}>{row.dimensions.map((value, index) => <td key={`${row.key}-${index}`}><b>{value}</b></td>)}{definition.metrics.map((metric) => <td key={metric}>{format(metric, row.values[metric])}</td>)}</tr>)}{!rows.length && <tr><td colSpan={Math.max(1, definition.groupBy.length + definition.metrics.length)}>No records match this report configuration.</td></tr>}</tbody></table></div></div>
-      <div className="customBuilderSection customSavePanel"><div><h3>4. Save and schedule</h3><p>Save this configuration for reuse or have RefAssign email it automatically.</p></div><div className="reportFilters"><label>Template name<input value={templateName} maxLength={100} placeholder={definition.title} onChange={(event) => setTemplateName(event.target.value)} /></label><label className="customScheduleToggle"><input type="checkbox" checked={scheduleEnabled} onChange={(event) => setScheduleEnabled(event.target.checked)} />Schedule email delivery</label>{scheduleEnabled && <><label>Recipient email<input type="email" value={recipientEmail} onChange={(event) => setRecipientEmail(event.target.value)} /></label><label>Frequency<select value={frequency} onChange={(event) => { setFrequency(event.target.value as "weekly" | "monthly"); setSendDay(1); }}><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label><label>{frequency === "weekly" ? "Weekday" : "Day of month"}<select value={sendDay} onChange={(event) => setSendDay(Number(event.target.value))}>{frequency === "weekly" ? ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((day, index) => <option value={index} key={day}>{day}</option>) : Array.from({ length: 28 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}</select></label></>}</div><button onClick={() => void save()} disabled={busy || !definition.metrics.length}>{busy ? "Saving…" : templateId ? "Update report template" : "Save report template"}</button></div></div></div>
-  </section>;
+export default function CustomReportBuilder({
+  organizationId,
+}: {
+  organizationId?: string;
+}) {
+  const [access, setAccess] = useState<"loading" | "standard" | "premium">(
+      "loading",
+    ),
+    [games, setGames] = useState<any[]>([]),
+    [assignments, setAssignments] = useState<any[]>([]),
+    [organizations, setOrganizations] = useState<Organization[]>([]),
+    [templates, setTemplates] = useState<Template[]>([]),
+    [definition, setDefinition] =
+      useState<CustomReportDefinition>(defaultCustomReport),
+    [templateId, setTemplateId] = useState(""),
+    [templateName, setTemplateName] = useState(""),
+    [recipientEmail, setRecipientEmail] = useState(""),
+    [frequency, setFrequency] = useState<"weekly" | "monthly">("weekly"),
+    [sendDay, setSendDay] = useState(1),
+    [scheduleEnabled, setScheduleEnabled] = useState(false),
+    [message, setMessage] = useState(""),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  const endpoint = `/api/reports/custom?organizationId=${encodeURIComponent(organizationId || "")}`;
+  const load = async () => {
+    setError("");
+    try {
+      const response = await fetch(endpoint, { cache: "no-store" }),
+        result = await response.json();
+      if (!response.ok)
+        throw new Error(
+          result.error || "Custom reporting could not be loaded.",
+        );
+      const premium = result.reportingAccess === "premium";
+      setAccess(premium ? "premium" : "standard");
+      if (premium) {
+        setGames(result.games || []);
+        setAssignments(result.assignments || []);
+        setOrganizations(result.organizations || []);
+        setTemplates(result.templates || []);
+        setRecipientEmail((current) => current || result.defaultEmail || "");
+      }
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Custom reporting could not be loaded.",
+      );
+      setAccess("standard");
+    }
+  };
+  useEffect(() => {
+    void load();
+  }, [organizationId]);
+  const facts = useMemo(
+      () => normalizeReportFacts(games, assignments, organizations),
+      [games, assignments, organizations],
+    ),
+    rows = useMemo(
+      () => buildCustomReport(facts, definition),
+      [facts, definition],
+    );
+  const visibleDimensions = dimensions.filter(
+    (item) => definition.dataset === "assignments" || !assignmentOnly.has(item),
+  );
+  const optionValues = useMemo(
+    () =>
+      Object.fromEntries(
+        dimensions.map((dimension) => [
+          dimension,
+          [
+            ...new Set(
+              facts
+                .flatMap((fact) =>
+                  dimension === "team"
+                    ? [fact.homeTeam, fact.awayTeam]
+                    : [String((fact as any)[dimension] || "")],
+                )
+                .filter(Boolean),
+            ),
+          ].sort(),
+        ]),
+      ),
+    [facts],
+  );
+  const update = <K extends keyof CustomReportDefinition>(
+    key: K,
+    value: CustomReportDefinition[K],
+  ) => setDefinition((current) => ({ ...current, [key]: value }));
+  const setDataset = (dataset: "games" | "assignments") =>
+    setDefinition((current) => ({
+      ...current,
+      dataset,
+      groupBy: current.groupBy.filter(
+        (item) => dataset === "assignments" || !assignmentOnly.has(item),
+      ),
+      filters: Object.fromEntries(
+        Object.entries(current.filters).filter(
+          ([item]) =>
+            dataset === "assignments" ||
+            !assignmentOnly.has(item as ReportDimension),
+        ),
+      ),
+    }));
+  const toggleMetric = (metric: ReportMetric) =>
+    update(
+      "metrics",
+      definition.metrics.includes(metric)
+        ? definition.metrics.filter((item) => item !== metric)
+        : [...definition.metrics, metric],
+    );
+  const setGroup = (index: number, value: string) => {
+    const next = [...definition.groupBy];
+    if (!value) next.splice(index, 1);
+    else next[index] = value as ReportDimension;
+    update("groupBy", [...new Set(next)].slice(0, 2));
+  };
+  const exportCsv = () => {
+    const body = rows.map((row) => [
+        ...row.dimensions,
+        ...definition.metrics.map((metric) => row.values[metric]),
+      ]),
+      csv = [
+        [
+          ...definition.groupBy.map((item) => dimensionLabels[item]),
+          ...definition.metrics.map((item) => metricLabels[item]),
+        ],
+        ...body,
+      ]
+        .map((row) => row.map(quote).join(","))
+        .join("\n"),
+      url = URL.createObjectURL(
+        new Blob([csv], { type: "text/csv;charset=utf-8" }),
+      ),
+      anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${definition.title.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "custom-report"}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+  const exportPdf = async () => {
+    const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+        import("jspdf"),
+        import("jspdf-autotable"),
+      ]),
+      document = new jsPDF({ orientation: "landscape" });
+    document.setTextColor(12, 30, 55);
+    document.setFontSize(18);
+    document.text(definition.title || "RefAssign Custom Report", 14, 17);
+    document.setFontSize(9);
+    document.text(
+      `${
+        organizations
+          .filter(
+            (item) =>
+              !definition.organizationIds.length ||
+              definition.organizationIds.includes(item.id),
+          )
+          .map((item) => item.name)
+          .join(" • ") || "Authorized organizations"
+      } • Generated ${new Date().toLocaleString()}`,
+      14,
+      25,
+    );
+    autoTable(document, {
+      startY: 32,
+      head: [
+        [
+          ...definition.groupBy.map((item) => dimensionLabels[item]),
+          ...definition.metrics.map((item) => metricLabels[item]),
+        ],
+      ],
+      body: rows.map((row) => [
+        ...row.dimensions,
+        ...definition.metrics.map((metric) =>
+          format(metric, row.values[metric]),
+        ),
+      ]),
+      styles: { fontSize: 7 },
+      headStyles: { fillColor: [37, 99, 235] },
+    });
+    document.save(
+      `${definition.title.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "custom-report"}.pdf`,
+    );
+  };
+  const save = async () => {
+    setBusy(true);
+    setMessage("");
+    setError("");
+    const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: templateId || undefined,
+          name: templateName || definition.title,
+          definition,
+          recipientEmail,
+          frequency,
+          sendDay,
+          scheduleEnabled,
+        }),
+      }),
+      result = await response.json();
+    setBusy(false);
+    if (!response.ok)
+      return setError(
+        result.error || "The report template could not be saved.",
+      );
+    setTemplateId(result.template.id);
+    setTemplateName(result.template.name);
+    setTemplates((current) => [
+      result.template,
+      ...current.filter((item) => item.id !== result.template.id),
+    ]);
+    setMessage("Report template saved.");
+  };
+  const openTemplate = (template: Template) => {
+    setDefinition({
+      ...defaultCustomReport,
+      ...template.definition,
+      filters: template.definition.filters || {},
+    });
+    setTemplateId(template.id);
+    setTemplateName(template.name);
+    setRecipientEmail(template.recipient_email || "");
+    setFrequency(template.frequency);
+    setSendDay(template.send_day);
+    setScheduleEnabled(template.schedule_enabled);
+    setMessage("");
+  };
+  const removeTemplate = async (template: Template) => {
+    if (!window.confirm(`Delete “${template.name}”?`)) return;
+    const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete", id: template.id }),
+      }),
+      result = await response.json();
+    if (!response.ok)
+      return setError(result.error || "The template could not be deleted.");
+    setTemplates((current) =>
+      current.filter((item) => item.id !== template.id),
+    );
+    if (templateId === template.id) {
+      setTemplateId("");
+      setTemplateName("");
+    }
+  };
+  const newReport = () => {
+    setDefinition(defaultCustomReport);
+    setTemplateId("");
+    setTemplateName("");
+    setScheduleEnabled(false);
+    setMessage("");
+  };
+  const chartMetric = definition.metrics[0],
+    chartRows = rows.slice(0, 8),
+    chartMax = Math.max(
+      1,
+      ...chartRows.map((row) => row.values[chartMetric] || 0),
+    ),
+    chartTotal = chartRows.reduce(
+      (sum, row) => sum + (row.values[chartMetric] || 0),
+      0,
+    ),
+    donut = chartRows.reduce(
+      (current, row, index) => {
+        const start = current.end,
+          end =
+            start +
+            (chartTotal ? (row.values[chartMetric] / chartTotal) * 360 : 0);
+        return {
+          end,
+          stops: [
+            ...current.stops,
+            `${colors[index % colors.length]} ${start}deg ${end}deg`,
+          ],
+        };
+      },
+      { end: 0, stops: [] as string[] },
+    );
+  if (access === "loading")
+    return (
+      <section className="card">
+        <p>Loading Custom Report Builder…</p>
+      </section>
+    );
+  if (access === "standard")
+    return (
+      <section className="card premiumBuilderLock">
+        <span className="premiumLockIcon">◆</span>
+        <div>
+          <span className="premiumEyebrow">Premium Reporting</span>
+          <h2>Custom Report Builder</h2>
+          <p>
+            Build reports from games, assignments, officials, payroll, mileage,
+            teams, levels, locations, and organizations.
+          </p>
+          <div className="premiumFeatureGrid">
+            {[
+              "Custom fields and filters",
+              "Paying-organization breakdowns",
+              "Saved templates",
+              "Charts and comparisons",
+              "CSV and PDF exports",
+              "Scheduled email delivery",
+              "Organization-branded reports",
+              "Cross-organization comparisons",
+            ].map((item) => (
+              <span key={item}>✓ {item}</span>
+            ))}
+          </div>
+          <p className="reportFootnote">
+            A Super Admin can enable Premium Reporting for this account.
+          </p>
+        </div>
+      </section>
+    );
+  return (
+    <section className="card officialReports customReportBuilder">
+      <div className="cardHead">
+        <div>
+          <span className="premiumEyebrow">Premium Reporting</span>
+          <h2>Custom Report Builder</h2>
+          <p>
+            Choose the data, dimensions, metrics, and delivery options your
+            organization needs.
+          </p>
+        </div>
+        <div className="headerActions">
+          <button className="secondary" onClick={newReport}>
+            New report
+          </button>
+          <button
+            className="secondary"
+            disabled={!rows.length}
+            onClick={exportCsv}
+          >
+            Export CSV
+          </button>
+          <button
+            className="secondary"
+            disabled={!rows.length}
+            onClick={() => void exportPdf()}
+          >
+            Export PDF
+          </button>
+        </div>
+      </div>
+      {error && <div className="errorBox">{error}</div>}
+      {message && <div className="successBox">{message}</div>}
+      <div className="customBuilderLayout">
+        <aside className="customTemplatePanel">
+          <h3>Saved reports</h3>
+          {templates.map((template) => (
+            <div
+              className={
+                template.id === templateId
+                  ? "customTemplate active"
+                  : "customTemplate"
+              }
+              key={template.id}
+            >
+              <button onClick={() => openTemplate(template)}>
+                <b>{template.name}</b>
+                <small>
+                  {template.schedule_enabled
+                    ? `${template.frequency} delivery`
+                    : "Saved template"}
+                </small>
+              </button>
+              <button
+                className="templateDelete"
+                aria-label={`Delete ${template.name}`}
+                onClick={() => void removeTemplate(template)}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          {!templates.length && <p>No saved reports yet.</p>}
+        </aside>
+        <div className="customBuilderMain">
+          <div className="customBuilderSection">
+            <h3>1. Report foundation</h3>
+            <div className="reportFilters customFoundation">
+              <label>
+                Report title
+                <input
+                  value={definition.title}
+                  maxLength={100}
+                  onChange={(event) => update("title", event.target.value)}
+                />
+              </label>
+              <label>
+                Data source
+                <select
+                  value={definition.dataset}
+                  onChange={(event) =>
+                    setDataset(event.target.value as "games" | "assignments")
+                  }
+                >
+                  <option value="games">Games &amp; operations</option>
+                  <option value="assignments">
+                    Assignments &amp; payments
+                  </option>
+                </select>
+              </label>
+              <label>
+                Reporting period
+                <select
+                  value={definition.period}
+                  onChange={(event) =>
+                    update(
+                      "period",
+                      event.target.value as CustomReportDefinition["period"],
+                    )
+                  }
+                >
+                  <option value="season">Current year</option>
+                  <option value="30">Last 30 days</option>
+                  <option value="90">Last 90 days</option>
+                  <option value="custom">Custom dates</option>
+                  <option value="all">All records</option>
+                </select>
+              </label>
+              {definition.period === "custom" && (
+                <>
+                  <label>
+                    Start date
+                    <input
+                      type="date"
+                      value={definition.startDate}
+                      onChange={(event) =>
+                        update("startDate", event.target.value)
+                      }
+                    />
+                  </label>
+                  <label>
+                    End date
+                    <input
+                      type="date"
+                      value={definition.endDate}
+                      onChange={(event) =>
+                        update("endDate", event.target.value)
+                      }
+                    />
+                  </label>
+                </>
+              )}
+              <label>
+                Organization
+                <select
+                  value={definition.organizationIds[0] || "all"}
+                  onChange={(event) =>
+                    update(
+                      "organizationIds",
+                      event.target.value === "all" ? [] : [event.target.value],
+                    )
+                  }
+                >
+                  <option value="all">All authorized organizations</option>
+                  {organizations.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </div>
+          <div className="customBuilderSection">
+            <h3>2. Group and filter</h3>
+            <div className="reportFilters">
+              <label>
+                Primary grouping
+                <select
+                  value={definition.groupBy[0] || ""}
+                  onChange={(event) => setGroup(0, event.target.value)}
+                >
+                  <option value="">No grouping</option>
+                  {visibleDimensions.map((item) => (
+                    <option value={item} key={item}>
+                      {dimensionLabels[item]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Secondary grouping
+                <select
+                  value={definition.groupBy[1] || ""}
+                  onChange={(event) => setGroup(1, event.target.value)}
+                >
+                  <option value="">None</option>
+                  {visibleDimensions
+                    .filter((item) => item !== definition.groupBy[0])
+                    .map((item) => (
+                      <option value={item} key={item}>
+                        {dimensionLabels[item]}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              {visibleDimensions
+                .filter((item) => !["organization", "month"].includes(item))
+                .map((item) => (
+                  <label key={item}>
+                    {dimensionLabels[item]} filter
+                    <select
+                      value={definition.filters[item] || "all"}
+                      onChange={(event) =>
+                        update("filters", {
+                          ...definition.filters,
+                          [item]: event.target.value,
+                        })
+                      }
+                    >
+                      <option value="all">All</option>
+                      {(optionValues[item] || []).map((value: string) => (
+                        <option key={value}>{value}</option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+            </div>
+          </div>
+          <div className="customBuilderSection">
+            <h3>3. Choose metrics</h3>
+            <div className="customMetricPicker">
+              {metrics.map((metric) => (
+                <label
+                  className={
+                    definition.metrics.includes(metric) ? "selected" : ""
+                  }
+                  key={metric}
+                >
+                  <input
+                    type="checkbox"
+                    checked={definition.metrics.includes(metric)}
+                    onChange={() => toggleMetric(metric)}
+                  />
+                  {metricLabels[metric]}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="customBuilderSection customResults">
+            <div className="customResultHead">
+              <div>
+                <h3>Report results</h3>
+                <p>
+                  {rows.length} grouped result{rows.length === 1 ? "" : "s"}
+                </p>
+              </div>
+              <label>
+                Graphic
+                <select
+                  value={definition.chart}
+                  onChange={(event) =>
+                    update(
+                      "chart",
+                      event.target.value as CustomReportDefinition["chart"],
+                    )
+                  }
+                >
+                  <option value="bar">Bar chart</option>
+                  <option value="donut">Donut chart</option>
+                  <option value="none">No graphic</option>
+                </select>
+              </label>
+            </div>
+            {definition.chart !== "none" &&
+              chartMetric &&
+              chartRows.length > 0 && (
+                <article className="customChart">
+                  <h4>
+                    {metricLabels[chartMetric]} by{" "}
+                    {definition.groupBy
+                      .map((item) => dimensionLabels[item])
+                      .join(" / ") || "all records"}
+                  </h4>
+                  {definition.chart === "bar" ? (
+                    <div className="reportBars">
+                      {chartRows.map((row) => (
+                        <div className="reportBarRow" key={row.key}>
+                          <span>
+                            {row.dimensions.join(" / ") || "All records"}
+                          </span>
+                          <i>
+                            <em
+                              style={{
+                                width: `${(row.values[chartMetric] / chartMax) * 100}%`,
+                              }}
+                            />
+                          </i>
+                          <b>{format(chartMetric, row.values[chartMetric])}</b>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="customDonutWrap">
+                      <div
+                        className="customDonut"
+                        style={{
+                          background: `conic-gradient(${donut.stops.join(",")})`,
+                        }}
+                      >
+                        <span>{format(chartMetric, chartTotal)}</span>
+                      </div>
+                      <div>
+                        {chartRows.map((row, index) => (
+                          <p key={row.key}>
+                            <i
+                              style={{
+                                background: colors[index % colors.length],
+                              }}
+                            />
+                            {row.dimensions.join(" / ") || "All records"}
+                            <b>
+                              {format(chartMetric, row.values[chartMetric])}
+                            </b>
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </article>
+              )}
+            <div className="tableWrap">
+              <table className="officialReportTable customReportTable">
+                <thead>
+                  <tr>
+                    {definition.groupBy.map((item) => (
+                      <th key={item}>{dimensionLabels[item]}</th>
+                    ))}
+                    {definition.metrics.map((item) => (
+                      <th key={item}>{metricLabels[item]}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => (
+                    <tr key={row.key}>
+                      {row.dimensions.map((value, index) => (
+                        <td key={`${row.key}-${index}`}>
+                          <b>{value}</b>
+                        </td>
+                      ))}
+                      {definition.metrics.map((metric) => (
+                        <td key={metric}>
+                          {format(metric, row.values[metric])}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                  {!rows.length && (
+                    <tr>
+                      <td
+                        colSpan={Math.max(
+                          1,
+                          definition.groupBy.length + definition.metrics.length,
+                        )}
+                      >
+                        No records match this report configuration.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="customBuilderSection customSavePanel">
+            <div>
+              <h3>4. Save and schedule</h3>
+              <p>
+                Save this configuration for reuse or have RefAssign email it
+                automatically.
+              </p>
+            </div>
+            <div className="reportFilters">
+              <label>
+                Template name
+                <input
+                  value={templateName}
+                  maxLength={100}
+                  placeholder={definition.title}
+                  onChange={(event) => setTemplateName(event.target.value)}
+                />
+              </label>
+              <label className="customScheduleToggle">
+                <input
+                  type="checkbox"
+                  checked={scheduleEnabled}
+                  onChange={(event) => setScheduleEnabled(event.target.checked)}
+                />
+                Schedule email delivery
+              </label>
+              {scheduleEnabled && (
+                <>
+                  <label>
+                    Recipient email
+                    <input
+                      type="email"
+                      value={recipientEmail}
+                      onChange={(event) =>
+                        setRecipientEmail(event.target.value)
+                      }
+                    />
+                  </label>
+                  <label>
+                    Frequency
+                    <select
+                      value={frequency}
+                      onChange={(event) => {
+                        setFrequency(
+                          event.target.value as "weekly" | "monthly",
+                        );
+                        setSendDay(1);
+                      }}
+                    >
+                      <option value="weekly">Weekly</option>
+                      <option value="monthly">Monthly</option>
+                    </select>
+                  </label>
+                  <label>
+                    {frequency === "weekly" ? "Weekday" : "Day of month"}
+                    <select
+                      value={sendDay}
+                      onChange={(event) =>
+                        setSendDay(Number(event.target.value))
+                      }
+                    >
+                      {frequency === "weekly"
+                        ? [
+                            "Sunday",
+                            "Monday",
+                            "Tuesday",
+                            "Wednesday",
+                            "Thursday",
+                            "Friday",
+                            "Saturday",
+                          ].map((day, index) => (
+                            <option value={index} key={day}>
+                              {day}
+                            </option>
+                          ))
+                        : Array.from({ length: 28 }, (_, index) => (
+                            <option key={index + 1} value={index + 1}>
+                              {index + 1}
+                            </option>
+                          ))}
+                    </select>
+                  </label>
+                </>
+              )}
+            </div>
+            <button
+              onClick={() => void save()}
+              disabled={busy || !definition.metrics.length}
+            >
+              {busy
+                ? "Saving…"
+                : templateId
+                  ? "Update report template"
+                  : "Save report template"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
 }

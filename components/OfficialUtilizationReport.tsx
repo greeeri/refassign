@@ -93,7 +93,7 @@ const dateInPastDays = (date: Date, days: number, now: Date) => {
   return date >= cutoff && date <= now;
 };
 
-export default function OfficialUtilizationReport() {
+export default function OfficialUtilizationReport({ organizationId }: { organizationId?: string }) {
   const [officials, setOfficials] = useState<Official[]>([]),
     [assignments, setAssignments] = useState<Assignment[]>([]),
     [replacements, setReplacements] = useState<Replacement[]>([]),
@@ -115,7 +115,7 @@ export default function OfficialUtilizationReport() {
   useEffect(() => {
     void (async () => {
       try {
-        const response = await fetch("/api/reports/utilization", { cache: "no-store" }),
+        const response = await fetch(`/api/reports/utilization?organizationId=${encodeURIComponent(organizationId || "")}`, { cache: "no-store" }),
           result = await response.json();
         if (!response.ok)
           throw new Error(result.error || "Official utilization could not be loaded.");

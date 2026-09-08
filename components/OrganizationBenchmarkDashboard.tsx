@@ -23,11 +23,11 @@ const pct = (value: number) => `${Math.round(value)}%`;
 const assignmentCost = (row: Assignment) => row.payment_status === "void" ? 0 : Number(row.game_fee || 0) + Number(row.mileage_miles || 0) * Number(row.mileage_rate || 0);
 const quote = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
 
-export default function OrganizationBenchmarkDashboard() {
+export default function OrganizationBenchmarkDashboard({ organizationId: workspaceOrganizationId }: { organizationId?: string }) {
   const [organizations, setOrganizations] = useState<Organization[]>([]), [games, setGames] = useState<Game[]>([]), [assignments, setAssignments] = useState<Assignment[]>([]), [roster, setRoster] = useState<Roster[]>([]), [reportingAccess, setReportingAccess] = useState<"standard" | "premium">("standard"), [windowDays, setWindowDays] = useState<WindowDays>("90"), [organizationId, setOrganizationId] = useState("all"), [sort, setSort] = useState<SortKey>("attention"), [loading, setLoading] = useState(true), [error, setError] = useState("");
 
   useEffect(() => { void (async () => { try {
-    const response = await fetch("/api/reports/benchmarks", { cache: "no-store" }), result = await response.json();
+    const response = await fetch(`/api/reports/benchmarks?organizationId=${encodeURIComponent(workspaceOrganizationId || "")}`, { cache: "no-store" }), result = await response.json();
     if (!response.ok) throw new Error(result.error || "Organization benchmarks could not be loaded.");
     setOrganizations(result.organizations || []); setGames(result.games || []); setAssignments(result.assignments || []); setRoster(result.roster || []); setReportingAccess(result.reportingAccess === "premium" ? "premium" : "standard");
   } catch (reason) { setError(reason instanceof Error ? reason.message : "Organization benchmarks could not be loaded."); } setLoading(false); })(); }, []);

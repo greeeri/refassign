@@ -43,7 +43,7 @@ const officialName = (row: Assignment) => `${row.officials?.first_name || ""} ${
 const activeGame = (status: string) => !["cancelled", "canceled", "rained_out", "suspended", "on_hold"].includes(status);
 const titleCase = (value: string) => value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 
-export default function FinancialForecastReport() {
+export default function FinancialForecastReport({ organizationId }: { organizationId?: string }) {
   const [actual, setActual] = useState<Assignment[]>([]),
     [forecastAssignments, setForecastAssignments] = useState<Assignment[]>([]),
     [futureGames, setFutureGames] = useState<Game[]>([]),
@@ -64,7 +64,7 @@ export default function FinancialForecastReport() {
   useEffect(() => {
     void (async () => {
       try {
-        const response = await fetch("/api/reports/financial-forecast", { cache: "no-store" }), result = await response.json();
+        const response = await fetch(`/api/reports/financial-forecast?organizationId=${encodeURIComponent(organizationId || "")}`, { cache: "no-store" }), result = await response.json();
         if (!response.ok) throw new Error(result.error || "Financial forecasting could not be loaded.");
         setActual(result.actualAssignments || []);
         setForecastAssignments(result.forecastAssignments || []);

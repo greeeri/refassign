@@ -93,7 +93,7 @@ const distance = (a: number | null, b: number | null, c: number | null, d: numbe
   return radius * 2 * Math.asin(Math.sqrt(q));
 };
 
-export default function StaffingForecastReport() {
+export default function StaffingForecastReport({ organizationId }: { organizationId?: string }) {
   const [games, setGames] = useState<Game[]>([]),
     [assignments, setAssignments] = useState<Assignment[]>([]),
     [officials, setOfficials] = useState<Official[]>([]),
@@ -114,7 +114,7 @@ export default function StaffingForecastReport() {
   useEffect(() => {
     void (async () => {
       try {
-        const response = await fetch("/api/reports/forecast", { cache: "no-store" }), result = await response.json();
+        const response = await fetch(`/api/reports/forecast?organizationId=${encodeURIComponent(organizationId || "")}`, { cache: "no-store" }), result = await response.json();
         if (!response.ok) throw new Error(result.error || "Staffing forecast could not be loaded.");
         setGames(result.games || []);
         setAssignments(result.assignments || []);

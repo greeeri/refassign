@@ -17,12 +17,12 @@ const dayPart = (date: Date) => date.getHours() < 12 ? "Morning" : date.getHours
 const duration = (hours: number | null) => hours === null ? "Open" : hours < 1 ? `${Math.max(1, Math.round(hours * 60))} min` : `${hours.toFixed(1)} hrs`;
 const quote = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
 
-export default function DeclineReplacementReport() {
+export default function DeclineReplacementReport({ organizationId }: { organizationId?: string }) {
   const [assignments, setAssignments] = useState<Assignment[]>([]), [officials, setOfficials] = useState<Exclude<Official, null>[]>([]), [declines, setDeclines] = useState<Decline[]>([]), [reportingAccess, setReportingAccess] = useState<"standard" | "premium">("standard"), [historyAvailable, setHistoryAvailable] = useState(false), [period, setPeriod] = useState<Period>("season"), [organization, setOrganization] = useState("all"), [level, setLevel] = useState("all"), [location, setLocation] = useState("all"), [team, setTeam] = useState("all"), [position, setPosition] = useState("all"), [reason, setReason] = useState("all"), [outcome, setOutcome] = useState("all"), [dimension, setDimension] = useState<Dimension>("reason"), [alertCount, setAlertCount] = useState(3), [loading, setLoading] = useState(true), [error, setError] = useState("");
 
   useEffect(() => { void (async () => {
     try {
-      const response = await fetch("/api/reports/declines", { cache: "no-store" }), result = await response.json();
+      const response = await fetch(`/api/reports/declines?organizationId=${encodeURIComponent(organizationId || "")}`, { cache: "no-store" }), result = await response.json();
       if (!response.ok) throw new Error(result.error || "Decline reporting could not be loaded.");
       setAssignments(result.assignments || []); setOfficials(result.officials || []); setDeclines(result.declines || []); setHistoryAvailable(Boolean(result.historyAvailable)); setReportingAccess(result.reportingAccess === "premium" ? "premium" : "standard");
       const stored = window.localStorage.getItem("refassign-decline-alert-count"); if (stored) setAlertCount(Math.max(1, Number(stored) || 3));

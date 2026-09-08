@@ -41,7 +41,7 @@ const assignmentName = (item: Assignment) =>
   `${item.officials?.first_name || ""} ${item.officials?.last_name || ""}`.trim() ||
   "Open";
 
-export default function AssignmentCoverageReport() {
+export default function AssignmentCoverageReport({ organizationId }: { organizationId?: string }) {
   const [games, setGames] = useState<Game[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [period, setPeriod] = useState<Period>("90");
@@ -52,7 +52,7 @@ export default function AssignmentCoverageReport() {
 
   useEffect(() => {
     void (async () => {
-      const response = await fetch("/api/reports/coverage", {
+      const response = await fetch(`/api/reports/coverage?organizationId=${encodeURIComponent(organizationId || "")}`, {
         cache: "no-store",
       });
       const result = await response.json();
