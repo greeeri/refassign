@@ -26,7 +26,7 @@ type SavedWorkspace = {
   additional_official_blocks: number;
   texting_addon: boolean;
   status: string;
-  leagues: { name: string; region: string | null; coverage: string }[];
+  leagues: { league_id?: string; name: string; region: string | null; coverage: string }[];
 };
 
 // Organization configuration stays on the pricing site until it is saved.
