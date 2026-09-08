@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { createClient } from "../../lib/supabase/client";
+import { createClient, isTierTestRuntime } from "../../lib/supabase/client";
 import { RefAssignMark } from "../../components/BrandMarks";
 import GamesManager from "../../components/SortableGamesManager";
 import GameSetup from "../../components/GameSetup";
@@ -45,6 +45,7 @@ type TestWorkspace = {
     "owner" | "admin" | "assignor" | "billing" | "viewer" | "official"
   >;
   viewer_permissions: string[];
+  leagues?: Array<{ league_id: string; name: string }>;
 };
 const labels: Record<Role, string> = {
   admin: "Admin",
@@ -86,7 +87,7 @@ export default function Workspace() {
         window.location.replace("/login");
         return;
       }
-      if (window.location.hostname === "test.ref-assign.com") {
+      if (isTierTestRuntime()) {
         setTestMode(true);
         setTestOfficialAccount(
           Boolean(
@@ -628,7 +629,7 @@ export default function Workspace() {
           </div>
         </header>
         {manager && section === "Dashboard" && (
-          <DashboardGames onNavigate={setSection} />
+          <DashboardGames organizationId={testWorkspace?.organization_id} onNavigate={setSection} />
         )}{" "}
         {manager && section === "Games" && (
           <GamesManager organizationId={testWorkspace?.organization_id} />
@@ -646,12 +647,13 @@ export default function Workspace() {
           <OrganizationTeamManager
             organizationId={testWorkspace.organization_id}
             organization={testWorkspace.name}
+            leagues={(testWorkspace.leagues || []).map(league => ({ id: league.league_id, name: league.name }))}
             canManage={
               testWorkspace.role === "owner" || testWorkspace.role === "admin"
             }
           />
         )}
-        {manager && section === "Assignments" && <AssignmentsManager />}
+        {manager && section === "Assignments" && <AssignmentsManager organizationId={testWorkspace?.organization_id} />}
         {manager && section === "Audit History" && <AuditHistoryManager />}
         {manager && section === "Auto Assign" && <AutoAssignManager />}
         {manager && section === "Payroll" && (
