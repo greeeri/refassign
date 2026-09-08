@@ -89,7 +89,11 @@ export default function Workspace() {
         const hashInvitation = new URLSearchParams(
           window.location.hash.slice(1),
         ).get("official_invite");
+        const queryInvitation = new URLSearchParams(
+          window.location.search,
+        ).get("official_invite");
         const invitationId =
+          queryInvitation ||
           hashInvitation ||
           localStorage.getItem("refassign-official-invitation") ||
           (typeof user.user_metadata?.official_invitation_id === "string"
@@ -103,7 +107,7 @@ export default function Workspace() {
           if (claimError) setInvitationClaimError(claimError.message);
           else {
             localStorage.removeItem("refassign-official-invitation");
-            if (hashInvitation)
+            if (hashInvitation || queryInvitation)
               window.history.replaceState(null, "", window.location.pathname);
           }
         }
