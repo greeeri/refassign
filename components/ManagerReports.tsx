@@ -8,6 +8,7 @@ import DeclineReplacementReport from "./DeclineReplacementReport";
 import ExecutiveReportingDashboard from "./ExecutiveReportingDashboard";
 import FinancialForecastReport from "./FinancialForecastReport";
 import OrganizationOperationsReport from "./OrganizationOperationsReport";
+import OrganizationBenchmarkDashboard from "./OrganizationBenchmarkDashboard";
 import OfficialReports from "./OfficialReports";
 import OfficialUtilizationReport from "./OfficialUtilizationReport";
 import PayrollPaymentReport from "./PayrollPaymentReport";
@@ -19,6 +20,7 @@ export default function ManagerReports() {
   const [report, setReport] = useState<
     | "executive"
     | "operations"
+    | "benchmarks"
     | "coverage"
     | "compliance"
     | "communications"
@@ -46,6 +48,12 @@ export default function ManagerReports() {
             onClick={() => setReport("operations")}
           >
             Organization Operations
+          </button>
+          <button
+            className={report === "benchmarks" ? "active" : ""}
+            onClick={() => setReport("benchmarks")}
+          >
+            Organization Benchmarks <span className="premiumTabMark">◆</span>
           </button>
           <button
             className={report === "coverage" ? "active" : ""}
@@ -119,6 +127,8 @@ export default function ManagerReports() {
         <ExecutiveReportingDashboard onOpenReport={setReport} />
       ) : report === "operations" ? (
         <OrganizationOperationsReport />
+      ) : report === "benchmarks" ? (
+        <OrganizationBenchmarkDashboard />
       ) : report === "coverage" ? (
         <AssignmentCoverageReport />
       ) : report === "declines" ? (
