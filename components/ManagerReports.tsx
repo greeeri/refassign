@@ -3,6 +3,7 @@
 import { useState } from "react";
 import AssignmentCoverageReport from "./AssignmentCoverageReport";
 import ComplianceEligibilityReport from "./ComplianceEligibilityReport";
+import CommunicationEffectivenessReport from "./CommunicationEffectivenessReport";
 import DeclineReplacementReport from "./DeclineReplacementReport";
 import FinancialForecastReport from "./FinancialForecastReport";
 import OrganizationOperationsReport from "./OrganizationOperationsReport";
@@ -17,6 +18,7 @@ export default function ManagerReports() {
     | "operations"
     | "coverage"
     | "compliance"
+    | "communications"
     | "declines"
     | "financial"
     | "forecast"
@@ -60,6 +62,12 @@ export default function ManagerReports() {
             Training &amp; Development
           </button>
           <button
+            className={report === "communications" ? "active" : ""}
+            onClick={() => setReport("communications")}
+          >
+            Communication Effectiveness
+          </button>
+          <button
             className={report === "forecast" ? "active" : ""}
             onClick={() => setReport("forecast")}
           >
@@ -101,6 +109,8 @@ export default function ManagerReports() {
         <ComplianceEligibilityReport />
       ) : report === "development" ? (
         <TrainingDevelopmentReport />
+      ) : report === "communications" ? (
+        <CommunicationEffectivenessReport />
       ) : report === "forecast" ? (
         <StaffingForecastReport />
       ) : report === "financial" ? (

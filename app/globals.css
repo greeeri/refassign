@@ -2664,3 +2664,141 @@ td small {
     align-items: flex-start;
   }
 }
+
+.communicationControls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin: 14px 0;
+}
+.communicationControls label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 700;
+}
+.communicationControls input {
+  width: 64px;
+  padding: 7px;
+}
+.communicationAlert {
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 12px;
+  font-weight: 800;
+}
+.communicationCostSettings {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto auto auto;
+  align-items: end;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 16px;
+  border: 1px solid #dbe4ee;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+.communicationCostSettings h3,
+.communicationCostSettings p {
+  margin: 0;
+}
+.communicationCostSettings p {
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+}
+.communicationCostSettings label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 700;
+}
+.communicationCostSettings input {
+  width: 90px;
+  padding: 7px;
+}
+.chartNote {
+  display: block;
+  margin-top: 12px;
+  color: #64748b;
+}
+.communicationInsights {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 18px 0 24px;
+}
+.communicationInsights > article {
+  padding: 18px;
+  border: 1px solid #dbe4ee;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+.communicationInsights h3 {
+  margin: 0 0 10px;
+}
+.communicationInsights article > p {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 9px 0;
+  border-top: 1px solid #e2e8f0;
+  font-size: 13px;
+}
+.communicationInsights article > p:first-of-type {
+  border-top: 0;
+}
+.communicationInsights p span {
+  color: #64748b;
+  text-align: right;
+}
+.communicationStatus {
+  display: inline-block;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: capitalize;
+}
+.communicationStatus.sent,
+.communicationStatus.delivered,
+.communicationStatus.opened {
+  background: #dcfce7;
+  color: #15803d;
+}
+.communicationStatus.failed {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+.communicationStatus.queued {
+  background: #fef3c7;
+  color: #a16207;
+}
+.communicationTable small {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+}
+@media (max-width: 900px) {
+  .communicationControls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .communicationCostSettings,
+  .communicationInsights {
+    grid-template-columns: 1fr;
+  }
+  .communicationCostSettings label {
+    justify-content: space-between;
+  }
+}
