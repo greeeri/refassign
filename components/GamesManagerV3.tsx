@@ -56,7 +56,8 @@ const statusOptions = [
 function statusColors(value: string) {
   const status = value === "open" ? "active" : value;
   if (status === "canceled") return { background: "#fee2e2", color: "#172033" };
-  if (status === "suspended") return { background: "#fef9c3", color: "#172033" };
+  if (status === "suspended")
+    return { background: "#fef9c3", color: "#172033" };
   if (status === "rained_out") return { background: "#1e3a8a", color: "#fff" };
   return { background: "#fff", color: "#172033" };
 }
@@ -214,7 +215,11 @@ function inRange(g: Game, r: Range, customDate = "") {
   if (r === "thisWeek") return t >= week && t < next;
   return t >= next && t < afterNext;
 }
-export default function GamesManagerV3() {
+export default function GamesManagerV3({
+  organizationId,
+}: {
+  organizationId?: string;
+}) {
   const sb = useMemo(() => createClient(), []);
   const [games, setGames] = useState<Game[]>([]),
     [sports, setSports] = useState<Sport[]>([]),
@@ -243,6 +248,12 @@ export default function GamesManagerV3() {
     [error, setError] = useState(""),
     [message, setMessage] = useState("");
   async function load() {
+    const gamesQuery = sb
+      .from("games")
+      .select(
+        "id,game_number,status,sport_id,league_id,level_id,home_team_id,away_team_id,location_id,starts_at,duration_minutes,officials_needed,notes,sports(name),leagues(name),levels(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(id,name,city,state)",
+      )
+      .order("starts_at");
     const [s, lg, lv, t, lo, g] = await Promise.all([
       sb
         .from("sports")
@@ -257,12 +268,9 @@ export default function GamesManagerV3() {
         .select("id,name,city,state")
         .eq("active", true)
         .order("name"),
-      sb
-        .from("games")
-        .select(
-          "id,game_number,status,sport_id,league_id,level_id,home_team_id,away_team_id,location_id,starts_at,duration_minutes,officials_needed,notes,sports(name),leagues(name),levels(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(id,name,city,state)",
-        )
-        .order("starts_at"),
+      organizationId
+        ? gamesQuery.eq("organization_id", organizationId)
+        : gamesQuery,
     ]);
     const e = s.error || lg.error || lv.error || t.error || lo.error || g.error;
     if (e) setError(e.message);
@@ -277,7 +285,7 @@ export default function GamesManagerV3() {
   }
   useEffect(() => {
     void load();
-  }, []);
+  }, [organizationId]);
   function requestStatusChange(gameId: string, status: string) {
     if (["canceled", "rained_out"].includes(status)) {
       setPendingStatus({ gameId, status });
@@ -347,6 +355,7 @@ export default function GamesManagerV3() {
       if (form.home_team_id === form.away_team_id)
         throw new Error("Home and away teams must be different.");
       const payload = {
+        ...(organizationId ? { organization_id: organizationId } : {}),
         game_number: form.game_number.trim() || null,
         sport_id: form.sport_id,
         league_id: form.league_id,
@@ -423,12 +432,10 @@ export default function GamesManagerV3() {
         issues: string[] = [],
         sportMatch = sports.find((x) => norm(x.name) === norm(sport)),
         levelMatch = levels.find((x) => norm(x.name) === norm(level));
-      if (!sportMatch)
-        issues.push("Sport not found");
+      if (!sportMatch) issues.push("Sport not found");
       if (!leagues.some((x) => norm(x.name) === norm(league)))
         issues.push("League not found");
-      if (!levelMatch)
-        issues.push("Level not found");
+      if (!levelMatch) issues.push("Level not found");
       if (!locations.some((x) => norm(x.name) === norm(location)))
         issues.push("Location not found");
       if (!date) issues.push("Invalid date");
@@ -544,9 +551,15 @@ export default function GamesManagerV3() {
         currentDateValue = `${currentDate.getFullYear()}-${pad(currentDate.getMonth() + 1)}-${pad(currentDate.getDate())}`,
         currentTimeValue = `${pad(currentDate.getHours())}:${pad(currentDate.getMinutes())}`,
         changes: string[] = [],
-        compare = (label: string, before: string | number, after: string | number) => {
+        compare = (
+          label: string,
+          before: string | number,
+          after: string | number,
+        ) => {
           if (norm(String(before)) !== norm(String(after)))
-            changes.push(`${label}: ${before || "blank"} → ${after || "blank"}`);
+            changes.push(
+              `${label}: ${before || "blank"} → ${after || "blank"}`,
+            );
         };
       compare("Sport", existing.sports?.name || "", row.sport);
       compare("League", existing.leagues?.name || "", row.league);
@@ -560,7 +573,9 @@ export default function GamesManagerV3() {
       compare("Officials", existing.officials_needed, row.officials_needed);
       compare("Notes", existing.notes || "", row.notes);
       row.action = changes.length ? "update" : "skip";
-      row.changes = changes.length ? changes.join(" • ") : "No changes detected";
+      row.changes = changes.length
+        ? changes.join(" • ")
+        : "No changes detected";
     }
     return validated;
   }
@@ -589,10 +604,12 @@ export default function GamesManagerV3() {
       if (!validated.some((row) => !row.valid)) {
         const databaseValidated = validated.map((row) => ({ ...row }));
         for (let attempt = 0; attempt < databaseValidated.length; attempt++) {
-          const { error: validationError } = await sb
-            .rpc("validate_game_import", {
+          const { error: validationError } = await sb.rpc(
+            "validate_game_import",
+            {
               p_rows: importPayload(databaseValidated),
-            });
+            },
+          );
           if (!validationError) break;
           const rowNumber = Number(
               validationError.message.match(/spreadsheet row (\d+)/i)?.[1] || 0,
@@ -670,12 +687,18 @@ export default function GamesManagerV3() {
     setError("");
     try {
       if (!importValidated || !importApproved)
-        throw new Error("Validate and approve the complete preview before applying this import.");
+        throw new Error(
+          "Validate and approve the complete preview before applying this import.",
+        );
       const { data, error: applyError } = await sb.rpc("apply_game_import", {
         p_rows: importPayload(rows),
       });
       if (applyError) throw applyError;
-      const result = data as { added?: number; updated?: number; skipped?: number };
+      const result = data as {
+        added?: number;
+        updated?: number;
+        skipped?: number;
+      };
       setMessage(
         `Import complete: ${result.updated || 0} updated, ${result.added || 0} added, ${result.skipped || 0} unchanged and skipped.`,
       );
@@ -687,7 +710,8 @@ export default function GamesManagerV3() {
     } catch (x) {
       const importError = x instanceof Error ? x.message : "Import failed";
       setError(importError);
-      const rowNumber = Number(importError.match(/spreadsheet row (\d+)/i)?.[1] || 0) || null;
+      const rowNumber =
+        Number(importError.match(/spreadsheet row (\d+)/i)?.[1] || 0) || null;
       const { data: userData } = await sb.auth.getUser();
       await sb.from("import_error_log").insert({
         import_type: "games",

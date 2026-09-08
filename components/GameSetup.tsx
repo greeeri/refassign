@@ -38,7 +38,23 @@ type Location = {
   contact_email: string | null;
 };
 type View = "Leagues" | "Levels" | "Teams" | "Locations";
-export default function GameSetup({ view }: { view: View }) {
+type DirectoryLocation = Pick<
+  Location,
+  "id" | "name" | "address" | "city" | "state"
+> & {
+  postal_code: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  source?: string;
+  already_connected: boolean;
+};
+export default function GameSetup({
+  view,
+  organizationId,
+}: {
+  view: View;
+  organizationId?: string;
+}) {
   const supabase = useMemo(() => createClient(), []);
   const [allowed, setAllowed] = useState(false),
     [sports, setSports] = useState<Sport[]>([]),
@@ -68,11 +84,129 @@ export default function GameSetup({ view }: { view: View }) {
     });
   const [editingTeamId, setEditingTeamId] = useState<string | null>(null),
     [editingLocationId, setEditingLocationId] = useState<string | null>(null),
-    [openLeagueDocuments, setOpenLeagueDocuments] = useState<string | null>(null),
+    [openLeagueDocuments, setOpenLeagueDocuments] = useState<string | null>(
+      null,
+    ),
+    [leagueDrafts, setLeagueDrafts] = useState<Record<string, MileagePlan>>({}),
+    [savingLeagueId, setSavingLeagueId] = useState(""),
+    [leagueMessage, setLeagueMessage] = useState(""),
     [savingPower, setSavingPower] = useState(""),
     [showTeamImport, setShowTeamImport] = useState(false),
     [showLocationImport, setShowLocationImport] = useState(false),
     [error, setError] = useState("");
+  const [locationQuery, setLocationQuery] = useState(""),
+    [directoryLocations, setDirectoryLocations] = useState<DirectoryLocation[]>(
+      [],
+    ),
+    [searchingLocations, setSearchingLocations] = useState(false),
+    [connectingLocation, setConnectingLocation] = useState(""),
+    [locationMessage, setLocationMessage] = useState(""),
+    [locationSource, setLocationSource] = useState<"system" | "all">("system");
+
+  async function searchLocations(e: FormEvent) {
+    e.preventDefault();
+    await runLocationSearch(locationQuery, locationSource === "all");
+  }
+
+  async function runLocationSearch(
+    query = locationQuery,
+    includeRealPlaces = false,
+  ) {
+    if (!organizationId || query.trim().length < 2) {
+      setDirectoryLocations([]);
+      return;
+    }
+    setSearchingLocations(true);
+    setError("");
+    setLocationMessage("");
+    const { data, error: searchError } = await supabase.rpc(
+      "search_location_directory",
+      {
+        p_organization_id: organizationId,
+        p_query: query.trim(),
+      },
+    );
+    if (searchError) {
+      setSearchingLocations(false);
+      setError(searchError.message);
+      return;
+    }
+    let results = (data || []) as DirectoryLocation[];
+    if (includeRealPlaces) {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const params = new URLSearchParams({
+        q: query.trim(),
+        organization: organizationId,
+      });
+      const response = await fetch(`/api/tier-test/location-search?${params}`, {
+        headers: {
+          Authorization: `Bearer ${sessionData.session?.access_token || ""}`,
+        },
+      });
+      const external = (await response.json()) as {
+        results?: DirectoryLocation[];
+        error?: string;
+      };
+      if (!response.ok)
+        setError(external.error || "Real-world location search failed.");
+      else {
+        const known = new Set(
+          results.map((item) => `${item.name}|${item.city}`.toLowerCase()),
+        );
+        results = [
+          ...results,
+          ...(external.results || []).filter(
+            (item) => !known.has(`${item.name}|${item.city}`.toLowerCase()),
+          ),
+        ];
+      }
+    }
+    setDirectoryLocations(results);
+    setSearchingLocations(false);
+  }
+
+  useEffect(() => {
+    if (!organizationId || view !== "Locations") return;
+    const timer = window.setTimeout(
+      () => void runLocationSearch(locationQuery),
+      350,
+    );
+    return () => window.clearTimeout(timer);
+  }, [locationQuery, organizationId, view]);
+
+  async function connectLocation(item: DirectoryLocation) {
+    if (!organizationId || item.already_connected) return;
+    setConnectingLocation(item.id);
+    setError("");
+    const external = item.id.startsWith("osm-");
+    const { error: connectError } = external
+      ? await supabase.rpc("create_and_connect_organization_location", {
+          p_organization_id: organizationId,
+          p_name: item.name,
+          p_address: item.address,
+          p_city: item.city,
+          p_state: item.state,
+          p_postal_code: item.postal_code,
+          p_latitude: item.latitude,
+          p_longitude: item.longitude,
+        })
+      : await supabase.rpc("connect_organization_location", {
+          p_organization_id: organizationId,
+          p_location_id: item.id,
+        });
+    setConnectingLocation("");
+    if (connectError) {
+      setError(connectError.message);
+      return;
+    }
+    setDirectoryLocations((current) =>
+      current.map((entry) =>
+        entry.id === item.id ? { ...entry, already_connected: true } : entry,
+      ),
+    );
+    setLocationMessage(`${item.name} is now available to this organization.`);
+    await load();
+  }
   async function load() {
     setError("");
     const { data: u } = await supabase.auth.getUser();
@@ -82,9 +216,21 @@ export default function GameSetup({ view }: { view: View }) {
       .select("role")
       .eq("id", u.user.id)
       .maybeSingle();
-    const ok = ["admin", "assignor"].includes(p?.role || "");
+    const ok =
+      Boolean(organizationId) || ["admin", "assignor"].includes(p?.role || "");
     setAllowed(ok);
     if (!ok) return;
+    const locationRequest = organizationId
+      ? supabase.rpc("get_organization_locations", {
+          p_organization_id: organizationId,
+        })
+      : supabase
+          .from("locations")
+          .select(
+            "id,name,address,city,state,directions,parking_instructions,entrance_information,map_url,contact_name,contact_phone,contact_email",
+          )
+          .eq("active", true)
+          .order("name");
     const [s, l, lg, t, loc, pw] = await Promise.all([
       supabase
         .from("sports")
@@ -105,13 +251,7 @@ export default function GameSetup({ view }: { view: View }) {
         .from("teams")
         .select("id,name,sport_id,level_id,level")
         .order("name"),
-      supabase
-        .from("locations")
-        .select(
-          "id,name,address,city,state,directions,parking_instructions,entrance_information,map_url,contact_name,contact_phone,contact_email",
-        )
-        .eq("active", true)
-        .order("name"),
+      locationRequest,
       supabase.from("team_power_rankings").select("team_id,power"),
     ]);
     const err =
@@ -125,6 +265,14 @@ export default function GameSetup({ view }: { view: View }) {
       setSports(s.data || []);
       setLevels((l.data || []) as Level[]);
       setLeagues(lg.data || []);
+      setLeagueDrafts(
+        Object.fromEntries(
+          ((lg.data || []) as League[]).map((league) => [
+            league.id,
+            league.mileage_plan,
+          ]),
+        ),
+      );
       setTeams(t.data || []);
       setPowers(powerMap);
       setLocations((loc.data || []) as Location[]);
@@ -132,7 +280,7 @@ export default function GameSetup({ view }: { view: View }) {
   }
   useEffect(() => {
     load();
-  }, []);
+  }, [organizationId]);
   async function addLevel(e: FormEvent) {
     e.preventDefault();
     const n = Number(levelOfficials);
@@ -165,9 +313,15 @@ export default function GameSetup({ view }: { view: View }) {
   }
   async function addLeague(e: FormEvent) {
     e.preventDefault();
-    const r = await supabase
-      .from("leagues")
-      .insert({ name: leagueName.trim(), mileage_plan: leagueMileagePlan });
+    const r = organizationId
+      ? await supabase.rpc("create_organization_league", {
+          p_organization_id: organizationId,
+          p_name: leagueName.trim(),
+          p_mileage_plan: leagueMileagePlan,
+        })
+      : await supabase
+          .from("leagues")
+          .insert({ name: leagueName.trim(), mileage_plan: leagueMileagePlan });
     if (r.error) setError(r.error.message);
     else {
       setLeagueName("");
@@ -177,17 +331,28 @@ export default function GameSetup({ view }: { view: View }) {
   }
   async function updateLeagueMileagePlan(id: string, mileagePlan: MileagePlan) {
     setError("");
-    const { error: updateError } = await supabase
-      .from("leagues")
-      .update({ mileage_plan: mileagePlan })
-      .eq("id", id);
+    setLeagueMessage("");
+    setSavingLeagueId(id);
+    const { error: updateError } = organizationId
+      ? await supabase.rpc("update_organization_league_mileage_plan", {
+          p_organization_id: organizationId,
+          p_league_id: id,
+          p_mileage_plan: mileagePlan,
+        })
+      : await supabase
+          .from("leagues")
+          .update({ mileage_plan: mileagePlan })
+          .eq("id", id);
+    setSavingLeagueId("");
     if (updateError) setError(updateError.message);
-    else
+    else {
       setLeagues((current) =>
         current.map((league) =>
           league.id === id ? { ...league, mileage_plan: mileagePlan } : league,
         ),
       );
+      setLeagueMessage("League changes saved.");
+    }
   }
   async function saveTeam(e: FormEvent) {
     e.preventDefault();
@@ -241,11 +406,17 @@ export default function GameSetup({ view }: { view: View }) {
     if (location.address.trim() || location.name.trim()) {
       try {
         coordinates = await coordinatesForVenue(
-          [location.address, location.city, location.state].filter(Boolean).join(", "),
+          [location.address, location.city, location.state]
+            .filter(Boolean)
+            .join(", "),
           location.name,
         );
       } catch (geocodeError) {
-        setError(geocodeError instanceof Error ? geocodeError.message : "The venue address could not be located.");
+        setError(
+          geocodeError instanceof Error
+            ? geocodeError.message
+            : "The venue address could not be located.",
+        );
         return;
       }
     }
@@ -265,12 +436,30 @@ export default function GameSetup({ view }: { view: View }) {
       latitude: coordinates.latitude,
       longitude: coordinates.longitude,
     };
-    const r = editingLocationId
-      ? await supabase
-          .from("locations")
-          .update(payload)
-          .eq("id", editingLocationId)
-      : await supabase.from("locations").insert(payload);
+    const r = organizationId
+      ? await supabase.rpc("save_organization_location", {
+          p_organization_id: organizationId,
+          p_location_id: editingLocationId,
+          p_name: payload.name,
+          p_address: payload.address,
+          p_city: payload.city,
+          p_state: payload.state,
+          p_directions: payload.directions,
+          p_parking_instructions: payload.parking_instructions,
+          p_entrance_information: payload.entrance_information,
+          p_map_url: payload.map_url,
+          p_contact_name: payload.contact_name,
+          p_contact_phone: payload.contact_phone,
+          p_contact_email: payload.contact_email,
+          p_latitude: payload.latitude,
+          p_longitude: payload.longitude,
+        })
+      : editingLocationId
+        ? await supabase
+            .from("locations")
+            .update(payload)
+            .eq("id", editingLocationId)
+        : await supabase.from("locations").insert(payload);
     if (r.error) setError(r.error.message);
     else {
       setLocation({
@@ -337,6 +526,7 @@ export default function GameSetup({ view }: { view: View }) {
       {view === "Leagues" && (
         <section className="card">
           <h2>Leagues</h2>
+          {leagueMessage && <div className="loginMessage">{leagueMessage}</div>}
           <form className="toolbar" onSubmit={addLeague}>
             <input
               required
@@ -372,53 +562,83 @@ export default function GameSetup({ view }: { view: View }) {
               <tbody>
                 {leagues.map((l) => (
                   <Fragment key={l.id}>
-                  <tr>
-                    <td>
-                      <b>{l.name}</b>
-                    </td>
-                    <td>
-                      <select
-                        aria-label={`Mileage plan for ${l.name}`}
-                        value={l.mileage_plan}
-                        onChange={(e) =>
-                          void updateLeagueMileagePlan(
-                            l.id,
-                            e.target.value as MileagePlan,
-                          )
-                        }
-                      >
-                        {mileagePlans.map(([value, label]) => (
-                          <option key={value} value={value}>
-                            {label}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      <button
-                        className="secondary"
-                        type="button"
-                        onClick={() => setOpenLeagueDocuments(openLeagueDocuments === l.id ? null : l.id)}
-                      >
-                        {openLeagueDocuments === l.id ? "Close Documents" : "Manage Documents"}
-                      </button>
-                    </td>
-                    <td>
-                      <button
-                        className="tableButton"
-                        onClick={() => remove("leagues", l.id)}
-                      >
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                  {openLeagueDocuments === l.id && (
-                    <tr className="leagueDocumentsTableRow">
-                      <td colSpan={4}>
-                        <LeagueDocumentsManager leagueId={l.id} leagueName={l.name} />
+                    <tr>
+                      <td>
+                        <b>{l.name}</b>
+                      </td>
+                      <td>
+                        <div className="headerActions">
+                          <select
+                            aria-label={`Mileage plan for ${l.name}`}
+                            value={leagueDrafts[l.id] ?? l.mileage_plan}
+                            onChange={(e) =>
+                              setLeagueDrafts((current) => ({
+                                ...current,
+                                [l.id]: e.target.value as MileagePlan,
+                              }))
+                            }
+                          >
+                            {mileagePlans.map(([value, label]) => (
+                              <option key={value} value={value}>
+                                {label}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            className="primary"
+                            type="button"
+                            disabled={
+                              savingLeagueId === l.id ||
+                              (leagueDrafts[l.id] ?? l.mileage_plan) ===
+                                l.mileage_plan
+                            }
+                            onClick={() =>
+                              void updateLeagueMileagePlan(
+                                l.id,
+                                leagueDrafts[l.id] ?? l.mileage_plan,
+                              )
+                            }
+                          >
+                            {savingLeagueId === l.id
+                              ? "Saving…"
+                              : "Save changes"}
+                          </button>
+                        </div>
+                      </td>
+                      <td>
+                        <button
+                          className="secondary"
+                          type="button"
+                          onClick={() =>
+                            setOpenLeagueDocuments(
+                              openLeagueDocuments === l.id ? null : l.id,
+                            )
+                          }
+                        >
+                          {openLeagueDocuments === l.id
+                            ? "Close Documents"
+                            : "Manage Documents"}
+                        </button>
+                      </td>
+                      <td>
+                        <button
+                          className="tableButton"
+                          onClick={() => remove("leagues", l.id)}
+                        >
+                          Remove
+                        </button>
                       </td>
                     </tr>
-                  )}
+                    {openLeagueDocuments === l.id && (
+                      <tr className="leagueDocumentsTableRow">
+                        <td colSpan={4}>
+                          <LeagueDocumentsManager
+                            leagueId={l.id}
+                            leagueName={l.name}
+                          />
+                        </td>
+                      </tr>
+                    )}
                   </Fragment>
                 ))}
               </tbody>
@@ -637,219 +857,321 @@ export default function GameSetup({ view }: { view: View }) {
         </section>
       )}
       {view === "Locations" && (
-        <section className="card">
-          <div className="cardHead">
-            <div>
-              <h2>Locations</h2>
-              <p>
-                Manage game locations independently of Level, or bulk update
-                them with the uploader.
-              </p>
-            </div>
-            <button
-              className="secondary"
-              onClick={() => setShowLocationImport(!showLocationImport)}
-            >
-              {showLocationImport
-                ? "Close Location Uploader"
-                : "Location Import / Export"}
-            </button>
-          </div>
-          {showLocationImport && <LocationsRosterManager />}
-          <form className="officialForm" onSubmit={saveLocation}>
-            <label>
-              Location Name
-              <input
-                required
-                value={location.name}
-                onChange={(e) =>
-                  setLocation({ ...location, name: e.target.value })
-                }
-              />
-            </label>
-            <label>
-              Address
-              <input
-                value={location.address}
-                onChange={(e) =>
-                  setLocation({ ...location, address: e.target.value })
-                }
-              />
-            </label>
-            <label>
-              City
-              <input
-                value={location.city}
-                onChange={(e) =>
-                  setLocation({ ...location, city: e.target.value })
-                }
-              />
-            </label>
-            <label>
-              State
-              <input
-                value={location.state}
-                onChange={(e) =>
-                  setLocation({ ...location, state: e.target.value })
-                }
-              />
-            </label>
-            <label>
-              Preferred Map Link
-              <input
-                type="url"
-                placeholder="https://maps.google.com/…"
-                value={location.map_url}
-                onChange={(e) =>
-                  setLocation({ ...location, map_url: e.target.value })
-                }
-              />
-            </label>
-            <label>
-              Venue Contact
-              <input
-                value={location.contact_name}
-                onChange={(e) =>
-                  setLocation({ ...location, contact_name: e.target.value })
-                }
-              />
-            </label>
-            <label>
-              Contact Phone
-              <input
-                type="tel"
-                value={location.contact_phone}
-                onChange={(e) =>
-                  setLocation({ ...location, contact_phone: e.target.value })
-                }
-              />
-            </label>
-            <label>
-              Contact Email
-              <input
-                type="email"
-                value={location.contact_email}
-                onChange={(e) =>
-                  setLocation({ ...location, contact_email: e.target.value })
-                }
-              />
-            </label>
-            <label style={{ gridColumn: "1 / -1" }}>
-              Field-Specific Directions
-              <textarea
-                rows={2}
-                value={location.directions}
-                onChange={(e) =>
-                  setLocation({ ...location, directions: e.target.value })
-                }
-              />
-            </label>
-            <label style={{ gridColumn: "1 / -1" }}>
-              Parking Instructions
-              <textarea
-                rows={2}
-                value={location.parking_instructions}
-                onChange={(e) =>
-                  setLocation({
-                    ...location,
-                    parking_instructions: e.target.value,
-                  })
-                }
-              />
-            </label>
-            <label style={{ gridColumn: "1 / -1" }}>
-              Entrance Information
-              <textarea
-                rows={2}
-                value={location.entrance_information}
-                onChange={(e) =>
-                  setLocation({
-                    ...location,
-                    entrance_information: e.target.value,
-                  })
-                }
-              />
-            </label>
-            <div className="formActions">
-              {editingLocationId && (
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() => {
-                    setEditingLocationId(null);
-                    setLocation({
-                      name: "",
-                      address: "",
-                      city: "",
-                      state: "IA",
-                      directions: "",
-                      parking_instructions: "",
-                      entrance_information: "",
-                      map_url: "",
-                      contact_name: "",
-                      contact_phone: "",
-                      contact_email: "",
-                    });
-                  }}
-                >
-                  Cancel Edit
+        <>
+          {organizationId && (
+            <section className="card directorySearchCard">
+              <div>
+                <p className="eyebrow">Shared location directory</p>
+                <h2>Find a location before adding a new one</h2>
+                <p>
+                  Enter anything you know. A city, partial venue name, ZIP code,
+                  or part of an address will return possible matches.
+                </p>
+              </div>
+              <form className="directoryConnectForm" onSubmit={searchLocations}>
+                <label>
+                  Location search
+                  <input
+                    value={locationQuery}
+                    minLength={2}
+                    required
+                    placeholder="Try “Des Moines”, “Cownie”, or “50317”"
+                    onChange={(event) => setLocationQuery(event.target.value)}
+                  />
+                </label>
+                <button className="primary" disabled={searchingLocations}>
+                  {searchingLocations ? "Searching…" : "Search all locations"}
                 </button>
+              </form>
+              <fieldset className="locationSourceOptions">
+                <legend>Where should RefAssign search?</legend>
+                <label>
+                  <input
+                    type="radio"
+                    name="location-source"
+                    checked={locationSource === "system"}
+                    onChange={() => setLocationSource("system")}
+                  />
+                  Existing RefAssign locations
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="location-source"
+                    checked={locationSource === "all"}
+                    onChange={() => setLocationSource("all")}
+                  />
+                  Search for a new real-world location
+                </label>
+              </fieldset>
+              {locationMessage && (
+                <div className="successBox">{locationMessage}</div>
               )}
-              <button className="primary">
-                {editingLocationId ? "Save Location Changes" : "Add Location"}
+              {directoryLocations.length > 0 && (
+                <div className="directoryResults">
+                  {directoryLocations.map((item) => (
+                    <article key={item.id}>
+                      <div>
+                        <strong>{item.name}</strong>
+                        <span>
+                          {[
+                            item.address,
+                            item.city,
+                            item.state,
+                            item.postal_code,
+                          ]
+                            .filter(Boolean)
+                            .join(", ") || "Address not yet provided"}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className={
+                          item.already_connected ? "secondary" : "primary"
+                        }
+                        disabled={
+                          item.already_connected ||
+                          connectingLocation === item.id
+                        }
+                        onClick={() => void connectLocation(item)}
+                      >
+                        {item.already_connected
+                          ? "Already in workspace"
+                          : connectingLocation === item.id
+                            ? "Adding…"
+                            : "Use this location"}
+                      </button>
+                    </article>
+                  ))}
+                </div>
+              )}
+              {!searchingLocations &&
+                locationQuery.trim().length >= 2 &&
+                directoryLocations.length === 0 && (
+                  <div className="emptySearchResult">
+                    {locationSource === "system"
+                      ? "No existing RefAssign locations matched. Select “Search for a new real-world location” to look outside the system."
+                      : "No locations matched that search."}
+                  </div>
+                )}
+            </section>
+          )}
+          <section className="card">
+            <div className="cardHead">
+              <div>
+                <h2>Locations</h2>
+                <p>
+                  Manage game locations independently of Level, or bulk update
+                  them with the uploader.
+                </p>
+              </div>
+              <button
+                className="secondary"
+                onClick={() => setShowLocationImport(!showLocationImport)}
+              >
+                {showLocationImport
+                  ? "Close Location Uploader"
+                  : "Location Import / Export"}
               </button>
             </div>
-          </form>
-          <div className="tableWrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Location</th>
-                  <th>Address</th>
-                  <th>Venue Details</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {locations.map((v) => (
-                  <tr key={v.id}>
-                    <td>{v.name}</td>
-                    <td>
-                      {[v.address, v.city, v.state].filter(Boolean).join(", ")}
-                    </td>
-                    <td>
-                      {[
-                        v.directions && "Directions",
-                        v.parking_instructions && "Parking",
-                        v.entrance_information && "Entrance",
-                        (v.contact_name ||
-                          v.contact_phone ||
-                          v.contact_email) &&
-                          "Contact",
-                      ]
-                        .filter(Boolean)
-                        .join(" • ") || "Not added"}
-                    </td>
-                    <td>
-                      <button
-                        className="tableButton"
-                        onClick={() => editLocation(v)}
-                      >
-                        Edit
-                      </button>{" "}
-                      <button
-                        className="tableButton"
-                        onClick={() => remove("locations", v.id)}
-                      >
-                        Remove
-                      </button>
-                    </td>
+            {showLocationImport && <LocationsRosterManager />}
+            <form className="officialForm" onSubmit={saveLocation}>
+              <label>
+                Location Name
+                <input
+                  required
+                  value={location.name}
+                  onChange={(e) =>
+                    setLocation({ ...location, name: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Address
+                <input
+                  value={location.address}
+                  onChange={(e) =>
+                    setLocation({ ...location, address: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                City
+                <input
+                  value={location.city}
+                  onChange={(e) =>
+                    setLocation({ ...location, city: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                State
+                <input
+                  value={location.state}
+                  onChange={(e) =>
+                    setLocation({ ...location, state: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Preferred Map Link
+                <input
+                  type="url"
+                  placeholder="https://maps.google.com/…"
+                  value={location.map_url}
+                  onChange={(e) =>
+                    setLocation({ ...location, map_url: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Venue Contact
+                <input
+                  value={location.contact_name}
+                  onChange={(e) =>
+                    setLocation({ ...location, contact_name: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Contact Phone
+                <input
+                  type="tel"
+                  value={location.contact_phone}
+                  onChange={(e) =>
+                    setLocation({ ...location, contact_phone: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Contact Email
+                <input
+                  type="email"
+                  value={location.contact_email}
+                  onChange={(e) =>
+                    setLocation({ ...location, contact_email: e.target.value })
+                  }
+                />
+              </label>
+              <label style={{ gridColumn: "1 / -1" }}>
+                Field-Specific Directions
+                <textarea
+                  rows={2}
+                  value={location.directions}
+                  onChange={(e) =>
+                    setLocation({ ...location, directions: e.target.value })
+                  }
+                />
+              </label>
+              <label style={{ gridColumn: "1 / -1" }}>
+                Parking Instructions
+                <textarea
+                  rows={2}
+                  value={location.parking_instructions}
+                  onChange={(e) =>
+                    setLocation({
+                      ...location,
+                      parking_instructions: e.target.value,
+                    })
+                  }
+                />
+              </label>
+              <label style={{ gridColumn: "1 / -1" }}>
+                Entrance Information
+                <textarea
+                  rows={2}
+                  value={location.entrance_information}
+                  onChange={(e) =>
+                    setLocation({
+                      ...location,
+                      entrance_information: e.target.value,
+                    })
+                  }
+                />
+              </label>
+              <div className="formActions">
+                {editingLocationId && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => {
+                      setEditingLocationId(null);
+                      setLocation({
+                        name: "",
+                        address: "",
+                        city: "",
+                        state: "IA",
+                        directions: "",
+                        parking_instructions: "",
+                        entrance_information: "",
+                        map_url: "",
+                        contact_name: "",
+                        contact_phone: "",
+                        contact_email: "",
+                      });
+                    }}
+                  >
+                    Cancel Edit
+                  </button>
+                )}
+                <button className="primary">
+                  {editingLocationId ? "Save Location Changes" : "Add Location"}
+                </button>
+              </div>
+            </form>
+            <div className="tableWrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Location</th>
+                    <th>Address</th>
+                    <th>Venue Details</th>
+                    <th></th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+                </thead>
+                <tbody>
+                  {locations.map((v) => (
+                    <tr key={v.id}>
+                      <td>{v.name}</td>
+                      <td>
+                        {[v.address, v.city, v.state]
+                          .filter(Boolean)
+                          .join(", ")}
+                      </td>
+                      <td>
+                        {[
+                          v.directions && "Directions",
+                          v.parking_instructions && "Parking",
+                          v.entrance_information && "Entrance",
+                          (v.contact_name ||
+                            v.contact_phone ||
+                            v.contact_email) &&
+                            "Contact",
+                        ]
+                          .filter(Boolean)
+                          .join(" • ") || "Not added"}
+                      </td>
+                      <td>
+                        <button
+                          className="tableButton"
+                          onClick={() => editLocation(v)}
+                        >
+                          Edit
+                        </button>{" "}
+                        <button
+                          className="tableButton"
+                          onClick={() => remove("locations", v.id)}
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
       )}
     </>
   );

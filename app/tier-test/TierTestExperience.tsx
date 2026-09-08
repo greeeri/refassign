@@ -1,0 +1,1005 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import {
+  OFFICIAL_BLOCK_ANNUAL_PRICE_CENTS,
+  OFFICIAL_BLOCK_SIZE,
+  PLAN_CATALOG,
+  PlanCode,
+} from "../../lib/saas/planCatalog";
+import styles from "./tier-test.module.css";
+import wizard from "./wizard.module.css";
+import TestAuthPanel from "./TestAuthPanel";
+import { createTierTestClient as createClient } from "../../lib/supabase/client";
+import saved from "./saved.module.css";
+import OrganizationTeamSetup from "./OrganizationTeamSetup";
+
+type SavedWorkspace = {
+  organization_id: string;
+  name: string;
+  primary_sport: string | null;
+  created_at?: string;
+  role: string;
+  viewer_permissions: string[];
+  plan: PlanCode;
+  official_limit: number | null;
+  additional_official_blocks: number;
+  texting_addon: boolean;
+  status: string;
+  leagues: { league_id?: string; name: string; region: string | null; coverage: string }[];
+};
+
+// Organization configuration stays on the pricing site until it is saved.
+
+const money = (cents: number | null) =>
+  cents === null
+    ? "Custom"
+    : new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+        maximumFractionDigits: 0,
+      }).format(cents / 100);
+const orderedPlans: PlanCode[] = [
+  "starter",
+  "pro",
+  "pro_founding",
+  "premier",
+  "enterprise",
+];
+const descriptions: Record<PlanCode, string> = {
+  starter: "For small leagues and clubs",
+  pro: "For growing assigning organizations",
+  pro_founding: "Limited introductory Pro rate",
+  premier: "For larger, multi-sport organizations",
+  enterprise: "For state associations and complex programs",
+};
+const features: Record<PlanCode, string[]> = {
+  starter: [
+    "Game management",
+    "Official assignments",
+    "Basic reporting",
+    "Email support",
+  ],
+  pro: [
+    "Everything in Starter",
+    "Payroll processing",
+    "Advanced reporting",
+    "Custom rules and settings",
+    "Priority support",
+  ],
+  pro_founding: [
+    "Everything in Pro",
+    "Founding member pricing",
+    "Rate locked during introductory term",
+    "Priority support",
+  ],
+  premier: [
+    "Everything in Pro",
+    "Multi-sport support",
+    "Advanced analytics",
+    "Custom integrations",
+    "Priority support",
+  ],
+  enterprise: [
+    "Everything in Premier",
+    "Custom development options",
+    "Dedicated account manager",
+    "Onboarding and training",
+    "Ongoing partnership support",
+  ],
+};
+
+export default function TierTestExperience({
+  databaseConnected,
+}: {
+  databaseConnected: boolean;
+}) {
+  const [officials, setOfficials] = useState(75);
+  const [selected, setSelected] = useState<PlanCode>("pro");
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [organization, setOrganization] = useState("");
+  const [sport, setSport] = useState("Soccer");
+  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
+  const [leagues, setLeagues] = useState([
+    { id: 1, name: "", region: "", coverage: "All locations" },
+  ]);
+  const [userEmail, setUserEmail] = useState("");
+  const [authRequired, setAuthRequired] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+  const [organizationId, setOrganizationId] = useState("");
+  const [authPortal, setAuthPortal] = useState(false);
+  const [savedWorkspaces, setSavedWorkspaces] = useState<SavedWorkspace[]>([]);
+  const [textingAddon, setTextingAddon] = useState(false);
+  const plan = PLAN_CATALOG[selected];
+  const extraBlocks =
+    plan.includedOfficials === null
+      ? 0
+      : Math.max(
+          0,
+          Math.ceil((officials - plan.includedOfficials) / OFFICIAL_BLOCK_SIZE),
+        );
+  const textingIncluded = selected === "enterprise";
+  const estimate =
+    plan.annualPriceCents === null
+      ? null
+      : plan.annualPriceCents +
+        extraBlocks * OFFICIAL_BLOCK_ANNUAL_PRICE_CENTS +
+        (textingAddon ? 18_000 : 0);
+  const recommendation = useMemo<PlanCode>(
+    () =>
+      officials <= 50
+        ? "starter"
+        : officials <= 100
+          ? "pro"
+          : officials <= 250
+            ? "premier"
+            : "enterprise",
+    [officials],
+  );
+  const scrollAfterRender = (id: string) =>
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() =>
+        document
+          .getElementById(id)
+          ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      ),
+    );
+  const openTestSignIn = () => {
+    if (userEmail) {
+      scrollAfterRender("saved-workspaces");
+      return;
+    }
+    setAuthPortal(true);
+    scrollAfterRender("test-auth-portal");
+  };
+  const switchAccount = async () => {
+    await createClient().auth.signOut({ scope: "local" });
+    window.localStorage.removeItem("refassign-last-test-workspace");
+    setUserEmail("");
+    setSavedWorkspaces([]);
+    setOrganizationId("");
+    setSetupOpen(false);
+    setAuthRequired(false);
+    setAuthPortal(true);
+    scrollAfterRender("test-auth-portal");
+  };
+  const openSetup = () => {
+    setOrganizationId("");
+    setOrganization("");
+    setSport("Soccer");
+    setTextingAddon(false);
+    setLeagues([
+      { id: Date.now(), name: "", region: "", coverage: "All locations" },
+    ]);
+    setSetupOpen(true);
+    setStep(1);
+    scrollAfterRender("organization-setup");
+  };
+  const choose = (code: PlanCode) => {
+    setOrganizationId("");
+    setSelected(code);
+    if (code === "enterprise") setTextingAddon(false);
+    setSetupOpen(true);
+    setStep(1);
+    requestAnimationFrame(() =>
+      document
+        .getElementById("organization-setup")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    );
+  };
+  const updateLeague = (
+    id: number,
+    field: "name" | "region" | "coverage",
+    value: string,
+  ) =>
+    setLeagues((rows) =>
+      rows.map((row) => (row.id === id ? { ...row, [field]: value } : row)),
+    );
+  const addLeague = () =>
+    setLeagues((rows) => [
+      ...rows,
+      { id: Date.now(), name: "", region: "", coverage: "All locations" },
+    ]);
+  const removeLeague = (id: number) =>
+    setLeagues((rows) =>
+      rows.length === 1 ? rows : rows.filter((row) => row.id !== id),
+    );
+  const validLeagues = leagues.filter((row) => row.name.trim());
+  useEffect(() => {
+    const supabase = createClient();
+    void supabase.auth
+      .getUser()
+      .then(({ data }) => setUserEmail(data.user?.email || ""));
+    const { data } = supabase.auth.onAuthStateChange((_event, session) =>
+      setUserEmail(session?.user.email || ""),
+    );
+    return () => data.subscription.unsubscribe();
+  }, []);
+  useEffect(() => {
+    if (!userEmail) return;
+    const supabase = createClient();
+    void (async () => {
+      await supabase.rpc("accept_my_organization_invitations");
+      const { data, error } = await supabase.rpc("get_my_test_workspaces");
+      if (error) {
+        setSaveMessage(error.message);
+        return;
+      }
+      setSavedWorkspaces((data || []) as SavedWorkspace[]);
+    })();
+  }, [userEmail]);
+  const openSaved = (workspace: SavedWorkspace) => {
+    window.localStorage.setItem(
+      "refassign-last-test-workspace",
+      workspace.organization_id,
+    );
+    setOrganizationId(workspace.organization_id);
+    setOrganization(workspace.name);
+    setSport(workspace.primary_sport || "Soccer");
+    setSelected(workspace.plan);
+    setTextingAddon(workspace.texting_addon);
+    setOfficials(
+      workspace.official_limit === null
+        ? 250
+        : workspace.official_limit +
+            workspace.additional_official_blocks * OFFICIAL_BLOCK_SIZE,
+    );
+    setLeagues(
+      workspace.leagues.length
+        ? workspace.leagues.map((league, index) => ({
+            id: Date.now() + index,
+            name: league.name,
+            region: league.region || "",
+            coverage: league.coverage,
+          }))
+        : [
+            {
+              id: Date.now(),
+              name: "",
+              region: "",
+              coverage: "All locations",
+            },
+          ],
+    );
+    setSaveMessage("");
+    setSetupOpen(true);
+    setStep(1);
+    scrollAfterRender("organization-setup");
+  };
+  const persistWorkspace = async () => {
+    setSaving(true);
+    setSaveMessage("");
+    const supabase = createClient();
+    const savedLeagues = validLeagues.map(({ name, region, coverage }) => ({
+      name,
+      region,
+      coverage,
+    }));
+    const rpcName = organizationId
+      ? "update_test_organization_workspace"
+      : "create_test_organization_workspace";
+    const rpcArgs = organizationId
+      ? {
+          p_organization_id: organizationId,
+          p_organization_name: organization,
+          p_primary_sport: sport,
+          p_plan: selected,
+          p_official_limit: plan.includedOfficials,
+          p_additional_official_blocks: extraBlocks,
+          p_leagues: savedLeagues,
+        }
+      : {
+          p_organization_name: organization,
+          p_primary_sport: sport,
+          p_plan: selected,
+          p_official_limit: plan.includedOfficials,
+          p_additional_official_blocks: extraBlocks,
+          p_leagues: savedLeagues,
+        };
+    const { data, error } = await supabase.rpc(rpcName, rpcArgs);
+    if (error) {
+      setSaveMessage(error.message);
+    } else {
+      const savedId = data as string;
+      const { error: coverageError } = await supabase.rpc(
+        "set_organization_coverage_types",
+        { p_organization_id: savedId, p_leagues: savedLeagues },
+      );
+      if (coverageError) {
+        setSaveMessage(coverageError.message);
+        setSaving(false);
+        return;
+      }
+      const { error: addonError } = await supabase.rpc(
+        "set_organization_texting_addon",
+        {
+          p_organization_id: savedId,
+          p_enabled: textingAddon && !textingIncluded,
+        },
+      );
+      if (addonError) {
+        setSaveMessage(addonError.message);
+        setSaving(false);
+        return;
+      }
+      const savedWorkspace: SavedWorkspace = {
+        organization_id: savedId,
+        name: organization,
+        primary_sport: sport,
+        role: "owner",
+        viewer_permissions: [],
+        plan: selected,
+        official_limit: plan.includedOfficials,
+        additional_official_blocks: extraBlocks,
+        texting_addon: textingAddon && !textingIncluded,
+        status: "pending",
+        leagues: savedLeagues,
+      };
+      window.localStorage.setItem("refassign-last-test-workspace", savedId);
+      setOrganizationId(savedId);
+      setSavedWorkspaces((rows) => [
+        savedWorkspace,
+        ...rows.filter((row) => row.organization_id !== savedId),
+      ]);
+      setStep(4);
+    }
+    setSaving(false);
+  };
+  const saveWorkspace = () => {
+    if (!userEmail) {
+      setAuthRequired(true);
+      requestAnimationFrame(() =>
+        document
+          .querySelector("[data-workspace-auth]")
+          ?.scrollIntoView({ behavior: "smooth", block: "center" }),
+      );
+      return;
+    }
+    void persistWorkspace();
+  };
+
+  return (
+    <main className={styles.page} id="tier-test-page">
+      <nav className={styles.nav}>
+        <div className={styles.brand}>
+          <img
+            src="/brand/ref-pro-group-logo.png"
+            alt="Ref Pro Group — Powering Better Officiating"
+            width="78"
+            height="64"
+            style={{ width: "78px", height: "64px", objectFit: "contain" }}
+          />
+          <span />
+          <img
+            src="/brand/refassign-logo.png"
+            alt="RefAssign — Assign, Develop, Manage"
+            width="246"
+            height="65"
+            style={{ width: "auto", height: "58px", objectFit: "contain" }}
+          />
+        </div>
+        <div className={styles.navLinks}>
+          <a href="#plans">Plans</a>
+          <button onClick={openTestSignIn}>
+            {userEmail ? "My workspaces" : "Test sign in"}
+          </button>
+          <button onClick={openSetup}>Start setup</button>
+        </div>
+      </nav>
+      <header className={styles.hero}>
+        <div className={styles.heroCopy}>
+          <p className={styles.eyebrow}>Assign · Develop · Manage</p>
+          <h1>A plan that grows with your officiating program.</h1>
+          <p>
+            Manage games, assignments, officials and payments in one place.
+            Officials always create and use their accounts at no cost.
+          </p>
+          <div className={styles.heroActions}>
+            <a href="#plans">Compare plans</a>
+            <span>14-day free trial · No credit card</span>
+          </div>
+        </div>
+        <div className={styles.capacityPanel}>
+          <div className={styles.capacityTop}>
+            <div>
+              <span>Plan finder</span>
+              <h2>How many active officials?</h2>
+            </div>
+            <strong>{officials}</strong>
+          </div>
+          <input
+            aria-label="Number of active officials"
+            type="range"
+            min="10"
+            max="350"
+            step="5"
+            value={officials}
+            onChange={(e) => setOfficials(Number(e.target.value))}
+          />
+          <div className={styles.rangeLabels}>
+            <span>10</span>
+            <span>350+</span>
+          </div>
+          <div className={styles.recommendation}>
+            <span>Recommended</span>
+            <b>{PLAN_CATALOG[recommendation].name}</b>
+            <small>
+              {PLAN_CATALOG[recommendation].includedOfficials
+                ? `Includes up to ${PLAN_CATALOG[recommendation].includedOfficials} active officials`
+                : "Custom capacity and support"}
+            </small>
+          </div>
+        </div>
+      </header>
+      <section className={styles.status}>
+        <span
+          className={
+            databaseConnected ? styles.statusDot : styles.statusDotWarning
+          }
+        />
+        <b>
+          {databaseConnected
+            ? "Test environment connected"
+            : "Test connection needs attention"}
+        </b>
+        <p>
+          This preview uses separate test data and does not access Iowa Soccer.
+        </p>
+      </section>
+      {authPortal && !userEmail && (
+        <section className={saved.authWrap} id="test-auth-portal">
+          <TestAuthPanel
+            returnPath="/tier-test"
+            onAuthenticated={(email) => {
+              setUserEmail(email);
+              setAuthPortal(false);
+              scrollAfterRender("saved-workspaces");
+            }}
+          />
+        </section>
+      )}
+      {userEmail && (
+        <section className={saved.workspaces} id="saved-workspaces">
+          <div className={saved.savedHead}>
+            <div>
+              <p className={styles.eyebrow}>Signed in as {userEmail}</p>
+              <h2>Organization workspaces</h2>
+            </div>
+            <div className={saved.savedActions}>
+              <button
+                type="button"
+                className={saved.createButton}
+                onClick={openSetup}
+              >
+                + Create another organization
+              </button>
+              <button type="button" onClick={() => void switchAccount()}>
+                Sign out / switch account
+              </button>
+            </div>
+          </div>
+          {savedWorkspaces.length === 0 ? (
+            <div className={saved.empty}>
+              <b>No saved organizations yet</b>
+              <p>Create an isolated organization workspace to begin testing.</p>
+              <button type="button" onClick={openSetup}>
+                Create organization
+              </button>
+            </div>
+          ) : (
+            <div className={saved.savedGrid}>
+              {savedWorkspaces.map((workspace) => (
+                <button
+                  type="button"
+                  key={workspace.organization_id}
+                  onClick={() => openSaved(workspace)}
+                >
+                  <span>{workspace.role}</span>
+                  <h3>{workspace.name}</h3>
+                  <p>
+                    {PLAN_CATALOG[workspace.plan]?.name || workspace.plan} ·{" "}
+                    {workspace.leagues.length}{" "}
+                    {workspace.leagues.length === 1 ? "league" : "leagues"}
+                  </p>
+                  <b>Open organization setup →</b>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+      <section className={styles.plans} id="plans">
+        <div className={styles.sectionHeading}>
+          <div>
+            <p className={styles.eyebrow}>Simple annual pricing</p>
+            <h2>Choose the right level of support</h2>
+          </div>
+          <p>
+            Need more capacity? Add officials in blocks of 25 for $50 per year.
+          </p>
+        </div>
+        <div className={styles.planGrid}>
+          {orderedPlans.map((code) => {
+            const item = PLAN_CATALOG[code];
+            const popular = code === "pro";
+            const recommended = code === recommendation;
+            return (
+              <article
+                className={`${styles.card} ${popular ? styles.popular : ""} ${selected === code ? styles.selected : ""}`}
+                key={code}
+              >
+                {popular && <div className={styles.ribbon}>Most popular</div>}
+                <div className={styles.cardHead}>
+                  <div>
+                    <h3>{item.name}</h3>
+                    <p>{descriptions[code]}</p>
+                  </div>
+                  {recommended && (
+                    <span className={styles.match}>Your match</span>
+                  )}
+                </div>
+                <div className={styles.price}>
+                  {money(item.annualPriceCents)}
+                  {item.annualPriceCents !== null && <small>/ year</small>}
+                </div>
+                <p className={styles.capacity}>
+                  {item.includedOfficials === null
+                    ? "250+ officials"
+                    : "Up to " + item.includedOfficials + " officials"}
+                </p>
+                <ul>
+                  {features[code].map((feature) => (
+                    <li key={feature}>
+                      <span>✓</span>
+                      {feature}
+                    </li>
+                  ))}
+                </ul>
+                <button onClick={() => choose(code)}>
+                  {code === "enterprise"
+                    ? "Talk with our team"
+                    : "Choose " + item.name}
+                </button>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+      {setupOpen && (
+        <section className={styles.setup} id="organization-setup">
+          <div className={styles.setupIntro}>
+            <p className={styles.eyebrow}>Organization setup</p>
+            <h2>
+              {step === 5
+                ? "Your test workspace is ready."
+                : "Let’s configure your RefAssign workspace."}
+            </h2>
+            <p>
+              This creates a preview only. Nothing is billed or added to Iowa
+              Soccer.
+            </p>
+            <ol>
+              <li className={step === 1 ? styles.currentStep : ""}>
+                Organization
+              </li>
+              <li className={step === 2 ? styles.currentStep : ""}>
+                League coverage
+              </li>
+              <li className={step === 3 ? styles.currentStep : ""}>Review</li>
+              <li className={step === 4 ? styles.currentStep : ""}>Team</li>
+            </ol>
+          </div>
+          {step === 1 && (
+            <form
+              className={styles.form}
+              onSubmit={(event) => event.preventDefault()}
+            >
+              <div className={styles.formHeader}>
+                <div>
+                  <span>Selected plan</span>
+                  <h3>{plan.name}</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    document
+                      .getElementById("plans")
+                      ?.scrollIntoView({ behavior: "smooth" })
+                  }
+                >
+                  Change plan
+                </button>
+              </div>
+              <label>
+                Organization name
+                <input
+                  value={organization}
+                  onChange={(e) => setOrganization(e.target.value)}
+                  placeholder="Example: Central Iowa Officials Association"
+                />
+              </label>
+              <div className={styles.formRow}>
+                <label>
+                  Primary sport
+                  <select
+                    value={sport}
+                    onChange={(e) => setSport(e.target.value)}
+                  >
+                    <option>Soccer</option>
+                    <option>Basketball</option>
+                    <option>Baseball</option>
+                    <option>Softball</option>
+                    <option>Volleyball</option>
+                    <option>Football</option>
+                    <option>Other</option>
+                  </select>
+                </label>
+                <label>
+                  Expected active officials
+                  <input
+                    type="number"
+                    min="1"
+                    value={officials}
+                    onChange={(e) =>
+                      setOfficials(Math.max(1, Number(e.target.value)))
+                    }
+                  />
+                </label>
+              </div>
+              <label className={styles.addonOption}>
+                <input
+                  type="checkbox"
+                  checked={textingAddon || textingIncluded}
+                  disabled={textingIncluded}
+                  onChange={(e) => setTextingAddon(e.target.checked)}
+                />
+                <span>
+                  <b>Text messaging</b>
+                  <small>
+                    {textingIncluded
+                      ? "Included with Enterprise"
+                      : "Add organization texting for $15 per month"}
+                  </small>
+                </span>
+                <strong>{textingIncluded ? "Included" : "+$15/mo"}</strong>
+              </label>
+              <div className={styles.summary}>
+                <div>
+                  <span>Base plan</span>
+                  <b>{money(plan.annualPriceCents)}</b>
+                </div>
+                <div>
+                  <span>Additional official blocks</span>
+                  <b>
+                    {plan.includedOfficials === null ? "Custom" : extraBlocks}
+                  </b>
+                </div>
+                <div>
+                  <span>Text messaging</span>
+                  <b>
+                    {textingIncluded
+                      ? "Included"
+                      : textingAddon
+                        ? "$180 / year"
+                        : "Not selected"}
+                  </b>
+                </div>
+                <div className={styles.total}>
+                  <span>Estimated annual total</span>
+                  <b>{money(estimate)}</b>
+                </div>
+              </div>
+              <button
+                className={styles.continue}
+                type="button"
+                disabled={!organization.trim()}
+                onClick={() => setStep(2)}
+              >
+                Continue to league coverage <span>→</span>
+              </button>
+              <small>
+                Draft only. Billing will not begin from this preview.
+              </small>
+            </form>
+          )}
+          {step === 2 && (
+            <div className={`${styles.form} ${wizard.coverageForm}`}>
+              <div className={styles.formHeader}>
+                <div>
+                  <span>Coverage setup</span>
+                  <h3>Add the leagues you assign</h3>
+                </div>
+                <button type="button" onClick={() => setStep(1)}>
+                  Back
+                </button>
+              </div>
+              <p className={wizard.help}>
+                A league may be shared by more than one organization or
+                assignor. Add the area you are responsible for rather than
+                duplicating the league.
+              </p>
+              <div className={wizard.leagueList}>
+                {leagues.map((league, index) => (
+                  <div className={wizard.leagueRow} key={league.id}>
+                    <div className={wizard.rowTitle}>
+                      <b>League {index + 1}</b>
+                      {leagues.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeLeague(league.id)}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                    <label>
+                      League name
+                      <input
+                        value={league.name}
+                        onChange={(e) =>
+                          updateLeague(league.id, "name", e.target.value)
+                        }
+                        placeholder="Example: Midwest Regional League"
+                      />
+                    </label>
+                    <div className={styles.formRow}>
+                      <label>
+                        State or region
+                        <input
+                          value={league.region}
+                          onChange={(e) =>
+                            updateLeague(league.id, "region", e.target.value)
+                          }
+                          placeholder="Iowa — Central"
+                        />
+                      </label>
+                      <label>
+                        Assignor coverage
+                        <select
+                          value={league.coverage}
+                          onChange={(e) =>
+                            updateLeague(league.id, "coverage", e.target.value)
+                          }
+                        >
+                          <option>All locations</option>
+                          <option>Selected locations only</option>
+                          <option>Shared by region</option>
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <button
+                className={wizard.addLeague}
+                type="button"
+                onClick={addLeague}
+              >
+                + Add another league
+              </button>
+              <button
+                className={styles.continue}
+                type="button"
+                disabled={validLeagues.length === 0}
+                onClick={() => setStep(3)}
+              >
+                Review workspace <span>→</span>
+              </button>
+            </div>
+          )}
+          {step === 3 && (
+            <div className={`${styles.form} ${wizard.review}`}>
+              <div className={styles.formHeader}>
+                <div>
+                  <span>Final review</span>
+                  <h3>{organization}</h3>
+                </div>
+                <button type="button" onClick={() => setStep(2)}>
+                  Edit coverage
+                </button>
+              </div>
+              <div className={wizard.reviewGrid}>
+                <div>
+                  <span>Plan</span>
+                  <b>{plan.name}</b>
+                </div>
+                <div>
+                  <span>Primary sport</span>
+                  <b>{sport}</b>
+                </div>
+                <div>
+                  <span>Expected officials</span>
+                  <b>{officials}</b>
+                </div>
+                <div>
+                  <span>Text messaging</span>
+                  <b>
+                    {textingIncluded
+                      ? "Included"
+                      : textingAddon
+                        ? "$15 / month"
+                        : "Not selected"}
+                  </b>
+                </div>
+                <div>
+                  <span>Annual estimate</span>
+                  <b>{money(estimate)}</b>
+                </div>
+              </div>
+              <div className={wizard.reviewLeagues}>
+                <span>League coverage</span>
+                {validLeagues.map((league) => (
+                  <div key={league.id}>
+                    <b>{league.name}</b>
+                    <p>
+                      {league.region || "Region not specified"} ·{" "}
+                      {league.coverage}
+                    </p>
+                  </div>
+                ))}
+              </div>
+              <div className={wizard.notice}>
+                <b>Active-official rule</b>
+                <p>
+                  Usage includes officials who logged in and accepted or
+                  declined an assignment during the previous six months.
+                </p>
+              </div>
+              {authRequired && !userEmail && (
+                <div data-workspace-auth>
+                  <TestAuthPanel
+                    returnPath="/tier-test"
+                    onAuthenticated={(email) => {
+                      setUserEmail(email);
+                      setAuthRequired(false);
+                      void persistWorkspace();
+                    }}
+                  />
+                </div>
+              )}
+              {userEmail && (
+                <div className={wizard.notice}>
+                  <b>Signed in securely</b>
+                  <p>
+                    {userEmail} will be the owner of this test organization.
+                  </p>
+                </div>
+              )}
+              {saveMessage && (
+                <div className={wizard.notice}>
+                  <b>Unable to save</b>
+                  <p>{saveMessage}</p>
+                </div>
+              )}
+              <button
+                className={styles.continue}
+                type="button"
+                disabled={saving}
+                onClick={saveWorkspace}
+              >
+                {saving
+                  ? "Saving securely…"
+                  : userEmail
+                    ? organizationId
+                      ? "Update test workspace"
+                      : "Save test workspace"
+                    : "Continue to secure sign in"}{" "}
+                <span>→</span>
+              </button>
+              <small>
+                After sign-in, this workspace will save automatically to the
+                separate test database. No charge will be created.
+              </small>
+            </div>
+          )}
+          {step === 4 && organizationId && (
+            <OrganizationTeamSetup
+              organizationId={organizationId}
+              organization={organization}
+              onBack={() => setStep(3)}
+              onContinue={() => setStep(5)}
+            />
+          )}
+          {step === 5 && (
+            <div className={`${styles.form} ${wizard.complete}`}>
+              <div className={wizard.check}>✓</div>
+              <span>Test workspace created</span>
+              <h3>{organization}</h3>
+              <p>
+                Your organization structure is ready for testing with{" "}
+                {validLeagues.length}{" "}
+                {validLeagues.length === 1 ? "league" : "leagues"}, {officials}{" "}
+                expected officials and the {plan.name} feature set.
+              </p>
+              <div className={styles.summary}>
+                <div>
+                  <span>Subscription status</span>
+                  <b>Test draft</b>
+                </div>
+                <div>
+                  <span>Billing status</span>
+                  <b>Not activated</b>
+                </div>
+                <div>
+                  <span>Data environment</span>
+                  <b>Isolated test site</b>
+                </div>
+              </div>
+              <button
+                className={styles.continue}
+                type="button"
+                onClick={() =>
+                  window.location.assign(
+                    `/workspace?organization=${organizationId}`,
+                  )
+                }
+              >
+                Open RefAssign workspace <span>→</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setStep(1)}
+                style={{
+                  border: 0,
+                  background: "transparent",
+                  color: "#176fa8",
+                  fontWeight: 900,
+                  cursor: "pointer",
+                }}
+              >
+                Edit organization
+              </button>
+            </div>
+          )}
+        </section>
+      )}
+      <section className={styles.how} id="how-it-works">
+        <div>
+          <span>1</span>
+          <h3>Set up your organization</h3>
+          <p>Add the organization, sport and expected official count.</p>
+        </div>
+        <div>
+          <span>2</span>
+          <h3>Connect league coverage</h3>
+          <p>Assign leagues, locations and assignor responsibility.</p>
+        </div>
+        <div>
+          <span>3</span>
+          <h3>Invite your team</h3>
+          <p>Officials join free and your plan tracks active usage.</p>
+        </div>
+      </section>
+      <footer>
+        <div>
+          <img
+            src="/brand/ref-pro-group-logo.png"
+            alt="Ref Pro Group, LLC"
+            width="63"
+            height="52"
+            style={{ width: "63px", height: "52px", objectFit: "contain" }}
+          />
+          <span
+            aria-hidden="true"
+            style={{
+              height: "30px",
+              width: "1px",
+              background: "#71859b",
+              margin: "0 12px",
+            }}
+          />
+          <img
+            src="/brand/refassign-logo.png"
+            alt="RefAssign"
+            width="189"
+            height="50"
+            style={{ width: "auto", height: "42px", objectFit: "contain" }}
+          />
+        </div>
+        <p>RefAssign is a Ref Pro Group, LLC platform.</p>
+        <span>© 2026 Ref Pro Group, LLC</span>
+      </footer>
+    </main>
+  );
+}

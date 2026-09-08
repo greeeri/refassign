@@ -1,12 +1,12 @@
 "use client";
-// Manager reporting production retry.
 import { useEffect, useMemo, useState } from "react";
-import { createClient } from "../../lib/supabase/client";
+import { createClient, isTierTestRuntime } from "../../lib/supabase/client";
 import { RefAssignMark } from "../../components/BrandMarks";
 import GamesManager from "../../components/SortableGamesManager";
 import GameSetup from "../../components/GameSetup";
 import AssignmentsManager from "../../components/AssignmentsManagerV2";
 import OfficialsDirectory from "../../components/OfficialsDirectory";
+import OrganizationTeamManager from "../../components/OrganizationTeamManager";
 import AvailabilityCalendar from "../../components/AvailabilityCalendar";
 import BlockRemovalRequests from "../../components/BlockRemovalRequests";
 import DashboardGames from "../../components/DashboardGames";
@@ -39,6 +39,16 @@ type Role =
   | "official"
   | "mentor"
   | "contact";
+type TestWorkspace = {
+  organization_id: string;
+  name: string;
+  role: "owner" | "admin" | "assignor" | "billing" | "viewer" | "official";
+  roles?: Array<
+    "owner" | "admin" | "assignor" | "billing" | "viewer" | "official"
+  >;
+  viewer_permissions: string[];
+  leagues?: Array<{ league_id: string; name: string }>;
+};
 const labels: Record<Role, string> = {
   admin: "Admin",
   assignor: "Assignor",
@@ -64,7 +74,12 @@ export default function Workspace() {
     [iowaMentorAccess, setIowaMentorAccess] = useState(false),
     [mobileNavOpen, setMobileNavOpen] = useState(false),
     [ready, setReady] = useState(false),
-    [openNav, setOpenNav] = useState<string | null>(null);
+    [openNav, setOpenNav] = useState<string | null>(null),
+    [testMode, setTestMode] = useState(false),
+    [testOfficialAccount, setTestOfficialAccount] = useState(false),
+    [testWorkspaces, setTestWorkspaces] = useState<TestWorkspace[]>([]),
+    [testWorkspace, setTestWorkspace] = useState<TestWorkspace | null>(null),
+    [invitationClaimError, setInvitationClaimError] = useState("");
   useEffect(() => {
     async function load() {
       const {
@@ -72,6 +87,97 @@ export default function Workspace() {
       } = await supabase.auth.getUser();
       if (!user) {
         window.location.replace("/login");
+        return;
+      }
+      if (isTierTestRuntime()) {
+        setTestMode(true);
+        setTestOfficialAccount(
+          Boolean(
+            user.user_metadata?.account_type === "official" ||
+            user.user_metadata?.first_name,
+          ),
+        );
+        const hashInvitation = new URLSearchParams(
+          window.location.hash.slice(1),
+        ).get("official_invite");
+        const queryInvitation = new URLSearchParams(window.location.search).get(
+          "official_invite",
+        );
+        const invitationId =
+          queryInvitation ||
+          hashInvitation ||
+          localStorage.getItem("refassign-official-invitation") ||
+          (typeof user.user_metadata?.official_invitation_id === "string"
+            ? user.user_metadata.official_invitation_id
+            : "");
+        if (invitationId) {
+          const { error: claimError } = await supabase.rpc(
+            "claim_official_invitation",
+            { p_invitation_id: invitationId },
+          );
+          if (claimError) setInvitationClaimError(claimError.message);
+          else {
+            localStorage.removeItem("refassign-official-invitation");
+            if (hashInvitation || queryInvitation)
+              window.history.replaceState(null, "", window.location.pathname);
+          }
+        }
+        await Promise.all([
+          supabase.rpc("accept_my_organization_invitations"),
+          supabase.rpc("accept_my_official_invitations"),
+        ]);
+        const { data, error } = await supabase.rpc("get_my_test_workspaces");
+        if (error) {
+          console.error(error);
+          setReady(true);
+          return;
+        }
+        const available = (data || []) as TestWorkspace[];
+        const requested = new URLSearchParams(window.location.search).get(
+          "organization",
+        );
+        const stored = localStorage.getItem("refassign-last-test-workspace");
+        const selected =
+          available.find(
+            (item) => item.organization_id === (requested || stored),
+          ) ||
+          available[0] ||
+          null;
+        setTestWorkspaces(available);
+        setTestWorkspace(selected);
+        if (selected)
+          localStorage.setItem(
+            "refassign-last-test-workspace",
+            selected.organization_id,
+          );
+        const mapWorkspaceRole = (role: TestWorkspace["role"]): Role =>
+          role === "official"
+            ? "official"
+            : role === "assignor"
+              ? "assignor"
+              : role === "viewer" || role === "billing"
+                ? "contact"
+                : "admin";
+        const availableRoles = Array.from(
+          new Set(
+            (selected?.roles || (selected ? [selected.role] : [])).map(
+              mapWorkspaceRole,
+            ),
+          ),
+        );
+        const savedRole = localStorage.getItem(
+          "refassign-view-role",
+        ) as Role | null;
+        const mapped =
+          (savedRole && availableRoles.includes(savedRole)
+            ? savedRole
+            : null) ||
+          availableRoles[0] ||
+          "official";
+        setRoles(availableRoles);
+        setViewRole(mapped);
+        setSection(mapped === "official" ? "Official Dashboard" : "Dashboard");
+        setReady(true);
         return;
       }
       const [
@@ -145,6 +251,14 @@ export default function Workspace() {
   async function signOut() {
     await supabase.auth.signOut();
     location.href = "/login";
+  }
+  function switchTestWorkspace(organizationId: string) {
+    const next = testWorkspaces.find(
+      (item) => item.organization_id === organizationId,
+    );
+    if (!next) return;
+    localStorage.setItem("refassign-last-test-workspace", next.organization_id);
+    window.location.assign(`/workspace?organization=${next.organization_id}`);
   }
   if (!ready)
     return (
@@ -236,6 +350,35 @@ export default function Workspace() {
       </div>
     );
   };
+  if (testMode && !testWorkspace)
+    return (
+      <div className="shell refAssignBranded">
+        <main>
+          <section className="card">
+            <h1>
+              {testOfficialAccount
+                ? "No officiating organizations connected"
+                : "No organization workspace"}
+            </h1>
+            <p>
+              {testOfficialAccount
+                ? invitationClaimError ||
+                  "This account is valid, but it has not claimed an organization invitation yet. Ask the organization to resend the invitation, then open the new email link while signed in."
+                : "Create an organization or accept an invitation before entering RefAssign."}
+            </p>
+            {testOfficialAccount ? (
+              <button className="primary" onClick={signOut}>
+                Sign out and use invitation
+              </button>
+            ) : (
+              <a className="primary" href="/tier-test">
+                Open organization setup
+              </a>
+            )}
+          </section>
+        </main>
+      </div>
+    );
   return (
     <div className="shell refAssignBranded">
       {mobileNavOpen && (
@@ -288,6 +431,15 @@ export default function Workspace() {
                   label: "Block Removal Requests",
                 },
               ])}
+              {testMode && testWorkspace && (
+                <button
+                  className={`topNavButton ${section === "Team & Roles" ? "active" : ""}`}
+                  onClick={() => nav("Team & Roles")}
+                >
+                  <Icon>♙</Icon>
+                  <span>Team &amp; Roles</span>
+                </button>
+              )}
               {iowaGroup()}
               <button
                 className={`topNavButton ${section === "Reports" ? "active" : ""}`}
@@ -446,6 +598,30 @@ export default function Workspace() {
             </p>
           </div>
           <div className="headerActions">
+            {testMode && (
+              <button className="secondary" onClick={signOut}>
+                Sign out / switch account
+              </button>
+            )}
+            {testMode && testWorkspace && (
+              <label style={{ fontSize: 12, fontWeight: 800 }}>
+                Organization
+                <select
+                  value={testWorkspace.organization_id}
+                  onChange={(event) => switchTestWorkspace(event.target.value)}
+                  style={{ marginLeft: 8, width: "auto", minWidth: 150 }}
+                >
+                  {testWorkspaces.map((item) => (
+                    <option
+                      key={item.organization_id}
+                      value={item.organization_id}
+                    >
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <label style={{ fontSize: 12, fontWeight: 800 }}>
               Viewing as
               <select
@@ -463,12 +639,31 @@ export default function Workspace() {
           </div>
         </header>
         {manager && section === "Dashboard" && (
-          <DashboardGames onNavigate={setSection} />
+          <DashboardGames organizationId={testWorkspace?.organization_id} onNavigate={setSection} />
         )}{" "}
-        {manager && section === "Games" && <GamesManager />}
-        {manager && isSetup && <GameSetup view={section as SetupView} />}{" "}
-        {manager && section === "Officials" && <OfficialsDirectory />}
-        {manager && section === "Assignments" && <AssignmentsManager />}
+        {manager && section === "Games" && (
+          <GamesManager organizationId={testWorkspace?.organization_id} />
+        )}
+        {manager && isSetup && (
+          <GameSetup
+            view={section as SetupView}
+            organizationId={testWorkspace?.organization_id}
+          />
+        )}{" "}
+        {manager && section === "Officials" && (
+          <OfficialsDirectory organizationId={testWorkspace?.organization_id} />
+        )}
+        {manager && testWorkspace && section === "Team & Roles" && (
+          <OrganizationTeamManager
+            organizationId={testWorkspace.organization_id}
+            organization={testWorkspace.name}
+            leagues={(testWorkspace.leagues || []).map(league => ({ id: league.league_id, name: league.name }))}
+            canManage={
+              testWorkspace.role === "owner" || testWorkspace.role === "admin"
+            }
+          />
+        )}
+        {manager && section === "Assignments" && <AssignmentsManager organizationId={testWorkspace?.organization_id} />}
         {manager && section === "Reports" && <ManagerReports />}
         {manager && section === "Audit History" && <AuditHistoryManager />}
         {manager && section === "Auto Assign" && <AutoAssignManager />}
@@ -487,7 +682,49 @@ export default function Workspace() {
         {manager && section === "Contacts" && <ContactsManager />}
         {manager && section === "Sports & Rules" && <SportsRulesManager />}
         {viewRole === "official" && section === "Official Dashboard" && (
-          <OfficialDashboard onNavigate={setSection} />
+          <>
+            {testMode && testWorkspace && (
+              <section className="card officialOrganizationsCard">
+                <div>
+                  <p className="eyebrow">My organizations</p>
+                  <h2>Officiating organizations</h2>
+                  <p>
+                    Select an organization to view its games, assignments,
+                    availability, and schedule.
+                  </p>
+                </div>
+                <div className="officialOrganizationChoices">
+                  {testWorkspaces.map((item) => (
+                    <button
+                      type="button"
+                      key={item.organization_id}
+                      className={
+                        item.organization_id === testWorkspace.organization_id
+                          ? "officialOrganizationChoice active"
+                          : "officialOrganizationChoice"
+                      }
+                      onClick={() => switchTestWorkspace(item.organization_id)}
+                    >
+                      <span>{item.name}</span>
+                      <small>
+                        {item.organization_id === testWorkspace.organization_id
+                          ? "Currently viewing"
+                          : "Open organization"}
+                      </small>
+                    </button>
+                  ))}
+                </div>
+                {testWorkspaces.length === 1 && (
+                  <p className="officialOrganizationHint">
+                    One organization is currently connected. Additional
+                    organizations will appear here after you accept their
+                    invitations.
+                  </p>
+                )}
+              </section>
+            )}
+            <OfficialDashboard onNavigate={setSection} />
+          </>
         )}{" "}
         {viewRole === "official" && section === "My Schedule" && (
           <OfficialSchedule />

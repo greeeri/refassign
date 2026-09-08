@@ -253,7 +253,11 @@ function inRange(g: Game, r: Range, customDate = "") {
   if (r === "thisWeek") return t >= week && t < next;
   return t >= next && t < afterNext;
 }
-export default function AssignmentsManagerV2() {
+export default function AssignmentsManagerV2({
+  organizationId,
+}: {
+  organizationId?: string;
+}) {
   const supabase = useMemo(() => createClient(), []);
   const [games, setGames] = useState<Game[]>([]),
     [officials, setOfficials] = useState<Official[]>([]),
@@ -377,13 +381,14 @@ export default function AssignmentsManagerV2() {
         ),
       );
     } else setCanManage(false);
-    const [g, o, p, a, r, pr, pw, le, ve, bl, lg, lm, sas, ah, at] = await Promise.all([
-      supabase
+    const gamesQuery = supabase
         .from("games")
         .select(
           "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,city,state,latitude,longitude)",
         )
-        .order("starts_at"),
+        .order("starts_at");
+    const [g, o, p, a, r, pr, pw, le, ve, bl, lg, lm, sas, ah, at] = await Promise.all([
+      organizationId ? gamesQuery.eq("organization_id", organizationId) : gamesQuery,
       supabase
         .from("officials")
         .select(
@@ -485,22 +490,32 @@ export default function AssignmentsManagerV2() {
     setPowers(pm);
     setOfficials((o.data || []) as Official[]);
     setPositions((p.data || []) as Position[]);
-    setAssignments((a.data || []) as Assignment[]);
+    const scopedGames = (g.data || []) as unknown as Game[];
+    const scopedGameIds = new Set(scopedGames.map(game => game.id));
+    setAssignments(((a.data || []) as Assignment[]).filter(assignment => scopedGameIds.has(assignment.game_id)));
     setLeagueElig((le.data || []) as EligL[]);
     setLevelElig((ve.data || []) as EligV[]);
     setBlocks((bl.data || []) as Block[]);
     setLinkGroups((lg.data || []) as LinkGroup[]);
-    setLinkMembers((lm.data || []) as LinkMember[]);
-    setSelfAssignSlots((sas.data || []) as SelfAssignSlot[]);
+    setLinkMembers(
+      ((lm.data || []) as LinkMember[]).filter((member) =>
+        scopedGameIds.has(member.game_id),
+      ),
+    );
+    setSelfAssignSlots(
+      ((sas.data || []) as SelfAssignSlot[]).filter((slot) =>
+        scopedGameIds.has(slot.game_id),
+      ),
+    );
     setAssignmentTemplates((at.data || []) as AssignmentTemplate[]);
     setUnassignedSlotKeys(
       [...new Set(((ah.data || []) as UnassignmentAudit[]).flatMap((row) =>
-        row.game_id && row.old_data?.position_id
+        row.game_id && scopedGameIds.has(row.game_id) && row.old_data?.position_id
           ? [`${row.game_id}:${row.old_data.position_id}`]
           : [],
       ))],
     );
-    const sorted = ((g.data || []) as unknown as Game[]).sort(
+    const sorted = scopedGames.sort(
       (x, y) =>
         gamePower(y, pm) - gamePower(x, pm) ||
         new Date(x.starts_at).getTime() - new Date(y.starts_at).getTime(),
@@ -510,7 +525,7 @@ export default function AssignmentsManagerV2() {
   }
   useEffect(() => {
     void load();
-  }, []);
+  }, [organizationId]);
   useEffect(() => { void loadSavedViews(); }, []);
   async function refreshAssignmentState() {
     const [assignmentResult, selfAssignResult, unassignmentResult] = await Promise.all([
@@ -533,17 +548,31 @@ export default function AssignmentsManagerV2() {
       setError(refreshError.message);
       return false;
     }
-    setAssignments((assignmentResult.data || []) as Assignment[]);
-    setSelfAssignSlots((selfAssignResult.data || []) as SelfAssignSlot[]);
+    const visibleGameIds = new Set(games.map((game) => game.id));
+    setAssignments(
+      ((assignmentResult.data || []) as Assignment[]).filter((assignment) =>
+        visibleGameIds.has(assignment.game_id),
+      ),
+    );
+    setSelfAssignSlots(
+      ((selfAssignResult.data || []) as SelfAssignSlot[]).filter((slot) =>
+        visibleGameIds.has(slot.game_id),
+      ),
+    );
     setUnassignedSlotKeys(
       [...new Set(((unassignmentResult.data || []) as UnassignmentAudit[]).flatMap((row) =>
-        row.game_id && row.old_data?.position_id
+        row.game_id && visibleGameIds.has(row.game_id) && row.old_data?.position_id
           ? [`${row.game_id}:${row.old_data.position_id}`]
           : [],
       ))],
     );
     return true;
   }
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(""), 5000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
   function gamePower(g: Game, map = powers) {
     return (
       ((g.home ? (map[g.home.id] ?? 1) : 1) +
