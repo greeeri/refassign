@@ -1,5 +1,10 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  gameAcceptsAssignments,
+  inactiveGameStatusLabel,
+  normalizeGameStatus,
+} from "../lib/game-status";
 import { createClient } from "../lib/supabase/client";
 import { announceUndoAvailable } from "./UndoCenter";
 type Team = { id: string; name: string };
@@ -193,17 +198,8 @@ const gameStatusOptions = [
   ["canceled", "Cancelled"],
   ["rained_out", "Rain Out"],
 ] as const;
-function gameAcceptsAssignments(game: Pick<Game, "status">) {
-  return game.status === "active" || game.status === "open";
-}
 function assignmentOccupiesPosition(status: string) {
   return !["declined", "cancelled", "canceled"].includes(status);
-}
-function inactiveGameStatusLabel(status: string) {
-  if (status === "suspended") return "On Hold";
-  if (status === "rained_out") return "Rain Out";
-  if (status === "canceled" || status === "cancelled") return "Cancelled";
-  return "Inactive";
 }
 function miles(
   a: number | null,
@@ -596,9 +592,20 @@ export default function AssignmentsManagerV2({
         new Date(x.starts_at).getTime() - new Date(y.starts_at).getTime(),
     );
     setGames(sorted);
-    if (!selected && sorted[0]) setSelected(sorted[0].id);
+    setLinkSelected((current) =>
+      current.filter((gameId) => scopedGameIds.has(gameId)),
+    );
+    setSelfAssignSelected((current) =>
+      current.filter((slotKey) => scopedGameIds.has(slotKey.split(":")[0])),
+    );
+    setSelected((current) =>
+      scopedGameIds.has(current) ? current : sorted[0]?.id || "",
+    );
   }
   useEffect(() => {
+    setLinkSelected([]);
+    setSelfAssignSelected([]);
+    setSelected("");
     void load();
   }, [organizationId]);
   useEffect(() => {
@@ -2157,7 +2164,9 @@ export default function AssignmentsManagerV2({
       linkSelected.includes(item.id),
     );
     const assignableGames = selectedGames.filter(gameAcceptsAssignments);
-    const excludedCount = selectedGames.length - assignableGames.length;
+    const excludedGames = selectedGames.filter(
+      (item) => !gameAcceptsAssignments(item),
+    );
     setBulkAssignOfficial("");
     setBulkAssignPositions(
       Object.fromEntries(
@@ -2169,8 +2178,8 @@ export default function AssignmentsManagerV2({
     );
     setBulkOverrideConfirmed(false);
     setBulkAssignMessage(
-      excludedCount
-        ? `${excludedCount} inactive game${excludedCount === 1 ? " was" : "s were"} excluded from bulk assignment.`
+      excludedGames.length
+        ? `${excludedGames.length} inactive game${excludedGames.length === 1 ? " was" : "s were"} excluded from bulk assignment: ${excludedGames.map((item) => `Game #${item.game_number} (${inactiveGameStatusLabel(item.status)})`).join(", ")}.`
         : "",
     );
     setBulkOfficialSearch("");
@@ -2517,13 +2526,13 @@ export default function AssignmentsManagerV2({
       );
   }
   function prepareBulkCrew() {
-    const excludedCount = games.filter(
+    const excludedGames = games.filter(
       (item) => linkSelected.includes(item.id) && !gameAcceptsAssignments(item),
-    ).length;
+    );
     setBulkCrewSelections({});
     setBulkCrewMessage(
-      excludedCount
-        ? `${excludedCount} inactive game${excludedCount === 1 ? " was" : "s were"} excluded from crew assignment.`
+      excludedGames.length
+        ? `${excludedGames.length} inactive game${excludedGames.length === 1 ? " was" : "s were"} excluded from crew assignment: ${excludedGames.map((item) => `Game #${item.game_number} (${inactiveGameStatusLabel(item.status)})`).join(", ")}.`
         : "",
     );
     setBulkCrewOverrideConfirmed(false);
@@ -3850,7 +3859,7 @@ export default function AssignmentsManagerV2({
     const d = new Date(g.starts_at);
     const completeness = assignmentCompleteness(g);
     const staffing = staffingCounts(g);
-    const normalizedStatus = g.status === "open" ? "active" : g.status;
+    const normalizedStatus = normalizeGameStatus(g.status);
     const isRainOut = normalizedStatus === "rained_out";
     const statusBackground =
       normalizedStatus === "canceled"
@@ -3996,7 +4005,7 @@ export default function AssignmentsManagerV2({
           className="assignmentGameStatusSelect"
           aria-label={`Status for game ${g.game_number}`}
           disabled={!canManage || gameStatusSaving === g.id}
-          value={g.status === "open" ? "active" : g.status}
+          value={normalizeGameStatus(g.status)}
           onChange={(event) =>
             requestGameStatusChange(g.id, event.target.value)
           }
@@ -4921,7 +4930,7 @@ export default function AssignmentsManagerV2({
                     );
                   })}
                 </div>
-                {!slots.length && (
+                {!slots.length && !bulkCrewMessage && (
                   <div className="tapAssignAlert clear">
                     <b>No open positions</b>
                     <span>Every selected game is already fully assigned.</span>

@@ -444,7 +444,7 @@ export default function GamesManagerV3({
       };
       const q = editing
         ? sb.from("games").update(payload).eq("id", editing)
-        : sb.from("games").insert({ ...payload, status: "open" });
+        : sb.from("games").insert({ ...payload, status: "active" });
       const { error: e2 } = await q;
       if (e2) {
         const databaseMessage = [e2.message, e2.details, e2.hint]
