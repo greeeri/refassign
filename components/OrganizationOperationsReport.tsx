@@ -1,6 +1,9 @@
 "use client";
 
+import { addReportCopyright } from "../lib/pdfCopyright";
+
 import { useEffect, useMemo, useState } from "react";
+import ReportSavedViews from "./ReportSavedViews";
 
 type Named = { name: string } | null;
 type Team = { id: string; name: string } | null;
@@ -442,7 +445,7 @@ export default function OrganizationOperationsReport({ organizationId }: { organ
       styles: { fontSize: 7 },
       headStyles: { fillColor: [12, 30, 55] },
     });
-    document.save("refassign-organization-operations.pdf");
+    addReportCopyright(document); document.save("refassign-organization-operations.pdf");
   };
 
   if (loading)
@@ -535,6 +538,7 @@ export default function OrganizationOperationsReport({ organizationId }: { organ
               </select>
             </label>
           </div>
+          <ReportSavedViews organizationId={organizationId} reportKey="operations" filters={{ period, organization, team, level, location, status, dimension, startDate, endDate }} onApply={(saved) => { if (saved.period) setPeriod(saved.period as Period); if (saved.organization) setOrganization(saved.organization); if (saved.team) setTeam(saved.team); if (saved.level) setLevel(saved.level); if (saved.location) setLocation(saved.location); if (saved.status) setStatus(saved.status); if (saved.dimension) setDimension(saved.dimension as Dimension); setStartDate(saved.startDate || ""); setEndDate(saved.endDate || ""); }} />
 
           <div className="reportMetrics operationsMetrics">
             <div><span>Games</span><b>{visible.length}</b></div>

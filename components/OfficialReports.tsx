@@ -1,5 +1,7 @@
 "use client";
 
+import { addReportCopyright } from "../lib/pdfCopyright";
+
 import { useEffect, useMemo, useState } from "react";
 
 type MileagePlan = "one_way" | "round_trip" | "actual" | "none";
@@ -737,7 +739,7 @@ export default function OfficialReports({
       },
     });
     footer();
-    document.save(
+    addReportCopyright(document); document.save(
       `refassign-${nameOf(selectedOfficial)
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")}-report.pdf`,

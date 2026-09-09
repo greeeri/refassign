@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import ReportSavedViews from "./ReportSavedViews";
 
 type Named = { name: string } | null;
 type Game = {
@@ -261,6 +262,7 @@ export default function AssignmentCoverageReport({ organizationId }: { organizat
           </select>
         </label>
       </div>
+      <ReportSavedViews organizationId={organizationId} reportKey="coverage" filters={{ period, league, coverage }} onApply={(saved) => { if (saved.period) setPeriod(saved.period as Period); if (saved.league) setLeague(saved.league); if (saved.coverage) setCoverage(saved.coverage as Coverage); }} />
       <div className="reportMetrics">
         <div>
           <span>Games</span>

@@ -1,5 +1,7 @@
 "use client";
 
+import { addReportCopyright } from "../lib/pdfCopyright";
+
 import { useEffect, useMemo, useState } from "react";
 
 type Named = { id?: string; name: string } | null;
@@ -230,7 +232,7 @@ export default function StaffingForecastReport({ organizationId }: { organizatio
     document.setFontSize(9); document.setTextColor(100, 116, 139); document.text(`${horizon === "all" ? "All upcoming games" : `Next ${horizon} days`} • ${organization === "all" ? "All organizations" : organization}`, 14, 23);
     document.setTextColor(15, 23, 42); document.text(`Games: ${totals.games}    Coverage: ${totals.positions ? pct(totals.filled / totals.positions) : "—"}    Open positions: ${totals.open}    High-risk games: ${totals.highRisk}    Expected shortage: ${totals.expected}`, 14, 31);
     autoTable(document, { startY: 38, head: [["Date", "Game", "Organization / Level", "Coverage", "Available", "Deadline", "Risk", "Expected", "Suggested officials"]], body: forecast.map((row) => [new Date(row.game.starts_at).toLocaleDateString(), row.game.game_number || "—", `${row.game.leagues?.name || "—"} / ${row.game.levels?.name || "—"}`, `${row.filled}/${row.slots.length}`, row.available, row.deadlinePassed ? "Passed" : "On track", `${row.risk} ${row.riskLabel}`, row.expectedShortage, row.candidates.slice(0, 3).map((item) => `${item.official.first_name} ${item.official.last_name}`).join(", ") || "None"]), styles: { fontSize: 8 }, headStyles: { fillColor: [37, 99, 235] } });
-    document.save("refassign-staffing-forecast.pdf");
+    addReportCopyright(document); document.save("refassign-staffing-forecast.pdf");
   };
 
   if (loading) return <section className="card"><p>Loading staffing forecast…</p></section>;

@@ -1,5 +1,7 @@
 "use client";
 
+import { addReportCopyright } from "../lib/pdfCopyright";
+
 import { useEffect, useMemo, useState } from "react";
 
 type Named = { name: string } | null;
@@ -153,7 +155,7 @@ export default function FinancialForecastReport({ organizationId }: { organizati
     const [{ jsPDF }, { default: autoTable }] = await Promise.all([import("jspdf"), import("jspdf-autotable")]), document = new jsPDF({ orientation: "landscape" });
     document.setTextColor(12, 30, 55); document.setFontSize(18); document.text("RefAssign Financial & Budget Forecast", 14, 16); document.setFontSize(9); document.setTextColor(100, 116, 139); document.text(`${organization === "all" ? "All paying organizations" : organizations.find(([id]) => id === organization)?.[1] || "Organization"} • ${horizon === "all" ? "All upcoming games" : `${horizon === "season" ? "Current season" : `Next ${horizon} days`}`}`, 14, 23); document.setTextColor(15, 23, 42); document.text(`Recorded: ${money(actualTotals.total)}    Paid: ${money(actualTotals.paid)}    Outstanding: ${money(actualTotals.outstanding)}    Projected: ${money(projectedTotal)}`, 14, 31);
     autoTable(document, { startY: 38, head: [["Paying organization", "Actual", "Paid", "Outstanding", "Future games", "Projected", "Budget", "Budget used"]], body: summaries.map((row) => [row.name, money(row.actual), money(row.paid), money(row.outstanding), row.games, money(row.projected), row.budget ? money(row.budget) : "Not set", row.budget ? `${Math.round(row.used * 100)}%` : "—"]), styles: { fontSize: 8 }, headStyles: { fillColor: [37, 99, 235] } });
-    autoTable(document, { head: [["Date", "Game", "Organization / Level", "Coverage", "Committed", "Open estimate", "Forecast", "Exception"]], body: projections.map((row) => [new Date(row.game.starts_at).toLocaleDateString(), row.game.game_number || "—", `${row.game.leagues?.name || "—"} / ${row.game.levels?.name || "—"}`, `${row.assigned}/${row.game.officials_needed}`, money(row.committed), money(row.estimated), money(row.total), row.exception || "—"]), styles: { fontSize: 7 }, headStyles: { fillColor: [12, 30, 55] } }); document.save("refassign-financial-forecast.pdf");
+    autoTable(document, { head: [["Date", "Game", "Organization / Level", "Coverage", "Committed", "Open estimate", "Forecast", "Exception"]], body: projections.map((row) => [new Date(row.game.starts_at).toLocaleDateString(), row.game.game_number || "—", `${row.game.leagues?.name || "—"} / ${row.game.levels?.name || "—"}`, `${row.assigned}/${row.game.officials_needed}`, money(row.committed), money(row.estimated), money(row.total), row.exception || "—"]), styles: { fontSize: 7 }, headStyles: { fillColor: [12, 30, 55] } }); addReportCopyright(document); document.save("refassign-financial-forecast.pdf");
   };
 
   if (loading) return <section className="card"><p>Loading financial forecast…</p></section>;

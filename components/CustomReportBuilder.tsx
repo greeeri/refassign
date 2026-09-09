@@ -1,5 +1,7 @@
 "use client";
 
+import { addReportCopyright } from "../lib/pdfCopyright";
+
 import { useEffect, useMemo, useState } from "react";
 import {
   buildCustomReport,
@@ -269,7 +271,7 @@ export default function CustomReportBuilder({
       styles: { fontSize: 7 },
       headStyles: { fillColor: [37, 99, 235] },
     });
-    document.save(
+    addReportCopyright(document); document.save(
       `${definition.title.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "custom-report"}.pdf`,
     );
   };

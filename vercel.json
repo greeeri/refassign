@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/custom-reports",
       "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/cron/saved-report-views",
+      "schedule": "0 13 * * *"
     }
   ],
   "redirects": [

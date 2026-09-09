@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import ReportSavedViews from "./ReportSavedViews";
 
 type Named = { name: string } | null;
 type PaymentStatus = "unpaid" | "approved" | "paid" | "void";
@@ -353,6 +354,7 @@ export default function PayrollPaymentReport({ organizationId }: { organizationI
               </select>
             </label>
           </div>
+          <ReportSavedViews organizationId={organizationId} reportKey="payroll" filters={{ period, league, official, status, startDate, endDate }} onApply={(saved) => { if (saved.period) setPeriod(saved.period as Period); if (saved.league) setLeague(saved.league); if (saved.official) setOfficial(saved.official); if (saved.status) setStatus(saved.status); setStartDate(saved.startDate || ""); setEndDate(saved.endDate || ""); }} />
           <div className="reportMetrics">
             <div>
               <span>Assignments</span>

@@ -78,6 +78,12 @@ export default function ManagerReports({ organizationId }: { organizationId?: st
   }, []);
 
   useEffect(() => {
+    const requestedReport = new URLSearchParams(window.location.search).get("report") as ReportKey | null;
+    if (requestedReport && [...standardReports, ...premiumReports].some((item) => item.key === requestedReport)) {
+      setReport(requestedReport);
+      setGroup(premiumKeys.has(requestedReport) ? "premium" : "standard");
+      return;
+    }
     const stored = window.localStorage.getItem(storageKey);
     if (stored && [...standardReports, ...premiumReports].some((item) => item.key === stored)) {
       setReport(stored as ReportKey);

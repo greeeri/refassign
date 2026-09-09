@@ -1,5 +1,7 @@
 "use client";
 
+import { addReportCopyright } from "../lib/pdfCopyright";
+
 import { useEffect, useMemo, useState } from "react";
 
 type Named = { name: string } | null;
@@ -298,7 +300,7 @@ export default function OfficialUtilizationReport({ organizationId }: { organiza
       styles: { fontSize: 8 },
       headStyles: { fillColor: [37, 99, 235] },
     });
-    document.save("refassign-official-utilization.pdf");
+    addReportCopyright(document); document.save("refassign-official-utilization.pdf");
   };
 
   if (loading) return <section className="card"><p>Loading official utilization…</p></section>;

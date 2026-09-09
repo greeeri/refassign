@@ -1,5 +1,7 @@
 "use client";
 
+import { addReportCopyright } from "../lib/pdfCopyright";
+
 import { useEffect, useMemo, useState } from "react";
 
 type Named = { name: string } | null;
@@ -496,7 +498,7 @@ export default function ExecutiveReportingDashboard({
       ]),
       headStyles: { fillColor: [12, 30, 55] },
     });
-    document.save("refassign-executive-summary.pdf");
+    addReportCopyright(document); document.save("refassign-executive-summary.pdf");
   };
 
   if (loading)
