@@ -346,6 +346,11 @@ export default function Workspace() {
       { view: "Program Referees", label: "Program Referees" },
       { view: "Development Mentors", label: "🧠 Mentors" },
     );
+  if (viewRole === "official" && iowaDevelopmentAccess)
+    iowaViews.push(
+      { view: "Official Registration", label: "Registration" },
+      { view: "Iowa Soccer Development", label: "Development" },
+    );
   const iowaGroup = () => {
     if (!iowaViews.length) return null;
     const active = iowaViews.some((x) => x.view === section),
@@ -509,22 +514,7 @@ export default function Workspace() {
                   {n}
                 </button>
               ))}
-              {iowaDevelopmentAccess && (
-                <>
-                  <button
-                    className={`topNavButton ${section === "Official Registration" ? "active" : ""}`}
-                    onClick={() => nav("Official Registration")}
-                  >
-                    <span>Iowa Soccer Registration</span>
-                  </button>
-                  <button
-                    className={`topNavButton ${section === "Iowa Soccer Development" ? "active" : ""}`}
-                    onClick={() => nav("Iowa Soccer Development")}
-                  >
-                    <span>Iowa Soccer Development</span>
-                  </button>
-                </>
-              )}
+              {iowaGroup()}
             </>
           )}
           {viewRole === "contact" &&
