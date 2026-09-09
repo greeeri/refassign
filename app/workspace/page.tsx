@@ -245,9 +245,6 @@ export default function Workspace() {
     isOfficials = ["Officials", "Blocks", "Block Removal Requests"].includes(
       section,
     ),
-    officialIowaSections = ["Registrar", "Iowa Soccer Development"],
-    officialIowaMode =
-      viewRole === "official" && officialIowaSections.includes(section),
     iowaAdminView = viewRole === "admin";
   function nav(view: string) {
     setReportAction(null);
@@ -495,48 +492,29 @@ export default function Workspace() {
           )}
           {viewRole === "official" && (
             <>
-              {officialIowaMode ? (
-                <>
-                  <button
-                    className={`topNavButton ${section === "Registrar" ? "active" : ""}`}
-                    onClick={() => nav("Registrar")}
-                  >
-                    Registration
-                  </button>
-                  <button
-                    className={`topNavButton ${section === "Iowa Soccer Development" ? "active" : ""}`}
-                    onClick={() => nav("Iowa Soccer Development")}
-                  >
-                    Training
-                  </button>
-                </>
-              ) : (
-                <>
-                  {[
-                    "Official Dashboard",
-                    "Self Assign",
-                    "My Schedule",
-                    "My Reports",
-                    "My Availability",
-                    "My Profile",
-                  ].map((n) => (
-                    <button
-                      key={n}
-                      className={`topNavButton ${section === n ? "active" : ""}`}
-                      onClick={() => nav(n)}
-                    >
-                      {n}
-                    </button>
-                  ))}
-                  {iowaDevelopmentAccess && (
-                    <button
-                      className={`topNavButton ${section === "Iowa Soccer Development" ? "active" : ""}`}
-                      onClick={() => nav("Iowa Soccer Development")}
-                    >
-                      <span>Iowa Soccer Development</span>
-                    </button>
-                  )}
-                </>
+              {[
+                "Official Dashboard",
+                "Self Assign",
+                "My Schedule",
+                "My Reports",
+                "My Availability",
+                "My Profile",
+              ].map((n) => (
+                <button
+                  key={n}
+                  className={`topNavButton ${section === n ? "active" : ""}`}
+                  onClick={() => nav(n)}
+                >
+                  {n}
+                </button>
+              ))}
+              {iowaDevelopmentAccess && (
+                <button
+                  className={`topNavButton ${section === "Iowa Soccer Development" ? "active" : ""}`}
+                  onClick={() => nav("Iowa Soccer Development")}
+                >
+                  <span>Iowa Soccer Development</span>
+                </button>
               )}
             </>
           )}
@@ -554,7 +532,7 @@ export default function Workspace() {
             viewRole !== "official" &&
             viewRole !== "contact" &&
             iowaGroup()}
-          {isSuperAdmin && !officialIowaMode && (
+          {isSuperAdmin && (
             <button
               className={`topNavButton ${section === "Super Admin" ? "active" : ""}`}
               onClick={() => nav("Super Admin")}
@@ -773,7 +751,7 @@ export default function Workspace() {
           <OfficialProfile />
         )}
         {viewRole === "official" && section === "Iowa Soccer Development" && (
-          <IowaSoccerDevelopment />
+          <IowaSoccerDevelopment onBack={() => nav("Official Dashboard")} />
         )}
         {viewRole === "contact" && section === "Dashboard" && (
           <section className="card">

@@ -65,7 +65,11 @@ const categoryIcon = (c: string) =>
               : c.includes("Fitness")
                 ? "✚"
                 : "★";
-export default function IowaSoccerDevelopment() {
+export default function IowaSoccerDevelopment({
+  onBack,
+}: {
+  onBack: () => void;
+}) {
   const supabase = useMemo(() => createClient(), []),
     [officialId, setOfficialId] = useState(""),
     [modules, setModules] = useState<Module[]>([]),
@@ -382,6 +386,14 @@ export default function IowaSoccerDevelopment() {
     <div className="iowaTrainingPage">
       <section className="iowaTrainingTitle">
         <div>
+          <button
+            type="button"
+            className="trainingAction secondary"
+            style={{ marginBottom: 12 }}
+            onClick={onBack}
+          >
+            ← Back to Official Dashboard
+          </button>
           <h2>Training</h2>
           <p>
             <b style={{ color: "#0878f9" }}>
