@@ -56,8 +56,10 @@ export default function SelfAssignBoard({
       }),
     );
     const failed = results.find((result) => result.error);
-    if (failed?.error) setError(failed.error.message);
-    else
+    if (failed?.error) {
+      setSlots([]);
+      setError(failed.error.message);
+    } else
       setSlots(
         results
           .flatMap((result) =>
@@ -124,8 +126,31 @@ export default function SelfAssignBoard({
       {notice && <div className="loginMessage">{notice}</div>}
       {loading ? (
         <p>Loading open positions…</p>
-      ) : slots.length ? (
-        <div className="tableWrap">
+      ) : (
+        <>
+          <div className="selfAssignOrganizationSummary">
+            {organizationIds.map((organizationId) => {
+              const available = slots.filter(
+                (slot) => slot.organization_id === organizationId,
+              ).length;
+              return (
+                <div className="selfAssignOrganizationStatus" key={organizationId}>
+                  <b>{organizationNames[organizationId] || "Organization"}</b>
+                  <span className={available ? "badge green" : "badge gray"}>
+                    {available} available to you
+                  </span>
+                  {!available && (
+                    <small>
+                      No qualified, conflict-free Self Assign positions are
+                      currently available for your account.
+                    </small>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {slots.length ? (
+            <div className="tableWrap">
           <table>
             <thead>
               <tr>
@@ -192,12 +217,18 @@ export default function SelfAssignBoard({
               })}
             </tbody>
           </table>
-        </div>
-      ) : (
-        <div className="emptyState">
-          <h3>No Self Assign positions are open</h3>
-          <p>New qualified positions will appear here when an assignor opens them.</p>
-        </div>
+            </div>
+          ) : (
+            <div className="emptyState">
+              <h3>No Self Assign positions are available to you</h3>
+              <p>
+                A position can be open to other officials but hidden from your
+                account when you do not match its qualifications or already
+                have an overlapping game.
+              </p>
+            </div>
+          )}
+        </>
       )}
     </section>
   );
