@@ -334,10 +334,15 @@ export default function Workspace() {
   if (
     viewRole === "registrar" ||
     viewRole === "league_admin" ||
-    iowaDevelopmentStaff
+    (viewRole === "admin" && iowaDevelopmentStaff)
   )
     iowaViews.push({ view: "Registrar", label: "Registrar Management" });
-  if (iowaDevelopmentStaff)
+  if (
+    iowaDevelopmentStaff &&
+    (viewRole === "admin" ||
+      viewRole === "registrar" ||
+      viewRole === "league_admin")
+  )
     iowaViews.push({ view: "Development Admin", label: "Training" });
   if (iowaAdminView)
     iowaViews.push({ view: "Program Referees", label: "Program Referees" });
@@ -766,11 +771,13 @@ export default function Workspace() {
         {viewRole === "contact" && section === "Games" && <DashboardGames />}
         {(viewRole === "registrar" ||
           viewRole === "league_admin" ||
-          iowaDevelopmentStaff) &&
+          (viewRole === "admin" && iowaDevelopmentStaff)) &&
           section === "Registrar" && <RegistrarManager />}
-        {iowaDevelopmentStaff && section === "Development Admin" && (
-          <IowaSoccerDevelopmentAdmin />
-        )}
+        {iowaDevelopmentStaff &&
+          (viewRole === "admin" ||
+            viewRole === "registrar" ||
+            viewRole === "league_admin") &&
+          section === "Development Admin" && <IowaSoccerDevelopmentAdmin />}
         {iowaAdminView && section === "Program Referees" && (
           <IowaProgramReferees canManage />
         )}
