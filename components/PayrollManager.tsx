@@ -38,7 +38,7 @@ type PayrollRow = {
   games: {
     game_number: string;
     starts_at: string;
-    leagues: { mileage_plan: MileagePlan } | null;
+    leagues: { name: string; mileage_plan: MileagePlan } | null;
     home: { name: string } | null;
     away: { name: string } | null;
     location: {
@@ -408,6 +408,7 @@ export default function PayrollManager({ organizationId, focusAssignmentId }: { 
         ? new Date(row.games.starts_at).toLocaleDateString("en-US")
         : "",
       "Game Number": row.games?.game_number || "",
+      League: row.games?.leagues?.name || "",
       Game: gameName(row),
       Location: row.games?.location?.name || "",
       Official: officialName(row),
@@ -428,6 +429,7 @@ export default function PayrollManager({ organizationId, focusAssignmentId }: { 
       { wch: 38 },
       { wch: 12 },
       { wch: 16 },
+      { wch: 20 },
       { wch: 32 },
       { wch: 24 },
       { wch: 24 },

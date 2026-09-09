@@ -8,7 +8,7 @@ export async function GET(request: NextRequest) {
   const assignmentResult = await service
     .from("assignments")
     .select(
-      "id,status,game_fee,mileage_miles,mileage_rate,payment_status,paid_at,payroll_notes,officials(id,first_name,last_name,home_latitude,home_longitude),sport_positions(name),games!inner(game_number,starts_at,organization_id,leagues(mileage_plan),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name,latitude,longitude))",
+      "id,status,game_fee,mileage_miles,mileage_rate,payment_status,paid_at,payroll_notes,officials(id,first_name,last_name,home_latitude,home_longitude),sport_positions(name),games!inner(game_number,starts_at,organization_id,leagues(name,mileage_plan),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name,latitude,longitude))",
     )
     .eq("games.organization_id", organizationId)
     .not("official_id", "is", null)

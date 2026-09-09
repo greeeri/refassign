@@ -205,7 +205,7 @@ export default function PayrollPaymentReport({ organizationId, onOpenAction }: {
     const blob = new Blob(
         [
           [
-            "Date,Game,Organization,Official,Position,Game Fee,Miles,Rate,Mileage Pay,Total,Payment Status,Paid Date",
+            "Date,Game,League,Official,Position,Game Fee,Miles,Rate,Mileage Pay,Total,Payment Status,Paid Date",
             ...detail,
           ].join("\n"),
         ],
