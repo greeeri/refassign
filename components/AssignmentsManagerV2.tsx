@@ -194,7 +194,7 @@ const gameStatusOptions = [
   ["rained_out", "Rain Out"],
 ] as const;
 function gameAcceptsAssignments(game: Pick<Game, "status">) {
-  return game.status === "active";
+  return game.status === "active" || game.status === "open";
 }
 function assignmentOccupiesPosition(status: string) {
   return !["declined", "cancelled", "canceled"].includes(status);
