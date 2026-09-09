@@ -196,6 +196,9 @@ const gameStatusOptions = [
 function gameAcceptsAssignments(game: Pick<Game, "status">) {
   return game.status === "active";
 }
+function assignmentOccupiesPosition(status: string) {
+  return !["declined", "cancelled", "canceled"].includes(status);
+}
 function inactiveGameStatusLabel(status: string) {
   if (status === "suspended") return "On Hold";
   if (status === "rained_out") return "Rain Out";
@@ -1972,7 +1975,7 @@ export default function AssignmentsManagerV2({
             (assignment) =>
               assignment.game_id === targetGame.id &&
               assignment.position_id === position.id &&
-              assignment.status !== "declined",
+              assignmentOccupiesPosition(assignment.status),
           ),
       );
   }
@@ -2100,7 +2103,7 @@ export default function AssignmentsManagerV2({
           (assignment) =>
             assignment.game_id === game.id &&
             assignment.position_id === position.id &&
-            assignment.status !== "declined",
+            assignmentOccupiesPosition(assignment.status),
         ),
     );
   }
