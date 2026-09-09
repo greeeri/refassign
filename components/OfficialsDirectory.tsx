@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { createClient } from "../lib/supabase/client";
 import OfficialsRosterManager from "./OfficialsRosterManager";
@@ -103,10 +103,13 @@ type LinkOfficialResult = {
 
 export default function OfficialsDirectory({
   organizationId,
+  focusOfficialId,
 }: {
   organizationId?: string;
+  focusOfficialId?: string;
 }) {
   const supabase = useMemo(() => createClient(), []);
+  const handledReportFocus = useRef("");
   const [officials, setOfficials] = useState<Official[]>([]);
   const [positionRanks, setPositionRanks] = useState<
     Record<string, PositionRank>
@@ -483,6 +486,21 @@ export default function OfficialsDirectory({
   useEffect(() => {
     void load();
   }, [organizationId]);
+  useEffect(() => {
+    if (!focusOfficialId || handledReportFocus.current === focusOfficialId) return;
+    const official = officials.find((item) => item.id === focusOfficialId);
+    if (!official) return;
+    handledReportFocus.current = focusOfficialId;
+    setShowRoster(false);
+    setShowCommunications(false);
+    setQuery(`${official.first_name} ${official.last_name}`);
+    void startEdit(official).then(() => {
+      window.setTimeout(
+        () => document.getElementById("focused-official-form")?.scrollIntoView({ behavior: "smooth", block: "start" }),
+        0,
+      );
+    });
+  }, [focusOfficialId, officials]);
 
   function toggleSport(sport: string) {
     setForm((current) => ({
@@ -1057,7 +1075,7 @@ export default function OfficialsDirectory({
             </select>
           </div>
           {showForm && (
-            <form className="officialForm" onSubmit={saveOfficial}>
+            <form id="focused-official-form" className={focusOfficialId === editingId ? "officialForm reportActionFocus" : "officialForm"} onSubmit={saveOfficial}>
               <label>
                 First name
                 <input

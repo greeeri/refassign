@@ -28,6 +28,7 @@ import IowaProgramReferees from "../../components/IowaProgramReferees";
 import IowaDevelopmentMentors from "../../components/IowaDevelopmentMentors";
 import OfficialReports from "../../components/OfficialReports";
 import ManagerReports from "../../components/ManagerReports";
+import type { ReportActionTarget } from "../../lib/reportActions";
 const setupNav = ["Leagues", "Levels", "Teams", "Locations"] as const;
 type SetupView = (typeof setupNav)[number];
 type Role =
@@ -78,6 +79,7 @@ export default function Workspace() {
     [testOfficialAccount, setTestOfficialAccount] = useState(false),
     [testWorkspaces, setTestWorkspaces] = useState<TestWorkspace[]>([]),
     [testWorkspace, setTestWorkspace] = useState<TestWorkspace | null>(null),
+    [reportAction, setReportAction] = useState<ReportActionTarget | null>(null),
     [invitationClaimError, setInvitationClaimError] = useState("");
   useEffect(() => {
     async function load() {
@@ -240,7 +242,13 @@ export default function Workspace() {
       viewRole === "official" && officialIowaSections.includes(section),
     iowaAdminView = viewRole === "admin";
   function nav(view: string) {
+    setReportAction(null);
     setSection(view);
+    setMobileNavOpen(false);
+  }
+  function openReportAction(target: ReportActionTarget) {
+    setReportAction(target);
+    setSection(target.section);
     setMobileNavOpen(false);
   }
   function switchRole(role: Role) {
@@ -652,7 +660,10 @@ export default function Workspace() {
           />
         )}{" "}
         {manager && section === "Officials" && (
-          <OfficialsDirectory organizationId={testWorkspace?.organization_id} />
+          <OfficialsDirectory
+            organizationId={testWorkspace?.organization_id}
+            focusOfficialId={reportAction?.section === "Officials" ? reportAction.officialId : undefined}
+          />
         )}
         {manager && testWorkspace && section === "Team & Roles" && (
           <OrganizationTeamManager
@@ -664,12 +675,12 @@ export default function Workspace() {
             }
           />
         )}
-        {manager && section === "Assignments" && <AssignmentsManager organizationId={testWorkspace?.organization_id} />}
-        {manager && section === "Reports" && <ManagerReports organizationId={testWorkspace?.organization_id} />}
+        {manager && section === "Assignments" && <AssignmentsManager organizationId={testWorkspace?.organization_id} focusGameId={reportAction?.section === "Assignments" ? reportAction.gameId : undefined} />}
+        {manager && section === "Reports" && <ManagerReports organizationId={testWorkspace?.organization_id} onOpenAction={openReportAction} />}
         {manager && section === "Auto Assign" && <AutoAssignManager organizationId={testWorkspace?.organization_id} />}
         {manager && section === "Payroll" && (
           <>
-            <PayrollManager organizationId={testWorkspace?.organization_id} />
+            <PayrollManager organizationId={testWorkspace?.organization_id} focusAssignmentId={reportAction?.section === "Payroll" ? reportAction.assignmentId : undefined} />
             <MileageCoordinatesManager organizationId={testWorkspace?.organization_id} />
           </>
         )}

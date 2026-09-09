@@ -16,6 +16,7 @@ import OfficialUtilizationReport from "./OfficialUtilizationReport";
 import PayrollPaymentReport from "./PayrollPaymentReport";
 import StaffingForecastReport from "./StaffingForecastReport";
 import TrainingDevelopmentReport from "./TrainingDevelopmentReport";
+import type { ReportActionTarget } from "../lib/reportActions";
 
 type ReportKey =
   | "executive"
@@ -58,7 +59,13 @@ const premiumReports: Array<{ key: ReportKey; label: string }> = [
 
 const premiumKeys = new Set<ReportKey>(premiumReports.map((item) => item.key));
 
-export default function ManagerReports({ organizationId }: { organizationId?: string }) {
+export default function ManagerReports({
+  organizationId,
+  onOpenAction,
+}: {
+  organizationId?: string;
+  onOpenAction?: (target: ReportActionTarget) => void;
+}) {
   const [group, setGroup] = useState<ReportGroup>("standard");
   const [report, setReport] = useState<ReportKey>("operations");
   const visibleReports = group === "standard" ? standardReports : premiumReports;
@@ -111,13 +118,13 @@ export default function ManagerReports({ organizationId }: { organizationId?: st
       {report === "executive" ? (
         <ExecutiveReportingDashboard key={organizationId} onOpenReport={openReport} organizationId={organizationId} />
       ) : report === "operations" ? (
-        <OrganizationOperationsReport key={organizationId} organizationId={organizationId} />
+        <OrganizationOperationsReport key={organizationId} organizationId={organizationId} onOpenAction={onOpenAction} />
       ) : report === "benchmarks" ? (
         <OrganizationBenchmarkDashboard key={organizationId} organizationId={organizationId} />
       ) : report === "coverage" ? (
-        <AssignmentCoverageReport key={organizationId} organizationId={organizationId} />
+        <AssignmentCoverageReport key={organizationId} organizationId={organizationId} onOpenAction={onOpenAction} />
       ) : report === "audit" ? (
-        <AuditHistoryManager key={organizationId} organizationId={organizationId} />
+        <AuditHistoryManager key={organizationId} organizationId={organizationId} onOpenAction={onOpenAction} />
       ) : report === "declines" ? (
         <DeclineReplacementReport key={organizationId} organizationId={organizationId} />
       ) : report === "compliance" ? (
@@ -133,7 +140,7 @@ export default function ManagerReports({ organizationId }: { organizationId?: st
       ) : report === "utilization" ? (
         <OfficialUtilizationReport key={organizationId} organizationId={organizationId} />
       ) : report === "payroll" ? (
-        <PayrollPaymentReport key={organizationId} organizationId={organizationId} />
+        <PayrollPaymentReport key={organizationId} organizationId={organizationId} onOpenAction={onOpenAction} />
       ) : report === "custom" ? (
         <CustomReportBuilder key={organizationId} organizationId={organizationId} />
       ) : (

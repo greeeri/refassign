@@ -152,10 +152,11 @@ function normalizedRecord(record: Record<string, unknown>) {
   );
 }
 
-export default function PayrollManager({ organizationId }: { organizationId?: string }) {
+export default function PayrollManager({ organizationId, focusAssignmentId }: { organizationId?: string; focusAssignmentId?: string }) {
   const supabase = useMemo(() => createClient(), []);
   const fileInput = useRef<HTMLInputElement>(null);
   const geocodeBackfillOrganization = useRef("");
+  const handledReportFocus = useRef("");
   const [rows, setRows] = useState<PayrollRow[]>([]);
   const [weekdayOrigins, setWeekdayOrigins] = useState<WeekdayOrigin[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
@@ -238,6 +239,17 @@ export default function PayrollManager({ organizationId }: { organizationId?: st
       }
     })();
   }, [organizationId]);
+  useEffect(() => {
+    if (!focusAssignmentId || handledReportFocus.current === focusAssignmentId || !rows.some((row) => row.id === focusAssignmentId)) return;
+    handledReportFocus.current = focusAssignmentId;
+    setPeriod("all");
+    setStatusFilter("all");
+    setSelected([focusAssignmentId]);
+    window.setTimeout(
+      () => document.getElementById(`payroll-row-${focusAssignmentId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }),
+      0,
+    );
+  }, [focusAssignmentId, rows]);
 
   const mileagePlan = mileagePlanFor;
   const originFor = (row: PayrollRow) => {
@@ -813,7 +825,7 @@ export default function PayrollManager({ organizationId }: { organizationId?: st
                 visible.map((row) => {
                   const suggestedMiles = defaultMileage(row);
                   return (
-                    <tr key={row.id}>
+                    <tr id={`payroll-row-${row.id}`} className={focusAssignmentId === row.id ? "reportActionFocus" : undefined} key={row.id}>
                       <td>
                         <input
                           type="checkbox"

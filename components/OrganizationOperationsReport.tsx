@@ -4,6 +4,7 @@ import { addReportCopyright } from "../lib/pdfCopyright";
 
 import { useEffect, useMemo, useState } from "react";
 import ReportSavedViews from "./ReportSavedViews";
+import type { ReportActionTarget } from "../lib/reportActions";
 
 type Named = { name: string } | null;
 type Team = { id: string; name: string } | null;
@@ -70,7 +71,7 @@ const titleCase = (value: string) =>
 const pct = (filled: number, slots: number) =>
   slots ? `${Math.round((filled / slots) * 100)}%` : "—";
 
-export default function OrganizationOperationsReport({ organizationId }: { organizationId?: string }) {
+export default function OrganizationOperationsReport({ organizationId, onOpenAction }: { organizationId?: string; onOpenAction?: (target: ReportActionTarget) => void }) {
   const [games, setGames] = useState<Game[]>([]),
     [assignments, setAssignments] = useState<Assignment[]>([]),
     [audit, setAudit] = useState<Audit[]>([]),
@@ -663,7 +664,7 @@ export default function OrganizationOperationsReport({ organizationId }: { organ
             <table className="officialReportTable operationsDetailTable">
               <thead><tr>
                 <th>Date</th><th>Game</th><th>Organization / Level</th><th>Location</th><th>Status</th>
-                <th>Coverage</th><th>Confirmed</th><th>Declines</th><th>Changes</th>{premium && <th>Cost</th>}
+                <th>Coverage</th><th>Confirmed</th><th>Declines</th><th>Changes</th>{premium && <th>Cost</th>}<th>Action</th>
               </tr></thead>
               <tbody>
                 {detailGames.length ? detailGames.map((game) => {
@@ -677,9 +678,10 @@ export default function OrganizationOperationsReport({ organizationId }: { organ
                       <td>{state.active.length}/{game.officials_needed}<small>{state.open ? `${state.open} open` : "Fully staffed"}</small></td>
                       <td>{state.confirmed.length}</td><td>{state.declined.length}</td><td>{state.changes}</td>
                       {premium && <td><b>{money(state.total)}</b><small>{money(state.fees)} fees + {money(state.mileage)} mileage</small></td>}
+                      <td><button type="button" className="tableButton reportActionButton" onClick={() => onOpenAction?.({ section: "Assignments", gameId: game.id })}>Manage assignments</button></td>
                     </tr>
                   );
-                }) : <tr><td colSpan={premium ? 10 : 9}>No games match these filters.</td></tr>}
+                }) : <tr><td colSpan={premium ? 11 : 10}>No games match these filters.</td></tr>}
               </tbody>
             </table>
           </div>

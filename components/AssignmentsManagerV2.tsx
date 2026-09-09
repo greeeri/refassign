@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../lib/supabase/client";
 import { announceUndoAvailable } from "./UndoCenter";
 type Team = { id: string; name: string };
@@ -273,10 +273,13 @@ function inRange(g: Game, r: Range, customDate = "") {
 }
 export default function AssignmentsManagerV2({
   organizationId,
+  focusGameId,
 }: {
   organizationId?: string;
+  focusGameId?: string;
 }) {
   const supabase = useMemo(() => createClient(), []);
+  const handledReportFocus = useRef("");
   const [games, setGames] = useState<Game[]>([]),
     [officials, setOfficials] = useState<Official[]>([]),
     [positions, setPositions] = useState<Position[]>([]),
@@ -595,6 +598,24 @@ export default function AssignmentsManagerV2({
   useEffect(() => {
     void load();
   }, [organizationId]);
+  useEffect(() => {
+    if (!focusGameId || handledReportFocus.current === focusGameId || !games.some((item) => item.id === focusGameId)) return;
+    handledReportFocus.current = focusGameId;
+    setRange("all");
+    setCustomDate("");
+    setUnpublishedOnly(false);
+    setSelfAssignOnly(false);
+    setCompletenessFilter("all");
+    setOfficialFilter("");
+    setLocationFilter("");
+    setLeagueFilter("");
+    setLevelFilter("");
+    setSelected(focusGameId);
+    window.setTimeout(
+      () => document.getElementById("selected-game-assignment")?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      0,
+    );
+  }, [focusGameId, games]);
   useEffect(() => {
     void loadSavedViews();
   }, []);
@@ -7855,7 +7876,7 @@ export default function AssignmentsManagerV2({
           </label>
         </section>
         {game && filteredGames.some((g) => g.id === game.id) && (
-          <div className="assignmentLayout selectedGameDetailStandalone">
+          <div className={`assignmentLayout selectedGameDetailStandalone${focusGameId === game.id ? " reportActionFocus" : ""}`}>
             <section
               id="selected-game-assignment"
               className="card assignmentMain"

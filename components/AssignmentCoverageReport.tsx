@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import ReportSavedViews from "./ReportSavedViews";
+import type { ReportActionTarget } from "../lib/reportActions";
 
 type Named = { name: string } | null;
 type Game = {
@@ -43,7 +44,7 @@ const assignmentName = (item: Assignment) =>
   `${item.officials?.first_name || ""} ${item.officials?.last_name || ""}`.trim() ||
   "Open";
 
-export default function AssignmentCoverageReport({ organizationId }: { organizationId?: string }) {
+export default function AssignmentCoverageReport({ organizationId, onOpenAction }: { organizationId?: string; onOpenAction?: (target: ReportActionTarget) => void }) {
   const [games, setGames] = useState<Game[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [period, setPeriod] = useState<Period>("90");
@@ -353,6 +354,7 @@ export default function AssignmentCoverageReport({ organizationId }: { organizat
               <th>Coverage</th>
               <th>Confirmed</th>
               <th>Attention</th>
+              <th>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -409,12 +411,13 @@ export default function AssignmentCoverageReport({ organizationId }: { organizat
                               ? "Open positions"
                               : "Ready"}
                     </td>
+                    <td><button type="button" className="tableButton reportActionButton" onClick={() => onOpenAction?.({ section: "Assignments", gameId: game.id })}>Manage assignments</button></td>
                   </tr>
                 );
               })
             ) : (
               <tr>
-                <td colSpan={7}>No games match these filters.</td>
+                <td colSpan={8}>No games match these filters.</td>
               </tr>
             )}
           </tbody>
