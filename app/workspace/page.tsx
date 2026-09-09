@@ -21,6 +21,7 @@ import PayrollManager from "../../components/PayrollManager";
 import MileageCoordinatesManager from "../../components/MileageCoordinatesManager";
 import SportsRulesManager from "../../components/SportsRulesManager";
 import RegistrarManager from "../../components/RegistrarManager";
+import ParentalConsentDocuments from "../../components/ParentalConsentDocuments";
 import OfficialRegistration from "../../components/OfficialRegistration";
 import SuperAdminManager from "../../components/SuperAdminManager";
 import IowaSoccerDevelopment from "../../components/IowaSoccerDevelopment";
@@ -775,7 +776,7 @@ export default function Workspace() {
         {(viewRole === "registrar" ||
           viewRole === "league_admin" ||
           (viewRole === "admin" && iowaDevelopmentStaff)) &&
-          section === "Registrar" && <RegistrarManager />}
+          section === "Registrar" && <><RegistrarManager /><ParentalConsentDocuments /></>}
         {iowaDevelopmentStaff &&
           (viewRole === "admin" ||
             viewRole === "registrar" ||
