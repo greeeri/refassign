@@ -1001,9 +1001,9 @@ export default function OfficialsDirectory({
           )}
         </section>
       )}
-      {showRoster && <OfficialsRosterManager />}
+      {showRoster && <OfficialsRosterManager organizationId={organizationId} />}
       {showCommunications ? (
-        <CommunicationCenter />
+        <CommunicationCenter organizationId={organizationId} />
       ) : (
         <section className="card">
           <div className="cardHead">
