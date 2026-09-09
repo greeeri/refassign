@@ -6031,9 +6031,8 @@ export default function AssignmentsManagerV2({
                                   ? "Override"
                                   : "Assign"}
                             </button>
-                            {replacementNeeded &&
-                              !current &&
-                              candidate.conflictingGames.length === 0 && (
+                            {candidate.conflictingGames.length === 0 &&
+                              current?.official_id !== candidate.id && (
                                 <button
                                   type="button"
                                   className="success"
