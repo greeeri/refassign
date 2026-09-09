@@ -339,7 +339,6 @@ export default function AssignmentsManagerV2({
     [bulkAssignPositions, setBulkAssignPositions] = useState<
       Record<string, string>
     >({}),
-    [bulkOverrideConfirmed, setBulkOverrideConfirmed] = useState(false),
     [bulkAssignMessage, setBulkAssignMessage] = useState(""),
     [bulkOfficialSearch, setBulkOfficialSearch] = useState(""),
     [bulkOfficialStatus, setBulkOfficialStatus] = useState<
@@ -2193,7 +2192,6 @@ export default function AssignmentsManagerV2({
         ]),
       ),
     );
-    setBulkOverrideConfirmed(false);
     setBulkAssignMessage(
       excludedGames.length
         ? `${excludedGames.length} inactive game${excludedGames.length === 1 ? " was" : "s were"} excluded from bulk assignment: ${excludedGames.map((item) => `Game #${item.game_number} (${inactiveGameStatusLabel(item.status)})`).join(", ")}.`
@@ -2292,12 +2290,6 @@ export default function AssignmentsManagerV2({
     if (review.blocking.length) {
       setBulkAssignMessage(
         "This official cannot be assigned until the conflicts shown below are resolved.",
-      );
-      return;
-    }
-    if (review.warnings.length && !bulkOverrideConfirmed) {
-      setBulkAssignMessage(
-        "Confirm the eligibility override before assigning these games.",
       );
       return;
     }
@@ -4534,7 +4526,6 @@ export default function AssignmentsManagerV2({
                               disabled={bulkWorking}
                               onChange={() => {
                                 setBulkAssignOfficial(item.id);
-                                setBulkOverrideConfirmed(false);
                                 setBulkAssignMessage("");
                               }}
                             />
@@ -4663,24 +4654,6 @@ export default function AssignmentsManagerV2({
                     </span>
                   </div>
                 )}
-                {!review.blocking.length && warnings.length > 0 && (
-                  <label className="bulkOverrideCheck">
-                    <input
-                      type="checkbox"
-                      checked={bulkOverrideConfirmed}
-                      onChange={(event) =>
-                        setBulkOverrideConfirmed(event.target.checked)
-                      }
-                    />
-                    <span>
-                      <b>Confirm eligibility overrides</b>
-                      <small>
-                        {warnings.length} warning
-                        {warnings.length === 1 ? "" : "s"} will be overridden.
-                      </small>
-                    </span>
-                  </label>
-                )}
                 {official && !review.blocking.length && !warnings.length && (
                   <div className="tapAssignAlert clear">
                     <b>Ready to assign</b>
@@ -4709,13 +4682,15 @@ export default function AssignmentsManagerV2({
                   </button>
                   <button
                     type="button"
-                    className="primary"
+                    className={warnings.length ? "danger" : "primary"}
                     disabled={bulkWorking}
                     onClick={() => void confirmBulkAssignment()}
                   >
                     {bulkWorking
                       ? "Assigning…"
-                      : `Assign to ${review.targets.length} Game${review.targets.length === 1 ? "" : "s"}`}
+                      : warnings.length
+                        ? `Override & Assign to ${review.targets.length} Game${review.targets.length === 1 ? "" : "s"}`
+                        : `Assign to ${review.targets.length} Game${review.targets.length === 1 ? "" : "s"}`}
                   </button>
                 </footer>
               </section>
