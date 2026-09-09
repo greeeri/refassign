@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../lib/supabase/client";
 
 type Slot = {
+  organization_id: string;
+  organization_name: string;
   slot_id: string;
   game_id: string;
   game_number: string;
@@ -21,7 +23,15 @@ type Slot = {
   location_state: string | null;
 };
 
-export default function SelfAssignBoard({ organizationId }: { organizationId?: string }) {
+type Props = {
+  organizationIds: string[];
+  organizationNames: Record<string, string>;
+};
+
+export default function SelfAssignBoard({
+  organizationIds,
+  organizationNames,
+}: Props) {
   const supabase = useMemo(() => createClient(), []);
   const [slots, setSlots] = useState<Slot[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,23 +42,45 @@ export default function SelfAssignBoard({ organizationId }: { organizationId?: s
   async function load() {
     setLoading(true);
     setError("");
-    if (!organizationId) {
+    if (!organizationIds.length) {
       setSlots([]);
       setLoading(false);
       return;
     }
-    const { data, error: loadError } = await supabase.rpc(
-      "list_my_self_assign_positions",
-      { p_organization_id: organizationId },
+    const results = await Promise.all(
+      organizationIds.map(async (organizationId) => {
+        const result = await supabase.rpc("list_my_self_assign_positions", {
+          p_organization_id: organizationId,
+        });
+        return { organizationId, ...result };
+      }),
     );
-    if (loadError) setError(loadError.message);
-    else setSlots((data || []) as Slot[]);
+    const failed = results.find((result) => result.error);
+    if (failed?.error) setError(failed.error.message);
+    else
+      setSlots(
+        results
+          .flatMap((result) =>
+            ((result.data || []) as Omit<Slot, "organization_id" | "organization_name">[]).map(
+              (slot) => ({
+                ...slot,
+                organization_id: result.organizationId,
+                organization_name:
+                  organizationNames[result.organizationId] || "Organization",
+              }),
+            ),
+          )
+          .sort(
+            (a, b) =>
+              new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime(),
+          ),
+      );
     setLoading(false);
   }
 
   useEffect(() => {
     void load();
-  }, [organizationId, supabase]);
+  }, [organizationIds, organizationNames, supabase]);
 
   async function claim(slot: Slot) {
     if (
@@ -62,7 +94,10 @@ export default function SelfAssignBoard({ organizationId }: { organizationId?: s
     setNotice("");
     const { error: claimError } = await supabase.rpc(
       "claim_self_assign_position",
-      { p_slot_id: slot.slot_id, p_organization_id: organizationId },
+      {
+        p_slot_id: slot.slot_id,
+        p_organization_id: slot.organization_id,
+      },
     );
     if (claimError) setError(claimError.message);
     else setNotice("The game has been added to My Schedule as an accepted assignment.");
@@ -96,6 +131,7 @@ export default function SelfAssignBoard({ organizationId }: { organizationId?: s
               <tr>
                 <th>Date &amp; Time</th>
                 <th>Game</th>
+                {organizationIds.length > 1 && <th>Organization</th>}
                 <th>League / Level</th>
                 <th>Location</th>
                 <th>Position</th>
@@ -122,6 +158,9 @@ export default function SelfAssignBoard({ organizationId }: { organizationId?: s
                       </b>
                       <small>{slot.game_number}</small>
                     </td>
+                    {organizationIds.length > 1 && (
+                      <td>{slot.organization_name}</td>
+                    )}
                     <td>
                       {slot.league_name || "Any league"}
                       <small>{slot.level_name || "Any level"}</small>
