@@ -297,6 +297,7 @@ export default function AssignmentsManagerV2({
     [showCalendar, setShowCalendar] = useState(false),
     [unpublishedOnly, setUnpublishedOnly] = useState(false),
     [selfAssignOnly, setSelfAssignOnly] = useState(false),
+    [replacementOnly, setReplacementOnly] = useState(false),
     [completenessFilter, setCompletenessFilter] = useState<Completeness>("all"),
     [officialFilter, setOfficialFilter] = useState(""),
     [locationFilter, setLocationFilter] = useState(""),
@@ -606,6 +607,7 @@ export default function AssignmentsManagerV2({
     setLinkSelected([]);
     setSelfAssignSelected([]);
     setSelected("");
+    setReplacementOnly(false);
     void load();
   }, [organizationId]);
   useEffect(() => {
@@ -843,23 +845,34 @@ export default function AssignmentsManagerV2({
       .filter((slot) => slot.status === "open")
       .map((slot) => slot.game_id),
   ).size;
+  function gameNeedsReplacement(listedGame: Game) {
+    return positions
+      .filter((position) => position.sport_id === listedGame.sport_id)
+      .slice(0, listedGame.officials_needed)
+      .some((position) =>
+        isReplacementNeeded(listedGame.id, position.id),
+      );
+  }
   const hasDirectGameFilter = Boolean(
     locationFilter || officialFilter || leagueFilter || levelFilter,
   );
   const rangeGames = games.filter((g) => inRange(g, range, customDate));
   const baseFilteredGames = games.filter((g) => {
     const matchesSelfAssign = !selfAssignOnly || selfAssignOpenCount(g.id) > 0;
+    const matchesReplacement = !replacementOnly || gameNeedsReplacement(g);
     if (hasDirectGameFilter)
       return (
         matchesLocationFilter(g) &&
         matchesOfficialFilter(g) &&
         matchesLeagueFilter(g) &&
         matchesLevelFilter(g) &&
-        matchesSelfAssign
+        matchesSelfAssign &&
+        matchesReplacement
       );
     return (
       inRange(g, range, customDate) &&
       matchesSelfAssign &&
+      matchesReplacement &&
       (!unpublishedOnly || isUnpublishedGame(g)) &&
       (completenessFilter === "all" ||
         assignmentCompleteness(g).key === completenessFilter)
@@ -1442,12 +1455,14 @@ export default function AssignmentsManagerV2({
   function toggleUnpublished() {
     const next = !unpublishedOnly;
     setUnpublishedOnly(next);
+    setReplacementOnly(false);
     setOverrideOfficial("");
     setSelected("");
     setLinkSelected([]);
   }
   function chooseCompleteness(value: Completeness) {
     setCompletenessFilter(value);
+    setReplacementOnly(false);
     setOverrideOfficial("");
     setSelected("");
     setLinkSelected([]);
@@ -1458,6 +1473,7 @@ export default function AssignmentsManagerV2({
     setShowCalendar(false);
     setUnpublishedOnly(false);
     setSelfAssignOnly(false);
+    setReplacementOnly(false);
     setCompletenessFilter("all");
     setOfficialFilter("");
     setLocationFilter("");
@@ -1519,6 +1535,7 @@ export default function AssignmentsManagerV2({
     setLeagueFilter(view.leagueFilter || "");
     setLevelFilter(view.levelFilter || "");
     setCompletenessFilter(view.completenessFilter);
+    setReplacementOnly(false);
     setUnpublishedOnly(view.unpublishedOnly);
     setSelfAssignOnly(view.selfAssignOnly);
     setLinkSelected([]);
@@ -3519,12 +3536,7 @@ export default function AssignmentsManagerV2({
     ["nextWeek", "Next Week"],
   ];
   const attentionQueue = {
-    replacements: rangeGames.filter((listedGame) =>
-      positions
-        .filter((position) => position.sport_id === listedGame.sport_id)
-        .slice(0, listedGame.officials_needed)
-        .some((position) => isReplacementNeeded(listedGame.id, position.id)),
-    ).length,
+    replacements: rangeGames.filter(gameNeedsReplacement).length,
     needsAction: rangeGames.filter(
       (listedGame) => assignmentCompleteness(listedGame).key === "attention",
     ).length,
@@ -6798,19 +6810,16 @@ export default function AssignmentsManagerV2({
               </div>
               <button
                 type="button"
+                className={replacementOnly ? "selected" : ""}
+                aria-pressed={replacementOnly}
                 onClick={() => {
-                  chooseCompleteness("attention");
-                  const replacementGame = rangeGames.find((listedGame) =>
-                    positions
-                      .filter(
-                        (position) => position.sport_id === listedGame.sport_id,
-                      )
-                      .slice(0, listedGame.officials_needed)
-                      .some((position) =>
-                        isReplacementNeeded(listedGame.id, position.id),
-                      ),
-                  );
-                  if (replacementGame) setSelected(replacementGame.id);
+                  setReplacementOnly(true);
+                  setCompletenessFilter("all");
+                  setUnpublishedOnly(false);
+                  setSelfAssignOnly(false);
+                  setOverrideOfficial("");
+                  setSelected("");
+                  setLinkSelected([]);
                 }}
               >
                 <b>{attentionQueue.replacements}</b>
@@ -6818,6 +6827,14 @@ export default function AssignmentsManagerV2({
               </button>
               <button
                 type="button"
+                className={
+                  !replacementOnly && completenessFilter === "unassigned"
+                    ? "selected"
+                    : ""
+                }
+                aria-pressed={
+                  !replacementOnly && completenessFilter === "unassigned"
+                }
                 onClick={() => chooseCompleteness("unassigned")}
               >
                 <b>{attentionQueue.unassigned}</b>
@@ -6825,6 +6842,14 @@ export default function AssignmentsManagerV2({
               </button>
               <button
                 type="button"
+                className={
+                  !replacementOnly && completenessFilter === "awaiting"
+                    ? "selected"
+                    : ""
+                }
+                aria-pressed={
+                  !replacementOnly && completenessFilter === "awaiting"
+                }
                 onClick={() => chooseCompleteness("awaiting")}
               >
                 <b>{attentionQueue.awaiting}</b>
@@ -6832,8 +6857,11 @@ export default function AssignmentsManagerV2({
               </button>
               <button
                 type="button"
+                className={unpublishedOnly ? "selected" : ""}
+                aria-pressed={unpublishedOnly}
                 onClick={() => {
                   setUnpublishedOnly(true);
+                  setReplacementOnly(false);
                   setCompletenessFilter("all");
                   setSelected("");
                 }}
