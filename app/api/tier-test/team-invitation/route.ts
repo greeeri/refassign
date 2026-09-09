@@ -4,7 +4,8 @@ import { createHash } from "node:crypto";
 
 const testUrl = "https://slenztuopbfxqzjyrtzp.supabase.co";
 const testPublishableKey = "sb_publishable_Hz_2BH4cYmrogX3O15x2PQ_fU-0uSKZ";
-// This route is intentionally limited to the isolated organization preview.
+const productionUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+const productionPublishableKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 
 function esc(value: unknown) {
   return String(value ?? "").replace(/[&<>'"]/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]!);
@@ -19,10 +20,20 @@ export async function POST(request: NextRequest) {
   const actionLink = String(body.actionLink ?? "");
   if (!body.organizationId || !email.includes("@") || !actionLink) return NextResponse.json({ error: "The invitation information is incomplete." }, { status: 400 });
 
-  const link = new URL(actionLink);
-  if (link.origin !== testUrl || !link.pathname.startsWith("/auth/v1/verify")) return NextResponse.json({ error: "The invitation link is invalid." }, { status: 400 });
+  let link: URL;
+  try { link = new URL(actionLink); }
+  catch { return NextResponse.json({ error: "The invitation link is invalid." }, { status: 400 }); }
+  const productionOrigin = productionUrl ? new URL(productionUrl).origin : "";
+  const linkUsesTestProject = link.origin === testUrl;
+  const linkUsesProductionProject = Boolean(productionOrigin && link.origin === productionOrigin);
+  if ((!linkUsesTestProject && !linkUsesProductionProject) || !link.pathname.startsWith("/auth/v1/verify")) {
+    return NextResponse.json({ error: "The invitation link is invalid." }, { status: 400 });
+  }
+  const supabaseUrl = linkUsesTestProject ? testUrl : productionUrl;
+  const publishableKey = linkUsesTestProject ? testPublishableKey : productionPublishableKey;
+  if (!supabaseUrl || !publishableKey) return NextResponse.json({ error: "Invitation email is not configured for this workspace." }, { status: 503 });
 
-  const supabase = createClient(testUrl, testPublishableKey, { global: { headers: { Authorization: authorization } }, auth: { persistSession: false, autoRefreshToken: false } });
+  const supabase = createClient(supabaseUrl, publishableKey, { global: { headers: { Authorization: authorization } }, auth: { persistSession: false, autoRefreshToken: false } });
   const token = authorization.replace("Bearer ", "");
   const { data: authData, error: authError } = await supabase.auth.getUser(token);
   if (authError || !authData.user) return NextResponse.json({ error: "Your session expired. Please sign in again." }, { status: 401 });

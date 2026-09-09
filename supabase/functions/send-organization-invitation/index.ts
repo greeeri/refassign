@@ -7,6 +7,7 @@ const allowedOrigins = new Set([
   "https://refassign-chi.vercel.app",
   "https://test.ref-assign.com",
 ]);
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const requestOrigin = (request: Request) => {
   const origin = request.headers.get("Origin") ?? "";
   return allowedOrigins.has(origin) ? origin : "https://ref-assign.com";
@@ -47,7 +48,13 @@ Deno.serve(async (request) => {
     const email = String(body.email ?? "").trim().toLowerCase();
     const role = String(body.role ?? "");
     const viewerPermissions = Array.isArray(body.viewerPermissions) ? body.viewerPermissions.map(String) : [];
-    const leagueIds = Array.isArray(body.leagueIds) ? body.leagueIds.map(String) : [];
+    const leagueIds = Array.isArray(body.leagueIds)
+      ? body.leagueIds.map(String).filter((id) => uuidPattern.test(id))
+      : [];
+    if (!uuidPattern.test(organizationId)) return json(request, { error: "Select a valid organization." }, 400);
+    if ((role === "assignor" || role === "viewer") && !leagueIds.length) {
+      return json(request, { error: "Select at least one valid league." }, 400);
+    }
 
     const { data: invitationId, error: invitationError } = await userClient.rpc("create_organization_invitation", {
       p_organization_id: organizationId,

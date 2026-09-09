@@ -7,6 +7,7 @@ import styles from "./OrganizationTeamManager.module.css";
 type TeamAccess={id:string;user_id?:string;email:string;role:string;viewer_permissions:string[];league_ids:string[];status:"active"|"pending"};
 type TeamData={members:TeamAccess[];invitations:TeamAccess[]};
 type LeagueChoice={id:string;name:string};
+const uuidPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const roles=["admin","assignor","viewer","billing"] as const;
 const labels:Record<string,string>={owner:"Organization owner",admin:"Administrator",assignor:"Assignor",viewer:"Contact (read-only)",billing:"Billing manager"};
 const permissions=[
@@ -16,17 +17,19 @@ const permissions=[
 ] as const;
 
 export default function OrganizationTeamManager({organizationId,organization,canManage,leagues}:{organizationId:string;organization:string;canManage:boolean;leagues:LeagueChoice[]}){
- const allLeagueIds=leagues.map(league=>league.id);
+ const validLeagues=leagues.filter(league=>uuidPattern.test(league.id));
+ const allLeagueIds=validLeagues.map(league=>league.id);
  const [team,setTeam]=useState<TeamData>({members:[],invitations:[]}),[email,setEmail]=useState(""),[role,setRole]=useState("assignor"),[viewerPermissions,setViewerPermissions]=useState<string[]>(["overview"]),[leagueIds,setLeagueIds]=useState<string[]>(allLeagueIds),[busy,setBusy]=useState(""),[message,setMessage]=useState("");
  const load=async()=>{const {data,error}=await createClient().rpc("get_organization_team",{p_organization_id:organizationId});if(error){setMessage(error.message);return}setTeam((data||{members:[],invitations:[]}) as TeamData)};
  useEffect(()=>{if(organizationId)void load()},[organizationId]);
  useEffect(()=>{setLeagueIds(allLeagueIds)},[organizationId,leagues.map(league=>league.id).join("|")]);
  const needsLeagues=role==="assignor"||role==="viewer";
  const invite=async()=>{
-  if(!email.includes("@")||!canManage||needsLeagues&&!leagueIds.length)return;
+  const validLeagueIds=leagueIds.filter(id=>uuidPattern.test(id));
+  if(!email.includes("@")||!canManage||needsLeagues&&!validLeagueIds.length)return;
   setBusy("invite");setMessage("");
   const supabase=createClient();
-  const {data,error}=await supabase.functions.invoke("send-organization-invitation",{body:{organizationId,email,role,viewerPermissions:role==="viewer"?viewerPermissions:[],leagueIds:needsLeagues?leagueIds:[]}});
+  const {data,error}=await supabase.functions.invoke("send-organization-invitation",{body:{organizationId,email,role,viewerPermissions:role==="viewer"?viewerPermissions:[],leagueIds:needsLeagues?validLeagueIds:[]}});
   if(error){
    let detail=error.message;
    try{const body=await error.context?.json();if(body?.error)detail=body.error}catch{}
@@ -43,7 +46,7 @@ export default function OrganizationTeamManager({organizationId,organization,can
  return <div className={styles.wrap}>
   <section className={styles.heading}><div><p>Organization workspace</p><h2>Team &amp; roles</h2><span>Invite teammates, change their roles, and control read-only access.</span></div></section>
   {!canManage&&<section className={styles.notice}>Only the organization owner or an administrator can change team access.</section>}
-  {canManage&&<section className={styles.invite}><h3>Invite a team member</h3><div className={styles.inviteGrid}><label>Email address<input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="team@example.com"/></label><label>Workspace role<select value={role} onChange={e=>setRole(e.target.value)}>{roles.map(code=><option value={code} key={code}>{labels[code]}</option>)}</select></label></div>{needsLeagues&&<LeaguePicker leagues={leagues} selected={leagueIds} onChange={setLeagueIds}/>} {role==="viewer"&&<PermissionPicker selected={viewerPermissions} onChange={setViewerPermissions}/>}<button className="primary" disabled={busy==="invite"||!email.includes("@")||needsLeagues&&!leagueIds.length||role==="viewer"&&!viewerPermissions.length} onClick={()=>void invite()}>{busy==="invite"?"Sending…":"Send invitation"}</button></section>}
+  {canManage&&<section className={styles.invite}><h3>Invite a team member</h3><div className={styles.inviteGrid}><label>Email address<input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="team@example.com"/></label><label>Workspace role<select value={role} onChange={e=>setRole(e.target.value)}>{roles.map(code=><option value={code} key={code}>{labels[code]}</option>)}</select></label></div>{needsLeagues&&<LeaguePicker leagues={validLeagues} selected={leagueIds} onChange={setLeagueIds}/>} {role==="viewer"&&<PermissionPicker selected={viewerPermissions} onChange={setViewerPermissions}/>}<button className="primary" disabled={busy==="invite"||!email.includes("@")||needsLeagues&&!allLeagueIds.length||role==="viewer"&&!viewerPermissions.length} onClick={()=>void invite()}>{busy==="invite"?"Sending…":"Send invitation"}</button></section>}
   {message&&<p className={styles.message}>{message}</p>}
   <section className={styles.list}><div className={styles.listHead}><h3>Organization access</h3><b>{team.members.length} active · {team.invitations.length} pending</b></div>{[...team.members,...team.invitations].length===0?<p className={styles.empty}>No additional team members have been added.</p>:[...team.members,...team.invitations].map(item=><MemberCard key={item.id} item={item} leagues={leagues} disabled={!canManage||busy===item.id} onSave={save}/>)}</section>
  </div>
