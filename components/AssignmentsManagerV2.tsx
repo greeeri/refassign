@@ -3350,6 +3350,7 @@ export default function AssignmentsManagerV2({
           succeeded = selectedAssignments.length;
           const { data: undoRows } = await supabase.rpc(
             "latest_undo_operation",
+            { p_organization_id: organizationId },
           );
           const undoId = (undoRows as { id: string }[] | null)?.[0]?.id;
           if (undoId) undoOperationIds.push(undoId);
@@ -3386,6 +3387,7 @@ export default function AssignmentsManagerV2({
             succeeded++;
             const { data: undoRows } = await supabase.rpc(
               "latest_undo_operation",
+              { p_organization_id: organizationId },
             );
             const undoId = (undoRows as { id: string }[] | null)?.[0]?.id;
             if (undoId && !undoOperationIds.includes(undoId))
@@ -3453,6 +3455,7 @@ export default function AssignmentsManagerV2({
             action === "status"
               ? "Bulk game-status change"
               : "Bulk unassignment",
+          p_organization_id: organizationId,
         });
         announceUndoAvailable();
       }

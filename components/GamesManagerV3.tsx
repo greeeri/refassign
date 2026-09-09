@@ -752,6 +752,7 @@ export default function GamesManagerV3({
       return {
         row: r.row,
         action: r.valid ? r.action : "skip",
+        organization_id: organizationId,
         game_id: existing?.id || null,
         game_number: r.game_number,
         sport_id: s?.id || null,
@@ -800,6 +801,7 @@ export default function GamesManagerV3({
         Number(importError.match(/spreadsheet row (\d+)/i)?.[1] || 0) || null;
       const { data: userData } = await sb.auth.getUser();
       await sb.from("import_error_log").insert({
+        organization_id: organizationId || null,
         import_type: "games",
         error_message: importError,
         row_number: rowNumber,

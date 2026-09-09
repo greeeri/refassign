@@ -16,6 +16,7 @@ import OfficialDashboard from "../../components/OfficialDashboard";
 import OfficialProfile from "../../components/OfficialProfile";
 import OfficialSchedule from "../../components/OfficialSchedule";
 import SelfAssignBoard from "../../components/SelfAssignBoard";
+import AuditHistoryManager from "../../components/AuditHistoryManager";
 import UndoCenter from "../../components/UndoCenter";
 import PayrollManager from "../../components/PayrollManager";
 import MileageCoordinatesManager from "../../components/MileageCoordinatesManager";
@@ -457,6 +458,13 @@ export default function Workspace() {
                 <span>Reports</span>
               </button>
               <button
+                className={`topNavButton ${section === "Audit History" ? "active" : ""}`}
+                onClick={() => nav("Audit History")}
+              >
+                <Icon>▤</Icon>
+                <span>Change &amp; Audit</span>
+              </button>
+              <button
                 className={`topNavButton ${section === "Contacts" ? "active" : ""}`}
                 onClick={() => nav("Contacts")}
               >
@@ -666,6 +674,7 @@ export default function Workspace() {
         )}
         {manager && section === "Assignments" && <AssignmentsManager organizationId={testWorkspace?.organization_id} />}
         {manager && section === "Reports" && <ManagerReports organizationId={testWorkspace?.organization_id} />}
+        {manager && section === "Audit History" && <AuditHistoryManager organizationId={testWorkspace?.organization_id} />}
         {manager && section === "Auto Assign" && <AutoAssignManager organizationId={testWorkspace?.organization_id} />}
         {manager && section === "Payroll" && (
           <>
@@ -773,7 +782,7 @@ export default function Workspace() {
           iowaMentorAccess &&
           section === "Development Mentors" && <IowaDevelopmentMentors />}
         {isSuperAdmin && section === "Super Admin" && <SuperAdminManager />}
-        {manager && <UndoCenter />}
+        {manager && <UndoCenter organizationId={testWorkspace?.organization_id} />}
       </main>
       {manager && (
         <nav className="assignorMobileNav">

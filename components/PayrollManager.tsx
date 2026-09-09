@@ -537,6 +537,7 @@ export default function PayrollManager({ organizationId }: { organizationId?: st
       "import_payroll_rows",
       {
         p_rows: importRows.map((row) => ({
+          organization_id: organizationId,
           assignment_id: row.assignmentId,
           spreadsheet_row: row.spreadsheetRow,
           game_fee: row.gameFee,

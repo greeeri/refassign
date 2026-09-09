@@ -442,6 +442,7 @@ export default function OfficialsRosterManager({
           const { data, error } = await supabase.rpc(
             "upsert_official_roster_row",
             {
+              p_organization_id: organizationId,
               p_supplied_id: r.supplied_id || null,
               p_first_name: r.first_name,
               p_last_name: r.last_name,
@@ -470,17 +471,6 @@ export default function OfficialsRosterManager({
           const officialId = result?.result_official_id;
           if (!officialId)
             throw new Error("The imported official could not be identified.");
-          const { error: linkError } = await supabase
-            .from("organization_officials")
-            .upsert(
-              {
-                organization_id: organizationId,
-                official_id: officialId,
-                active: true,
-              },
-              { onConflict: "organization_id,official_id" },
-            );
-          if (linkError) throw linkError;
           if (result?.result_action === "Add") added++;
           else updated++;
         } catch (rowErr) {

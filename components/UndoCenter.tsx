@@ -15,16 +15,22 @@ export function announceUndoAvailable(description?: string) {
   );
 }
 
-export default function UndoCenter() {
+export default function UndoCenter({ organizationId }: { organizationId?: string }) {
   const supabase = useMemo(() => createClient(), []),
     [operation, setOperation] = useState<UndoOperation | null>(null),
     [announcement, setAnnouncement] = useState(""),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const load = useCallback(async () => {
-    const { data } = await supabase.rpc("latest_undo_operation");
+    if (!organizationId) {
+      setOperation(null);
+      return;
+    }
+    const { data } = await supabase.rpc("latest_undo_operation", {
+      p_organization_id: organizationId,
+    });
     setOperation(((data || [])[0] as UndoOperation | undefined) || null);
-  }, [supabase]);
+  }, [organizationId, supabase]);
   const handleAnnouncement = useCallback(
     (event: Event) => {
       const detail = (event as CustomEvent<{ description?: string }>).detail;
@@ -48,6 +54,7 @@ export default function UndoCenter() {
     setError("");
     const { error: undoError } = await supabase.rpc("undo_operation", {
       p_operation_id: operation.id,
+      p_organization_id: organizationId,
     });
     if (undoError) {
       setError(undoError.message);
