@@ -1614,6 +1614,33 @@ export default function AssignmentsManagerV2({
     }
     return reasons;
   }
+  function conflictingAssignedGamesForGame(
+    officialId: string,
+    targetGame: Game,
+    ignorePositionId = "",
+  ) {
+    return assignments.flatMap((assignment) => {
+      if (
+        assignment.official_id !== officialId ||
+        ["declined", "cancelled"].includes(assignment.status) ||
+        (ignorePositionId &&
+          assignment.game_id === targetGame.id &&
+          assignment.position_id === ignorePositionId)
+      )
+        return [];
+      const otherGame = games.find((item) => item.id === assignment.game_id);
+      return otherGame &&
+        otherGame.id !== targetGame.id &&
+        overlaps(
+          targetGame.starts_at,
+          targetGame.duration_minutes || 110,
+          otherGame.starts_at,
+          otherGame.duration_minutes || 110,
+        )
+        ? [otherGame]
+        : [];
+    });
+  }
   function duplicateAssignmentReasonsForGame(
     officialId: string,
     targetGame: Game,
@@ -1867,7 +1894,6 @@ export default function AssignmentsManagerV2({
     return officials
       .filter(
         (o) =>
-          !workingAtGameTime(o, pos.id) &&
           (eligible(o) || canManage || current?.official_id === o.id) &&
           !used.has(o.id) &&
           (!isMentor(pos) ||
@@ -1884,6 +1910,7 @@ export default function AssignmentsManagerV2({
           game.location?.longitude ?? null,
         ),
         rank: positionRankFor(o.id, pos),
+        conflictingGames: conflictingAssignedGamesForGame(o.id, game, pos.id),
         reasons: ineligibleReasons(o, pos.id).filter(
           (r) =>
             !(
@@ -2128,6 +2155,26 @@ export default function AssignmentsManagerV2({
             assignment.position_id === position.id &&
             assignmentOccupiesPosition(assignment.status),
         ),
+    );
+  }
+  function openConflictingGame(targetGameId: string) {
+    setCandidatePositionId("");
+    setRange("all");
+    setCustomDate("");
+    setUnpublishedOnly(false);
+    setSelfAssignOnly(false);
+    setCompletenessFilter("all");
+    setOfficialFilter("");
+    setLocationFilter("");
+    setLeagueFilter("");
+    setLevelFilter("");
+    setSelected(targetGameId);
+    window.setTimeout(
+      () =>
+        document
+          .getElementById("selected-game-assignment")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      0,
     );
   }
   async function assignFromCandidate(positionId: string, officialId: string) {
@@ -5909,7 +5956,9 @@ export default function AssignmentsManagerV2({
                         <article
                           key={candidate.id}
                           className={
-                            candidate.reasons.length
+                            candidate.conflictingGames.length
+                              ? "candidateBlocked"
+                              : candidate.reasons.length
                               ? "candidateWarning"
                               : "candidateEligible"
                           }
@@ -5946,6 +5995,7 @@ export default function AssignmentsManagerV2({
                             <button
                               type="button"
                               className={
+                                candidate.conflictingGames.length ||
                                 candidate.reasons.length
                                   ? "secondary"
                                   : "primary"
@@ -5954,16 +6004,24 @@ export default function AssignmentsManagerV2({
                                 saving === candidatePosition.id ||
                                 current?.official_id === candidate.id
                               }
-                              onClick={() =>
+                              onClick={() => {
+                                const conflictingGame =
+                                  candidate.conflictingGames[0];
+                                if (conflictingGame) {
+                                  openConflictingGame(conflictingGame.id);
+                                  return;
+                                }
                                 void assignFromCandidate(
                                   candidatePosition.id,
                                   candidate.id,
-                                )
-                              }
+                                );
+                              }}
                             >
                               {current?.official_id === candidate.id
                                 ? "Assigned"
-                                : candidate.reasons.length
+                                : candidate.conflictingGames.length
+                                  ? `View Game #${candidate.conflictingGames[0].game_number}`
+                                  : candidate.reasons.length
                                   ? "Override"
                                   : "Assign"}
                             </button>
