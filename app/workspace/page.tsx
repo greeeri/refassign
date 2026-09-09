@@ -21,6 +21,7 @@ import PayrollManager from "../../components/PayrollManager";
 import MileageCoordinatesManager from "../../components/MileageCoordinatesManager";
 import SportsRulesManager from "../../components/SportsRulesManager";
 import RegistrarManager from "../../components/RegistrarManager";
+import OfficialRegistration from "../../components/OfficialRegistration";
 import SuperAdminManager from "../../components/SuperAdminManager";
 import IowaSoccerDevelopment from "../../components/IowaSoccerDevelopment";
 import IowaSoccerDevelopmentAdmin from "../../components/IowaSoccerDevelopmentAdmin";
@@ -335,7 +336,7 @@ export default function Workspace() {
     viewRole === "league_admin" ||
     iowaDevelopmentStaff
   )
-    iowaViews.push({ view: "Registrar", label: "Registration" });
+    iowaViews.push({ view: "Registrar", label: "Registrar Management" });
   if (iowaDevelopmentStaff)
     iowaViews.push({ view: "Development Admin", label: "Training" });
   if (iowaAdminView)
@@ -509,12 +510,20 @@ export default function Workspace() {
                 </button>
               ))}
               {iowaDevelopmentAccess && (
-                <button
-                  className={`topNavButton ${section === "Iowa Soccer Development" ? "active" : ""}`}
-                  onClick={() => nav("Iowa Soccer Development")}
-                >
-                  <span>Iowa Soccer Development</span>
-                </button>
+                <>
+                  <button
+                    className={`topNavButton ${section === "Official Registration" ? "active" : ""}`}
+                    onClick={() => nav("Official Registration")}
+                  >
+                    <span>Iowa Soccer Registration</span>
+                  </button>
+                  <button
+                    className={`topNavButton ${section === "Iowa Soccer Development" ? "active" : ""}`}
+                    onClick={() => nav("Iowa Soccer Development")}
+                  >
+                    <span>Iowa Soccer Development</span>
+                  </button>
+                </>
               )}
             </>
           )}
@@ -749,6 +758,9 @@ export default function Workspace() {
         )}
         {viewRole === "official" && section === "My Profile" && (
           <OfficialProfile />
+        )}
+        {viewRole === "official" && section === "Official Registration" && (
+          <OfficialRegistration onBack={() => nav("Official Dashboard")} />
         )}
         {viewRole === "official" && section === "Iowa Soccer Development" && (
           <IowaSoccerDevelopment onBack={() => nav("Official Dashboard")} />
