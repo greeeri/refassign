@@ -408,6 +408,7 @@ export default function AssignmentsManagerV2({
       positionId: string;
       officialId: string;
       nextPositionId?: string;
+      override?: boolean;
     } | null>(null),
     [bulkResult, setBulkResult] = useState<BulkActionResult | null>(null);
   async function load() {
@@ -5748,7 +5749,9 @@ export default function AssignmentsManagerV2({
                     <div className="assignmentDialogHead">
                       <div>
                         <h3 id="replacementConfirmTitle">
-                          Confirm Replacement
+                          {pendingReplacement.override
+                            ? "Confirm Override & Replacement"
+                            : "Confirm Replacement"}
                         </h3>
                         <p>
                           Game #{game.game_number} — {game.home?.name || "TBD"}{" "}
@@ -5779,8 +5782,9 @@ export default function AssignmentsManagerV2({
                       </span>
                     </div>
                     <div className="assignmentConfirmMessage">
-                      This will assign the replacement, publish the assignment,
-                      and immediately notify the new official by email.
+                      {pendingReplacement.override
+                        ? "This will override the eligibility warning, assign and publish the replacement, and immediately notify the new official by email."
+                        : "This will assign the replacement, publish the assignment, and immediately notify the new official by email."}
                     </div>
                     <div className="assignmentDialogFooter">
                       <button
@@ -5805,7 +5809,9 @@ export default function AssignmentsManagerV2({
                       >
                         {replacementPublishing
                           ? "Assigning & Sending…"
-                          : "Assign & Notify Official"}
+                          : pendingReplacement.override
+                            ? "Override & Notify Official"
+                            : "Assign & Notify Official"}
                       </button>
                     </div>
                   </div>
@@ -6027,7 +6033,7 @@ export default function AssignmentsManagerV2({
                             </button>
                             {replacementNeeded &&
                               !current &&
-                              candidate.reasons.length === 0 && (
+                              candidate.conflictingGames.length === 0 && (
                                 <button
                                   type="button"
                                   className="success"
@@ -6045,10 +6051,13 @@ export default function AssignmentsManagerV2({
                                       positionId: candidatePosition.id,
                                       officialId: candidate.id,
                                       nextPositionId,
+                                      override: candidate.reasons.length > 0,
                                     });
                                   }}
                                 >
-                                  Assign & Notify
+                                  {candidate.reasons.length
+                                    ? "Override & Notify"
+                                    : "Assign & Notify"}
                                 </button>
                               )}
                           </div>
