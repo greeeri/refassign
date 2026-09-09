@@ -22,7 +22,23 @@ export default function OrganizationTeamManager({organizationId,organization,can
  useEffect(()=>{if(organizationId)void load()},[organizationId]);
  useEffect(()=>{setLeagueIds(allLeagueIds)},[organizationId,leagues.map(league=>league.id).join("|")]);
  const needsLeagues=role==="assignor"||role==="viewer";
- const invite=async()=>{if(!email.includes("@")||!canManage||needsLeagues&&!leagueIds.length)return;setBusy("invite");setMessage("");const supabase=createClient();const {data,error}=await supabase.functions.invoke("send-organization-invitation",{body:{organizationId,email,role,viewerPermissions:role==="viewer"?viewerPermissions:[],leagueIds:needsLeagues?leagueIds:[]}});if(error){setMessage(error.message);setBusy("");return}const {data:{session}}=await supabase.auth.getSession();const response=await fetch("/api/tier-test/team-invitation",{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${session?.access_token||""}`},body:JSON.stringify({organizationId,organization,email,roleLabel:labels[role],actionLink:data.actionLink,invitationId:data.invitationId})});const result=await response.json().catch(()=>({})) as{error?:string};if(!response.ok)setMessage(result.error||"The invitation email could not be sent.");else{setEmail("");setLeagueIds(allLeagueIds);setMessage("Invitation sent.")}await load();setBusy("")};
+ const invite=async()=>{
+  if(!email.includes("@")||!canManage||needsLeagues&&!leagueIds.length)return;
+  setBusy("invite");setMessage("");
+  const supabase=createClient();
+  const {data,error}=await supabase.functions.invoke("send-organization-invitation",{body:{organizationId,email,role,viewerPermissions:role==="viewer"?viewerPermissions:[],leagueIds:needsLeagues?leagueIds:[]}});
+  if(error){
+   let detail=error.message;
+   try{const body=await error.context?.json();if(body?.error)detail=body.error}catch{}
+   setMessage(detail);setBusy("");return;
+  }
+  const {data:{session}}=await supabase.auth.getSession();
+  const response=await fetch("/api/tier-test/team-invitation",{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${session?.access_token||""}`},body:JSON.stringify({organizationId,organization,email,roleLabel:labels[role],actionLink:data.actionLink,invitationId:data.invitationId})});
+  const result=await response.json().catch(()=>({})) as{error?:string};
+  if(!response.ok)setMessage(result.error||"The invitation email could not be sent.");
+  else{setEmail("");setLeagueIds(allLeagueIds);setMessage("Invitation sent.")}
+  await load();setBusy("");
+ };
  const save=async(item:TeamAccess,newRole:string,newPermissions:string[],newLeagueIds:string[])=>{setBusy(item.id);setMessage("");const supabase=createClient(),args={p_role:newRole,p_viewer_permissions:newRole==="viewer"?newPermissions:[],p_league_ids:newRole==="assignor"||newRole==="viewer"?newLeagueIds:[]};const {error}=item.status==="pending"?await supabase.rpc("update_organization_invitation",{p_invitation_id:item.id,...args}):await supabase.rpc("update_organization_member_access",{p_organization_id:organizationId,p_user_id:item.user_id,p_current_role:item.role,p_new_role:newRole,...args});setMessage(error?error.message:"Team access updated.");await load();setBusy("")};
  return <div className={styles.wrap}>
   <section className={styles.heading}><div><p>Organization workspace</p><h2>Team &amp; roles</h2><span>Invite teammates, change their roles, and control read-only access.</span></div></section>
