@@ -231,6 +231,28 @@ p {
   border-radius: 8px;
   background: #f1f5f9;
 }
+.selfAssignOrganizationSummary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin: 16px 0;
+}
+.selfAssignOrganizationStatus {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  padding: 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+.selfAssignOrganizationStatus .badge {
+  justify-self: start;
+}
+.selfAssignOrganizationStatus small {
+  color: #64748b;
+  line-height: 1.4;
+}
 button,
 select,
 input,
