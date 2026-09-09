@@ -66,9 +66,10 @@ Deno.serve(async (request) => {
     if (invitationError) return json(request, { error: invitationError.message }, 403);
 
     const origin = requestOrigin(request);
-    const redirectTo = origin === "https://test.ref-assign.com"
-      ? `${origin}/tier-test`
-      : `${origin}/workspace`;
+    const destination = origin === "https://test.ref-assign.com"
+      ? "/tier-test"
+      : "/workspace";
+    const redirectTo = `${origin}/set-password?next=${encodeURIComponent(destination)}`;
     let existingAccount = false;
     let { data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
       type: "invite",
@@ -80,7 +81,7 @@ Deno.serve(async (request) => {
       ({ data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
         type: "magiclink",
         email,
-        options: { redirectTo },
+        options: { redirectTo: `${origin}${destination}` },
       }));
     }
 
