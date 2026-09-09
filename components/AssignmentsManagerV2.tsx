@@ -1,5546 +1,3261 @@
-"use client";
-import { useEffect, useMemo, useState } from "react";
-import { createClient } from "../lib/supabase/client";
-import { announceUndoAvailable } from "./UndoCenter";
-type Team = { id: string; name: string };
-type Game = {
-  id: string;
-  game_number: string;
-  status: string;
-  sport_id: string;
-  league_id: string | null;
-  level_id: string | null;
-  location_id: string | null;
-  starts_at: string;
-  duration_minutes: number;
-  officials_needed: number;
-  sports: { name: string } | null;
-  leagues: { name: string; assignment_fill_target_days: number; assignment_acceptance_hours: number; assignment_escalation_days: number; assignment_reminder_hours: number } | null;
-  levels: { id: string; name: string } | null;
-  home: Team | null;
-  away: Team | null;
-  location: {
-    id: string;
-    name: string;
-    city: string | null;
-    state: string | null;
-    latitude: number | null;
-    longitude: number | null;
-  } | null;
-};
-type Official = {
-  id: string;
-  first_name: string;
-  last_name: string;
-  email: string | null;
-  phone: string | null;
-  sports: string[];
-  active: boolean;
-  home_city: string | null;
-  home_state: string | null;
-  home_latitude: number | null;
-  home_longitude: number | null;
-};
-type Position = {
-  id: string;
-  sport_id: string;
-  name: string;
-  required: boolean;
-  sort_order: number;
-};
-type Assignment = {
-  id: string;
-  game_id: string;
-  official_id: string;
-  position_id: string;
-  status: string;
-  published_at: string | null;
-  accept_by: string | null;
-  responded_at: string | null;
-  decline_reason: string | null;
-  overdue_reviewed_at: string | null;
-  assignment_source: "manager" | "self_assign" | "auto_assign";
-  email_sent_at: string | null;
-  email_error: string | null;
-  resend_email_id: string | null;
-  cancellation_notified_at: string | null;
-  cancellation_email_error: string | null;
-  cancellation_email_id: string | null;
-};
-type Rank = { official_id: string; rank: number };
-type PositionRank = {
-  official_id: string;
-  ref_rank: number;
-  ar1_rank: number;
-  ar2_rank: number;
-  fourth_rank: number;
-  mentor_rank: number;
-};
-type Power = { team_id: string; power: number };
-type EligL = { official_id: string; league_id: string };
-type EligV = { official_id: string; level_id: string };
-type Block = {
-  official_id: string;
-  block_type: "date" | "location" | "team" | "time";
-  start_date: string | null;
-  end_date: string | null;
-  starts_at: string | null;
-  ends_at: string | null;
-  location_id: string | null;
-  team_id: string | null;
-};
-type LinkGroup = { id: string; name: string; created_at: string };
-type LinkMember = { group_id: string; game_id: string; sort_order: number };
-type SelfAssignSlot = {
-  id: string;
-  game_id: string;
-  position_id: string;
-  status: "open" | "claimed" | "withdrawn";
-};
-type AssignmentTemplateSlot = {
-  id: string;
-  position_id: string;
-  official_id: string;
-  sort_order: number;
-};
-type AssignmentTemplate = {
-  id: string;
-  name: string;
-  sport_id: string;
-  league_id: string | null;
-  created_by: string;
-  updated_at: string;
-  assignment_template_slots: AssignmentTemplateSlot[];
-};
-type AuditEvent = {
-  id: number;
-  action: string;
-  actor_name: string | null;
-  summary: string;
-  occurred_at: string;
-};
-type UnassignmentAudit = {
-  game_id: string | null;
-  old_data: { position_id?: string } | null;
-};
-type SavedAssignmentView = {
-  id: string;
-  name: string;
-  range: Range;
-  customDate: string;
-  locationFilter: string;
-  officialFilter: string;
-  leagueFilter?: string;
-  levelFilter?: string;
-  completenessFilter: Completeness;
-  unpublishedOnly: boolean;
-  selfAssignOnly: boolean;
-};
-type QuickEditDraft = { gameId: string; startsAt: string; durationMinutes: number; locationId: string; levelId: string };
-type BulkActionResult = {
-  action: string;
-  succeeded: number;
-  failures: string[];
-};
-type BulkAssignmentItem = {
-  gameId: string;
-  gameNumber: string;
-  matchup: string;
-  positionId: string;
-  positionName: string;
-  officialId: string;
-  officialName: string;
-  status: "success" | "failed" | "skipped";
-  error: string;
-};
-type BulkAssignmentResult = {
-  officialId: string;
-  officialName: string;
-  items: BulkAssignmentItem[];
-};
-type Range = "all" | "today" | "tomorrow" | "thisWeek" | "nextWeek" | "custom";
-type Completeness =
-  | "all"
-  | "unassigned"
-  | "partial"
-  | "full"
-  | "awaiting"
-  | "confirmed"
-  | "attention";
-type GameSort =
-  "default" | "game" | "location" | "time" | "power" | "status" | "assignments";
-const gameStatusOptions = [
-  ["active", "Active"],
-  ["suspended", "Hold"],
-  ["canceled", "Cancelled"],
-  ["rained_out", "Rain Out"],
-] as const;
-function gameAcceptsAssignments(game: Pick<Game, "status">) {
-  return game.status === "active";
-}
-function inactiveGameStatusLabel(status: string) {
-  if (status === "suspended") return "On Hold";
-  if (status === "rained_out") return "Rain Out";
-  if (status === "canceled" || status === "cancelled") return "Cancelled";
-  return "Inactive";
-}
-function miles(
-  a: number | null,
-  b: number | null,
-  c: number | null,
-  d: number | null,
-) {
-  if ([a, b, c, d].some((x) => x == null)) return null;
-  const r = 3958.7613,
-    p = Math.PI / 180,
-    dlat = (c! - a!) * p,
-    dlon = (d! - b!) * p,
-    q =
-      Math.sin(dlat / 2) ** 2 +
-      Math.cos(a! * p) * Math.cos(c! * p) * Math.sin(dlon / 2) ** 2;
-  return r * 2 * Math.asin(Math.sqrt(q));
-}
-function overlaps(
-  aStart: string,
-  aMinutes: number,
-  bStart: string,
-  bMinutes: number,
-) {
-  const a = new Date(aStart).getTime(),
-    b = new Date(bStart).getTime();
-  return a < b + bMinutes * 60000 && b < a + aMinutes * 60000;
-}
-function startDay(d: Date) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
-function localDateKey(d: Date) {
-  const year = d.getFullYear(),
-    month = `${d.getMonth() + 1}`.padStart(2, "0"),
-    day = `${d.getDate()}`.padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-function startWeek(d: Date) {
-  const x = startDay(d),
-    day = x.getDay();
-  x.setDate(x.getDate() - (day === 0 ? 6 : day - 1));
-  return x;
-}
-function inRange(g: Game, r: Range, customDate = "") {
-  const t = new Date(g.starts_at);
-  if (r === "all") return true;
-  if (r === "custom") {
-    if (!customDate) return false;
-    const start = new Date(`${customDate}T00:00:00`),
-      end = new Date(start);
-    end.setDate(start.getDate() + 1);
-    return t >= start && t < end;
-  }
-  const now = new Date(),
-    today = startDay(now),
-    tomorrow = new Date(today);
-  tomorrow.setDate(today.getDate() + 1);
-  const afterTomorrow = new Date(today);
-  afterTomorrow.setDate(today.getDate() + 2);
-  const week = startWeek(now),
-    next = new Date(week);
-  next.setDate(week.getDate() + 7);
-  const afterNext = new Date(week);
-  afterNext.setDate(week.getDate() + 14);
-  if (r === "today") return t >= today && t < tomorrow;
-  if (r === "tomorrow") return t >= tomorrow && t < afterTomorrow;
-  if (r === "thisWeek") return t >= week && t < next;
-  return t >= next && t < afterNext;
-}
-export default function AssignmentsManagerV2({
-  organizationId,
-}: {
-  organizationId?: string;
-}) {
-  const supabase = useMemo(() => createClient(), []);
-  const [games, setGames] = useState<Game[]>([]),
-    [officials, setOfficials] = useState<Official[]>([]),
-    [positions, setPositions] = useState<Position[]>([]),
-    [assignments, setAssignments] = useState<Assignment[]>([]),
-    [ranks, setRanks] = useState<Record<string, number>>({}),
-    [positionRanks, setPositionRanks] = useState<Record<string, PositionRank>>(
-      {},
-    ),
-    [powers, setPowers] = useState<Record<string, number>>({}),
-    [leagueElig, setLeagueElig] = useState<EligL[]>([]),
-    [levelElig, setLevelElig] = useState<EligV[]>([]),
-    [blocks, setBlocks] = useState<Block[]>([]),
-    [selected, setSelected] = useState(""),
-    [range, setRange] = useState<Range>("all"),
-    [customDate, setCustomDate] = useState(""),
-    [showCalendar, setShowCalendar] = useState(false),
-    [unpublishedOnly, setUnpublishedOnly] = useState(false),
-    [selfAssignOnly, setSelfAssignOnly] = useState(false),
-    [completenessFilter, setCompletenessFilter] = useState<Completeness>("all"),
-    [officialFilter, setOfficialFilter] = useState(""),
-    [locationFilter, setLocationFilter] = useState(""),
-    [leagueFilter, setLeagueFilter] = useState(""),
-    [levelFilter, setLevelFilter] = useState(""),
-    [error, setError] = useState(""),
-    [notice, setNotice] = useState(""),
-    [saving, setSaving] = useState(""),
-    [movingAssignment, setMovingAssignment] = useState(""),
-    [publishing, setPublishing] = useState(false),
-    [retryingNotifications, setRetryingNotifications] = useState(false),
-    [confirming, setConfirming] = useState(""),
-    [gameStatusSaving, setGameStatusSaving] = useState(""),
-    [pendingGameStatus, setPendingGameStatus] = useState<{
-      gameId: string;
-      status: string;
-    } | null>(null),
-    [canManage, setCanManage] = useState(false),
-    [overrideOfficial, setOverrideOfficial] = useState(""),
-    [gameSort, setGameSort] = useState<GameSort>("default"),
-    [gameSortDir, setGameSortDir] = useState<"asc" | "desc">("asc"),
-    [linkGroups, setLinkGroups] = useState<LinkGroup[]>([]),
-    [linkMembers, setLinkMembers] = useState<LinkMember[]>([]),
-    [linkSelected, setLinkSelected] = useState<string[]>([]),
-    [linking, setLinking] = useState(false),
-    [draggingGame, setDraggingGame] = useState(""),
-    [draggingOfficial, setDraggingOfficial] = useState(""),
-    [officialDropGame, setOfficialDropGame] = useState(""),
-    [pickedOfficial, setPickedOfficial] = useState(""),
-    [pendingTapAssignment, setPendingTapAssignment] = useState<{
-      gameId: string;
-      officialId: string;
-      positionId: string;
-    } | null>(null),
-    [bulkWorking, setBulkWorking] = useState(false),
-    [bulkStatus, setBulkStatus] = useState("active"),
-    [showBulkAssign, setShowBulkAssign] = useState(false),
-    [bulkAssignOfficial, setBulkAssignOfficial] = useState(""),
-    [bulkAssignPositions, setBulkAssignPositions] = useState<Record<string, string>>({}),
-    [bulkOverrideConfirmed, setBulkOverrideConfirmed] = useState(false),
-    [bulkAssignMessage, setBulkAssignMessage] = useState(""),
-    [bulkOfficialSearch, setBulkOfficialSearch] = useState(""),
-    [bulkOfficialStatus, setBulkOfficialStatus] = useState<"eligible" | "all" | "warning" | "blocked">("eligible"),
-    [bulkAssignmentResult, setBulkAssignmentResult] = useState<BulkAssignmentResult | null>(null),
-    [bulkRetryingGame, setBulkRetryingGame] = useState(""),
-    [showBulkCrew, setShowBulkCrew] = useState(false),
-    [bulkCrewSelections, setBulkCrewSelections] = useState<Record<string, string>>({}),
-    [bulkCrewWorking, setBulkCrewWorking] = useState(false),
-    [bulkCrewMessage, setBulkCrewMessage] = useState(""),
-    [bulkCrewOverrideConfirmed, setBulkCrewOverrideConfirmed] = useState(false),
-    [assignmentTemplates, setAssignmentTemplates] = useState<AssignmentTemplate[]>([]),
-    [showCrewTemplates, setShowCrewTemplates] = useState(false),
-    [crewTemplateName, setCrewTemplateName] = useState(""),
-    [copyCrewSourceGameId, setCopyCrewSourceGameId] = useState(""),
-    [crewTemplateWorking, setCrewTemplateWorking] = useState(false),
-    [crewTemplateMessage, setCrewTemplateMessage] = useState(""),
-    [selfAssignSlots, setSelfAssignSlots] = useState<SelfAssignSlot[]>([]),
-    [selfAssignSelected, setSelfAssignSelected] = useState<string[]>([]),
-    [selfAssignSaving, setSelfAssignSaving] = useState(false),
-    [showSelfAssignDialog, setShowSelfAssignDialog] = useState(false),
-    [showIneligibleOfficials, setShowIneligibleOfficials] = useState(false),
-    [officialListSearch, setOfficialListSearch] = useState(""),
-    [officialListSort, setOfficialListSort] = useState<"best" | "distance" | "rank" | "leastRecent" | "name">("best"),
-    [candidateSearch, setCandidateSearch] = useState(""),
-    [candidateSort, setCandidateSort] = useState<"best" | "distance" | "rank" | "leastRecent" | "name">("best"),
-    [needsAssignmentView, setNeedsAssignmentView] = useState<Record<string, boolean>>({}),
-    [ineligibleSearch, setIneligibleSearch] = useState(""),
-    [ineligibleReasonFilter, setIneligibleReasonFilter] = useState("all"),
-    [overduePromptClosed, setOverduePromptClosed] = useState(false),
-    [overdueResolving, setOverdueResolving] = useState(false),
-    [overdueSelected, setOverdueSelected] = useState<string[]>([]),
-    [showPublishReview, setShowPublishReview] = useState(false),
-    [showActivityTimeline, setShowActivityTimeline] = useState(false),
-    [activityRows, setActivityRows] = useState<AuditEvent[]>([]),
-    [activityLoading, setActivityLoading] = useState(false),
-    [activityError, setActivityError] = useState(""),
-    [savedViews, setSavedViews] = useState<SavedAssignmentView[]>([]),
-    [quickEdit, setQuickEdit] = useState<QuickEditDraft | null>(null),
-    [quickEditSaving, setQuickEditSaving] = useState(false),
-    [showDeadlineSettings, setShowDeadlineSettings] = useState(false),
-    [deadlineLeagueId, setDeadlineLeagueId] = useState(""),
-    [deadlineDraft, setDeadlineDraft] = useState({ fill: 14, acceptance: 24, escalation: 3, reminder: 24 }),
-    [deadlineSaving, setDeadlineSaving] = useState(false),
-    [showCoverageForecast, setShowCoverageForecast] = useState(false),
-    [candidatePositionId, setCandidatePositionId] = useState(""),
-    [replacementPublishing, setReplacementPublishing] = useState(""),
-    [unassignedSlotKeys, setUnassignedSlotKeys] = useState<string[]>([]),
-    [pendingReplacement, setPendingReplacement] = useState<{
-      positionId: string;
-      officialId: string;
-      nextPositionId?: string;
-    } | null>(null),
-    [bulkResult, setBulkResult] = useState<BulkActionResult | null>(null);
-  async function load() {
-    setError("");
-    const { data: userData } = await supabase.auth.getUser();
-    if (userData.user) {
-      const { data: userRoles } = await supabase.rpc("current_user_roles");
-      setCanManage(
-        ((userRoles || []) as string[]).some((role) =>
-          ["admin", "assignor"].includes(role),
-        ),
-      );
-    } else setCanManage(false);
-    const gamesQuery = supabase
-        .from("games")
-        .select(
-          "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,city,state,latitude,longitude)",
-        )
-        .order("starts_at");
-    const [g, oo, o, p, a, r, pr, pw, le, ve, bl, lg, lm, sas, ah, at] = await Promise.all([
-      organizationId ? gamesQuery.eq("organization_id", organizationId) : gamesQuery,
-      organizationId
-        ? supabase
-            .from("organization_officials")
-            .select("official_id")
-            .eq("organization_id", organizationId)
-            .eq("active", true)
-        : Promise.resolve({ data: null, error: null }),
-      supabase
-        .from("officials")
-        .select(
-          "id,first_name,last_name,email,phone,sports,active,home_city,home_state,home_latitude,home_longitude",
-        )
-        .eq("active", true)
-        .order("last_name")
-        .order("first_name"),
-      supabase
-        .from("sport_positions")
-        .select("id,sport_id,name,required,sort_order")
-        .order("sort_order"),
-      supabase
-        .from("assignments")
-        .select(
-          "id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at,assignment_source,email_sent_at,email_error,resend_email_id,cancellation_notified_at,cancellation_email_error,cancellation_email_id",
-        ),
-      supabase.from("official_rankings").select("official_id,rank"),
-      supabase
-        .from("official_soccer_position_rankings")
-        .select(
-          "official_id,ref_rank,ar1_rank,ar2_rank,fourth_rank,mentor_rank",
-        ),
-      supabase.from("team_power_rankings").select("team_id,power"),
-      supabase
-        .from("official_league_eligibility")
-        .select("official_id,league_id"),
-      supabase
-        .from("official_level_eligibility")
-        .select("official_id,level_id"),
-      supabase
-        .from("official_availability_blocks")
-        .select(
-          "official_id,block_type,start_date,end_date,starts_at,ends_at,location_id,team_id",
-        ),
-      supabase
-        .from("game_link_groups")
-        .select("id,name,created_at")
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("game_link_members")
-        .select("group_id,game_id,sort_order")
-        .order("sort_order"),
-      supabase
-        .from("assignment_self_assign_slots")
-        .select("id,game_id,position_id,status")
-        .eq("status", "open"),
-      supabase
-        .from("audit_history")
-        .select("game_id,old_data")
-        .eq("action", "unassigned"),
-      supabase
-        .from("assignment_templates")
-        .select("id,name,sport_id,league_id,created_by,updated_at,assignment_template_slots(id,position_id,official_id,sort_order)")
-        .order("updated_at", { ascending: false }),
-    ]);
-    const err =
-      g.error ||
-      oo.error ||
-      o.error ||
-      p.error ||
-      a.error ||
-      r.error ||
-      pr.error ||
-      pw.error ||
-      le.error ||
-      ve.error ||
-      bl.error ||
-      lg.error ||
-      lm.error ||
-      sas.error ||
-      ah.error ||
-      at.error;
-    if (err) {
-      setError(err.message);
-      return;
-    }
-    const rm: Record<string, number> = {},
-      prm: Record<string, PositionRank> = {},
-      pm: Record<string, number> = {};
-    ((r.data || []) as Rank[]).forEach(
-      (x) => (rm[x.official_id] = Number(x.rank)),
-    );
-    ((pr.data || []) as PositionRank[]).forEach(
-      (x) =>
-        (prm[x.official_id] = {
-          official_id: x.official_id,
-          ref_rank: Number(x.ref_rank),
-          ar1_rank: Number(x.ar1_rank),
-          ar2_rank: Number(x.ar2_rank),
-          fourth_rank: Number(x.fourth_rank),
-          mentor_rank: Number(x.mentor_rank),
-        }),
-    );
-    ((pw.data || []) as Power[]).forEach(
-      (x) => (pm[x.team_id] = Number(x.power)),
-    );
-    setRanks(rm);
-    setPositionRanks(prm);
-    setPowers(pm);
-    const organizationOfficialIds = organizationId
-      ? new Set((oo.data || []).map((link) => link.official_id))
-      : null;
-    setOfficials(
-      ((o.data || []) as Official[]).filter(
-        (official) =>
-          !organizationOfficialIds || organizationOfficialIds.has(official.id),
-      ),
-    );
-    setPositions((p.data || []) as Position[]);
-    const scopedGames = (g.data || []) as unknown as Game[];
-    const scopedGameIds = new Set(scopedGames.map(game => game.id));
-    setAssignments(((a.data || []) as Assignment[]).filter(assignment => scopedGameIds.has(assignment.game_id)));
-    setLeagueElig((le.data || []) as EligL[]);
-    setLevelElig((ve.data || []) as EligV[]);
-    setBlocks((bl.data || []) as Block[]);
-    setLinkGroups((lg.data || []) as LinkGroup[]);
-    setLinkMembers(
-      ((lm.data || []) as LinkMember[]).filter((member) =>
-        scopedGameIds.has(member.game_id),
-      ),
-    );
-    setSelfAssignSlots(
-      ((sas.data || []) as SelfAssignSlot[]).filter((slot) =>
-        scopedGameIds.has(slot.game_id),
-      ),
-    );
-    setAssignmentTemplates((at.data || []) as AssignmentTemplate[]);
-    setUnassignedSlotKeys(
-      [...new Set(((ah.data || []) as UnassignmentAudit[]).flatMap((row) =>
-        row.game_id && scopedGameIds.has(row.game_id) && row.old_data?.position_id
-          ? [`${row.game_id}:${row.old_data.position_id}`]
-          : [],
-      ))],
-    );
-    const sorted = scopedGames.sort(
-      (x, y) =>
-        gamePower(y, pm) - gamePower(x, pm) ||
-        new Date(x.starts_at).getTime() - new Date(y.starts_at).getTime(),
-    );
-    setGames(sorted);
-    if (!selected && sorted[0]) setSelected(sorted[0].id);
-  }
-  useEffect(() => {
-    void load();
-  }, [organizationId]);
-  useEffect(() => { void loadSavedViews(); }, []);
-  async function refreshAssignmentState() {
-    const [assignmentResult, selfAssignResult, unassignmentResult] = await Promise.all([
-      supabase
-        .from("assignments")
-        .select(
-          "id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at,assignment_source,email_sent_at,email_error,resend_email_id,cancellation_notified_at,cancellation_email_error,cancellation_email_id",
-        ),
-      supabase
-        .from("assignment_self_assign_slots")
-        .select("id,game_id,position_id,status")
-        .eq("status", "open"),
-      supabase
-        .from("audit_history")
-        .select("game_id,old_data")
-        .eq("action", "unassigned"),
-    ]);
-    const refreshError = assignmentResult.error || selfAssignResult.error || unassignmentResult.error;
-    if (refreshError) {
-      setError(refreshError.message);
-      return false;
-    }
-    const visibleGameIds = new Set(games.map((game) => game.id));
-    setAssignments(
-      ((assignmentResult.data || []) as Assignment[]).filter((assignment) =>
-        visibleGameIds.has(assignment.game_id),
-      ),
-    );
-    setSelfAssignSlots(
-      ((selfAssignResult.data || []) as SelfAssignSlot[]).filter((slot) =>
-        visibleGameIds.has(slot.game_id),
-      ),
-    );
-    setUnassignedSlotKeys(
-      [...new Set(((unassignmentResult.data || []) as UnassignmentAudit[]).flatMap((row) =>
-        row.game_id && visibleGameIds.has(row.game_id) && row.old_data?.position_id
-          ? [`${row.game_id}:${row.old_data.position_id}`]
-          : [],
-      ))],
-    );
-    return true;
-  }
-  useEffect(() => {
-    if (!notice) return;
-    const timer = window.setTimeout(() => setNotice(""), 5000);
-    return () => window.clearTimeout(timer);
-  }, [notice]);
-  function gamePower(g: Game, map = powers) {
-    return (
-      ((g.home ? (map[g.home.id] ?? 1) : 1) +
-        (g.away ? (map[g.away.id] ?? 1) : 1)) /
-      2
-    );
-  }
-  function isReplacementNeeded(gameId: string, positionId: string) {
-    const hasActiveAssignment = assignments.some(
-      (assignment) =>
-        assignment.game_id === gameId &&
-        assignment.position_id === positionId &&
-        assignment.status !== "declined",
-    );
-    if (hasActiveAssignment) return false;
-    return (
-      unassignedSlotKeys.includes(`${gameId}:${positionId}`) ||
-      assignments.some(
-        (assignment) =>
-          assignment.game_id === gameId &&
-          assignment.position_id === positionId &&
-          assignment.status === "declined",
-      )
-    );
-  }
-  function isUnpublishedGame(g: Game) {
-    const ga = assignments.filter(
-      (a) => a.game_id === g.id && a.status !== "declined",
-    );
-    return ga.length > 0 && ga.some((a) => !a.published_at);
-  }
-  function assignmentCompleteness(g: Game) {
-    const slots = positions
-        .filter((position) => position.sport_id === g.sport_id)
-        .sort((a, b) => a.sort_order - b.sort_order)
-        .slice(0, Math.max(0, g.officials_needed)),
-      active = assignments.filter(
-        (assignment) =>
-          assignment.game_id === g.id &&
-          assignment.status !== "declined" &&
-          slots.some((slot) => slot.id === assignment.position_id),
-      ),
-      filled = new Set(active.map((assignment) => assignment.position_id)).size,
-      replacementCount = slots.filter((slot) => isReplacementNeeded(g.id, slot.id)).length;
-    if (replacementCount)
-      return {
-        key: "attention" as const,
-        label: "Needs Attention",
-        color: "#dc2626",
-        detail: `${replacementCount} position${replacementCount === 1 ? "" : "s"} need replacement`,
-      };
-    if (!slots.length || filled === 0)
-      return {
-        key: "unassigned" as const,
-        label: "Unassigned",
-        color: "#dc2626",
-        detail: "No assignment slots are filled",
-      };
-    if (filled < slots.length)
-      return {
-        key: "partial" as const,
-        label: "Partially Assigned",
-        color: "#ea580c",
-        detail: `${filled} of ${slots.length} slots filled`,
-      };
-    const overdue = active.some(
-      (assignment) =>
-        assignment.published_at &&
-        assignment.status === "proposed" &&
-        ["auto_assign", "manager"].includes(assignment.assignment_source) &&
-        assignment.accept_by &&
-        new Date(assignment.accept_by).getTime() < Date.now(),
-    );
-    if (overdue)
-      return {
-        key: "attention" as const,
-        label: "Needs Attention",
-        color: "#dc2626",
-        detail: "One or more confirmation deadlines have passed",
-      };
-    if (
-      active.every((assignment) =>
-        ["accepted", "confirmed"].includes(assignment.status),
-      )
-    )
-      return {
-        key: "confirmed" as const,
-        label: "Confirmed",
-        color: "#16a34a",
-        detail: "Every assignment is confirmed",
-      };
-    if (active.every((assignment) => Boolean(assignment.published_at)))
-      return {
-        key: "awaiting" as const,
-        label: "Awaiting Confirmation",
-        color: "#ca8a04",
-        detail: "Published; waiting for one or more confirmations",
-      };
-    return {
-      key: "full" as const,
-      label: "Fully Assigned",
-      color: "#2563eb",
-      detail:
-        "Every position is filled; one or more assignments still need publishing",
-    };
-  }
-  function staffingCounts(g: Game) {
-    const slots = positions
-      .filter((position) => position.sport_id === g.sport_id)
-      .sort((a, b) => a.sort_order - b.sort_order)
-      .slice(0, Math.max(0, g.officials_needed));
-    const filled = new Set(
-      assignments
-        .filter(
-          (assignment) =>
-            assignment.game_id === g.id &&
-            assignment.status !== "declined" &&
-            slots.some((slot) => slot.id === assignment.position_id),
-        )
-        .map((assignment) => assignment.position_id),
-    ).size;
-    return { filled, total: slots.length, open: Math.max(0, slots.length - filled) };
-  }
-  function matchesOfficialFilter(g: Game) {
-    return (
-      !officialFilter ||
-      assignments.some(
-        (assignment) =>
-          assignment.game_id === g.id &&
-          assignment.official_id === officialFilter &&
-          assignment.status !== "declined",
-      )
-    );
-  }
-  function matchesLocationFilter(g: Game) {
-    return !locationFilter || g.location_id === locationFilter;
-  }
-  function matchesLeagueFilter(g: Game) {
-    return !leagueFilter || g.league_id === leagueFilter;
-  }
-  function matchesLevelFilter(g: Game) {
-    return !levelFilter || g.level_id === levelFilter;
-  }
-  function selfAssignOpenCount(gameId: string) {
-    return selfAssignSlots.filter(
-      (slot) => slot.game_id === gameId && slot.status === "open",
-    ).length;
-  }
-  const selfAssignGameCount = new Set(
-    selfAssignSlots
-      .filter((slot) => slot.status === "open")
-      .map((slot) => slot.game_id),
-  ).size;
-  const hasDirectGameFilter = Boolean(
-    locationFilter || officialFilter || leagueFilter || levelFilter,
-  );
-  const rangeGames = games.filter((g) => inRange(g, range, customDate));
-  const baseFilteredGames = games.filter((g) => {
-    const matchesSelfAssign =
-      !selfAssignOnly || selfAssignOpenCount(g.id) > 0;
-    if (hasDirectGameFilter)
-      return (
-        matchesLocationFilter(g) &&
-        matchesOfficialFilter(g) &&
-        matchesLeagueFilter(g) &&
-        matchesLevelFilter(g) &&
-        matchesSelfAssign
-      );
-    return (
-      inRange(g, range, customDate) &&
-      matchesSelfAssign &&
-      (!unpublishedOnly || isUnpublishedGame(g)) &&
-      (completenessFilter === "all" ||
-        assignmentCompleteness(g).key === completenessFilter)
-    );
-  });
-  function compareGames(a: Game, b: Game) {
-    let n = 0;
-    if (gameSort === "game")
-      n = `${a.home?.name || ""} ${a.away?.name || ""}`.localeCompare(
-        `${b.home?.name || ""} ${b.away?.name || ""}`,
-      );
-    else if (gameSort === "location")
-      n = (a.location?.name || "").localeCompare(b.location?.name || "");
-    else if (gameSort === "time")
-      n = new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime();
-    else if (gameSort === "power") n = gamePower(a) - gamePower(b);
-    else if (gameSort === "status")
-      n = (a.status === "open" ? "active" : a.status).localeCompare(
-        b.status === "open" ? "active" : b.status,
-      );
-    else if (gameSort === "assignments")
-      n = assignmentCompleteness(a).label.localeCompare(
-        assignmentCompleteness(b).label,
-      );
-    else
-      n =
-        gamePower(b) - gamePower(a) ||
-        new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime();
-    if (n === 0)
-      n = new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime();
-    return gameSortDir === "desc" ? -n : n;
-  }
-  const linkGroupByGame = new Map(
-    linkMembers.map((member) => [member.game_id, member.group_id]),
-  );
-  const linkOrderByGame = new Map(
-    linkMembers.map((member) => [member.game_id, member.sort_order]),
-  );
-  const groupedGames = new Map<string, Game[]>();
-  const unlinkedGames: Game[] = [];
-  for (const currentGame of baseFilteredGames) {
-    const groupId = linkGroupByGame.get(currentGame.id);
-    if (!groupId) unlinkedGames.push(currentGame);
-    else {
-      const group = groupedGames.get(groupId) || [];
-      group.push(currentGame);
-      groupedGames.set(groupId, group);
-    }
-  }
-  const gameUnits: { key: string; groupId: string | null; games: Game[] }[] = [
-    ...Array.from(groupedGames.entries()).map(([groupId, linked]) => ({
-      key: groupId,
-      groupId,
-      games: linked.sort(
-        (a, b) =>
-          (linkOrderByGame.get(a.id) || 0) - (linkOrderByGame.get(b.id) || 0),
-      ),
-    })),
-    ...unlinkedGames.map((single) => ({
-      key: `single-${single.id}`,
-      groupId: null,
-      games: [single],
-    })),
-  ].sort((a, b) => compareGames(a.games[0], b.games[0]));
-  const filteredGames = gameUnits.flatMap((unit) => unit.games);
-  const assignmentSelection = games.filter((listedGame) =>
-    linkSelected.includes(listedGame.id),
-  );
-  const assignmentSelectionGroupId = assignmentSelection.length
-    ? linkGroupByGame.get(assignmentSelection[0].id) || null
-    : null;
-  const assignmentSelectionIsOneTarget =
-    assignmentSelection.length === 1 ||
-    (Boolean(assignmentSelectionGroupId) &&
-      assignmentSelection.every(
-        (listedGame) =>
-          linkGroupByGame.get(listedGame.id) === assignmentSelectionGroupId,
-      ));
-  const assignmentSelectionTarget = assignmentSelectionIsOneTarget
-    ? assignmentSelection[0]
-    : null;
-  const assignmentSelectionIsLinked = Boolean(
-    assignmentSelectionTarget &&
-      linkGroupByGame.get(assignmentSelectionTarget.id),
-  );
-  function sortGames(by: Exclude<GameSort, "default">) {
-    if (gameSort === by) setGameSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    else {
-      setGameSort(by);
-      setGameSortDir("asc");
-    }
-  }
-  function sortArrow(by: Exclude<GameSort, "default">) {
-    return gameSort === by ? (gameSortDir === "asc" ? " ‚ñ≤" : " ‚ñº") : "";
-  }
-  function toggleLinkSelection(gameId: string) {
-    setSelected(gameId);
-    setOverrideOfficial("");
-    setLinkSelected((current) =>
-      current.includes(gameId)
-        ? current.filter((id) => id !== gameId)
-        : [...current, gameId],
-    );
-  }
-  async function linkGames() {
-    if (linkSelected.length < 2) return;
-    setLinking(true);
-    setError("");
-    setNotice("");
-    const alreadyLinked = linkSelected.some((id) => linkGroupByGame.has(id));
-    if (alreadyLinked) {
-      setError(
-        "Unlink selected games from their current group before linking them again.",
-      );
-      setLinking(false);
-      return;
-    }
-    const { data: userData } = await supabase.auth.getUser();
-    const { data: group, error: groupError } = await supabase
-      .from("game_link_groups")
-      .insert({ name: "Linked Games", created_by: userData.user?.id || null })
-      .select("id")
-      .single();
-    if (groupError || !group) {
-      setError(groupError?.message || "Unable to link games.");
-      setLinking(false);
-      return;
-    }
-    const orderedIds = filteredGames
-      .filter((listedGame) => linkSelected.includes(listedGame.id))
-      .map((listedGame) => listedGame.id);
-    const { error: memberError } = await supabase
-      .from("game_link_members")
-      .insert(
-        orderedIds.map((game_id, sort_order) => ({
-          group_id: group.id,
-          game_id,
-          sort_order,
-        })),
-      );
-    if (memberError) {
-      await supabase.from("game_link_groups").delete().eq("id", group.id);
-      setError(memberError.message);
-    } else {
-      setNotice(`${orderedIds.length} games linked and grouped together.`);
-      setLinkSelected([]);
-    }
-    await load();
-    setLinking(false);
-  }
-  async function unlinkGames(groupId: string) {
-    if (
-      !window.confirm(
-        "Unlink these games? The games and assignments will remain.",
-      )
-    )
-      return;
-    setLinking(true);
-    setError("");
-    const { error: deleteError } = await supabase
-      .from("game_link_groups")
-      .delete()
-      .eq("id", groupId);
-    if (deleteError) setError(deleteError.message);
-    else setNotice("Games unlinked.");
-    await load();
-    setLinking(false);
-  }
-  function travelBetween(first: Game, second: Game) {
-    if (first.location_id && first.location_id === second.location_id)
-      return { miles: 0, minutes: 0 };
-    const directMiles = miles(
-      first.location?.latitude ?? null,
-      first.location?.longitude ?? null,
-      second.location?.latitude ?? null,
-      second.location?.longitude ?? null,
-    );
-    if (directMiles == null) return null;
-    const roadMiles = directMiles * 1.2;
-    return {
-      miles: roadMiles,
-      minutes: Math.max(10, Math.ceil((roadMiles / 35) * 60 + 10)),
-    };
-  }
-  function sharedCrew(first: Game, second: Game) {
-    const firstIds = new Set(
-      assignments
-        .filter(
-          (assignment) =>
-            assignment.game_id === first.id && assignment.status !== "declined",
-        )
-        .map((assignment) => assignment.official_id),
-    );
-    return [
-      ...new Set(
-        assignments
-          .filter(
-            (assignment) =>
-              assignment.game_id === second.id &&
-              assignment.status !== "declined" &&
-              firstIds.has(assignment.official_id),
-          )
-          .map((assignment) => assignment.official_id),
-      ),
-    ];
-  }
-  function travelDetails(first: Game, second: Game) {
-    const travel = travelBetween(first, second);
-    const firstEnds =
-      new Date(first.starts_at).getTime() + first.duration_minutes * 60000;
-    const gapMinutes = Math.floor(
-      (new Date(second.starts_at).getTime() - firstEnds) / 60000,
-    );
-    const shared = sharedCrew(first, second);
-    const impossible =
-      gapMinutes < 0 || (travel != null && gapMinutes < travel.minutes);
-    return { travel, gapMinutes, shared, impossible };
-  }
-  function linkedGroupWarnings(groupGames: Game[]) {
-    const warnings: string[] = [];
-    for (let index = 1; index < groupGames.length; index++) {
-      const first = groupGames[index - 1],
-        second = groupGames[index];
-      const details = travelDetails(first, second);
-      if (!details.impossible || !details.shared.length) continue;
-      const names = details.shared.map((officialId) => {
-        const official = officials.find(
-          (candidate) => candidate.id === officialId,
-        );
-        return official
-          ? `${official.first_name} ${official.last_name}`
-          : "Assigned official";
-      });
-      warnings.push(
-        `${names.join(", ")} cannot reasonably travel from ${first.location?.name || "the first location"} to ${second.location?.name || "the next location"} in the ${Math.max(0, details.gapMinutes)} minutes available.`,
-      );
-    }
-    return warnings;
-  }
-  async function reorderLinkedGame(
-    groupId: string,
-    draggedId: string,
-    targetId: string,
-  ) {
-    if (!canManage || !draggedId || draggedId === targetId) return;
-    const ordered = linkMembers
-      .filter((member) => member.group_id === groupId)
-      .sort((a, b) => a.sort_order - b.sort_order)
-      .map((member) => member.game_id);
-    const from = ordered.indexOf(draggedId),
-      to = ordered.indexOf(targetId);
-    if (from < 0 || to < 0) return;
-    const next = [...ordered];
-    next.splice(to, 0, next.splice(from, 1)[0]);
-    setLinking(true);
-    setError("");
-    setNotice("");
-    const results = await Promise.all(
-      next.map((gameId, sortOrder) =>
-        supabase
-          .from("game_link_members")
-          .update({ sort_order: sortOrder })
-          .eq("group_id", groupId)
-          .eq("game_id", gameId),
-      ),
-    );
-    const failed = results.find((result) => result.error)?.error;
-    if (failed) setError(failed.message);
-    else setNotice("Linked-game order updated.");
-    setDraggingGame("");
-    await load();
-    setLinking(false);
-  }
-  async function moveLinkedGame(
-    groupId: string,
-    gameId: string,
-    direction: -1 | 1,
-  ) {
-    const ordered = linkMembers
-      .filter((member) => member.group_id === groupId)
-      .sort((a, b) => a.sort_order - b.sort_order);
-    const index = ordered.findIndex((member) => member.game_id === gameId);
-    const target = ordered[index + direction];
-    if (target) await reorderLinkedGame(groupId, gameId, target.game_id);
-  }
-  async function unlinkOneGame(groupId: string, gameId: string) {
-    if (!canManage || linking) return;
-    setLinking(true);
-    setError("");
-    setNotice("");
-    const members = linkMembers.filter((member) => member.group_id === groupId);
-    const { error: removeError } = await supabase
-      .from("game_link_members")
-      .delete()
-      .eq("group_id", groupId)
-      .eq("game_id", gameId);
-    if (removeError) setError(removeError.message);
-    else if (members.length <= 2) {
-      const { error: groupError } = await supabase
-        .from("game_link_groups")
-        .delete()
-        .eq("id", groupId);
-      if (groupError) setError(groupError.message);
-      else
-        setNotice(
-          "Game unlinked; the remaining single-game group was removed.",
-        );
-    } else setNotice("Game removed from Linked Games.");
-    await load();
-    setLinking(false);
-  }
-  function selfAssignKey(gameId: string, positionId: string) {
-    return `${gameId}:${positionId}`;
-  }
-  function isSelfAssignOpen(gameId: string, positionId: string) {
-    return selfAssignSlots.some(
-      (slot) => slot.game_id === gameId && slot.position_id === positionId,
-    );
-  }
-  function toggleSelfAssignSelection(gameId: string, positionId: string) {
-    const key = selfAssignKey(gameId, positionId);
-    setSelfAssignSelected((current) =>
-      current.includes(key)
-        ? current.filter((item) => item !== key)
-        : [...current, key],
-    );
-  }
-  function selfAssignOptionsForGames(gameIds: string[]) {
-    return gameIds.flatMap((gameId) => {
-      const listedGame = games.find((item) => item.id === gameId);
-      if (!listedGame) return [];
-      return positions
-        .filter((position) => position.sport_id === listedGame.sport_id)
-        .sort((a, b) => a.sort_order - b.sort_order)
-        .slice(0, Math.max(0, listedGame.officials_needed))
-        .filter(
-          (position) =>
-            !assignments.some(
-              (assignment) =>
-                assignment.game_id === gameId &&
-                assignment.position_id === position.id &&
-                assignment.status !== "declined",
-            ) && !isSelfAssignOpen(gameId, position.id),
-        )
-        .map((position) => ({
-          gameId,
-          positionId: position.id,
-          positionName: position.name,
-          game: listedGame,
-          key: selfAssignKey(gameId, position.id),
-        }));
-    });
-  }
-  function prepareSelfAssignPositions() {
-    const gameIds = linkSelected.length
-      ? linkSelected
-      : game
-        ? [game.id]
-        : [];
-    const options = selfAssignOptionsForGames(gameIds);
-    setNotice("");
-    if (!options.length) {
-      setError(
-        "The selected game has no unassigned positions available for Self Assign.",
-      );
-      return;
-    }
-    setError("");
-    setSelfAssignSelected(options.map((option) => option.key));
-    setShowSelfAssignDialog(true);
-  }
-  async function openSelfAssignPositions() {
-    if (!canManage) {
-      setError(
-        "Only Administrators and Assignors can open Self Assign positions.",
-      );
-      return;
-    }
-    const usedGameSelection = selfAssignSelected.length === 0;
-    let slots = selfAssignSelected.map((key) => {
-      const [game_id, position_id] = key.split(":");
-      return { game_id, position_id };
-    });
-    if (!slots.length) {
-      const selectedGameIds = linkSelected.length
-        ? linkSelected
-        : game
-          ? [game.id]
-          : [];
-      slots = selectedGameIds.flatMap((gameId) => {
-        const selectedGame = games.find((item) => item.id === gameId);
-        if (!selectedGame) return [];
-        return positions
-          .filter((position) => position.sport_id === selectedGame.sport_id)
-          .sort((a, b) => a.sort_order - b.sort_order)
-          .slice(0, Math.max(0, selectedGame.officials_needed))
-          .filter(
-            (position) =>
-              !assignments.some(
-                (assignment) =>
-                  assignment.game_id === gameId &&
-                  assignment.position_id === position.id &&
-                  assignment.status !== "declined",
-              ) && !isSelfAssignOpen(gameId, position.id),
-          )
-          .map((position) => ({ game_id: gameId, position_id: position.id }));
-      });
-    }
-    slots = slots.filter(
-      (slot, index, all) =>
-        all.findIndex(
-          (item) =>
-            item.game_id === slot.game_id &&
-            item.position_id === slot.position_id,
-        ) === index,
-    );
-    if (!slots.length) {
-      setError(
-        "The selected game has no unassigned positions available for Self Assign.",
-      );
-      setNotice("");
-      return;
-    }
-    setSelfAssignSaving(true);
-    setError("");
-    setNotice("");
-    try {
-      const { data, error: saveError } = await supabase.rpc(
-        "set_self_assign_positions",
-        { p_slots: slots },
-      );
-      if (saveError) throw saveError;
+Y™Áäx-ÆÈ‹j◊ù¢Îi∫⁄+äßj[hëÈ‹¢ÈÌ◊]}ÔTËµ©h∫⁄n∂XßzÕHù\ŸH€Y[ùé¬ö[\‹ù»\ŸQYôôX›\ŸSY[[À\ŸT›]HHúõ€HúôXX›é¬ö[\‹ù»‹ôX]P€Y[ùHúõ€Hããã€Xã‹›\Xò\ŸKÿ€Y[ùé¬ö[\‹ù»[õõ›[òŸU[ô–]òZ[XõHHúõ€Hãã’[ô–Ÿ[ù\àé¬ù\HX[HH»Yà›ö[ôŒ»ò[YNà›ö[ô»N¬ù\Hÿ[YHH¬àYà›ö[ôŒ¬àÿ[YW€ù[Xô\éà›ö[ôŒ¬à›]\Œà›ö[ôŒ¬à‹‹ù⁄Yà›ö[ôŒ¬àXY›YW⁄Yà›ö[ô»ù[¬à]ô[⁄Yà›ö[ô»ù[¬àÿÿ][€ó⁄Yà›ö[ô»ù[¬à›\ù◊ÿ]à›ö[ôŒ¬à\ò][€ó€Z[ù]\Œàù[Xô\é¬àŸôöX⁄X[◊€ôYYYàù[Xô\é¬à‹‹ùŒà»ò[YNà›ö[ô»Hù[¬àXY›Y\Œà¬àò[YNà›ö[ôŒ¬à\‹⁄Y€õY[ùŸö[›\ôŸ]Ÿ^\Œàù[Xô\é¬à\‹⁄Y€õY[ùÿXÿŸ\[òŸW⁄›\úŒàù[Xô\é¬à\‹⁄Y€õY[ùŸ\ÿÿ[][€óŸ^\Œàù[Xô\é¬à\‹⁄Y€õY[ù‹ô[Z[ô\ó⁄›\úŒàù[Xô\é¬àHù[¬à]ô[Œà»Yà›ö[ôŒ»ò[YNà›ö[ô»Hù[¬à€YNàX[Hù[¬à]ÿ^NàX[Hù[¬àÿÿ][€éà¬àYà›ö[ôŒ¬àò[YNà›ö[ôŒ¬à⁄]Nà›ö[ô»ù[¬à›]Nà›ö[ô»ù[¬à]]YNàù[Xô\àù[¬à€ô⁄]YNàù[Xô\àù[¬àHù[¬üN¬ù\HŸôöX⁄X[H¬àYà›ö[ôŒ¬àö\ú›€ò[YNà›ö[ôŒ¬à\›€ò[YNà›ö[ôŒ¬à[XZ[à›ö[ô»ù[¬à€ôNà›ö[ô»ù[¬à‹‹ùŒà›ö[ô÷◊N¬àX›]ôNàõ€€X[é¬à€YWÿ⁄]Nà›ö[ô»ù[¬à€YW‹›]Nà›ö[ô»ù[¬à€YW€]]YNàù[Xô\àù[¬à€YW€€ô⁄]YNàù[Xô\àù[¬üN¬ù\H‹⁄][€àH¬àYà›ö[ôŒ¬à‹‹ù⁄Yà›ö[ôŒ¬àò[YNà›ö[ôŒ¬àô\]Z\ôYàõ€€X[é¬à€‹ù€‹ô\éàù[Xô\é¬üN¬ù\H\‹⁄Y€õY[ùH¬àYà›ö[ôŒ¬àÿ[YW⁄Yà›ö[ôŒ¬àŸôöX⁄X[⁄Yà›ö[ôŒ¬à‹⁄][€ó⁄Yà›ö[ôŒ¬à›]\Œà›ö[ôŒ¬àXõ\⁄Yÿ]à›ö[ô»ù[¬àXÿŸ\ÿûNà›ö[ô»ù[¬àô\‹€ôYÿ]à›ö[ô»ù[¬àX€[ôW‹ôX\€€éà›ö[ô»ù[¬à›ô\ôYW‹ô]öY]ŸYÿ]à›ö[ô»ù[¬à\‹⁄Y€õY[ù‹€›\òŸNàõX[òYŸ\ààúŸ[óÿ\‹⁄Y€ààò]]◊ÿ\‹⁄Y€àé¬à[XZ[‹Ÿ[ùÿ]à›ö[ô»ù[¬à[XZ[Ÿ\úõ‹éà›ö[ô»ù[¬àô\Ÿ[ôŸ[XZ[⁄Yà›ö[ô»ù[¬àÿ[òŸ[][€ó€õ›YöYYÿ]à›ö[ô»ù[¬àÿ[òŸ[][€óŸ[XZ[Ÿ\úõ‹éà›ö[ô»ù[¬àÿ[òŸ[][€óŸ[XZ[⁄Yà›ö[ô»ù[¬üN¬ù\Hò[ö»H»ŸôöX⁄X[⁄Yà›ö[ôŒ»ò[öŒàù[Xô\àN¬ù\H‹⁄][€îò[ö»H¬àŸôöX⁄X[⁄Yà›ö[ôŒ¬àôYó‹ò[öŒàù[Xô\é¬à\åW‹ò[öŒàù[Xô\é¬à\åó‹ò[öŒàù[Xô\é¬àõ›\ù‹ò[öŒàù[Xô\é¬àY[ù‹ó‹ò[öŒàù[Xô\é¬üN¬ù\H›Ÿ\àH»X[W⁄Yà›ö[ôŒ»›Ÿ\éàù[Xô\àN¬ù\H[Y”H»ŸôöX⁄X[⁄Yà›ö[ôŒ»XY›YW⁄Yà›ö[ô»N¬ù\H[Y’àH»ŸôöX⁄X[⁄Yà›ö[ôŒ»]ô[⁄Yà›ö[ô»N¬ù\Hõÿ⁄»H¬àŸôöX⁄X[⁄Yà›ö[ôŒ¬àõÿ⁄◊›\Nàô]Hàõÿÿ][€ààùX[Hàù[YHé¬à›\ùŸ]Nà›ö[ô»ù[¬à[ôŸ]Nà›ö[ô»ù[¬à›\ù◊ÿ]à›ö[ô»ù[¬à[ô◊ÿ]à›ö[ô»ù[¬àÿÿ][€ó⁄Yà›ö[ô»ù[¬àX[W⁄Yà›ö[ô»ù[¬üN¬ù\H[ö—‹õ›\H¬àYà›ö[ôŒ¬àò[YNà›ö[ôŒ¬à‹ôX]Yÿ]à›ö[ôŒ¬à‹ôÿ[ö^ò][€ó⁄Yà›ö[ôŒ¬üN¬ù\H[ö”Y[Xô\àH»‹õ›\⁄Yà›ö[ôŒ»ÿ[YW⁄Yà›ö[ôŒ»€‹ù€‹ô\éàù[Xô\àN¬ù\HŸ[ê\‹⁄Y€î€›H¬àYà›ö[ôŒ¬àÿ[YW⁄Yà›ö[ôŒ¬à‹⁄][€ó⁄Yà›ö[ôŒ¬à›]\Œàõ‹[ààò€Z[YYàù⁄]ò]€àé¬üN¬ù\H\‹⁄Y€õY[ù[\]T€›H¬àYà›ö[ôŒ¬à‹⁄][€ó⁄Yà›ö[ôŒ¬àŸôöX⁄X[⁄Yà›ö[ôŒ¬à€‹ù€‹ô\éàù[Xô\é¬üN¬ù\H\‹⁄Y€õY[ù[\]HH¬àYà›ö[ôŒ¬àò[YNà›ö[ôŒ¬à‹‹ù⁄Yà›ö[ôŒ¬àXY›YW⁄Yà›ö[ô»ù[¬à‹ôX]YÿûNà›ö[ôŒ¬à\]Yÿ]à›ö[ôŒ¬à‹ôÿ[ö^ò][€ó⁄Yà›ö[ôŒ¬à\‹⁄Y€õY[ù›[\]W‹€›Œà\‹⁄Y€õY[ù[\]T€›◊N¬üN¬ù\H]Y]]ô[ùH¬àYàù[Xô\é¬àX›[€éà›ö[ôŒ¬àX›‹ó€ò[YNà›ö[ô»ù[¬à›[[X\ûNà›ö[ôŒ¬àÿÿ›\úôYÿ]à›ö[ôŒ¬üN¬ù\H[ò\‹⁄Y€õY[ù]Y]H¬àÿ[YW⁄Yà›ö[ô»ù[¬à€Ÿ]Nà»‹⁄][€ó⁄YŒà›ö[ô»Hù[¬üN¬ù\Hÿ]ôY\‹⁄Y€õY[ùöY]»H¬àYà›ö[ôŒ¬àò[YNà›ö[ôŒ¬àò[ôŸNàò[ôŸN¬à›\›€Q]Nà›ö[ôŒ¬àÿÿ][€ëö[\éà›ö[ôŒ¬àŸôöX⁄X[ö[\éà›ö[ôŒ¬àXY›YQö[\èŒà›ö[ôŒ¬à]ô[ö[\èŒà›ö[ôŒ¬à€€\][ô\‹—ö[\éà€€\][ô\‹Œ¬à[úXõ\⁄Y€õNàõ€€X[é¬àŸ[ê\‹⁄Y€ì€õNàõ€€X[é¬üN¬ù\H]ZX⁄—Y]òYùH¬àÿ[YRYà›ö[ôŒ¬à›\ù–]à›ö[ôŒ¬à\ò][€ìZ[ù]\Œàù[Xô\é¬àÿÿ][€íYà›ö[ôŒ¬à]ô[Yà›ö[ôŒ¬üN¬ù\Hù[–X›[€îô\›[H¬àX›[€éà›ö[ôŒ¬à›XÿŸYYYàù[Xô\é¬àòZ[\ô\Œà›ö[ô÷◊N¬üN¬ù\Hù[–\‹⁄Y€õY[ù][HH¬àÿ[YRYà›ö[ôŒ¬àÿ[YSù[Xô\éà›ö[ôŒ¬àX]⁄\à›ö[ôŒ¬à‹⁄][€íYà›ö[ôŒ¬à‹⁄][€ìò[YNà›ö[ôŒ¬àŸôöX⁄X[Yà›ö[ôŒ¬àŸôöX⁄X[ò[YNà›ö[ôŒ¬à›]\Œàú›XÿŸ\‹»àôòZ[Yàú⁄⁄\Yé¬à\úõ‹éà›ö[ôŒ¬üN¬ù\Hù[–\‹⁄Y€õY[ùô\›[H¬àŸôöX⁄X[Yà›ö[ôŒ¬àŸôöX⁄X[ò[YNà›ö[ôŒ¬à][\Œàù[–\‹⁄Y€õY[ù][V◊N¬üN¬ù\Hò[ôŸHHò[àùŸ^Hàù€[‹úõ›»àù\’ŸYZ»àõô^ŸYZ»àò›\›€Hé¬ù\H€€\][ô\‹»Bàò[Çàù[ò\‹⁄Y€ôYÇàú\ùX[Çàôù[Çàò]ÿZ][ô»Çàò€€ôö\õYYÇàò][ù[€àé¬ù\Hÿ[YT€‹ùBàôYò][àôÿ[YHàõÿÿ][€ààù[YHàú›Ÿ\ààú›]\»àò\‹⁄Y€õY[ù»é¬ò€€ú›ÿ[YT›]\”‹[€ú»H¬à»òX›]ôHãêX›]ôHóKà»ú›\‹[ôYãí€óKà»òÿ[òŸ[Yãêÿ[òŸ[YóKà»úòZ[ôY€›]ãîòZ[à›]óKóH\»€€ú›¬ôù[ò›[€àÿ[YPXÿŸ\–\‹⁄Y€õY[ù ÿ[YNàX⁄œÿ[YKú›]\»èäH¬àô]\õàÿ[YKú›]\»OOHòX›]ôHé¬üBôù[ò›[€à[òX›]ôQÿ[YT›]\”Xô[
+›]\Œà›ö[ô H¬àYà
+›]\»OOHú›\‹[ôYäHô]\õàì€à€é¬àYà
+›]\»OOHúòZ[ôY€›]äHô]\õàîòZ[à›]é¬àYà
+›]\»OOHòÿ[òŸ[Yà›]\»OOHòÿ[òŸ[YäHô]\õàêÿ[òŸ[Yé¬àô]\õàí[òX›]ôHé¬üBôù[ò›[€àZ[\ àNàù[Xô\àù[àéàù[Xô\àù[àŒàù[Xô\àù[ààù[Xô\àù[äH¬àYà
+ÿKãÀKú€€YJ
+
+HOàOHù[
+JHô]\õàù[¬à€€ú›àHŒMNçÕåLÀàHX]îH»Nà]H
+»HHHJH
+àà€àH
+HHàJH
+ààHBàX]ú⁄[ä]»äH
+äàà
+¬àX]ò€‹ HH
+à
+H
+àX]ò€‹ »H
+à
+H
+àX]ú⁄[ä€à»äH
+äàé¬àô]\õàà
+àà
+àX]ò\⁄[äX]ú‹\ù
+JJN¬üBôù[ò›[€à›ô\õ\ àT›\ùà›ö[ôÀàSZ[ù]\Œàù[Xô\ãàî›\ùà›ö[ôÀàìZ[ù]\Œàù[Xô\ãäH¬à€€ú›HHô]»]JT›\ù
+KôŸ][YJ
+KààHô]»]Jî›\ù
+KôŸ][YJ
+N¬àô]\õàHà
+»ìZ[ù]\»
+àå	âààH
+»SZ[ù]\»
+àå¬üBôù[ò›[€à›\ù^Jà]JH¬à€€ú›Hô]»]J
+N¬àúŸ]›\ú 
+N¬àô]\õà¬üBôù[ò›[€àÿÿ[]RŸ^Jà]JH¬à€€ú›YX\àHôŸ]ù[YX\ä
+Kà[€ùH	ŸôŸ][€ù
 
-      const count = Number(data ?? slots.length);
-      await refreshAssignmentState();
-      setNotice(
-        `${count} ${count === 1 ? "position is" : "positions are"} now available for Self Assign.`,
-      );
-      setShowSelfAssignDialog(false);
-      setSelfAssignSelected([]);
-      if (usedGameSelection) setLinkSelected([]);
-    } catch (saveError) {
-      setError(
-        saveError instanceof Error
-          ? saveError.message
-          : typeof saveError === "object" &&
-              saveError !== null &&
-              "message" in saveError
-            ? String(saveError.message)
-            : "Unable to open the selected positions for Self Assign.",
-      );
-    } finally {
-      setSelfAssignSaving(false);
-    }
-  }
-  async function withdrawSelfAssignPosition(
-    gameId: string,
-    positionId: string,
-  ) {
-    if (!canManage) return;
-    setSelfAssignSaving(true);
-    setError("");
-    const { error: withdrawError } = await supabase.rpc(
-      "withdraw_self_assign_position",
-      { p_game_id: gameId, p_position_id: positionId },
-    );
-    if (withdrawError) setError(withdrawError.message);
-    else setNotice("Self Assign position removed.");
-    await refreshAssignmentState();
-    setSelfAssignSaving(false);
-  }
-  const game = games.find((g) => g.id === selected);
-  const sportPositions = game
-    ? positions
-        .filter((p) => p.sport_id === game.sport_id)
-        .sort((a, b) => a.sort_order - b.sort_order)
-    : [];
-  const gamePositions = game
-    ? sportPositions.slice(
-        0,
-        Math.max(0, Math.min(game.officials_needed, sportPositions.length)),
-      )
-    : [];
-  const gameAssignments = game
-    ? assignments.filter((a) => a.game_id === game.id)
-    : [];
-  const needsAssignmentOnly = game ? Boolean(needsAssignmentView[game.id]) : false;
-  function positionNeedsAssignment(position: Position) {
-    if (!game) return false;
-    return !assignments.some(
-      (assignment) =>
-        assignment.game_id === game.id &&
-        assignment.position_id === position.id &&
-        !["declined", "cancelled"].includes(assignment.status),
-    );
-  }
-  const visibleGamePositions = needsAssignmentOnly
-    ? gamePositions.filter(positionNeedsAssignment)
-    : gamePositions;
-  const unpublishedCount = gameAssignments.filter(
-    (a) => !a.published_at && a.status !== "declined",
-  ).length;
-  const unpublishedAssignments = gameAssignments.filter(
-    (assignment) => !assignment.published_at && assignment.status !== "declined",
-  );
-  const publishMissingEmails = unpublishedAssignments.filter((assignment) => !officials.find((item) => item.id === assignment.official_id)?.email).length;
-  const publishAcceptanceHours = game?.leagues?.assignment_acceptance_hours ?? 24;
-  const activeAssignmentCount = gameAssignments.filter(
-    (a) => !["declined", "cancelled"].includes(a.status),
-  ).length;
-  const openPositionCount = Math.max(0, gamePositions.length - activeAssignmentCount);
-  const assignmentEmailsSent = gameAssignments.filter((a) => a.email_sent_at).length;
-  const assignmentEmailIssues = gameAssignments.filter(
-    (a) => a.published_at && !a.email_sent_at,
-  ).length;
-  const cancellationEmailsSent = gameAssignments.filter(
-    (a) => a.cancellation_notified_at,
-  ).length;
-  const cancellationEmailIssues = gameAssignments.filter(
-    (a) =>
-      ["canceled", "rained_out"].includes(game?.status || "") &&
-      a.status === "cancelled" &&
-      !a.cancellation_notified_at,
-  ).length;
-  function workloadWindow(officialId: string, days: number) {
-    const now = Date.now(), end = now + days * 86400000;
-    return assignments.filter((item) => item.official_id === officialId && !["declined", "cancelled"].includes(item.status)).filter((item) => { const start = new Date(games.find((listed) => listed.id === item.game_id)?.starts_at || 0).getTime(); return start >= now && start <= end; }).length;
-  }
-  function requestSelectedGame(nextGameId: string) {
-    if (
-      nextGameId &&
-      nextGameId !== selected &&
-      unpublishedCount > 0 &&
-      !window.confirm(
-        `Game #${game?.game_number || ""} has ${unpublishedCount} unpublished assignment${unpublishedCount === 1 ? "" : "s"}. Switch games without publishing?`,
-      )
-    )
-      return;
-    setSelected(nextGameId);
-    setOverrideOfficial("");
-  }
-  function chooseRange(r: Range) {
-    setRange(r);
-    setShowCalendar(false);
-    setOverrideOfficial("");
-    setSelected("");
-    setLinkSelected([]);
-  }
-  function chooseDate(value: string) {
-    setCustomDate(value);
-    setRange("custom");
-    setOverrideOfficial("");
-    setSelected("");
-    setLinkSelected([]);
-  }
-  function toggleUnpublished() {
-    const next = !unpublishedOnly;
-    setUnpublishedOnly(next);
-    setOverrideOfficial("");
-    setSelected("");
-    setLinkSelected([]);
-  }
-  function chooseCompleteness(value: Completeness) {
-    setCompletenessFilter(value);
-    setOverrideOfficial("");
-    setSelected("");
-    setLinkSelected([]);
-  }
-  function clearGameFilters() {
-    setRange("all");
-    setCustomDate("");
-    setShowCalendar(false);
-    setUnpublishedOnly(false);
-    setSelfAssignOnly(false);
-    setCompletenessFilter("all");
-    setOfficialFilter("");
-    setLocationFilter("");
-    setLeagueFilter("");
-    setLevelFilter("");
-    setSelected("");
-    setLinkSelected([]);
-  }
-  async function loadSavedViews() {
-    const { data, error: viewError } = await supabase.from("assignment_saved_views").select("id,name,filters").order("updated_at", { ascending: false });
-    if (viewError) return;
-    setSavedViews((data || []).map((row) => ({ id: row.id, name: row.name, ...(row.filters as Omit<SavedAssignmentView, "id" | "name">) })));
-  }
-  async function saveCurrentView() {
-    const name = window.prompt("Name this Assignment Center view:")?.trim();
-    if (!name) return;
-    const filters = {
-      range,
-      customDate,
-      locationFilter,
-      officialFilter,
-      leagueFilter,
-      levelFilter,
-      completenessFilter,
-      unpublishedOnly,
-      selfAssignOnly,
-    };
-    const { data: auth } = await supabase.auth.getUser();
-    if (!auth.user) return setError("Sign in to save a shared view.");
-    const { error: saveError } = await supabase.from("assignment_saved_views").upsert({ user_id: auth.user.id, name, filters, updated_at: new Date().toISOString() }, { onConflict: "user_id,name" });
-    if (saveError) return setError(saveError.message);
-    await loadSavedViews();
-    setNotice(`Saved shared view ‚Äú${name}‚Äù.`);
-  }
-  function applySavedView(view: SavedAssignmentView) {
-    setRange(view.range);
-    setCustomDate(view.customDate);
-    setLocationFilter(view.locationFilter);
-    setOfficialFilter(view.officialFilter);
-    setLeagueFilter(view.leagueFilter || "");
-    setLevelFilter(view.levelFilter || "");
-    setCompletenessFilter(view.completenessFilter);
-    setUnpublishedOnly(view.unpublishedOnly);
-    setSelfAssignOnly(view.selfAssignOnly);
-    setLinkSelected([]);
-    setSelected("");
-    setNotice(`Showing saved view ‚Äú${view.name}‚Äù.`);
-  }
-  async function deleteSavedView(viewId: string) {
-    const { error: deleteError } = await supabase.from("assignment_saved_views").delete().eq("id", viewId);
-    if (deleteError) return setError(deleteError.message);
-    setSavedViews((current) => current.filter((view) => view.id !== viewId));
-  }
-  function linkedAssignmentGames() {
-    if (!game) return [];
-    const groupId = linkGroupByGame.get(game.id);
-    return groupId
-      ? games.filter((listedGame) => linkGroupByGame.get(listedGame.id) === groupId)
-      : [game];
-  }
-  function matchingPositionId(targetGame: Game, sourcePositionId: string) {
-    if (!game || !sourcePositionId) return "";
-    const sourcePositions = positions
-      .filter((position) => position.sport_id === game.sport_id)
-      .sort((a, b) => a.sort_order - b.sort_order || a.id.localeCompare(b.id));
-    const sourceSlot = sourcePositions.findIndex(
-      (position) => position.id === sourcePositionId,
-    );
-    if (sourceSlot < 0) return "";
-    return (
-      positions
-        .filter((position) => position.sport_id === targetGame.sport_id)
-        .sort((a, b) => a.sort_order - b.sort_order || a.id.localeCompare(b.id))[
-        sourceSlot
-      ]?.id || ""
-    );
-  }
-  function assignmentConflictReasonsForGame(
-    o: Official,
-    targetGame: Game,
-    ignorePositionId = "",
-  ) {
-    const reasons: string[] = [];
-    for (const a of assignments) {
-      if (
-        a.official_id !== o.id ||
-        ["declined", "cancelled"].includes(a.status)
-      )
-        continue;
-      if (
-        ignorePositionId &&
-        a.game_id === targetGame.id &&
-        a.position_id === ignorePositionId
-      )
-        continue;
-      const other = games.find((g) => g.id === a.game_id);
-      if (
-        other &&
-        overlaps(
-          targetGame.starts_at,
-          targetGame.duration_minutes || 110,
-          other.starts_at,
-          other.duration_minutes || 110,
-        )
-      ) {
-        const when = new Date(other.starts_at).toLocaleString([], {
-          dateStyle: "short",
-          timeStyle: "short",
-        });
-        reasons.push(
-          `Overlaps Game #${other.game_number} (${other.home?.name || "TBD"} vs ${other.away?.name || "TBD"}) at ${when}`,
-        );
-      }
-    }
-    return reasons;
-  }
-  function duplicateAssignmentReasonsForGame(
-    officialId: string,
-    targetGame: Game,
-    positionId: string,
-  ) {
-    return assignments.some(
-      (assignment) =>
-        assignment.game_id === targetGame.id &&
-        assignment.official_id === officialId &&
-        assignment.position_id !== positionId &&
-        assignment.status !== "declined",
-    )
-      ? ["Already assigned to another position on this game"]
-      : [];
-  }
-  function assignmentConflictReasons(o: Official, sourcePositionId = "") {
-    return linkedAssignmentGames().flatMap((targetGame) =>
-      assignmentConflictReasonsForGame(
-        o,
-        targetGame,
-        matchingPositionId(targetGame, sourcePositionId),
-      ),
-    );
-  }
-  function workingAtGameTime(o: Official, ignorePositionId = "") {
-    return assignmentConflictReasons(o, ignorePositionId).length > 0;
-  }
-  function ineligibleReasonsForGame(
-    o: Official,
-    targetGame: Game,
-    ignorePositionId = "",
-  ) {
-    const reasons: string[] = [];
-    reasons.push(
-      ...assignmentConflictReasonsForGame(o, targetGame, ignorePositionId),
-    );
-    const day = targetGame.starts_at.slice(0, 10),
-      gs = new Date(targetGame.starts_at).getTime(),
-      ge = gs + (targetGame.duration_minutes || 110) * 60000;
-    for (const b of blocks) {
-      if (b.official_id !== o.id) continue;
-      if (
-        b.starts_at &&
-        b.ends_at &&
-        new Date(b.starts_at).getTime() < ge &&
-        new Date(b.ends_at).getTime() > gs
-      )
-        reasons.push(
-          `Unavailable from ${new Date(b.starts_at).toLocaleString()} to ${new Date(b.ends_at).toLocaleString()}`,
-        );
-      else if (
-        b.block_type === "date" &&
-        b.start_date &&
-        b.end_date &&
-        day >= b.start_date &&
-        day <= b.end_date
-      )
-        reasons.push(`Unavailable from ${b.start_date} through ${b.end_date}`);
-      else if (
-        b.block_type === "location" &&
-        b.location_id === targetGame.location_id
-      )
-        reasons.push(
-          `Blocked at ${targetGame.location?.name || "this location"}`,
-        );
-      else if (
-        b.block_type === "team" &&
-        b.team_id &&
-        (b.team_id === targetGame.home?.id || b.team_id === targetGame.away?.id)
-      )
-        reasons.push(
-          `Blocked for ${b.team_id === targetGame.home?.id ? targetGame.home?.name : targetGame.away?.name || "this team"}`,
-        );
-    }
-    if (
-      !o.sports.some(
-        (s) => s.toLowerCase() === targetGame.sports?.name.toLowerCase(),
-      )
-    )
-      reasons.push(`Not eligible for ${targetGame.sports?.name || "sport"}`);
-    const ol = leagueElig.filter((x) => x.official_id === o.id),
-      ov = levelElig.filter((x) => x.official_id === o.id);
-    if (
-      targetGame.league_id &&
-      ol.length &&
-      !ol.some((x) => x.league_id === targetGame.league_id)
-    )
-      reasons.push(
-        `Not eligible for league ${targetGame.leagues?.name || "selected league"}`,
-      );
-    if (
-      targetGame.level_id &&
-      ov.length &&
-      !ov.some((x) => x.level_id === targetGame.level_id)
-    )
-      reasons.push(
-        `Not eligible for level ${targetGame.levels?.name || "selected level"}`,
-      );
-    if (
-      assignments.some(
-        (a) =>
-          a.game_id === targetGame.id &&
-          a.official_id === o.id &&
-          a.status !== "declined" &&
-          !(ignorePositionId && a.position_id === ignorePositionId),
-      )
-    )
-      reasons.push("Already assigned to this game");
-    return [...new Set(reasons)];
-  }
-  function ineligibleReasons(o: Official, sourcePositionId = "") {
-    const targetGames = linkedAssignmentGames();
-    const linked = targetGames.length > 1;
-    return [
-      ...new Set(
-        targetGames.flatMap((targetGame) =>
-          ineligibleReasonsForGame(
-            o,
-            targetGame,
-            matchingPositionId(targetGame, sourcePositionId),
-          ).map((reason) =>
-            linked && !reason.startsWith("Overlaps Game #")
-              ? `Game #${targetGame.game_number}: ${reason}`
-              : reason,
-          ),
-        ),
-      ),
-    ];
-  }
-  function eligible(o: Official) {
-    return ineligibleReasons(o).length === 0;
-  }
-  function daysSinceTeam(
-    officialId: string,
-    teamId: string | null | undefined,
-  ) {
-    if (!game || !teamId) return null;
-    const target = new Date(game.starts_at).getTime();
-    let last = 0;
-    for (const a of assignments) {
-      if (
-        a.official_id !== officialId ||
-        !["accepted", "confirmed"].includes(a.status)
-      )
-        continue;
-      const g = games.find((x) => x.id === a.game_id);
-      if (!g) continue;
-      const t = new Date(g.starts_at).getTime();
-      if (t >= target) continue;
-      if (g.home?.id === teamId || g.away?.id === teamId)
-        last = Math.max(last, t);
-    }
-    return last ? Math.max(0, Math.floor((target - last) / 86400000)) : null;
-  }
-  function hasFutureTeamAssignment(officialId: string) {
-    if (!game) return false;
-    const target = new Date(game.starts_at).getTime(),
-      teamIds = [game.home?.id, game.away?.id].filter(Boolean);
-    if (!teamIds.length) return false;
-    return assignments.some((a) => {
-      if (
-        a.official_id !== officialId ||
-        a.game_id === game.id ||
-        a.status === "declined"
-      )
-        return false;
-      const g = games.find((x) => x.id === a.game_id);
-      if (!g || new Date(g.starts_at).getTime() <= target) return false;
-      return teamIds.includes(g.home?.id) || teamIds.includes(g.away?.id);
-    });
-  }
-  function futureBadge(officialId: string) {
-    return hasFutureTeamAssignment(officialId) ? (
-      <span
-        title="This official already has a later assignment involving one of these teams"
-        style={{
-          display: "inline-block",
-          marginLeft: 6,
-          background: "#2563eb",
-          color: "#fff",
-          borderRadius: 6,
-          padding: "2px 6px",
-          fontSize: 10,
-          fontWeight: 800,
-          verticalAlign: "middle",
-        }}
-      >
-        Future+
-      </span>
-    ) : null;
-  }
-  function teamRecencyLabel(officialId: string) {
-    if (!game) return "";
-    const h = daysSinceTeam(officialId, game.home?.id),
-      a = daysSinceTeam(officialId, game.away?.id);
-    return ` ‚Ä¢ ${game.home?.name || "Home"} ${h == null ? "Never" : `${h}d`} ‚Ä¢ ${game.away?.name || "Away"} ${a == null ? "Never" : `${a}d`}`;
-  }
-  function isMentor(pos: Position) {
-    return pos.name.toLowerCase().includes("mentor");
-  }
-  function positionRankFor(officialId: string, pos: Position) {
-    const pr = positionRanks[officialId],
-      name = pos.name.toLowerCase();
-    if (isMentor(pos)) return pr?.mentor_rank ?? 1;
-    if (name.includes("assistant referee 1") || name === "ar1")
-      return pr?.ar1_rank ?? ranks[officialId] ?? 1;
-    if (name.includes("assistant referee 2") || name === "ar2")
-      return pr?.ar2_rank ?? ranks[officialId] ?? 1;
-    if (name.includes("4th") || name.includes("fourth"))
-      return pr?.fourth_rank ?? ranks[officialId] ?? 1;
-    if (
-      name.includes("center") ||
-      name === "ref" ||
-      (name.includes("referee") && !name.includes("assistant"))
-    )
-      return pr?.ref_rank ?? ranks[officialId] ?? 1;
-    return ranks[officialId] ?? 1;
-  }
-  function rankLabel(pos: Position) {
-    const name = pos.name.toLowerCase();
-    if (isMentor(pos)) return "Mentor";
-    if (name.includes("assistant referee 1") || name === "ar1") return "AR1";
-    if (name.includes("assistant referee 2") || name === "ar2") return "AR2";
-    if (name.includes("4th") || name.includes("fourth")) return "4th";
-    if (
-      name.includes("center") ||
-      name === "ref" ||
-      (name.includes("referee") && !name.includes("assistant"))
-    )
-      return "REF";
-    return "Rank";
-  }
-  function candidates(pos: Position) {
-    if (!game) return [];
-    const current = assignments.find(
-        (a) =>
-          a.game_id === game.id &&
-          a.position_id === pos.id &&
-          a.status !== "declined",
-      ),
-      used = new Set(
-        assignments
-          .filter(
-            (a) =>
-              a.game_id === game.id &&
-              a.position_id !== pos.id &&
-              a.status !== "declined",
-          )
-          .map((a) => a.official_id),
-      );
-    return officials
-      .filter(
-        (o) =>
-          !workingAtGameTime(o, pos.id) &&
-          (eligible(o) || canManage || current?.official_id === o.id) &&
-          !used.has(o.id) &&
-          (!isMentor(pos) ||
-            positionRankFor(o.id, pos) > 1 ||
-            canManage ||
-            current?.official_id === o.id),
-      )
-      .map((o) => ({
-        ...o,
-        distance: miles(
-          o.home_latitude,
-          o.home_longitude,
-          game.location?.latitude ?? null,
-          game.location?.longitude ?? null,
-        ),
-        rank: positionRankFor(o.id, pos),
-        reasons: ineligibleReasons(o, pos.id).filter(
-          (r) =>
-            !(
-              current?.official_id === o.id &&
-              r === "Already assigned to this game"
-            ),
-        ),
-      }))
-      .sort(
-        (a, b) =>
-          (a.reasons.length ? 1 : 0) - (b.reasons.length ? 1 : 0) ||
-          b.rank - a.rank ||
-          (a.distance ?? 9999) - (b.distance ?? 9999),
-      );
-  }
-  function lastAssignmentTime(officialId: string) {
-    if (!game) return 0;
-    const currentGameTime = new Date(game.starts_at).getTime();
-    return assignments.reduce((latest, assignment) => {
-      if (assignment.official_id !== officialId || assignment.status === "declined") return latest;
-      const assignedGame = games.find((item) => item.id === assignment.game_id);
-      if (!assignedGame) return latest;
-      const time = new Date(assignedGame.starts_at).getTime();
-      return time < currentGameTime ? Math.max(latest, time) : latest;
-    }, 0);
-  }
-  function sortOfficials<T extends Official & { rank: number; distance: number | null }>(items: T[], sort: typeof officialListSort) {
-    return [...items].sort((a, b) => {
-      if (sort === "distance") return (a.distance ?? 9999) - (b.distance ?? 9999) || b.rank - a.rank;
-      if (sort === "rank") return b.rank - a.rank || (a.distance ?? 9999) - (b.distance ?? 9999);
-      if (sort === "leastRecent") return lastAssignmentTime(a.id) - lastAssignmentTime(b.id) || b.rank - a.rank;
-      if (sort === "name") return `${a.last_name} ${a.first_name}`.localeCompare(`${b.last_name} ${b.first_name}`);
-      return b.rank - a.rank || (a.distance ?? 9999) - (b.distance ?? 9999);
-    });
-  }
-  const availableOfficialsBase = game
-    ? officials
-        .filter((o) => eligible(o) && !workingAtGameTime(o))
-        .map((o) => ({
-          ...o,
-          rank: ranks[o.id] ?? 1,
-          distance: miles(
-            o.home_latitude,
-            o.home_longitude,
-            game.location?.latitude ?? null,
-            game.location?.longitude ?? null,
-          ),
-        }))
-        .sort(
-          (a, b) =>
-            b.rank - a.rank || (a.distance ?? 9999) - (b.distance ?? 9999),
-        )
-    : [];
-  const availableOfficials = sortOfficials(
-    availableOfficialsBase.filter((official) => `${official.first_name} ${official.last_name}`.toLowerCase().includes(officialListSearch.trim().toLowerCase())),
-    officialListSort,
-  );
-  const ineligibleOfficials = game
-    ? officials
-        .map((o) => ({ ...o, reasons: ineligibleReasons(o) }))
-        .filter((o) => o.reasons.length > 0)
-        .sort(
-          (a, b) =>
-            a.last_name.localeCompare(b.last_name) ||
-            a.first_name.localeCompare(b.first_name),
-        )
-    : [];
-  const visibleIneligibleOfficials = ineligibleOfficials.filter((official) => {
-    const search = ineligibleSearch.trim().toLowerCase();
-    const matchesSearch =
-      !search ||
-      `${official.first_name} ${official.last_name}`
-        .toLowerCase()
-        .includes(search);
-    const reasonText = official.reasons.join(" ").toLowerCase();
-    const matchesReason =
-      ineligibleReasonFilter === "all" ||
-      (ineligibleReasonFilter === "eligibility" &&
-        (reasonText.includes("league") || reasonText.includes("level"))) ||
-      (ineligibleReasonFilter === "availability" &&
-        (reasonText.includes("unavailable") || reasonText.includes("block"))) ||
-      (ineligibleReasonFilter === "conflict" &&
-        (reasonText.includes("overlap") || reasonText.includes("assigned")));
-    return matchesSearch && matchesReason;
-  });
-  function openPositionsForGame(targetGame: Game) {
-    return positions
-      .filter((position) => position.sport_id === targetGame.sport_id)
-      .sort((a, b) => a.sort_order - b.sort_order || a.id.localeCompare(b.id))
-      .slice(0, Math.max(0, targetGame.officials_needed))
-      .filter(
-        (position) =>
-          !assignments.some(
-            (assignment) =>
-              assignment.game_id === targetGame.id &&
-              assignment.position_id === position.id &&
-              assignment.status !== "declined",
-          ),
-      );
-  }
-  function openPositionForGame(targetGame: Game) {
-    return openPositionsForGame(targetGame)[0];
-  }
-  async function assignToGame(
-    targetGame: Game,
-    positionId: string,
-    officialId: string,
-    assignmentReviewed = false,
-  ) {
-    const official = officials.find((o) => o.id === officialId);
-    const conflictReasons = official
-      ? [
-          ...assignmentConflictReasonsForGame(official, targetGame, positionId),
-          ...duplicateAssignmentReasonsForGame(official.id, targetGame, positionId),
-        ]
-      : [];
-    if (officialId && official && conflictReasons.length) {
-      setError(
-        `${official.first_name} ${official.last_name} cannot be assigned: ${conflictReasons.join("; ")}.`,
-      );
-      return false;
-    }
-    const reasons = official
-      ? ineligibleReasonsForGame(official, targetGame, positionId).filter((r) => {
-          if (r !== "Already assigned to this game") return true;
-          return !assignments.some(
-            (assignment) =>
-              assignment.game_id === targetGame.id &&
-              assignment.position_id === positionId &&
-              assignment.official_id === official.id &&
-              assignment.status !== "declined",
-          );
-        })
-      : [];
-    if (officialId && reasons.length) {
-      if (!canManage) {
-        setError("This official is not eligible for this game.");
-        return false;
-      }
-      if (
-        !assignmentReviewed &&
-        !window.confirm(
-          `Override eligibility and assign ${official?.first_name} ${official?.last_name}?\n\nWarning: ${reasons.join(", ")}`,
-        )
-      )
-        return false;
-    }
-    setSaving(positionId);
-    setError("");
-    setNotice("");
-    const existing = assignments.find(
-      (a) => a.game_id === targetGame.id && a.position_id === positionId,
-    );
-    let result;
-    if (!officialId && existing)
-      result = await supabase
-        .from("assignments")
-        .delete()
-        .eq("id", existing.id);
-    else if (officialId)
-      result = await supabase.rpc("assign_official_to_linked_games", {
-        p_game_id: targetGame.id,
-        p_position_id: positionId,
-        p_official_id: officialId,
-      });
-    if (!result) {
-      setSaving("");
-      return false;
-    }
-    if (result.error) setError(result.error.message);
-    else if (officialId) {
-      const linkedCount = Number(result.data || 1);
-      const position = positions.find((item) => item.id === positionId);
-      setNotice(
-        `${official?.first_name} ${official?.last_name} assigned to ${position ? shortPositionName(position.name) : "the position"}${linkedCount > 1 ? ` across ${linkedCount} linked games` : ` on Game #${targetGame.game_number}`}${reasons.length ? " with an eligibility override" : ""}.`,
-      );
-      announceUndoAvailable(
-        `${official?.first_name || "Official"} ${official?.last_name || ""} assigned to ${position ? shortPositionName(position.name) : "the position"} on Game #${targetGame.game_number}.`.replace(/\s+/g, " "),
-      );
-    } else {
-      const removedAssignment = existing;
-      const removedOfficial = officials.find((official) => official.id === removedAssignment?.official_id);
-      const removedPosition = positions.find((position) => position.id === positionId);
-      announceUndoAvailable(
-        `${removedOfficial ? `${removedOfficial.first_name} ${removedOfficial.last_name}` : "Official"} unassigned from ${removedPosition ? shortPositionName(removedPosition.name) : "the position"}.`,
-      );
-    }
-    await refreshAssignmentState();
-    setSaving("");
-    setOverrideOfficial("");
-    return !result.error;
-  }
-  async function assign(positionId: string, officialId: string) {
-    if (!game) return;
-    await assignToGame(game, positionId, officialId);
-  }
-  function nextOpenPositionAfter(positionId: string) {
-    if (!game) return undefined;
-    const currentIndex = gamePositions.findIndex((item) => item.id === positionId);
-    const ordered = [
-      ...gamePositions.slice(currentIndex + 1),
-      ...gamePositions.slice(0, Math.max(0, currentIndex)),
-    ];
-    return ordered.find(
-      (position) =>
-        !assignments.some(
-          (assignment) =>
-            assignment.game_id === game.id &&
-            assignment.position_id === position.id &&
-            assignment.status !== "declined",
-        ),
-    );
-  }
-  async function assignFromCandidate(positionId: string, officialId: string) {
-    if (!game) return;
-    const nextPosition = nextOpenPositionAfter(positionId);
-    const assigned = await assignToGame(game, positionId, officialId);
-    if (assigned) {
-      setCandidateSearch("");
-      setCandidatePositionId(nextPosition?.id || positionId);
-    }
-  }
-  async function dropOfficialOnGame(gameId: string, officialId: string) {
-    const targetGame = games.find((listedGame) => listedGame.id === gameId);
-    if (!targetGame || !officialId || !canManage) return;
-    const openPositions = openPositionsForGame(targetGame);
-    setOfficialDropGame("");
-    setDraggingOfficial("");
-    if (!openPositions.length) {
-      setError(`Game #${targetGame.game_number} has no open assignment positions.`);
-      return;
-    }
-    setSelected(targetGame.id);
-    setPendingTapAssignment({
-      gameId: targetGame.id,
-      officialId,
-      positionId: openPositions[0].id,
-    });
-  }
-  async function confirmTapAssignment() {
-    if (!pendingTapAssignment) return;
-    const targetGame = games.find((item) => item.id === pendingTapAssignment.gameId);
-    if (!targetGame) return;
-    const assigned = await assignToGame(
-      targetGame,
-      pendingTapAssignment.positionId,
-      pendingTapAssignment.officialId,
-      true,
-    );
-    if (assigned) {
-      setPendingTapAssignment(null);
-      setPickedOfficial("");
-    }
-  }
-  function prepareBulkAssignment() {
-    const selectedGames = games.filter((item) => linkSelected.includes(item.id));
-    const assignableGames = selectedGames.filter(gameAcceptsAssignments);
-    const excludedCount = selectedGames.length - assignableGames.length;
-    setBulkAssignOfficial("");
-    setBulkAssignPositions(
-      Object.fromEntries(
-        assignableGames.map((item) => [item.id, openPositionForGame(item)?.id || ""]),
-      ),
-    );
-    setBulkOverrideConfirmed(false);
-    setBulkAssignMessage(excludedCount ? `${excludedCount} inactive game${excludedCount === 1 ? " was" : "s were"} excluded from bulk assignment.` : "");
-    setBulkOfficialSearch("");
-    setBulkOfficialStatus("eligible");
-    setShowBulkAssign(true);
-  }
-  function bulkAssignmentReview(officialId = bulkAssignOfficial) {
-    const official = officials.find((item) => item.id === officialId);
-    const targets = games.filter(
-      (item) => gameAcceptsAssignments(item) && linkSelected.includes(item.id) && bulkAssignPositions[item.id],
-    );
-    const blocking: { gameId: string; reason: string }[] = [];
-    const warnings: { gameId: string; reason: string }[] = [];
-    if (!official) return { targets, blocking, warnings };
-    for (const target of targets) {
-      const positionId = bulkAssignPositions[target.id];
-      for (const reason of [
-        ...assignmentConflictReasonsForGame(official, target, positionId),
-        ...duplicateAssignmentReasonsForGame(official.id, target, positionId),
-      ]) blocking.push({ gameId: target.id, reason });
-      for (const reason of ineligibleReasonsForGame(official, target, positionId)) {
-        if (reason !== "Already assigned to this game")
-          warnings.push({ gameId: target.id, reason });
-      }
-      const position = positions.find((item) => item.id === positionId);
-      if (position && isMentor(position) && positionRankFor(official.id, position) <= 1)
-        warnings.push({ gameId: target.id, reason: `Not eligible for ${position.name}` });
-    }
-    for (let index = 0; index < targets.length; index += 1) {
-      for (let otherIndex = index + 1; otherIndex < targets.length; otherIndex += 1) {
-        const first = targets[index], second = targets[otherIndex];
-        if (overlaps(first.starts_at, first.duration_minutes || 110, second.starts_at, second.duration_minutes || 110)) {
-          blocking.push({
-            gameId: second.id,
-            reason: `Overlaps selected Game #${first.game_number}`,
-          });
-        }
-      }
-    }
-    return {
-      targets,
-      blocking: [...new Map(blocking.map((item) => [`${item.gameId}:${item.reason}`, item])).values()],
-      warnings: [...new Map(warnings.map((item) => [`${item.gameId}:${item.reason}`, item])).values()],
-    };
-  }
-  async function confirmBulkAssignment() {
-    const review = bulkAssignmentReview();
-    if (!bulkAssignOfficial) {
-      setBulkAssignMessage("Choose an official before assigning the games.");
-      return;
-    }
-    if (!review.targets.length) {
-      setBulkAssignMessage("None of the selected games has an open position to assign.");
-      return;
-    }
-    if (review.blocking.length) {
-      setBulkAssignMessage("This official cannot be assigned until the conflicts shown below are resolved.");
-      return;
-    }
-    if (review.warnings.length && !bulkOverrideConfirmed) {
-      setBulkAssignMessage("Confirm the eligibility override before assigning these games.");
-      return;
-    }
-    setBulkWorking(true);
-    setBulkAssignMessage(`Assigning 0 of ${review.targets.length} games‚Ä¶`);
-    const selectedOfficial = officials.find((item) => item.id === bulkAssignOfficial);
-    const results: BulkAssignmentItem[] = [];
-    let assigned = 0;
-    try {
-      for (const target of review.targets) {
-        const positionId = bulkAssignPositions[target.id];
-        const position = positions.find((item) => item.id === positionId);
-        if (!gameAcceptsAssignments(target)) {
-          results.push({
-            gameId: target.id,
-            gameNumber: target.game_number,
-            matchup: `${target.home?.name || "TBD"} vs ${target.away?.name || "TBD"}`,
-            positionId,
-            positionName: position?.name || "Position",
-            officialId: bulkAssignOfficial,
-            officialName: selectedOfficial ? `${selectedOfficial.first_name} ${selectedOfficial.last_name}` : "Selected official",
-            status: "skipped",
-            error: `${inactiveGameStatusLabel(target.status)} games cannot receive assignments.`,
-          });
-          continue;
-        }
-        const result = await supabase.rpc("assign_official_to_linked_games", {
-          p_game_id: target.id,
-          p_position_id: positionId,
-          p_official_id: bulkAssignOfficial,
-        });
-        const item: BulkAssignmentItem = {
-          gameId: target.id,
-          gameNumber: target.game_number,
-          matchup: `${target.home?.name || "TBD"} vs ${target.away?.name || "TBD"}`,
-          positionId,
-          positionName: position?.name || "Position",
-          officialId: bulkAssignOfficial,
-          officialName: selectedOfficial ? `${selectedOfficial.first_name} ${selectedOfficial.last_name}` : "Selected official",
-          status: result.error ? "failed" : "success",
-          error: result.error?.message || "",
-        };
-        results.push(item);
-        if (!result.error) assigned += 1;
-        setBulkAssignMessage(`Processed ${results.length} of ${review.targets.length} games‚Ä¶`);
-      }
-      await refreshAssignmentState();
-      setShowBulkAssign(false);
-      if (assigned === review.targets.length) setLinkSelected([]);
-      setBulkAssignmentResult({
-        officialId: bulkAssignOfficial,
-        officialName: selectedOfficial ? `${selectedOfficial.first_name} ${selectedOfficial.last_name}` : "Selected official",
-        items: results,
-      });
-      setNotice(`${assigned} of ${review.targets.length} selected game${review.targets.length === 1 ? "" : "s"} assigned successfully.`);
-    } catch (assignmentError) {
-      const message = assignmentError instanceof Error ? assignmentError.message : "Unexpected assignment error";
-      const completedIds = new Set(results.map((item) => item.gameId));
-      const remaining = review.targets.filter((item) => !completedIds.has(item.id)).map((target) => {
-        const positionId = bulkAssignPositions[target.id];
-        return {
-          gameId: target.id,
-          gameNumber: target.game_number,
-          matchup: `${target.home?.name || "TBD"} vs ${target.away?.name || "TBD"}`,
-          positionId,
-          positionName: positions.find((item) => item.id === positionId)?.name || "Position",
-          officialId: bulkAssignOfficial,
-          officialName: selectedOfficial ? `${selectedOfficial.first_name} ${selectedOfficial.last_name}` : "Selected official",
-          status: "skipped" as const,
-          error: message,
-        };
-      });
-      setShowBulkAssign(false);
-      setBulkAssignmentResult({ officialId: bulkAssignOfficial, officialName: selectedOfficial ? `${selectedOfficial.first_name} ${selectedOfficial.last_name}` : "Selected official", items: [...results, ...remaining] });
-    } finally {
-      setBulkWorking(false);
-    }
-  }
-  async function retryBulkAssignmentItem(item: BulkAssignmentItem) {
-    if (!bulkAssignmentResult || bulkRetryingGame) return;
-    const target = games.find((game) => game.id === item.gameId);
-    if (!target || !gameAcceptsAssignments(target)) {
-      setBulkAssignmentResult((current) => current ? {
-        ...current,
-        items: current.items.map((listedItem) => listedItem.gameId === item.gameId ? { ...listedItem, status: "skipped", error: `${inactiveGameStatusLabel(target?.status || "")} games cannot receive assignments.` } : listedItem),
-      } : current);
-      return;
-    }
-    setBulkRetryingGame(item.gameId);
-    const result = await supabase.rpc("assign_official_to_linked_games", {
-      p_game_id: item.gameId,
-      p_position_id: item.positionId,
-      p_official_id: item.officialId || bulkAssignmentResult.officialId,
-    });
-    setBulkAssignmentResult((current) => current ? {
-      ...current,
-      items: current.items.map((listedItem) => listedItem.gameId === item.gameId ? { ...listedItem, status: result.error ? "failed" : "success", error: result.error?.message || "" } : listedItem),
-    } : current);
-    if (!result.error) await refreshAssignmentState();
-    setBulkRetryingGame("");
-  }
-  function crewSlotKey(gameId: string, positionId: string) {
-    return `${gameId}:${positionId}`;
-  }
-  function bulkCrewSlots() {
-    return games.filter((item) => gameAcceptsAssignments(item) && linkSelected.includes(item.id)).flatMap((target) =>
-      openPositionsForGame(target).map((position) => ({ target, position, key: crewSlotKey(target.id, position.id) })),
-    );
-  }
-  function crewCandidatesForSlot(target: Game, position: Position, selections = bulkCrewSelections) {
-    const key = crewSlotKey(target.id, position.id);
-    return officials.map((official) => {
-      const blocking = [
-        ...assignmentConflictReasonsForGame(official, target, position.id),
-        ...duplicateAssignmentReasonsForGame(official.id, target, position.id),
-      ];
-      const warnings = ineligibleReasonsForGame(official, target, position.id).filter((reason) =>
-        !blocking.includes(reason) && reason !== "Already assigned to this game",
-      );
-      if (isMentor(position) && positionRankFor(official.id, position) <= 1)
-        warnings.push(`Not eligible for ${position.name}`);
-      for (const [otherKey, otherOfficialId] of Object.entries(selections)) {
-        if (otherKey === key || otherOfficialId !== official.id) continue;
-        const [otherGameId] = otherKey.split(":");
-        const otherGame = games.find((item) => item.id === otherGameId);
-        if (!otherGame) continue;
-        if (otherGame.id === target.id) blocking.push("Already selected for another position on this game");
-        else if (overlaps(target.starts_at, target.duration_minutes || 110, otherGame.starts_at, otherGame.duration_minutes || 110))
-          blocking.push(`Overlaps selected Game #${otherGame.game_number}`);
-      }
-      const distance = miles(official.home_latitude, official.home_longitude, target.location?.latitude ?? null, target.location?.longitude ?? null);
-      const workload = assignments.filter((assignment) => assignment.official_id === official.id && assignment.status !== "declined").length;
-      const rank = positionRankFor(official.id, position);
-      const score = rank * 100 - (distance ?? 100) - workload * 8;
-      return { official, blocking: [...new Set(blocking)], warnings: [...new Set(warnings)], distance, workload, rank, score };
-    }).sort((a, b) =>
-      (a.blocking.length ? 1 : 0) - (b.blocking.length ? 1 : 0) ||
-      (a.warnings.length ? 1 : 0) - (b.warnings.length ? 1 : 0) ||
-      b.score - a.score ||
-      a.official.last_name.localeCompare(b.official.last_name),
-    );
-  }
-  function prepareBulkCrew() {
-    const excludedCount = games.filter((item) => linkSelected.includes(item.id) && !gameAcceptsAssignments(item)).length;
-    setBulkCrewSelections({});
-    setBulkCrewMessage(excludedCount ? `${excludedCount} inactive game${excludedCount === 1 ? " was" : "s were"} excluded from crew assignment.` : "");
-    setBulkCrewOverrideConfirmed(false);
-    setShowBulkCrew(true);
-  }
-  function applySmartCrewRecommendations() {
-    const next: Record<string, string> = {};
-    for (const slot of bulkCrewSlots()) {
-      const recommended = crewCandidatesForSlot(slot.target, slot.position, next).find((candidate) => !candidate.blocking.length && !candidate.warnings.length);
-      if (recommended) next[slot.key] = recommended.official.id;
-    }
-    setBulkCrewSelections(next);
-    setBulkCrewOverrideConfirmed(false);
-    setBulkCrewMessage(`${Object.keys(next).length} of ${bulkCrewSlots().length} open positions filled with recommendations.`);
-  }
-  async function confirmBulkCrewAssignment() {
-    const slots = bulkCrewSlots().filter((slot) => bulkCrewSelections[slot.key]);
-    if (!slots.length) {
-      setBulkCrewMessage("Choose at least one official or use Smart Fill first.");
-      return;
-    }
-    const reviews = slots.map((slot) => ({ ...slot, candidate: crewCandidatesForSlot(slot.target, slot.position).find((item) => item.official.id === bulkCrewSelections[slot.key]) }));
-    if (reviews.some((review) => review.candidate?.blocking.length)) {
-      setBulkCrewMessage("Resolve the highlighted conflicts before assigning this crew.");
-      return;
-    }
-    if (reviews.some((review) => review.candidate?.warnings.length) && !bulkCrewOverrideConfirmed) {
-      setBulkCrewMessage("Confirm the eligibility overrides before assigning this crew.");
-      return;
-    }
-    setBulkCrewWorking(true);
-    setBulkCrewMessage(`Assigning 0 of ${reviews.length} positions‚Ä¶`);
-    const results: BulkAssignmentItem[] = [];
-    try {
-      for (const review of reviews) {
-        const officialId = bulkCrewSelections[review.key];
-        const official = officials.find((item) => item.id === officialId);
-        if (!gameAcceptsAssignments(review.target)) {
-          results.push({
-            gameId: review.target.id,
-            gameNumber: review.target.game_number,
-            matchup: `${review.target.home?.name || "TBD"} vs ${review.target.away?.name || "TBD"}`,
-            positionId: review.position.id,
-            positionName: review.position.name,
-            officialId,
-            officialName: official ? `${official.first_name} ${official.last_name}` : "Selected official",
-            status: "skipped",
-            error: `${inactiveGameStatusLabel(review.target.status)} games cannot receive assignments.`,
-          });
-          continue;
-        }
-        const result = await supabase.rpc("assign_official_to_linked_games", { p_game_id: review.target.id, p_position_id: review.position.id, p_official_id: officialId });
-        results.push({
-          gameId: review.target.id,
-          gameNumber: review.target.game_number,
-          matchup: `${review.target.home?.name || "TBD"} vs ${review.target.away?.name || "TBD"}`,
-          positionId: review.position.id,
-          positionName: review.position.name,
-          officialId,
-          officialName: official ? `${official.first_name} ${official.last_name}` : "Selected official",
-          status: result.error ? "failed" : "success",
-          error: result.error?.message || "",
-        });
-        setBulkCrewMessage(`Processed ${results.length} of ${reviews.length} positions‚Ä¶`);
-      }
-      await refreshAssignmentState();
-      setShowBulkCrew(false);
-      setBulkAssignmentResult({ officialId: "", officialName: "Crew assignment", items: results });
-      if (results.every((item) => item.status === "success")) setLinkSelected([]);
-    } catch (crewError) {
-      setBulkCrewMessage(crewError instanceof Error ? crewError.message : "Unable to complete crew assignment.");
-    } finally {
-      setBulkCrewWorking(false);
-    }
-  }
-  function crewTemplateTargetGames() {
-    const requested = linkSelected.length
-      ? games.filter((item) => linkSelected.includes(item.id))
-      : game
-        ? [game]
-        : [];
-    const seen = new Set<string>();
-    return requested.filter((target) => {
-      const unitKey = linkGroupByGame.get(target.id) || target.id;
-      if (seen.has(unitKey)) return false;
-      seen.add(unitKey);
-      return true;
-    });
-  }
-  function availableCrewTemplates() {
-    const target = crewTemplateTargetGames()[0];
-    if (!target) return [];
-    return assignmentTemplates.filter(
-      (template) =>
-        template.sport_id === target.sport_id &&
-        (!template.league_id || template.league_id === target.league_id),
-    );
-  }
-  function previousCrewGames() {
-    const target = crewTemplateTargetGames()[0];
-    if (!target) return [];
-    const targetIds = new Set(linkSelected.length ? linkSelected : [target.id]);
-    return games
-      .filter(
-        (listedGame) =>
-          listedGame.sport_id === target.sport_id &&
-          !targetIds.has(listedGame.id) &&
-          assignments.some(
-            (assignment) =>
-              assignment.game_id === listedGame.id &&
-              !["declined", "cancelled", "canceled"].includes(assignment.status),
-          ),
-      )
-      .sort(
-        (a, b) =>
-          Math.abs(new Date(a.starts_at).getTime() - new Date(target.starts_at).getTime()) -
-          Math.abs(new Date(b.starts_at).getTime() - new Date(target.starts_at).getTime()),
-      )
-      .slice(0, 40);
-  }
-  function openCrewTemplateTools() {
-    const target = crewTemplateTargetGames()[0];
-    if (!target) return;
-    setCrewTemplateName(`${target.leagues?.name || target.sports?.name || "Saved"} Crew`);
-    setCopyCrewSourceGameId(previousCrewGames()[0]?.id || "");
-    setCrewTemplateMessage("");
-    setShowCrewTemplates(true);
-  }
-  async function refreshCrewTemplates() {
-    const { data, error: templateError } = await supabase
-      .from("assignment_templates")
-      .select("id,name,sport_id,league_id,created_by,updated_at,assignment_template_slots(id,position_id,official_id,sort_order)")
-      .order("updated_at", { ascending: false });
-    if (templateError) throw templateError;
-    setAssignmentTemplates((data || []) as AssignmentTemplate[]);
-  }
-  async function saveCurrentCrewTemplate() {
-    const source = crewTemplateTargetGames()[0];
-    if (!source || !crewTemplateName.trim()) {
-      setCrewTemplateMessage("Enter a template name first.");
-      return;
-    }
-    const sourceAssignments = assignments.filter(
-      (assignment) =>
-        assignment.game_id === source.id &&
-        !["declined", "cancelled", "canceled"].includes(assignment.status),
-    );
-    if (!sourceAssignments.length) {
-      setCrewTemplateMessage("Assign at least one official before saving this crew.");
-      return;
-    }
-    setCrewTemplateWorking(true);
-    setCrewTemplateMessage("Saving crew template‚Ä¶");
-    const { data: userData } = await supabase.auth.getUser();
-    const { data: template, error: templateError } = await supabase
-      .from("assignment_templates")
-      .insert({
-        name: crewTemplateName.trim(),
-        sport_id: source.sport_id,
-        league_id: source.league_id,
-        created_by: userData.user?.id,
-      })
-      .select("id")
-      .single();
-    if (templateError || !template) {
-      setCrewTemplateMessage(templateError?.message || "Unable to save the crew template.");
-      setCrewTemplateWorking(false);
-      return;
-    }
-    const { error: slotsError } = await supabase.from("assignment_template_slots").insert(
-      sourceAssignments.map((assignment, index) => ({
-        template_id: template.id,
-        position_id: assignment.position_id,
-        official_id: assignment.official_id,
-        sort_order: index,
-      })),
-    );
-    if (slotsError) {
-      await supabase.from("assignment_templates").delete().eq("id", template.id);
-      setCrewTemplateMessage(slotsError.message);
-    } else {
-      await refreshCrewTemplates();
-      setCrewTemplateMessage(`Saved ‚Äú${crewTemplateName.trim()}‚Äù for future games.`);
-    }
-    setCrewTemplateWorking(false);
-  }
-  async function applyCrewSlots(
-    slots: Pick<AssignmentTemplateSlot, "position_id" | "official_id">[],
-    label: string,
-  ) {
-    const targets = crewTemplateTargetGames();
-    if (!targets.length || !slots.length) return;
-    setCrewTemplateWorking(true);
-    setCrewTemplateMessage(`Applying ${label}‚Ä¶`);
-    let assigned = 0;
-    let skipped = 0;
-    const failures: string[] = [];
-    for (const target of targets) {
-      if (!gameAcceptsAssignments(target)) {
-        skipped += slots.length;
-        continue;
-      }
-      for (const slot of slots) {
-        const validPosition = positions.some(
-          (position) => position.id === slot.position_id && position.sport_id === target.sport_id,
-        );
-        const alreadyFilled = assignments.some(
-          (assignment) =>
-            assignment.game_id === target.id &&
-            assignment.position_id === slot.position_id &&
-            !["declined", "cancelled", "canceled"].includes(assignment.status),
-        );
-        if (!validPosition || alreadyFilled) {
-          skipped += 1;
-          continue;
-        }
-        const result = await supabase.rpc("assign_official_to_linked_games", {
-          p_game_id: target.id,
-          p_position_id: slot.position_id,
-          p_official_id: slot.official_id,
-        });
-        if (result.error) failures.push(result.error.message);
-        else assigned += 1;
-      }
-    }
-    await refreshAssignmentState();
-    const detail = [
-      `${assigned} position${assigned === 1 ? "" : "s"} assigned`,
-      skipped ? `${skipped} filled or inactive position${skipped === 1 ? "" : "s"} skipped` : "",
-      failures.length ? `${failures.length} conflict${failures.length === 1 ? "" : "s"} not assigned` : "",
-    ].filter(Boolean).join(" ‚Ä¢ ");
-    setCrewTemplateMessage(detail);
-    setNotice(`${label}: ${detail}. Review the crew, then Publish when ready.`);
-    setCrewTemplateWorking(false);
-  }
-  async function copyCrewFromGame() {
-    const source = games.find((item) => item.id === copyCrewSourceGameId);
-    if (!source) {
-      setCrewTemplateMessage("Choose a previous game first.");
-      return;
-    }
-    const slots = assignments
-      .filter(
-        (assignment) =>
-          assignment.game_id === source.id &&
-          !["declined", "cancelled", "canceled"].includes(assignment.status),
-      )
-      .map((assignment) => ({
-        position_id: assignment.position_id,
-        official_id: assignment.official_id,
-      }));
-    await applyCrewSlots(slots, `Crew from Game #${source.game_number}`);
-  }
-  async function deleteCrewTemplate(templateId: string) {
-    setCrewTemplateWorking(true);
-    const { error: deleteError } = await supabase
-      .from("assignment_templates")
-      .delete()
-      .eq("id", templateId);
-    if (deleteError) setCrewTemplateMessage(deleteError.message);
-    else {
-      await refreshCrewTemplates();
-      setCrewTemplateMessage("Crew template deleted.");
-    }
-    setCrewTemplateWorking(false);
-  }
-  function chooseOfficialToAssign(officialId: string) {
-    const next = pickedOfficial === officialId ? "" : officialId;
-    setPickedOfficial(next);
-  }
-  async function assignAndPublishReplacement(
-    positionId: string,
-    officialId: string,
-    nextPositionId?: string,
-  ) {
-    if (!canManage || !game) return;
-    setPendingReplacement(null);
-    const workKey = `${positionId}:${officialId}`;
-    setReplacementPublishing(workKey);
-    setError("");
-    setNotice("");
-    try {
-      const { error: assignmentError } = await supabase.rpc(
-        "assign_official_to_linked_games",
-        {
-          p_game_id: game.id,
-          p_position_id: positionId,
-          p_official_id: officialId,
-        },
-      );
-      if (assignmentError) throw assignmentError;
-      const response = await fetch("/api/assignments/publish", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ gameId: game.id }),
-      });
-      const result = (await response.json().catch(() => ({}))) as {
-        sent?: number;
-        failed?: number;
-        failures?: string[];
-        error?: string;
-      };
-      if (!response.ok)
-        throw new Error(result.error || "The replacement could not be published.");
-      if (result.failed)
-        setError(
-          `Replacement assigned, but ${result.failed} notification${result.failed === 1 ? "" : "s"} failed: ${(result.failures || []).join("; ")}`,
-        );
-      else
-        setNotice(
-          `Replacement assigned and ${result.sent || 0} notification${result.sent === 1 ? "" : "s"} sent.`,
-        );
-      announceUndoAvailable();
-      await refreshAssignmentState();
-      setCandidateSearch("");
-      setCandidatePositionId(nextPositionId || positionId);
-    } catch (replacementError) {
-      setError(
-        replacementError instanceof Error
-          ? replacementError.message
-          : "The replacement could not be assigned and published.",
-      );
-    }
-    setReplacementPublishing("");
-  }
-  async function moveAssignment(
-    gameId: string,
-    assignmentId: string,
-    direction: -1 | 1,
-  ) {
-    if (!canManage) return;
-    setMovingAssignment(assignmentId);
-    setError("");
-    setNotice("");
-    const { error: moveError } = await supabase.rpc(
-      "move_assignment_position",
-      {
-        p_game_id: gameId,
-        p_assignment_id: assignmentId,
-        p_direction: direction,
-      },
-    );
-    if (moveError) setError(moveError.message);
-    else setNotice("Official positions updated.");
-    await refreshAssignmentState();
-    setMovingAssignment("");
-  }
-  async function unassign(assignmentId: string, positionId: string) {
-    if (!canManage) {
-      setError("Only Administrators and Assignors can unassign officials.");
-      return;
-    }
-    setSaving(positionId);
-    setError("");
-    setNotice("");
-    const removedAssignment = assignments.find((assignment) => assignment.id === assignmentId);
-    const selectedGameId = removedAssignment?.game_id || selected;
-    const removedOfficial = officials.find((official) => official.id === removedAssignment?.official_id);
-    const removedPosition = positions.find((position) => position.id === positionId);
-    const { error: deleteError } = await supabase
-      .from("assignments")
-      .delete()
-      .eq("id", assignmentId);
-    if (deleteError) setError(deleteError.message);
-    else {
-      const changeDescription = `${removedOfficial ? `${removedOfficial.first_name} ${removedOfficial.last_name}` : "Official"} unassigned from ${removedPosition ? shortPositionName(removedPosition.name) : "the position"}.`;
-      setNotice(changeDescription);
-      announceUndoAvailable(changeDescription);
-      if (selectedGameId) {
-        setSelected(selectedGameId);
-        setLinkSelected((current) => current.includes(selectedGameId) ? current : [...current, selectedGameId]);
-      }
-    }
-    await refreshAssignmentState();
-    setSaving("");
-  }
-  async function confirmAssignment(a: Assignment) {
-    if (
-      !canManage ||
-      !a.published_at ||
-      a.status === "declined" ||
-      a.status === "confirmed"
-    )
-      return;
-    setConfirming(a.id);
-    setError("");
-    setNotice("");
-    try {
-      const response = await fetch("/api/assignments/confirm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assignmentId: a.id }),
-      });
-      const result = (await response.json()) as {
-        confirmed?: boolean;
-        error?: string;
-      };
-      if (!response.ok)
-        throw new Error(result.error || "Unable to confirm assignment.");
-      setNotice(
-        "Assignment confirmed and confirmed game information emailed to the official.",
-      );
-    } catch (e) {
-      setError(
-        e instanceof Error ? e.message : "Unable to confirm assignment.",
-      );
-    }
-    await refreshAssignmentState();
-    setConfirming("");
-  }
-  function requestGameStatusChange(gameId: string, status: string) {
-    setPendingGameStatus({ gameId, status });
-  }
-  function openQuickEdit(target: Game) {
-    const date = new Date(target.starts_at);
-    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-    setQuickEdit({ gameId: target.id, startsAt: local, durationMinutes: target.duration_minutes, locationId: target.location_id || "", levelId: target.level_id || "" });
-  }
-  async function saveQuickEdit() {
-    if (!quickEdit) return;
-    if (!quickEdit.startsAt || quickEdit.durationMinutes < 15 || quickEdit.durationMinutes > 480) return setError("Enter a valid game time and duration between 15 and 480 minutes.");
-    setQuickEditSaving(true); setError("");
-    const { error: updateError } = await supabase.from("games").update({ starts_at: new Date(quickEdit.startsAt).toISOString(), duration_minutes: quickEdit.durationMinutes, location_id: quickEdit.locationId || null, level_id: quickEdit.levelId || null }).eq("id", quickEdit.gameId);
-    if (updateError) setError(updateError.message);
-    else { setQuickEdit(null); setNotice("Game updated. Assignment impacts were reviewed and the activity was recorded."); await load(); }
-    setQuickEditSaving(false);
-  }
-  function deadlineState(target: Game) {
-    const staffing = staffingCounts(target);
-    if (!staffing.open) return { label: "Filled", color: "#15803d" };
-    const targetAt = new Date(target.starts_at).getTime() - (target.leagues?.assignment_fill_target_days ?? 14) * 86400000;
-    const days = Math.ceil((targetAt - Date.now()) / 86400000);
-    return days < 0 ? { label: `${Math.abs(days)}d overdue`, color: "#b91c1c" } : days <= 3 ? { label: `Due in ${days}d`, color: "#b45309" } : { label: `Target ${days}d`, color: "#475569" };
-  }
-  async function saveDeadlineSettings() {
-    if (!deadlineLeagueId) return;
-    setDeadlineSaving(true);
-    const values = { assignment_fill_target_days: deadlineDraft.fill, assignment_acceptance_hours: deadlineDraft.acceptance, assignment_escalation_days: deadlineDraft.escalation, assignment_reminder_hours: deadlineDraft.reminder };
-    const { error: deadlineError } = await supabase.from("leagues").update(values).eq("id", deadlineLeagueId);
-    if (deadlineError) setError(deadlineError.message); else { setShowDeadlineSettings(false); setNotice("Assignment deadlines updated for the league."); await load(); }
-    setDeadlineSaving(false);
-  }
-  async function changeGameStatus(gameId: string, status: string) {
-    if (!canManage) {
-      setError("Only Administrators and Assignors can change game status.");
-      return;
-    }
-    setPendingGameStatus(null);
-    setGameStatusSaving(gameId);
-    setError("");
-    setNotice("");
-    const response = await fetch("/api/games/status", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ gameId, status }),
-    });
-    const result = (await response.json().catch(() => ({}))) as {
-      error?: string;
-      sent?: number;
-      failed?: number;
-      failures?: string[];
-    };
-    if (!response.ok) setError(result.error || "Unable to change game status.");
-    else {
-      setGames((current) =>
-        current.map((listedGame) =>
-          listedGame.id === gameId ? { ...listedGame, status } : listedGame,
-        ),
-      );
-      const notification = ["canceled", "rained_out"].includes(status)
-        ? ` ${result.sent || 0} official notification${result.sent === 1 ? "" : "s"} sent${result.failed ? `; ${result.failed} failed` : ""}.`
-        : "";
-      setNotice(
-        `Game status changed to ${gameStatusOptions.find(([value]) => value === status)?.[1] || status}.${notification}`,
-      );
-    }
-    if (["canceled", "rained_out"].includes(status))
-      await refreshAssignmentState();
-    setGameStatusSaving("");
-  }
-  async function publishAssignments() {
-    if (!game || unpublishedCount === 0) return;
-    setShowPublishReview(false);
-    setPublishing(true);
-    setError("");
-    setNotice("");
-    try {
-      const response = await fetch("/api/assignments/publish", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ gameId: game.id }),
-      });
-      const result = (await response.json()) as {
-        sent?: number;
-        failed?: number;
-        failures?: string[];
-        error?: string;
-      };
-      if (!response.ok)
-        throw new Error(result.error || "Unable to publish assignments.");
-      if (result.failed)
-        setError(
-          `${result.sent || 0} assignment email${result.sent === 1 ? "" : "s"} sent. ${result.failed} failed: ${(result.failures || []).join("; ")}`,
-        );
-      else
-        setNotice(
-          `${result.sent || 0} assignment email${result.sent === 1 ? "" : "s"} sent successfully.`,
-        );
-    } catch (e) {
-      setError(
-        e instanceof Error ? e.message : "Unable to publish assignments.",
-      );
-    }
-    await refreshAssignmentState();
-    setPublishing(false);
-  }
-  async function openActivityTimeline() {
-    if (!game) return;
-    setShowActivityTimeline(true);
-    setActivityLoading(true);
-    setActivityError("");
-    const { data, error: activityLoadError } = await supabase
-      .from("audit_history")
-      .select("id,action,actor_name,summary,occurred_at")
-      .eq("game_id", game.id)
-      .order("occurred_at", { ascending: false })
-      .limit(100);
-    if (activityLoadError) setActivityError(activityLoadError.message);
-    else setActivityRows((data || []) as AuditEvent[]);
-    setActivityLoading(false);
-  }
-  async function retryNotificationIssues() {
-    if (!game || retryingNotifications) return;
-    setRetryingNotifications(true);
-    setError("");
-    setNotice("");
-    try {
-      const cancellation = ["canceled", "rained_out"].includes(game.status);
-      const response = await fetch(
-        cancellation ? "/api/games/status" : "/api/assignments/publish",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(
-            cancellation
-              ? { gameId: game.id, status: game.status }
-              : { gameId: game.id },
-          ),
-        },
-      );
-      const result = (await response.json().catch(() => ({}))) as {
-        error?: string;
-        sent?: number;
-        failed?: number;
-        failures?: string[];
-      };
-      if (!response.ok)
-        throw new Error(result.error || "Notifications could not be retried.");
-      if (result.failed)
-        setError(
-          `${result.sent || 0} notification${result.sent === 1 ? "" : "s"} sent; ${result.failed} still failed. ${(result.failures || []).join("; ")}`,
-        );
-      else
-        setNotice(
-          `${result.sent || 0} notification${result.sent === 1 ? "" : "s"} sent successfully.`,
-        );
-      await refreshAssignmentState();
-    } catch (retryError) {
-      setError(
-        retryError instanceof Error
-          ? retryError.message
-          : "Notifications could not be retried.",
-      );
-    }
-    setRetryingNotifications(false);
-  }
-  function assignmentStatus(a: Assignment) {
-    if (a.status === "accepted" || a.status === "confirmed")
-      return { label: "Accepted", className: "badge green" };
-    if (a.status === "declined")
-      return { label: "Declined", className: "badge red" };
-    if (a.published_at)
-      return { label: "Under Review", className: "badge yellow" };
-    return { label: "Not Published", className: "badge blue" };
-  }
-  function formatDeadline(value: string | null) {
-    return value ? new Date(value).toLocaleString() : "";
-  }
-  async function exportAssignments(gameIds?: string[]) {
-    const XLSX = await import("xlsx");
-    const exportGames = gameIds?.length
-      ? filteredGames.filter((listedGame) => gameIds.includes(listedGame.id))
-      : filteredGames;
-    const positionNames: string[] = [];
-    for (const g of exportGames) {
-      const gp = positions
-        .filter((p) => p.sport_id === g.sport_id)
-        .sort((a, b) => a.sort_order - b.sort_order)
-        .slice(0, Math.max(0, g.officials_needed));
-      for (const pos of gp)
-        if (!positionNames.includes(pos.name)) positionNames.push(pos.name);
-    }
-    const data = exportGames.map((g) => {
-      const d = new Date(g.starts_at),
-        row: Record<string, string | number> = {
-          "Game Number": g.game_number,
-          Date: d.toLocaleDateString(),
-          Time: d.toLocaleTimeString([], {
-            hour: "numeric",
-            minute: "2-digit",
-          }),
-          Sport: g.sports?.name || "",
-          League: g.leagues?.name || "",
-          "Home Team": g.home?.name || "TBD",
-          "Away Team": g.away?.name || "TBD",
-          Location: g.location?.name || "TBD",
-          Power: Number(gamePower(g).toFixed(1)),
-        };
-      for (const name of positionNames) {
-        row[`${name} Official`] = "";
-        row[`${name} Email`] = "";
-        row[`${name} Phone`] = "";
-        row[`${name} Status`] = "";
-        row[`${name} Published`] = "";
-        row[`${name} Accept By`] = "";
-      }
-      const gp = positions
-        .filter((p) => p.sport_id === g.sport_id)
-        .sort((a, b) => a.sort_order - b.sort_order)
-        .slice(0, Math.max(0, g.officials_needed));
-      for (const pos of gp) {
-        const a = assignments.find(
-            (x) =>
-              x.game_id === g.id &&
-              x.position_id === pos.id &&
-              x.status !== "declined",
-          ),
-          o = a ? officials.find((x) => x.id === a.official_id) : undefined;
-        row[`${pos.name} Official`] = o
-          ? `${o.first_name} ${o.last_name}`
-          : "UNASSIGNED";
-        row[`${pos.name} Email`] = o?.email || "";
-        row[`${pos.name} Phone`] = o?.phone || "";
-        row[`${pos.name} Status`] = a
-          ? assignmentStatus(a).label
-          : "Unassigned";
-        row[`${pos.name} Published`] = a?.published_at ? "Yes" : "No";
-        row[`${pos.name} Accept By`] = a?.accept_by
-          ? new Date(a.accept_by).toLocaleString()
-          : "";
-      }
-      return row;
-    });
-    const ws = XLSX.utils.json_to_sheet(data),
-      wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Assignments");
-    XLSX.writeFile(wb, "refassign-game-assignments.xlsx");
-  }
-  async function runBulkAction(
-    action: "publish" | "confirm" | "unassign" | "status" | "closeSelfAssign",
-  ) {
-    if (!canManage || !linkSelected.length || bulkWorking) return;
-    const selectedIds = [...linkSelected];
-    const selectedAssignments = assignments.filter(
-      (a) => selectedIds.includes(a.game_id) && a.status !== "declined",
-    );
-    const labels = {
-      publish: "publish assignments for",
-      confirm: "confirm officials on",
-      unassign: "unassign every official from",
-      closeSelfAssign: "close every open Self Assign position for",
-      status: `change the status to ${gameStatusOptions.find(([value]) => value === bulkStatus)?.[1] || bulkStatus} for`,
-    };
-    const officialNotificationWarning =
-      action === "status" && ["canceled", "rained_out"].includes(bulkStatus)
-        ? "\n\nAssigned officials will be notified of this change."
-        : "";
-    if (
-      !window.confirm(
-        `${labels[action]} ${selectedIds.length} selected game${selectedIds.length === 1 ? "" : "s"}?${officialNotificationWarning}`,
-      )
-    )
-      return;
-    setBulkWorking(true);
-    setBulkResult(null);
-    setError("");
-    setNotice("");
-    let succeeded = 0;
-    const failures: string[] = [];
-    const undoOperationIds: string[] = [];
-    try {
-      if (action === "unassign") {
-        const { error: deleteError } = await supabase
-          .from("assignments")
-          .delete()
-          .in("game_id", selectedIds);
-        if (deleteError) failures.push(deleteError.message);
-        else {
-          succeeded = selectedAssignments.length;
-          const { data: undoRows } = await supabase.rpc(
-            "latest_undo_operation",
-          );
-          const undoId = (undoRows as { id: string }[] | null)?.[0]?.id;
-          if (undoId) undoOperationIds.push(undoId);
-        }
-      } else if (action === "closeSelfAssign") {
-        const openSlots = selfAssignSlots.filter((slot) =>
-          selectedIds.includes(slot.game_id),
-        );
-        for (const slot of openSlots) {
-          const { error: closeError } = await supabase.rpc(
-            "withdraw_self_assign_position",
-            {
-              p_game_id: slot.game_id,
-              p_position_id: slot.position_id,
-            },
-          );
-          if (closeError) failures.push(closeError.message);
-          else succeeded++;
-        }
-      } else if (action === "status") {
-        for (const gameId of selectedIds) {
-          const response = await fetch("/api/games/status", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ gameId, status: bulkStatus }),
-          });
-          const body = (await response.json().catch(() => ({}))) as {
-            error?: string;
-          };
-          if (response.ok) {
-            succeeded++;
-            const { data: undoRows } = await supabase.rpc(
-              "latest_undo_operation",
-            );
-            const undoId = (undoRows as { id: string }[] | null)?.[0]?.id;
-            if (undoId && !undoOperationIds.includes(undoId))
-              undoOperationIds.push(undoId);
-          } else failures.push(body.error || `Could not update game ${gameId}`);
-        }
-      } else if (action === "publish") {
-        for (const gameId of selectedIds) {
-          const response = await fetch("/api/assignments/publish", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ gameId }),
-          });
-          const body = (await response.json().catch(() => ({}))) as {
-            error?: string;
-            failed?: number;
-            failures?: string[];
-          };
-          if (response.ok) {
-            succeeded++;
-            if (body.failed) failures.push(...(body.failures || []));
-          } else
-            failures.push(body.error || `Could not publish game ${gameId}`);
-        }
-      } else if (action === "confirm") {
-        const eligible = selectedAssignments.filter(
-          (a) => a.published_at && a.status !== "confirmed",
-        );
-        for (const a of eligible) {
-          const response = await fetch("/api/assignments/confirm", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ assignmentId: a.id }),
-          });
-          const body = (await response.json().catch(() => ({}))) as {
-            error?: string;
-          };
-          if (response.ok) succeeded++;
-          else
-            failures.push(body.error || `Could not confirm assignment ${a.id}`);
-        }
-      }
-      if (failures.length)
-        setError(
-          `Bulk action completed with ${failures.length} issue${failures.length === 1 ? "" : "s"}: ${failures.slice(0, 4).join(" | ")}${failures.length > 4 ? " | ‚Ä¶" : ""}`,
-        );
-      setNotice(
-        `Bulk action complete: ${succeeded} ${action === "status" ? "game" : action === "confirm" || action === "unassign" ? "assignment" : "game"}${succeeded === 1 ? "" : "s"} processed.`,
-      );
-      setBulkResult({ action: labels[action], succeeded, failures: [...failures] });
-      if (succeeded && (action === "status" || action === "unassign")) {
-        await supabase.rpc("group_undo_operations", {
-          p_operation_ids: undoOperationIds,
-          p_description:
-            action === "status"
-              ? "Bulk game-status change"
-              : "Bulk unassignment",
-        });
-        announceUndoAvailable();
-      }
-      await load();
-      if (action === "unassign") {
-        setLinkSelected(selectedIds);
-        setSelected((current) => current && selectedIds.includes(current) ? current : selectedIds[0] || "");
-      } else {
-        setLinkSelected([]);
-      }
-    } catch (e) {
-      setError(
-        e instanceof Error ? e.message : "Unable to complete the bulk action.",
-      );
-    } finally {
-      setBulkWorking(false);
-    }
-  }
-  const filters: [Range, string][] = [
-    ["all", "All Games"],
-    ["today", "Today's Games"],
-    ["tomorrow", "Tomorrow's Games"],
-    ["thisWeek", "This Week"],
-    ["nextWeek", "Next Week"],
-  ];
-  const attentionQueue = {
-    replacements: rangeGames.filter((listedGame) =>
-      positions
-        .filter((position) => position.sport_id === listedGame.sport_id)
-        .slice(0, listedGame.officials_needed)
-        .some((position) => isReplacementNeeded(listedGame.id, position.id)),
-    ).length,
-    needsAction: rangeGames.filter(
-      (listedGame) => assignmentCompleteness(listedGame).key === "attention",
-    ).length,
-    unassigned: rangeGames.filter(
-      (listedGame) => assignmentCompleteness(listedGame).key === "unassigned",
-    ).length,
-    awaiting: rangeGames.filter(
-      (listedGame) => assignmentCompleteness(listedGame).key === "awaiting",
-    ).length,
-    unpublished: rangeGames.filter(isUnpublishedGame).length,
-  };
-  const coverageForecast = Array.from({ length: 14 }, (_, index) => {
-    const date = startDay(new Date());
-    date.setDate(date.getDate() + index);
-    const key = localDateKey(date),
-      dayGames = games.filter(
-        (listedGame) =>
-          localDateKey(new Date(listedGame.starts_at)) === key &&
-          !["canceled", "rained_out"].includes(listedGame.status),
-      ),
-      slots = dayGames.reduce(
-        (total, listedGame) => total + listedGame.officials_needed,
-        0,
-      ),
-      filled = dayGames.reduce((total, listedGame) => {
-        const assigned = new Set(
-          assignments
-            .filter(
-              (assignment) =>
-                assignment.game_id === listedGame.id &&
-                !["declined", "cancelled"].includes(assignment.status),
-            )
-            .map((assignment) => assignment.position_id),
-        ).size;
-        return total + Math.min(listedGame.officials_needed, assigned);
-      }, 0),
-      percent = slots ? Math.round((filled / slots) * 100) : 100;
-    return { date, key, games: dayGames.length, slots, filled, percent };
-  });
-  function shortPositionName(name: string) {
-    const normalized = name
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, "");
-    if (["assistantreferee1", "assistant1", "ar1"].includes(normalized))
-      return "AR1";
-    if (
-      ["assistantreferee2", "assistant2", "assistantreferee", "ar2"].includes(
-        normalized,
-      )
-    )
-      return "AR2";
-    if (
-      ["centerreferee", "center", "referee", "cr", "ref"].includes(normalized)
-    )
-      return "REF";
-    return name;
-  }
-  const overdueGroups = Array.from(
-    assignments
-      .filter((assignment) => {
-        const overdueGame = games.find(
-          (listedGame) => listedGame.id === assignment.game_id,
-        );
-        return Boolean(
-          overdueGame &&
-          assignment.status === "proposed" &&
-          assignment.published_at &&
-          assignment.accept_by &&
-          new Date(assignment.accept_by).getTime() < Date.now() &&
-          !assignment.overdue_reviewed_at &&
-          new Date(overdueGame.starts_at).getTime() > Date.now() &&
-          !["canceled", "rained_out"].includes(overdueGame.status),
-        );
-      })
-      .reduce((groups, assignment) => {
-        const group = groups.get(assignment.official_id) || [];
-        group.push(assignment);
-        groups.set(assignment.official_id, group);
-        return groups;
-      }, new Map<string, Assignment[]>()),
-  ).sort((a, b) => {
-    const aDeadline = Math.min(
-      ...a[1].map((assignment) => new Date(assignment.accept_by!).getTime()),
-    );
-    const bDeadline = Math.min(
-      ...b[1].map((assignment) => new Date(assignment.accept_by!).getTime()),
-    );
-    return aDeadline - bDeadline;
-  });
-  const overdueGroup = overdueGroups[0] || null;
-  const overdueGroupAssignmentIds = overdueGroup
-    ? overdueGroup[1].map((assignment) => assignment.id)
-    : [];
-  const overdueGroupSelectionKey = overdueGroupAssignmentIds.join(",");
-  useEffect(() => {
-    setOverdueSelected(
-      overdueGroupSelectionKey ? overdueGroupSelectionKey.split(",") : [],
-    );
-  }, [overdueGroupSelectionKey]);
-  function toggleOverdueSelection(assignmentId: string) {
-    setOverdueSelected((current) =>
-      current.includes(assignmentId)
-        ? current.filter((id) => id !== assignmentId)
-        : [...current, assignmentId],
-    );
-  }
-  async function resolveOverdue(
-    action: "keep" | "remove" | "remove_and_block",
-  ) {
-    if (!overdueGroup || overdueSelected.length === 0) return;
-    setOverdueResolving(true);
-    setError("");
-    setNotice("");
-    const { data, error: resolveError } = await supabase.rpc(
-      "resolve_overdue_assignments",
-      {
-        p_assignment_ids: overdueSelected,
-        p_action: action,
-      },
-    );
-    if (resolveError) setError(resolveError.message);
-    else {
-      const result = data as {
-        assignments_resolved?: number;
-        blocks_created?: number;
-      } | null;
-      const official = officials.find((item) => item.id === overdueGroup[0]);
-      const name = official
-        ? `${official.first_name} ${official.last_name}`
-        : "Official";
-      setNotice(
-        action === "keep"
-          ? `${name} was kept on ${result?.assignments_resolved || overdueSelected.length} selected overdue game assignment(s).`
-          : `${name} was removed from ${result?.assignments_resolved || overdueSelected.length} selected unaccepted game(s)${action === "remove_and_block" ? ` and ${result?.blocks_created || 0} time block(s) were created` : " without creating blocks"}.`,
-      );
-      setOverduePromptClosed(false);
-      await load();
-      if (action !== "keep") announceUndoAvailable();
-    }
-    setOverdueResolving(false);
-  }
-  function renderMobileInlineAssignment() {
-    if (!game) return null;
-    return (
-      <section className="card assignmentMain mobileInlineAssignment" aria-label={`Assignments for game ${game.game_number}`}>
-        <div className="mobileInlineAssignmentHead">
-          <div>
-            <h2>{game.home?.name || "TBD"} vs {game.away?.name || "TBD"}</h2>
-            <p>Game #{game.game_number} ‚Ä¢ {new Date(game.starts_at).toLocaleString()}</p>
-          </div>
-          <button type="button" className="secondary" onClick={() => setSelected("")} aria-label="Close game assignments">Close</button>
-        </div>
-        <div className="mobileInlineSummary">
-          <span><b>{activeAssignmentCount}/{game.officials_needed}</b> Filled</span>
-          <span><b>{openPositionCount}</b> Open</span>
-          <span><b>{gameAssignments.filter((item) => item.status === "proposed" && item.published_at).length}</b> Awaiting</span>
-          <span><b>{gameAssignments.filter((item) => ["accepted", "confirmed"].includes(item.status)).length}</b> Confirmed</span>
-        </div>
-        <div className="positionFocusToggle" role="group" aria-label="Positions shown">
-          <button type="button" className={!needsAssignmentOnly ? "active" : ""} onClick={() => setNeedsAssignmentView((current) => ({...current, [game.id]: false}))}>All Positions</button>
-          <button type="button" className={needsAssignmentOnly ? "active" : ""} onClick={() => setNeedsAssignmentView((current) => ({...current, [game.id]: true}))}>Needs Assignment ({openPositionCount})</button>
-        </div>
-        <div className="mobileInlinePositions">
-          {visibleGamePositions.map((pos) => {
-            const index = gamePositions.findIndex((position) => position.id === pos.id);
-            const current = assignments.find((assignment) => assignment.game_id === game.id && assignment.position_id === pos.id && assignment.status !== "declined");
-            const status = current ? assignmentStatus(current) : null;
-            const replacementNeeded = isReplacementNeeded(game.id, pos.id);
-            const eligibleCount = candidates(pos).filter((candidate) => candidate.reasons.length === 0).length;
-            const official = current ? officials.find((item) => item.id === current.official_id) : null;
-            return (
-              <article key={pos.id} className={replacementNeeded && !current ? "needsReplacement" : ""}>
-                <div className="mobileInlinePositionTop">
-                  <span><b>{shortPositionName(pos.name)}</b><small>Position {index + 1} of {game.officials_needed}</small></span>
-                  {status ? <span className={status.className}>{status.label}</span> : replacementNeeded ? <span className="badge red">Replacement Needed</span> : <span className="badge gray">Open</span>}
-                </div>
-                <div className="mobileInlineOfficial">
-                  <span><small>OFFICIAL</small><b>{official ? `${official.first_name} ${official.last_name}` : "Unassigned"}</b></span>
-                  <button type="button" className="primary candidatePanelButton" disabled={saving === pos.id} onClick={() => setCandidatePositionId(pos.id)}>
-                    {current ? "Change Official" : replacementNeeded ? "Find Replacement" : "Assign Official"}
-                    <small>{eligibleCount} eligible</small>
-                  </button>
-                </div>
-                {current && canManage && (
-                  <div className="mobileInlineActions">
-                    <button type="button" className="secondary" disabled={saving === pos.id} onClick={() => void unassign(current.id, pos.id)}>Unassign</button>
-                    {current.published_at && current.status !== "confirmed" && (
-                      <button type="button" className="confirmButton" disabled={confirming === current.id} onClick={() => void confirmAssignment(current)}>{confirming === current.id ? "Confirming‚Ä¶" : "Confirm Official"}</button>
-                    )}
-                  </div>
-                )}
-              </article>
-            );
-          })}
-          {!visibleGamePositions.length && <div className="positionsFilledMessage"><b>Every position is filled</b><span>Switch to All Positions to review or change the crew.</span></div>}
-        </div>
-      </section>
-    );
-  }
-  function renderGameRow(g: Game, linked: boolean, showChain: boolean) {
-    const d = new Date(g.starts_at);
-    const completeness = assignmentCompleteness(g);
-    const staffing = staffingCounts(g);
-    const normalizedStatus = g.status === "open" ? "active" : g.status;
-    const isRainOut = normalizedStatus === "rained_out";
-    const statusBackground =
-      normalizedStatus === "canceled"
-        ? "#fee2e2"
-        : normalizedStatus === "suspended"
-          ? "#fef9c3"
-          : isRainOut
-            ? "#1e3a8a"
-            : null;
-    const statusBorder =
-      normalizedStatus === "canceled"
-        ? "#fecaca"
-        : normalizedStatus === "suspended"
-          ? "#fde68a"
-          : isRainOut
-            ? "#1e40af"
-            : null;
-    return (
-      <div
-        key={g.id}
-        className={`assignmentGameRow${officialDropGame === g.id ? " officialDropTarget" : ""}${draggingOfficial ? " officialDropReady" : ""}`}
-        onDragEnter={(event) => {
-          if (!draggingOfficial || !canManage) return;
-          event.preventDefault();
-          event.stopPropagation();
-          setOfficialDropGame(g.id);
-        }}
-        onDragOver={(event) => {
-          if (!draggingOfficial || !canManage) return;
-          event.preventDefault();
-          event.stopPropagation();
-          event.dataTransfer.dropEffect = "move";
-        }}
-        onDragLeave={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget as Node))
-            setOfficialDropGame("");
-        }}
-        onDrop={(event) => {
-          const officialId =
-            event.dataTransfer.getData("text/plain") || draggingOfficial;
-          if (!officialId || !canManage) return;
-          event.preventDefault();
-          event.stopPropagation();
-          void dropOfficialOnGame(g.id, officialId);
-        }}
-        style={{
-          borderBottom: `1px solid ${statusBorder || (linked ? "#bfdbfe" : "#e2e8f0")}`,
-          background:
-            statusBackground ||
-            (linked ? "#eff6ff" : selected === g.id ? "#f8fafc" : "#fff"),
-          color: isRainOut ? "#fff" : "inherit",
-        }}
-      >
-        <label
-          title="Select game for bulk actions or linking"
-          style={{ display: "flex", justifyContent: "center" }}
-        >
-          <input
-            type="checkbox"
-            aria-label={`Select game ${g.game_number}`}
-            checked={linkSelected.includes(g.id)}
-            disabled={linking || bulkWorking}
-            onChange={() => toggleLinkSelection(g.id)}
-          />
-        </label>
-        <button
-          type="button"
-          onClick={() => {
-            if (pickedOfficial) void dropOfficialOnGame(g.id, pickedOfficial);
-            else requestSelectedGame(g.id);
-          }}
-          title={pickedOfficial ? "Assign selected official to this game" : "Open game"}
-          style={{
-            border: 0,
-            background: "transparent",
-            padding: 0,
-            textAlign: "left",
-            cursor: "pointer",
-            color: "inherit",
-          }}
-        >
-          <span className="assignmentGameName">
-            {showChain && (
-              <span aria-hidden="true" className="assignmentLinkedArrow">
-                ‚Ü≥
-              </span>
-            )}
-            {g.home?.name || "TBD"} vs {g.away?.name || "TBD"}
-            {selfAssignOpenCount(g.id) > 0 && (
-              <span
-                className="badge green"
-                style={{ marginLeft: 8, verticalAlign: "middle" }}
-              >
-                Self Assign ‚Ä¢ {selfAssignOpenCount(g.id)} Open
-              </span>
-            )}
-          </span>
-          <small style={{ color: isRainOut ? "#dbeafe" : undefined }}>
-            {g.game_number}
-          </small>
-        </button>
-        <span
-          className="assignmentGameLocation"
-          style={{
-            color: isRainOut ? "#fff" : "#475569",
-            fontSize: 11,
-            fontWeight: 700,
-          }}
-        >
-          {g.location?.name || "TBD"}
-        </span>
-        <span className="assignmentGameDate" style={{ color: isRainOut ? "#fff" : undefined }}>
-          <span>{d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}</span>
-          <small>{d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</small>
-        </span>
-        <span
-          className="assignmentGamePower"
-          title="Average of the home and away team power rankings"
-          style={{
-            color: isRainOut ? "#fff" : "#7c3aed",
-            fontSize: 12,
-            fontWeight: 900,
-          }}
-        >
-          {gamePower(g).toFixed(1)}
-        </span>
-        <select
-          className="assignmentGameStatusSelect"
-          aria-label={`Status for game ${g.game_number}`}
-          disabled={!canManage || gameStatusSaving === g.id}
-          value={g.status === "open" ? "active" : g.status}
-          onChange={(event) => requestGameStatusChange(g.id, event.target.value)}
-          style={{
-            width: "100%",
-            minWidth: 0,
-            padding: "5px 4px",
-            fontSize: 11,
-          }}
-        >
-          {gameStatusOptions.map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-        <div className="assignmentStatusCell">
-          <span
-            title={completeness.detail}
-            className="assignmentStatusBadge"
-            style={{
-              border: `1px solid ${completeness.color}`,
-              color: isRainOut ? "#fff" : completeness.color,
-              background: isRainOut ? "rgba(255,255,255,.12)" : "#fff",
-            }}
-          >
-            {completeness.label}
-          </span>
-          <span className="assignmentStaffingCount">
-            <b>{staffing.filled} of {staffing.total}</b> filled
-            <small>{staffing.open ? `${staffing.open} open` : "Fully staffed"}</small>
-            <small style={{ color: deadlineState(g).color }}>{deadlineState(g).label}</small>
-          </span>
-          <span className="assignmentStaffingBar" aria-label={`${staffing.filled} of ${staffing.total} positions filled`}>
-            <span style={{ width: `${staffing.total ? Math.round((staffing.filled / staffing.total) * 100) : 100}%` }} />
-          </span>
-          {canManage && <button type="button" className="secondary" style={{ padding: "3px 7px", fontSize: 10 }} onClick={(event) => { event.stopPropagation(); openQuickEdit(g); }}>Quick Edit</button>}
-        </div>
-      </div>
-    );
-  }
-  const assignmentOfficialId = draggingOfficial || pickedOfficial;
-  return (
-    <>
-      {assignmentOfficialId && canManage && (
-        <section className="officialDropTray" aria-label="Choose a game for the dragged official">
-          <header>
-            <span>
-              <b>{draggingOfficial ? "Drop on a Game" : "Choose a Game"}</b>
-              <small>
-                {officials.find((official) => official.id === assignmentOfficialId)?.first_name}{" "}
-                {officials.find((official) => official.id === assignmentOfficialId)?.last_name}
-              </small>
-            </span>
-            <button type="button" aria-label="Close game chooser" onClick={() => { setPickedOfficial(""); setDraggingOfficial(""); }}>√ó</button>
-          </header>
-          <div>
-            {(assignmentSelection.length ? assignmentSelection : filteredGames).map((targetGame) => {
-              const openPosition = openPositionForGame(targetGame);
-              return (
-                <div
-                  key={targetGame.id}
-                  className={`officialTrayGame${officialDropGame === targetGame.id ? " active" : ""}${openPosition ? "" : " full"}`}
-                  onDragEnter={(event) => {
-                    event.preventDefault();
-                    setOfficialDropGame(targetGame.id);
-                  }}
-                  onDragOver={(event) => {
-                    event.preventDefault();
-                    event.dataTransfer.dropEffect = openPosition ? "move" : "none";
-                  }}
-                  onDragLeave={(event) => {
-                    if (!event.currentTarget.contains(event.relatedTarget as Node))
-                      setOfficialDropGame("");
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    const officialId = event.dataTransfer.getData("text/plain") || assignmentOfficialId;
-                    if (openPosition && officialId)
-                      void dropOfficialOnGame(targetGame.id, officialId);
-                  }}
-                  onClick={() => {
-                    if (!draggingOfficial && openPosition && assignmentOfficialId)
-                      void dropOfficialOnGame(targetGame.id, assignmentOfficialId);
-                  }}
-                >
-                  <b>{targetGame.home?.name || "TBD"} vs {targetGame.away?.name || "TBD"}</b>
-                  <span>
-                    Game #{targetGame.game_number} ¬∑ {new Date(targetGame.starts_at).toLocaleDateString([], { month: "short", day: "numeric" })}{" "}
-                    {new Date(targetGame.starts_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
-                  </span>
-                  <small>{openPosition ? `Next: ${openPosition.name}` : "No open positions"}</small>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
-      {pendingTapAssignment && (() => {
-        const targetGame = games.find((item) => item.id === pendingTapAssignment.gameId);
-        const official = officials.find((item) => item.id === pendingTapAssignment.officialId);
-        if (!targetGame || !official) return null;
-        const openPositions = openPositionsForGame(targetGame);
-        const conflicts = [
-          ...assignmentConflictReasonsForGame(
-            official,
-            targetGame,
-            pendingTapAssignment.positionId,
-          ),
-          ...duplicateAssignmentReasonsForGame(
-            official.id,
-            targetGame,
-            pendingTapAssignment.positionId,
-          ),
-        ];
-        const warnings = ineligibleReasonsForGame(
-          official,
-          targetGame,
-          pendingTapAssignment.positionId,
-        ).filter(
-          (reason) =>
-            !conflicts.includes(reason) &&
-            !(conflicts.length && reason === "Already assigned to this game"),
-        );
-        return (
-          <div className="tapAssignOverlay" role="presentation" onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setPendingTapAssignment(null);
-          }}>
-            <section className="tapAssignDialog" role="dialog" aria-modal="true" aria-labelledby="tap-assign-title">
-              <header>
-                <div>
-                  <small>ASSIGN OFFICIAL</small>
-                  <h3 id="tap-assign-title">{official.first_name} {official.last_name}</h3>
-                </div>
-                <button type="button" aria-label="Close assignment review" onClick={() => setPendingTapAssignment(null)}>√ó</button>
-              </header>
-              <div className="tapAssignGameSummary">
-                <b>{targetGame.home?.name || "TBD"} vs {targetGame.away?.name || "TBD"}</b>
-                <span>Game #{targetGame.game_number} ¬∑ {new Date(targetGame.starts_at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</span>
-                <span>{targetGame.location?.name || "Location TBD"} ¬∑ {targetGame.leagues?.name || "League not set"} ¬∑ {targetGame.levels?.name || "Level not set"}</span>
-              </div>
-              <fieldset className="tapAssignPositions">
-                <legend>Choose an open position</legend>
-                {openPositions.map((position) => (
-                  <label key={position.id}>
-                    <input
-                      type="radio"
-                      name="tap-assignment-position"
-                      value={position.id}
-                      checked={pendingTapAssignment.positionId === position.id}
-                      onChange={() => setPendingTapAssignment({ ...pendingTapAssignment, positionId: position.id })}
-                    />
-                    <span>{position.name}</span>
-                  </label>
-                ))}
-              </fieldset>
-              {conflicts.length > 0 && (
-                <div className="tapAssignAlert blocking"><b>Cannot assign due to a schedule conflict</b>{conflicts.map((reason) => <span key={reason}>{reason}</span>)}</div>
-              )}
-              {!conflicts.length && warnings.length > 0 && (
-                <div className="tapAssignAlert warning"><b>Manager override required</b>{warnings.map((reason) => <span key={reason}>{reason}</span>)}</div>
-              )}
-              {!conflicts.length && !warnings.length && (
-                <div className="tapAssignAlert clear"><b>No conflicts found</b><span>This official is available and eligible for the selected position.</span></div>
-              )}
-              <footer>
-                <button type="button" className="secondary" onClick={() => setPendingTapAssignment(null)}>Cancel</button>
-                <button type="button" className={warnings.length ? "danger" : "primary"} disabled={Boolean(conflicts.length) || !pendingTapAssignment.positionId || Boolean(saving)} onClick={() => void confirmTapAssignment()}>
-                  {saving ? "Assigning‚Ä¶" : warnings.length ? "Confirm Override & Assign" : "Confirm Assignment"}
-                </button>
-              </footer>
-            </section>
-          </div>
-        );
-      })()}
-      {showBulkAssign && (() => {
-        const review = bulkAssignmentReview();
-        const excludedSelectedGames = games.filter((item) => linkSelected.includes(item.id) && !gameAcceptsAssignments(item));
-        const official = officials.find((item) => item.id === bulkAssignOfficial);
-        const officialAssessments = officials
-          .map((item) => {
-            const assessment = bulkAssignmentReview(item.id);
-            const status = assessment.blocking.length ? "blocked" : assessment.warnings.length ? "warning" : "eligible";
-            const roleRatings = assessment.targets.map((target) => positions.find((position) => position.id === bulkAssignPositions[target.id])).filter((position): position is Position => Boolean(position)).map((position) => ({ label: rankLabel(position), rank: positionRankFor(item.id, position) }));
-            const uniqueRoleRatings = [...new Map(roleRatings.map((rating) => [rating.label, rating])).values()];
-            const averageRoleRank = uniqueRoleRatings.length ? uniqueRoleRatings.reduce((total, rating) => total + rating.rank, 0) / uniqueRoleRatings.length : 0;
-            return { official: item, assessment, status, roleRatings: uniqueRoleRatings, averageRoleRank };
-          })
-          .sort((a, b) => {
-            const order = { eligible: 0, warning: 1, blocked: 2 };
-            return order[a.status] - order[b.status] || b.averageRoleRank - a.averageRoleRank || a.official.last_name.localeCompare(b.official.last_name) || a.official.first_name.localeCompare(b.official.first_name);
-          });
-        const eligibleCount = officialAssessments.filter((item) => item.status === "eligible").length;
-        const officialSearch = bulkOfficialSearch.trim().toLowerCase();
-        const visibleOfficialAssessments = officialAssessments.filter(({ official: item, status }) => {
-          const matchesStatus = bulkOfficialStatus === "all" || status === bulkOfficialStatus;
-          const name = `${item.first_name} ${item.last_name}`.toLowerCase();
-          return matchesStatus && (!officialSearch || name.includes(officialSearch));
-        });
-        const warnings = review.warnings.filter(
-          (warning) => !review.blocking.some((blocked) => blocked.gameId === warning.gameId && warning.reason.includes(blocked.reason)),
-        );
-        return (
-          <div className="tapAssignOverlay" role="presentation" onMouseDown={(event) => {
-            if (event.target === event.currentTarget && !bulkWorking) setShowBulkAssign(false);
-          }}>
-            <section className="tapAssignDialog bulkAssignDialog" role="dialog" aria-modal="true" aria-labelledby="bulk-assign-title">
-              <header>
-                <div><small>BULK ASSIGNMENT</small><h3 id="bulk-assign-title">Assign {review.targets.length} Selected Games</h3></div>
-                <button type="button" aria-label="Close bulk assignment" disabled={bulkWorking} onClick={() => setShowBulkAssign(false)}>√ó</button>
-              </header>
-              {excludedSelectedGames.length > 0 && <div className="tapAssignAlert blocking"><b>{excludedSelectedGames.length} game{excludedSelectedGames.length === 1 ? "" : "s"} excluded</b><span>On Hold, Rain Out, and Cancelled games cannot receive bulk assignments.</span></div>}
-              <div className="bulkOfficialPicker">
-                <div className="bulkOfficialPickerHead"><span>Choose an official</span><b>{eligibleCount} eligible for all selected games</b></div>
-                <div className="bulkOfficialFilters">
-                  <input type="search" value={bulkOfficialSearch} onChange={(event) => setBulkOfficialSearch(event.target.value)} placeholder="Search officials by name" aria-label="Search officials by name" />
-                  <div role="group" aria-label="Filter officials by assignment status">
-                    {([['eligible', `Eligible (${eligibleCount})`], ['all', `All (${officialAssessments.length})`], ['warning', 'Override'], ['blocked', 'Conflicts']] as const).map(([value, label]) => <button key={value} type="button" className={bulkOfficialStatus === value ? "active" : ""} onClick={() => setBulkOfficialStatus(value)}>{label}</button>)}
-                  </div>
-                </div>
-                <div className="bulkOfficialOptions" role="radiogroup" aria-label="Officials ranked by eligibility">
-                  {visibleOfficialAssessments.map(({ official: item, assessment, status, roleRatings }) => {
-                    const firstIssue = assessment.blocking[0]?.reason || assessment.warnings[0]?.reason;
-                    return (
-                      <label key={item.id} className={`${status}${bulkAssignOfficial === item.id ? " selected" : ""}`}>
-                        <input type="radio" name="bulk-official" value={item.id} checked={bulkAssignOfficial === item.id} disabled={bulkWorking} onChange={() => { setBulkAssignOfficial(item.id); setBulkOverrideConfirmed(false); setBulkAssignMessage(""); }} />
-                        <span><b>{item.first_name} {item.last_name}</b><small>{status === "eligible" ? `Eligible for all ${assessment.targets.length} selected positions` : status === "warning" ? `Override needed ¬∑ ${firstIssue}` : `Unavailable ¬∑ ${firstIssue}`}</small><em>{roleRatings.map((rating) => `${rating.label} ${rating.rank.toFixed(1)}`).join(" ¬∑ ")}</em></span>
-                        <strong>{status === "eligible" ? "Eligible" : status === "warning" ? "Override" : "Conflict"}</strong>
-                      </label>
-                    );
-                  })}
-                  {!visibleOfficialAssessments.length && <p className="bulkOfficialEmpty">No officials match this search and filter.</p>}
-                </div>
-              </div>
-              {official && <div className="bulkConflictSummary" aria-live="polite">
-                <span className={review.blocking.length ? "bad" : "good"}><b>{review.blocking.length}</b> conflicts</span>
-                <span className={warnings.length ? "warn" : "good"}><b>{warnings.length}</b> warnings</span>
-                <span className="neutral"><b>{review.targets.length}</b> games</span>
-              </div>}
-              <div className="bulkAssignGameList">
-                {review.targets.map((target) => {
-                  const gameBlocking = review.blocking.filter((item) => item.gameId === target.id);
-                  const gameWarnings = warnings.filter((item) => item.gameId === target.id);
-                  return (
-                    <article key={target.id} className={gameBlocking.length ? "blocked" : gameWarnings.length ? "warning" : ""}>
-                      <div><b>{target.home?.name || "TBD"} vs {target.away?.name || "TBD"}</b><span>Game #{target.game_number} ¬∑ {new Date(target.starts_at).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}</span></div>
-                      <label><span>Position</span><select value={bulkAssignPositions[target.id] || ""} disabled={bulkWorking} onChange={(event) => setBulkAssignPositions((current) => ({ ...current, [target.id]: event.target.value }))}>{openPositionsForGame(target).map((position) => <option key={position.id} value={position.id}>{position.name}</option>)}</select></label>
-                      {gameBlocking.map((item) => <small className="blocking" key={item.reason}>{item.reason}</small>)}
-                      {gameWarnings.map((item) => <small className="warning" key={item.reason}>{item.reason}</small>)}
-                    </article>
-                  );
-                })}
-              </div>
-              {review.blocking.length > 0 && <div className="tapAssignAlert blocking"><b>Assignment blocked</b><span>Resolve the schedule or duplicate-assignment conflicts shown above.</span></div>}
-              {!review.blocking.length && warnings.length > 0 && <label className="bulkOverrideCheck"><input type="checkbox" checked={bulkOverrideConfirmed} onChange={(event) => setBulkOverrideConfirmed(event.target.checked)} /><span><b>Confirm eligibility overrides</b><small>{warnings.length} warning{warnings.length === 1 ? "" : "s"} will be overridden.</small></span></label>}
-              {official && !review.blocking.length && !warnings.length && <div className="tapAssignAlert clear"><b>Ready to assign</b><span>No conflicts were found for {official.first_name} {official.last_name}.</span></div>}
-              {bulkAssignMessage && <div className={`bulkAssignMessage${bulkWorking ? " working" : ""}`} role="status">{bulkAssignMessage}</div>}
-              <footer>
-                <button type="button" className="secondary" disabled={bulkWorking} onClick={() => setShowBulkAssign(false)}>Cancel</button>
-                <button type="button" className="primary" disabled={bulkWorking} onClick={() => void confirmBulkAssignment()}>{bulkWorking ? "Assigning‚Ä¶" : `Assign to ${review.targets.length} Game${review.targets.length === 1 ? "" : "s"}`}</button>
-              </footer>
-            </section>
-          </div>
-        );
-      })()}
-      {showBulkCrew && (() => {
-        const slots = bulkCrewSlots();
-        const selectedReviews = slots.map((slot) => ({ ...slot, candidate: crewCandidatesForSlot(slot.target, slot.position).find((item) => item.official.id === bulkCrewSelections[slot.key]) }));
-        const hasBlocking = selectedReviews.some((review) => review.candidate?.blocking.length);
-        const hasWarnings = selectedReviews.some((review) => review.candidate?.warnings.length);
-        const chosenCount = Object.values(bulkCrewSelections).filter(Boolean).length;
-        const conflictCount = selectedReviews.reduce((total, review) => total + (review.candidate?.blocking.length || 0), 0);
-        const warningCount = selectedReviews.reduce((total, review) => total + (review.candidate?.warnings.length || 0), 0);
-        const readyCount = selectedReviews.filter((review) => review.candidate && !review.candidate.blocking.length && !review.candidate.warnings.length).length;
-        return (
-          <div className="tapAssignOverlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !bulkCrewWorking) setShowBulkCrew(false); }}>
-            <section className="tapAssignDialog bulkCrewDialog" role="dialog" aria-modal="true" aria-labelledby="bulk-crew-title">
-              <header><div><small>BULK CREW ASSIGNMENT</small><h3 id="bulk-crew-title">Fill {slots.length} Open Positions</h3></div><button type="button" aria-label="Close crew assignment" disabled={bulkCrewWorking} onClick={() => setShowBulkCrew(false)}>√ó</button></header>
-              <div className="bulkCrewTools"><div><b>Smart recommendations</b><span>Position rank, eligibility, distance, conflicts and workload are considered.</span></div><button type="button" className="success" disabled={bulkCrewWorking || !slots.length} onClick={applySmartCrewRecommendations}>Smart Fill</button></div>
-              <div className="bulkConflictSummary" aria-live="polite">
-                <span className="good"><b>{readyCount}</b> ready</span>
-                <span className={warningCount ? "warn" : "good"}><b>{warningCount}</b> warnings</span>
-                <span className={conflictCount ? "bad" : "good"}><b>{conflictCount}</b> conflicts</span>
-                <span className="neutral"><b>{slots.length - chosenCount}</b> open</span>
-              </div>
-              <div className="bulkCrewList">
-                {slots.map((slot) => {
-                  const candidates = crewCandidatesForSlot(slot.target, slot.position);
-                  const eligible = candidates.filter((candidate) => !candidate.blocking.length && !candidate.warnings.length);
-                  const overrides = candidates.filter((candidate) => !candidate.blocking.length && candidate.warnings.length);
-                  const selectedCandidate = candidates.find((candidate) => candidate.official.id === bulkCrewSelections[slot.key]);
-                  const recommendation = eligible[0];
-                  return <article key={slot.key} className={selectedCandidate?.blocking.length ? "blocked" : selectedCandidate?.warnings.length ? "warning" : ""}>
-                    <div className="bulkCrewGame"><b>{slot.target.home?.name || "TBD"} vs {slot.target.away?.name || "TBD"}</b><span>Game #{slot.target.game_number} ¬∑ {new Date(slot.target.starts_at).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}</span></div>
-                    <div className="bulkCrewPosition"><strong>{slot.position.name}</strong><span>{rankLabel(slot.position)} position</span></div>
-                    <label><span>Official</span><select value={bulkCrewSelections[slot.key] || ""} disabled={bulkCrewWorking} onChange={(event) => { setBulkCrewSelections((current) => ({ ...current, [slot.key]: event.target.value })); setBulkCrewOverrideConfirmed(false); setBulkCrewMessage(""); }}>
-                      <option value="">Leave open</option>
-                      {eligible.length > 0 && <optgroup label="Eligible ‚Äî recommended first">{eligible.map((candidate, index) => <option key={candidate.official.id} value={candidate.official.id}>{index === 0 ? "‚òÖ " : ""}{candidate.official.last_name}, {candidate.official.first_name} ‚Äî {rankLabel(slot.position)} {candidate.rank.toFixed(1)}{candidate.distance != null ? ` ‚Äî ${candidate.distance.toFixed(1)} mi` : ""} ‚Äî {workloadWindow(candidate.official.id, 7)} in 7d / {workloadWindow(candidate.official.id, 30)} in 30d</option>)}</optgroup>}
-                      {overrides.length > 0 && <optgroup label="Override required">{overrides.map((candidate) => <option key={candidate.official.id} value={candidate.official.id}>{candidate.official.last_name}, {candidate.official.first_name} ‚Äî {candidate.warnings[0]}</option>)}</optgroup>}
-                    </select></label>
-                    {recommendation && <small className="recommendation">Recommended: {recommendation.official.first_name} {recommendation.official.last_name} ¬∑ {rankLabel(slot.position)} {recommendation.rank.toFixed(1)}{recommendation.distance != null ? ` ¬∑ ${recommendation.distance.toFixed(1)} mi` : ""}</small>}
-                    {selectedCandidate?.blocking.map((reason) => <small className="blocking" key={reason}>{reason}</small>)}
-                    {selectedCandidate?.warnings.map((reason) => <small className="warning" key={reason}>{reason}</small>)}
-                  </article>;
-                })}
-              </div>
-              {!slots.length && <div className="tapAssignAlert clear"><b>No open positions</b><span>Every selected game is already fully assigned.</span></div>}
-              {hasWarnings && !hasBlocking && <label className="bulkOverrideCheck"><input type="checkbox" checked={bulkCrewOverrideConfirmed} onChange={(event) => setBulkCrewOverrideConfirmed(event.target.checked)} /><span><b>Confirm eligibility overrides</b><small>At least one selected official requires a manager override.</small></span></label>}
-              {bulkCrewMessage && <div className={`bulkAssignMessage${bulkCrewWorking ? " working" : ""}`} role="status">{bulkCrewMessage}</div>}
-              <footer><button type="button" className="secondary" disabled={bulkCrewWorking} onClick={() => setShowBulkCrew(false)}>Cancel</button><button type="button" className="primary" disabled={bulkCrewWorking || !slots.length} onClick={() => void confirmBulkCrewAssignment()}>{bulkCrewWorking ? "Assigning Crew‚Ä¶" : `Assign ${chosenCount} Position${chosenCount === 1 ? "" : "s"}`}</button></footer>
-            </section>
-          </div>
-        );
-      })()}
-      {bulkAssignmentResult && (() => {
-        const completed = bulkAssignmentResult.items.filter((item) => item.status === "success").length;
-        const issues = bulkAssignmentResult.items.filter((item) => item.status !== "success");
-        return (
-          <div className="assignmentDialogBackdrop" role="presentation" onMouseDown={() => !bulkRetryingGame && setBulkAssignmentResult(null)}>
-            <div className="assignmentDialog bulkAssignmentResultDialog" role="dialog" aria-modal="true" aria-labelledby="bulkAssignmentResultTitle" onMouseDown={(event) => event.stopPropagation()}>
-              <div className="assignmentDialogHead"><div><h3 id="bulkAssignmentResultTitle">Bulk Assignment Results</h3><p>{bulkAssignmentResult.officialName}</p></div><button type="button" aria-label="Close results" disabled={Boolean(bulkRetryingGame)} onClick={() => setBulkAssignmentResult(null)}>√ó</button></div>
-              <div className="bulkResultTotals"><span className="success"><b>{completed}</b> assigned</span><span className={issues.length ? "failed" : "success"}><b>{issues.length}</b> need attention</span></div>
-              <div className="bulkAssignmentResultList">
-                {bulkAssignmentResult.items.map((item) => <article key={item.gameId} className={item.status}>
-                  <span className="bulkResultStatus" aria-label={item.status}>{item.status === "success" ? "‚úì" : "!"}</span>
-                  <div><b>Game #{item.gameNumber} ¬∑ {item.positionName}</b><span>{item.matchup} ¬∑ {item.officialName}</span>{item.error && <small>{item.error}</small>}</div>
-                  {item.status !== "success" && <button type="button" className="secondary" disabled={Boolean(bulkRetryingGame)} onClick={() => void retryBulkAssignmentItem(item)}>{bulkRetryingGame === item.gameId ? "Retrying‚Ä¶" : "Retry"}</button>}
-                </article>)}
-              </div>
-              <div className="assignmentDialogFooter"><button type="button" className="primary" disabled={Boolean(bulkRetryingGame)} onClick={() => setBulkAssignmentResult(null)}>Done</button></div>
-            </div>
-          </div>
-        );
-      })()}
-      <div className={`assignmentCenterSplit ${game ? "hasSelectedGame" : ""}`}>
-      <section className="card">
-        <div className="cardHead assignmentCompactHead">
-          <div>
-            <h2>Assignment Center</h2>
-            <p>
-              Assign, review and publish officials for upcoming games.
-            </p>
-          </div>
-          <div className="assignmentCompactPrimary">
-            <button
-              className="primary"
-              disabled={!game || unpublishedCount === 0 || publishing}
-              onClick={() => setShowPublishReview(true)}
-            >
-              {publishing
-                ? "Publishing & Sending‚Ä¶"
-                : `Publish${unpublishedCount ? ` (${unpublishedCount})` : ""}`}
-            </button>
-            {canManage && <details className="assignmentCompactOverflow"><summary aria-label="More Assignment Center actions">‚Ä¢‚Ä¢‚Ä¢</summary><div><button type="button" onClick={() => setShowCoverageForecast(true)}>Coverage Forecast</button><button type="button" onClick={() => { const first = games.find((item) => item.league_id); if (first?.league_id) { setDeadlineLeagueId(first.league_id); setDeadlineDraft({ fill: first.leagues?.assignment_fill_target_days ?? 14, acceptance: first.leagues?.assignment_acceptance_hours ?? 24, escalation: first.leagues?.assignment_escalation_days ?? 3, reminder: first.leagues?.assignment_reminder_hours ?? 24 }); } setShowDeadlineSettings(true); }}>Deadline Settings</button><button type="button" disabled={!filteredGames.length} onClick={() => void exportAssignments()}>Export</button><button type="button" disabled={selfAssignSaving || (!selfAssignSelected.length && !linkSelected.length && !game)} onClick={prepareSelfAssignPositions}>{selfAssignSaving ? "Opening‚Ä¶" : "Open Positions for Self Assign"}</button></div></details>}
-          </div>
-        </div>
-        {canManage && <nav className="assignmentCompactActionStrip" aria-label="Assignment Center tools"><b>More actions:</b><button type="button" onClick={() => setShowCoverageForecast(true)}>Coverage Forecast</button><button type="button" onClick={() => { const first = games.find((item) => item.league_id); if (first?.league_id) { setDeadlineLeagueId(first.league_id); setDeadlineDraft({ fill: first.leagues?.assignment_fill_target_days ?? 14, acceptance: first.leagues?.assignment_acceptance_hours ?? 24, escalation: first.leagues?.assignment_escalation_days ?? 3, reminder: first.leagues?.assignment_reminder_hours ?? 24 }); } setShowDeadlineSettings(true); }}>Deadline Settings</button><button type="button" disabled={!filteredGames.length} onClick={() => void exportAssignments()}>Export</button><button type="button" disabled={selfAssignSaving || (!selfAssignSelected.length && !linkSelected.length && !game)} onClick={prepareSelfAssignPositions}>{selfAssignSaving ? "Opening‚Ä¶" : "Open Positions for Self Assign"}</button></nav>}
-        {error && (
-          <div className="errorBox assignmentFeedback" role="alert">
-            <span>{error}</span>
-            <button type="button" aria-label="Dismiss error" onClick={() => setError("")}>√ó</button>
-          </div>
-        )}
-        {notice && (
-          <div className="assignmentToast assignmentFeedback" role="status">
-            <span>{notice}</span>
-            <button type="button" aria-label="Dismiss message" onClick={() => setNotice("")}>√ó</button>
-          </div>
-        )}
-        {quickEdit && (() => {
-          const target = games.find((item) => item.id === quickEdit.gameId)!;
-          const active = assignments.filter((item) => item.game_id === target.id && !["declined", "cancelled"].includes(item.status));
-          const linkedCount = linkMembers.filter((item) => item.group_id === linkGroupByGame.get(target.id)).length;
-          const changedTime = (quickEdit.startsAt ? new Date(quickEdit.startsAt).toISOString() : "") !== target.starts_at || quickEdit.durationMinutes !== target.duration_minutes;
-          const changedVenue = quickEdit.locationId !== (target.location_id || "");
-          const changedLevel = quickEdit.levelId !== (target.level_id || "");
-          return <div className="assignmentDialogBackdrop" role="presentation" onMouseDown={() => !quickEditSaving && setQuickEdit(null)}><div className="assignmentDialog assignmentPublishReview" role="dialog" aria-modal="true" aria-labelledby="quickEditTitle" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="assignmentDialogHead"><div><h3 id="quickEditTitle">Quick Edit & Impact Review</h3><p>Game #{target.game_number} ‚Äî review downstream assignment effects before saving.</p></div><button type="button" aria-label="Close" onClick={() => setQuickEdit(null)}>√ó</button></div>
-            <div className="publishReviewSummary"><span><b>{active.length}</b> assigned officials affected</span><span className={active.some((item) => item.published_at) ? "warning" : "ready"}><b>{active.filter((item) => item.published_at).length}</b> published notifications</span><span><b>{linkedCount || 0}</b> linked games in group</span></div>
-            <div className="assignmentDirectFilters" style={{ padding: 16 }}>
-              <label>Date & time<input type="datetime-local" value={quickEdit.startsAt} onChange={(e) => setQuickEdit({ ...quickEdit, startsAt: e.target.value })}/></label>
-              <label>Duration (minutes)<input type="number" min="15" max="480" value={quickEdit.durationMinutes} onChange={(e) => setQuickEdit({ ...quickEdit, durationMinutes: Number(e.target.value) })}/></label>
-              <label>Location<select value={quickEdit.locationId} onChange={(e) => setQuickEdit({ ...quickEdit, locationId: e.target.value })}><option value="">TBD</option>{Array.from(new Map(games.filter((item) => item.location).map((item) => [item.location!.id, item.location!.name])).entries()).map(([id,name]) => <option key={id} value={id}>{name}</option>)}</select></label>
-              <label>Level<select value={quickEdit.levelId} onChange={(e) => setQuickEdit({ ...quickEdit, levelId: e.target.value })}><option value="">No level</option>{Array.from(new Map(games.filter((item) => item.levels).map((item) => [item.levels!.id, item.levels!.name])).entries()).map(([id,name]) => <option key={id} value={id}>{name}</option>)}</select></label>
-            </div>
-            <p className="publishReviewNote">Review required: {[changedTime && "time/conflict impact", changedVenue && "travel impact", changedLevel && "eligibility impact"].filter(Boolean).join(", ") || "no schedule, venue, or level changes yet"}. Published officials may need an updated notice.</p>
-            <div className="assignmentDialogFooter"><button type="button" className="secondary" onClick={() => setQuickEdit(null)}>Cancel</button><button type="button" className="primary" disabled={quickEditSaving} onClick={() => void saveQuickEdit()}>{quickEditSaving ? "Saving‚Ä¶" : "Save Reviewed Changes"}</button></div>
-          </div></div>;
-        })()}
-        {showDeadlineSettings && <div className="assignmentDialogBackdrop" role="presentation" onMouseDown={() => !deadlineSaving && setShowDeadlineSettings(false)}><div className="assignmentDialog assignmentConfirmDialog" role="dialog" aria-modal="true" aria-labelledby="deadlineTitle" onMouseDown={(event) => event.stopPropagation()}>
-          <div className="assignmentDialogHead"><div><h3 id="deadlineTitle">Assignment Deadlines</h3><p>Set league-level staffing targets, acceptance windows, reminders, and escalation timing.</p></div><button type="button" onClick={() => setShowDeadlineSettings(false)}>√ó</button></div>
-          <div className="assignmentDirectFilters" style={{ padding: 16 }}><label>League<select value={deadlineLeagueId} onChange={(e) => { const next = games.find((item) => item.league_id === e.target.value); setDeadlineLeagueId(e.target.value); if (next) setDeadlineDraft({ fill: next.leagues?.assignment_fill_target_days ?? 14, acceptance: next.leagues?.assignment_acceptance_hours ?? 24, escalation: next.leagues?.assignment_escalation_days ?? 3, reminder: next.leagues?.assignment_reminder_hours ?? 24 }); }}>{Array.from(new Map(games.filter((item) => item.league_id && item.leagues).map((item) => [item.league_id!, item.leagues!.name])).entries()).map(([id,name]) => <option key={id} value={id}>{name}</option>)}</select></label><label>Fill target (days before)<input type="number" min="0" max="90" value={deadlineDraft.fill} onChange={(e) => setDeadlineDraft({...deadlineDraft,fill:Number(e.target.value)})}/></label><label>Acceptance window (hours)<input type="number" min="1" max="168" value={deadlineDraft.acceptance} onChange={(e) => setDeadlineDraft({...deadlineDraft,acceptance:Number(e.target.value)})}/></label><label>Reminder (hours before due)<input type="number" min="1" max="168" value={deadlineDraft.reminder} onChange={(e) => setDeadlineDraft({...deadlineDraft,reminder:Number(e.target.value)})}/></label><label>Escalate after (days)<input type="number" min="0" max="30" value={deadlineDraft.escalation} onChange={(e) => setDeadlineDraft({...deadlineDraft,escalation:Number(e.target.value)})}/></label></div>
-          <div className="assignmentDialogFooter"><button type="button" className="secondary" onClick={() => setShowDeadlineSettings(false)}>Cancel</button><button type="button" className="primary" disabled={!deadlineLeagueId || deadlineSaving} onClick={() => void saveDeadlineSettings()}>{deadlineSaving ? "Saving‚Ä¶" : "Save Deadlines"}</button></div>
-        </div></div>}
-        {pendingGameStatus && (
-          <div className="assignmentDialogBackdrop" role="presentation" onMouseDown={() => !gameStatusSaving && setPendingGameStatus(null)}>
-            <div className="assignmentDialog assignmentConfirmDialog" role="dialog" aria-modal="true" aria-labelledby="gameStatusConfirmTitle" onMouseDown={(event) => event.stopPropagation()}>
-              <div className="assignmentDialogHead">
-                <div>
-                  <h3 id="gameStatusConfirmTitle">Confirm Game Status</h3>
-                  <p>
-                    Change Game #{games.find((item) => item.id === pendingGameStatus.gameId)?.game_number || ""} to {gameStatusOptions.find(([value]) => value === pendingGameStatus.status)?.[1] || pendingGameStatus.status}?
-                  </p>
-                </div>
-                <button type="button" aria-label="Close" disabled={Boolean(gameStatusSaving)} onClick={() => setPendingGameStatus(null)}>√ó</button>
-              </div>
-              {(() => { const affected = assignments.filter((item) => item.game_id === pendingGameStatus.gameId && !["declined", "cancelled"].includes(item.status)); const published = affected.filter((item) => item.published_at); const linked = linkMembers.filter((item) => item.group_id === linkGroupByGame.get(pendingGameStatus.gameId)).length; const sends = ["canceled", "rained_out"].includes(pendingGameStatus.status); return <><div className="publishReviewSummary"><span><b>{affected.length}</b> assignments affected</span><span className={published.length ? "warning" : "ready"}><b>{sends ? published.length : 0}</b> official notices</span><span><b>{linked || 0}</b> linked games</span></div><div className="assignmentConfirmMessage">{sends ? "Published officials will receive a cancellation or rain-out notice. Assignments will be closed." : "No automatic official email is sent for this status. Existing assignments remain available for review."}</div></>; })()}
-              <div className="assignmentDialogFooter">
-                <button type="button" className="secondary" disabled={Boolean(gameStatusSaving)} onClick={() => setPendingGameStatus(null)}>Keep Current Status</button>
-                <button type="button" className="danger" disabled={Boolean(gameStatusSaving)} onClick={() => void changeGameStatus(pendingGameStatus.gameId, pendingGameStatus.status)}>
-                  {gameStatusSaving ? "Updating‚Ä¶" : `Confirm ${gameStatusOptions.find(([value]) => value === pendingGameStatus.status)?.[1] || "Change"}`}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-        {pendingReplacement && game && (() => {
-          const replacementOfficial = officials.find((item) => item.id === pendingReplacement.officialId);
-          const replacementPosition = positions.find((item) => item.id === pendingReplacement.positionId);
-          return (
-            <div className="assignmentDialogBackdrop" role="presentation" onMouseDown={() => !replacementPublishing && setPendingReplacement(null)}>
-              <div className="assignmentDialog assignmentConfirmDialog" role="dialog" aria-modal="true" aria-labelledby="replacementConfirmTitle" onMouseDown={(event) => event.stopPropagation()}>
-                <div className="assignmentDialogHead">
-                  <div><h3 id="replacementConfirmTitle">Confirm Replacement</h3><p>Game #{game.game_number} ‚Äî {game.home?.name || "TBD"} vs {game.away?.name || "TBD"}</p></div>
-                  <button type="button" aria-label="Close" disabled={Boolean(replacementPublishing)} onClick={() => setPendingReplacement(null)}>√ó</button>
-                </div>
-                <div className="replacementConfirmSummary">
-                  <span><small>POSITION</small><b>{replacementPosition?.name || "Official"}</b></span>
-                  <span><small>NEW OFFICIAL</small><b>{replacementOfficial ? `${replacementOfficial.first_name} ${replacementOfficial.last_name}` : "Selected official"}</b></span>
-                </div>
-                <div className="assignmentConfirmMessage">This will assign the replacement, publish the assignment, and immediately notify the new official by email.</div>
-                <div className="assignmentDialogFooter">
-                  <button type="button" className="secondary" disabled={Boolean(replacementPublishing)} onClick={() => setPendingReplacement(null)}>Go Back</button>
-                  <button type="button" className="primary" disabled={Boolean(replacementPublishing)} onClick={() => void assignAndPublishReplacement(pendingReplacement.positionId, pendingReplacement.officialId, pendingReplacement.nextPositionId)}>{replacementPublishing ? "Assigning & Sending‚Ä¶" : "Assign & Notify Official"}</button>
-                </div>
-              </div>
-            </div>
-          );
-        })()}
-        {candidatePositionId && game && (() => {
-          const candidatePosition = gamePositions.find((item) => item.id === candidatePositionId);
-          if (!candidatePosition) return null;
-          const candidatePositionIndex = gamePositions.findIndex((item) => item.id === candidatePosition.id);
-          const candidateQuery = candidateSearch.trim().toLowerCase();
-          const list = sortOfficials(
-            candidates(candidatePosition).filter((candidate) => `${candidate.first_name} ${candidate.last_name}`.toLowerCase().includes(candidateQuery)),
-            candidateSort,
-          );
-          const current = assignments.find((item) => item.game_id === game.id && item.position_id === candidatePosition.id && item.status !== "declined");
-          const replacementNeeded = isReplacementNeeded(game.id, candidatePosition.id);
-          const eligibleCount = list.filter((item) => item.reasons.length === 0).length;
-          const label = rankLabel(candidatePosition);
-          return (
-            <div className="assignmentDialogBackdrop candidatePanelBackdrop" role="presentation" onMouseDown={() => setCandidatePositionId("")}>
-              <div className="assignmentDialog candidatePanelDialog" role="dialog" aria-modal="true" aria-labelledby="candidatePanelTitle" onMouseDown={(event) => event.stopPropagation()}>
-                <div className="assignmentDialogHead">
-                  <div>
-                    <h3 id="candidatePanelTitle">{replacementNeeded && !current ? "Choose a Replacement" : current ? "Change Official" : "Choose an Official"}</h3>
-                    <p>{shortPositionName(candidatePosition.name)} ‚Ä¢ Game #{game.game_number} ‚Ä¢ {eligibleCount} eligible</p>
-                  </div>
-                  <button type="button" aria-label="Close candidates" onClick={() => setCandidatePositionId("")}>√ó</button>
-                </div>
-                <div className="candidatePanelSummary">
-                  <span>
-                    <small>POSITION</small>
-                    <div className="candidatePositionNav">
-                      <button type="button" aria-label="Previous position" disabled={candidatePositionIndex === 0} onClick={() => setCandidatePositionId(gamePositions[candidatePositionIndex - 1].id)}>‚Üê</button>
-                      <b>{shortPositionName(candidatePosition.name)}</b>
-                      <button type="button" aria-label="Next position" disabled={candidatePositionIndex === gamePositions.length - 1} onClick={() => setCandidatePositionId(gamePositions[candidatePositionIndex + 1].id)}>‚Üí</button>
-                    </div>
-                  </span>
-                  <span><small>CURRENT OFFICIAL</small><b>{current ? `${officials.find((item) => item.id === current.official_id)?.first_name || ""} ${officials.find((item) => item.id === current.official_id)?.last_name || ""}`.trim() : "Open"}</b></span>
-                </div>
-                <div className="officialListTools candidateListTools">
-                  <input type="search" value={candidateSearch} onChange={(event) => setCandidateSearch(event.target.value)} placeholder="Search officials" aria-label="Search officials" />
-                  <select value={candidateSort} onChange={(event) => setCandidateSort(event.target.value as typeof candidateSort)} aria-label="Sort officials">
-                    <option value="best">Best qualified</option><option value="distance">Closest</option><option value="rank">Highest rank</option><option value="leastRecent">Least recently assigned</option><option value="name">Name</option>
-                  </select>
-                </div>
-                <div className="candidatePanelList">
-                  {list.map((candidate, candidateIndex) => (
-                    <article key={candidate.id} className={candidate.reasons.length ? "candidateWarning" : "candidateEligible"}>
-                      <div>
-                        <b>{candidateIndex + 1}. {candidate.first_name} {candidate.last_name}</b>
-                        <span>{label} {candidate.rank.toFixed(1)}{candidate.distance != null ? ` ‚Ä¢ ${candidate.distance.toFixed(1)} mi` : ""} ‚Ä¢ {workloadWindow(candidate.id, 7)} games/7d ‚Ä¢ {workloadWindow(candidate.id, 30)} games/30d</span>
-                        <small>{candidate.reasons.length ? candidate.reasons.join(" ‚Ä¢ ") : "Eligible and conflict-free"}</small>
-                        <details className="candidateDetails">
-                          <summary>View details</summary>
-                          <span>{teamRecencyLabel(candidate.id).replace(/^ ‚Ä¢ /, "") || "No recent team history"}</span>
-                        </details>
-                      </div>
-                      <div className="candidatePanelActions">
-                        <button type="button" className={candidate.reasons.length ? "secondary" : "primary"} disabled={saving === candidatePosition.id || current?.official_id === candidate.id} onClick={() => void assignFromCandidate(candidatePosition.id, candidate.id)}>
-                          {current?.official_id === candidate.id ? "Assigned" : candidate.reasons.length ? "Override" : "Assign"}
-                        </button>
-                        {replacementNeeded && !current && candidate.reasons.length === 0 && (
-                          <button type="button" className="success" disabled={saving === candidatePosition.id || Boolean(replacementPublishing)} onClick={() => { const nextPositionId = nextOpenPositionAfter(candidatePosition.id)?.id; setCandidatePositionId(""); setPendingReplacement({ positionId: candidatePosition.id, officialId: candidate.id, nextPositionId }); }}>Assign & Notify</button>
-                        )}
-                      </div>
-                    </article>
-                  ))}
-                  {!list.length && <div className="emptyState"><p>No officials are available for this position.</p></div>}
-                </div>
-                <div className="assignmentDialogFooter">
-                  <button type="button" className="secondary" onClick={() => setCandidatePositionId("")}>Close</button>
-                </div>
-              </div>
-            </div>
-          );
-        })()}
-        {showCoverageForecast && (
-          <div className="assignmentDialogBackdrop" role="presentation" onMouseDown={() => setShowCoverageForecast(false)}>
-            <div className="assignmentDialog coverageForecastDialog" role="dialog" aria-modal="true" aria-labelledby="coverageForecastTitle" onMouseDown={(event) => event.stopPropagation()}>
-              <div className="assignmentDialogHead">
-                <div><h3 id="coverageForecastTitle">14-Day Coverage Forecast</h3><p>Select a date to open its games in the Assignment Center.</p></div>
-                <button type="button" aria-label="Close" onClick={() => setShowCoverageForecast(false)}>√ó</button>
-              </div>
-              <div className="coverageForecastGrid">
-                {coverageForecast.map((day) => <button type="button" key={day.key} className={day.percent === 100 ? "covered" : day.percent >= 67 ? "watch" : "short"} onClick={() => { chooseDate(day.key); setShowCoverageForecast(false); }}><span>{day.date.toLocaleDateString([], { weekday: "short" })}</span><b>{day.date.toLocaleDateString([], { month: "short", day: "numeric" })}</b><strong>{day.percent}%</strong><small>{day.filled}/{day.slots} positions ‚Ä¢ {day.games} game{day.games === 1 ? "" : "s"}</small></button>)}
-              </div>
-              <div className="coverageLegend"><span><i className="covered"/>Covered</span><span><i className="watch"/>Watch</span><span><i className="short"/>Short</span></div>
-              <div className="assignmentDialogFooter"><button type="button" className="secondary" onClick={() => setShowCoverageForecast(false)}>Close</button></div>
-            </div>
-          </div>
-        )}
-        {bulkResult && (
-          <div className="assignmentDialogBackdrop" role="presentation" onMouseDown={() => setBulkResult(null)}>
-            <div className="assignmentDialog bulkResultDialog" role="dialog" aria-modal="true" aria-labelledby="bulkResultTitle" onMouseDown={(event) => event.stopPropagation()}>
-              <div className="assignmentDialogHead"><div><h3 id="bulkResultTitle">Assignment Change Summary</h3><p>The selected batch action has finished.</p></div><button type="button" aria-label="Close" onClick={() => setBulkResult(null)}>√ó</button></div>
-              <div className="bulkResultTotals"><span className="success"><b>{bulkResult.succeeded}</b> completed</span><span className={bulkResult.failures.length ? "failed" : "success"}><b>{bulkResult.failures.length}</b> issues</span></div>
-              <p className="bulkResultAction">Action: {bulkResult.action}</p>
-              {bulkResult.failures.length > 0 && <div className="bulkFailureList"><b>Items requiring attention</b>{bulkResult.failures.map((failure, index) => <p key={`${failure}-${index}`}>{failure}</p>)}</div>}
-              <div className="assignmentDialogFooter"><button type="button" className="primary" onClick={() => setBulkResult(null)}>Done</button></div>
-            </div>
-          </div>
-        )}
-        {showPublishReview && game && (
-          <div className="assignmentDialogBackdrop" role="presentation" onMouseDown={() => !publishing && setShowPublishReview(false)}>
-            <div className="assignmentDialog assignmentPublishReview" role="dialog" aria-modal="true" aria-labelledby="publishReviewTitle" onMouseDown={(event) => event.stopPropagation()}>
-              <div className="assignmentDialogHead">
-                <div>
-                  <h3 id="publishReviewTitle">Review Before Publishing</h3>
-                  <p>Game #{game.game_number} ‚Äî {game.home?.name || "TBD"} vs {game.away?.name || "TBD"}</p>
-                </div>
-                <button type="button" aria-label="Close" disabled={publishing} onClick={() => setShowPublishReview(false)}>√ó</button>
-              </div>
-              <div className="publishReviewSummary">
-                <span><b>{unpublishedCount}</b> official{unpublishedCount === 1 ? "" : "s"} will be notified</span>
-                <span className={openPositionCount ? "warning" : "ready"}><b>{openPositionCount}</b> open position{openPositionCount === 1 ? "" : "s"}</span>
-                <span className={publishMissingEmails ? "warning" : "ready"}><b>{publishMissingEmails}</b> missing email{publishMissingEmails === 1 ? "" : "s"}</span>
-                <span><b>{publishAcceptanceHours}h</b> response window</span>
-              </div>
-              <div className="publishRecipientList">
-                {unpublishedAssignments.map((assignment) => {
-                  const official = officials.find((item) => item.id === assignment.official_id);
-                  const position = positions.find((item) => item.id === assignment.position_id);
-                  return <div key={assignment.id}><span><b>{official ? `${official.first_name} ${official.last_name}` : "Unknown official"}</b><small>{position ? shortPositionName(position.name) : "Official"}</small></span><span className={official?.email ? "recipientReady" : "recipientMissing"}>{official?.email || "Email missing"}</span></div>;
-                })}
-              </div>
-              <p className="publishReviewNote">Publishing sends each listed official an assignment email with the league response deadline. Open positions are not included.{publishMissingEmails ? " Add the missing email before publishing." : " Recipient checks passed."}</p>
-              <div className="assignmentDialogFooter">
-                <button type="button" className="secondary" disabled={publishing} onClick={() => setShowPublishReview(false)}>Go Back</button>
-                <button type="button" className="primary" disabled={publishing || !unpublishedCount || Boolean(publishMissingEmails)} onClick={() => void publishAssignments()}>{publishing ? "Publishing & Sending‚Ä¶" : `Publish ${unpublishedCount} Assignment${unpublishedCount === 1 ? "" : "s"}`}</button>
-              </div>
-            </div>
-          </div>
-        )}
-        {showActivityTimeline && game && (
-          <div className="assignmentDialogBackdrop" role="presentation" onMouseDown={() => setShowActivityTimeline(false)}>
-            <div className="assignmentDialog assignmentActivityDialog" role="dialog" aria-modal="true" aria-labelledby="activityTimelineTitle" onMouseDown={(event) => event.stopPropagation()}>
-              <div className="assignmentDialogHead">
-                <div><h3 id="activityTimelineTitle">Activity Timeline</h3><p>Game #{game.game_number} ‚Äî visible only while this window is open.</p></div>
-                <button type="button" aria-label="Close" onClick={() => setShowActivityTimeline(false)}>√ó</button>
-              </div>
-              {activityError && <div className="errorBox">{activityError}</div>}
-              {activityLoading ? <p>Loading activity‚Ä¶</p> : activityRows.length ? <div className="gameActivityTimeline">{activityRows.map((row) => <article key={row.id}><i/><div><b>{row.summary}</b><span>{row.actor_name || "System"} ‚Ä¢ {new Date(row.occurred_at).toLocaleString()}</span></div><em>{row.action.replaceAll("_", " ")}</em></article>)}</div> : <div className="emptyState"><p>No recorded activity for this game yet.</p></div>}
-              <div className="assignmentDialogFooter"><button type="button" className="secondary" onClick={() => setShowActivityTimeline(false)}>Close</button></div>
-            </div>
-          </div>
-        )}
-        {showCrewTemplates && crewTemplateTargetGames()[0] && (() => {
-          const targets = crewTemplateTargetGames();
-          const templates = availableCrewTemplates();
-          const previousGames = previousCrewGames();
-          const source = targets[0];
-          return (
-            <div className="assignmentDialogBackdrop" role="presentation" onMouseDown={() => !crewTemplateWorking && setShowCrewTemplates(false)}>
-              <div className="assignmentDialog crewTemplateDialog" role="dialog" aria-modal="true" aria-labelledby="crewTemplateTitle" onMouseDown={(event) => event.stopPropagation()}>
-                <div className="assignmentDialogHead">
-                  <div>
-                    <h3 id="crewTemplateTitle">Crew Templates</h3>
-                    <p>{targets.length === 1 ? `Game #${source.game_number}` : `${targets.length} selected games`} ‚Äî assignments remain unpublished until reviewed.</p>
-                  </div>
-                  <button type="button" aria-label="Close crew templates" disabled={crewTemplateWorking} onClick={() => setShowCrewTemplates(false)}>√ó</button>
-                </div>
-                <div className="crewTemplateBody">
-                  <section className="crewTemplateCreate">
-                    <div><b>Save this crew</b><span>Reuse the officials currently assigned to this game.</span></div>
-                    <label><span>Template name</span><input value={crewTemplateName} maxLength={80} disabled={crewTemplateWorking} onChange={(event) => setCrewTemplateName(event.target.value)} /></label>
-                    <button type="button" className="success" disabled={crewTemplateWorking} onClick={() => void saveCurrentCrewTemplate()}>Save Current Crew</button>
-                  </section>
-                  <section className="crewTemplateCopy">
-                    <div><b>Copy from another game</b><span>Only open positions are filled; existing assignments are preserved.</span></div>
-                    <select value={copyCrewSourceGameId} disabled={crewTemplateWorking || !previousGames.length} onChange={(event) => setCopyCrewSourceGameId(event.target.value)}>
-                      {!previousGames.length && <option value="">No games with crews available</option>}
-                      {previousGames.map((listedGame) => <option key={listedGame.id} value={listedGame.id}>Game #{listedGame.game_number} ‚Äî {listedGame.home?.name || "TBD"} vs {listedGame.away?.name || "TBD"} ‚Äî {new Date(listedGame.starts_at).toLocaleDateString()}</option>)}
-                    </select>
-                    <button type="button" className="primary" disabled={crewTemplateWorking || !copyCrewSourceGameId} onClick={() => void copyCrewFromGame()}>Copy Crew</button>
-                  </section>
-                  <section className="crewTemplateSaved">
-                    <div className="crewTemplateSectionHead"><div><b>Saved crews</b><span>League-specific crews appear for matching games.</span></div><strong>{templates.length}</strong></div>
-                    {templates.length ? <div className="crewTemplateList">{templates.map((template) => (
-                      <article key={template.id}>
-                        <div><b>{template.name}</b><span>{template.assignment_template_slots.length} position{template.assignment_template_slots.length === 1 ? "" : "s"} ‚Ä¢ {template.league_id ? "League crew" : "All leagues"}</span><small>{template.assignment_template_slots.map((slot) => officials.find((official) => official.id === slot.official_id)).filter(Boolean).map((official) => `${official!.first_name} ${official!.last_name}`).join(", ") || "No available officials"}</small></div>
-                        <button type="button" className="primary" disabled={crewTemplateWorking || !template.assignment_template_slots.length} onClick={() => void applyCrewSlots(template.assignment_template_slots, template.name)}>Apply</button>
-                        <button type="button" className="secondary crewTemplateDelete" disabled={crewTemplateWorking} onClick={() => void deleteCrewTemplate(template.id)}>Delete</button>
-                      </article>
-                    ))}</div> : <div className="crewTemplateEmpty">No saved crews match this game yet. Save the current crew to create the first one.</div>}
-                  </section>
-                  {crewTemplateMessage && <div className="crewTemplateMessage" role="status">{crewTemplateMessage}</div>}
-                </div>
-                <div className="assignmentDialogFooter"><button type="button" className="secondary" disabled={crewTemplateWorking} onClick={() => setShowCrewTemplates(false)}>Done</button></div>
-              </div>
-            </div>
-          );
-        })()}
-        {showSelfAssignDialog && (
-          <div className="assignmentDialogBackdrop" role="presentation" onMouseDown={() => !selfAssignSaving && setShowSelfAssignDialog(false)}>
-            <div className="assignmentDialog" role="dialog" aria-modal="true" aria-labelledby="selfAssignDialogTitle" onMouseDown={(event) => event.stopPropagation()}>
-              <div className="assignmentDialogHead">
-                <div>
-                  <h3 id="selfAssignDialogTitle">Open Positions for Self Assign</h3>
-                  <p>Select the positions officials may claim.</p>
-                </div>
-                <button type="button" aria-label="Close" disabled={selfAssignSaving} onClick={() => setShowSelfAssignDialog(false)}>√ó</button>
-              </div>
-              <div className="selfAssignDialogActions">
-                <button type="button" className="secondary" onClick={() => {
-                  const gameIds = linkSelected.length ? linkSelected : game ? [game.id] : [];
-                  setSelfAssignSelected(selfAssignOptionsForGames(gameIds).map((option) => option.key));
-                }}>Select All</button>
-                <button type="button" className="secondary" onClick={() => setSelfAssignSelected([])}>Clear All</button>
-              </div>
-              <div className="selfAssignPositionList">
-                {selfAssignOptionsForGames(linkSelected.length ? linkSelected : game ? [game.id] : []).map((option) => (
-                  <label key={option.key}>
-                    <input
-                      type="checkbox"
-                      checked={selfAssignSelected.includes(option.key)}
-                      disabled={selfAssignSaving}
-                      onChange={() => toggleSelfAssignSelection(option.gameId, option.positionId)}
-                    />
-                    <span>
-                      <b>{option.positionName}</b>
-                      <small>Game #{option.game.game_number} ‚Äî {option.game.home?.name || "TBD"} vs {option.game.away?.name || "TBD"}</small>
-                    </span>
-                  </label>
-                ))}
-              </div>
-              <div className="assignmentDialogFooter">
-                <button type="button" className="secondary" disabled={selfAssignSaving} onClick={() => setShowSelfAssignDialog(false)}>Cancel</button>
-                <button type="button" className="success" disabled={selfAssignSaving || !selfAssignSelected.length} onClick={() => void openSelfAssignPositions()}>
-                  {selfAssignSaving ? "Opening‚Ä¶" : `Open ${selfAssignSelected.length} Position${selfAssignSelected.length === 1 ? "" : "s"}`}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-        {canManage && overdueGroup && !overduePromptClosed && (
-          <div
-            className="overduePrompt"
-            role="dialog"
-            aria-labelledby="overduePromptTitle"
-          >
-            <div className="cardHead">
-              <div>
-                <h3 id="overduePromptTitle">Acceptance deadline passed</h3>
-                <p>
-                  {officials.find((official) => official.id === overdueGroup[0])
-                    ?.first_name || "This official"}{" "}
-                  {officials.find((official) => official.id === overdueGroup[0])
-                    ?.last_name || ""}{" "}
-                  has not accepted the following assigned game
-                  {overdueGroup[1].length === 1 ? "" : "s"}. Official {1} of{" "}
-                  {overdueGroups.length} requiring review.
-                </p>
-              </div>
-            </div>
-            <div className="overdueGameList">
-              {overdueGroup[1].map((assignment) => {
-                const overdueGame = games.find(
-                  (listedGame) => listedGame.id === assignment.game_id,
-                );
-                const position = positions.find(
-                  (item) => item.id === assignment.position_id,
-                );
-                if (!overdueGame) return null;
-                return (
-                  <label key={assignment.id}>
-                    <input
-                      type="checkbox"
-                      checked={overdueSelected.includes(assignment.id)}
-                      disabled={overdueResolving}
-                      onChange={() => toggleOverdueSelection(assignment.id)}
-                      aria-label={`Select game ${overdueGame.game_number}`}
-                    />
-                    <span>
-                      <b>
-                        {overdueGame.game_number} ‚Äî{" "}
-                        {overdueGame.home?.name || "TBD"} vs{" "}
-                        {overdueGame.away?.name || "TBD"}
-                      </b>
-                      <small>
-                        {new Date(overdueGame.starts_at).toLocaleString([], {
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                          hour: "numeric",
-                          minute: "2-digit",
-                        })}
-                        {" ‚Ä¢ "}
-                        {position
-                          ? shortPositionName(position.name)
-                          : "Official"}
-                        {" ‚Ä¢ Acceptance was due "}
-                        {new Date(assignment.accept_by!).toLocaleString([], {
-                          month: "short",
-                          day: "numeric",
-                          hour: "numeric",
-                          minute: "2-digit",
-                        })}
-                      </small>
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
-            <p className="overduePromptQuestion">
-              Select the unaccepted games to update. Accepted assignments are
-              never included or removed.
-            </p>
-            <div className="overduePromptActions">
-              <button
-                className="secondary"
-                disabled={overdueResolving || overdueSelected.length === 0}
-                onClick={() => void resolveOverdue("keep")}
-              >
-                Keep Official
-              </button>
-              <button
-                className="dangerButton"
-                disabled={overdueResolving || overdueSelected.length === 0}
-                onClick={() => void resolveOverdue("remove")}
-              >
-                Remove ‚Äî No Block
-              </button>
-              <button
-                className="primary"
-                disabled={overdueResolving || overdueSelected.length === 0}
-                onClick={() => void resolveOverdue("remove_and_block")}
-              >
-                Remove + Create Blocks
-              </button>
-              <button
-                className="secondary"
-                disabled={overdueResolving}
-                onClick={() => setOverduePromptClosed(true)}
-              >
-                Review Later
-              </button>
-              {overdueResolving && <span>Updating‚Ä¶</span>}
-            </div>
-          </div>
-        )}
-        {canManage && (
-          <section className="assignmentAttentionQueue" aria-labelledby="attentionQueueTitle">
-            <div><h3 id="attentionQueueTitle">Needs Attention</h3><p>Open the work that should be handled next.</p></div>
-            <button type="button" onClick={() => {
-              chooseCompleteness("attention");
-              const replacementGame = rangeGames.find((listedGame) => positions.filter((position) => position.sport_id === listedGame.sport_id).slice(0, listedGame.officials_needed).some((position) => isReplacementNeeded(listedGame.id, position.id)));
-              if (replacementGame) setSelected(replacementGame.id);
-            }}><b>{attentionQueue.replacements}</b><span>Replacement needed</span></button>
-            <button type="button" onClick={() => chooseCompleteness("unassigned")}><b>{attentionQueue.unassigned}</b><span>Unassigned games</span></button>
-            <button type="button" onClick={() => chooseCompleteness("awaiting")}><b>{attentionQueue.awaiting}</b><span>Awaiting response</span></button>
-            <button type="button" onClick={() => { setUnpublishedOnly(true); setCompletenessFilter("all"); setSelected(""); }}><b>{attentionQueue.unpublished}</b><span>Not published</span></button>
-          </section>
-        )}
-        <div className="assignmentFilterPanel assignmentCompactToolbar">
-        <label className="assignmentToolbarField">
-          <span>View</span>
-          <select
-            aria-label="Game view"
-            value={selfAssignOnly ? "selfAssign" : "all"}
-            onChange={(event) => {
-              const next = event.target.value === "selfAssign";
-              setSelfAssignOnly(next);
-              setLinkSelected([]);
-              setSelected("");
-            }}
-          >
-            <option value="all">All Games</option>
-            <option value="selfAssign">Open for Self Assign ({selfAssignGameCount})</option>
-          </select>
-        </label>
-        <label className="assignmentToolbarField">
-          <span>Date</span>
-          <select
-            aria-label="Date range"
-            value={range}
-            onChange={(event) => {
-              const next = event.target.value as Range;
-              if (next === "custom") {
-                setRange("custom");
-                setShowCalendar(true);
-              }
-              else chooseRange(next);
-            }}
-          >
-            {filters.map(([key, label]) => (
-              <option key={key} value={key}>
-                {label} ({games.filter((g) => inRange(g, key, customDate) && matchesOfficialFilter(g)).length})
-              </option>
-            ))}
-            <option value="custom">Choose a Date</option>
-          </select>
-        </label>
-        {canManage && (
-          <label className="assignmentToolbarField assignmentSavedViewField">
-            <span>Saved View</span>
-            <select aria-label="Open a saved view" defaultValue="" onChange={(event) => { const view = savedViews.find((item) => item.id === event.target.value); if (view) applySavedView(view); event.target.value = ""; }}>
-              <option value="">{savedViews.length ? "Choose a saved view" : "No saved views yet"}</option>
-              {savedViews.map((view) => <option value={view.id} key={view.id}>{view.name}</option>)}
-            </select>
-          </label>
-        )}
-        {canManage && (
-          <button
-            type="button"
-            className="secondary assignmentToolbarButton"
-            onClick={saveCurrentView}
-          >
-            + Save View
-          </button>
-        )}
-        {canManage && (
-          <details className="assignmentMoreFilters">
-            <summary>More Filters</summary>
-            <div className="assignmentDirectFilters">
-            <span className="assignmentFilterLabel">Filters</span>
-            <label>
-              Location
-              <select
-                aria-label="Show games at location"
-                value={locationFilter}
-                onChange={(event) => {
-                  setLocationFilter(event.target.value);
-                  setLinkSelected([]);
-                  setSelected("");
-                }}
-              >
-                <option value="">All Locations</option>
-                {Array.from(
-                  new Map(
-                    games
-                      .filter((listedGame) => listedGame.location)
-                      .map((listedGame) => [listedGame.location!.id, listedGame.location!.name]),
-                  ).entries(),
-                )
-                  .sort((a, b) => a[1].localeCompare(b[1]))
-                  .map(([id, name]) => (
-                    <option key={id} value={id}>{name}</option>
-                  ))}
-              </select>
-            </label>
-            <label>
-              League
-              <select
-                aria-label="Show games in league"
-                value={leagueFilter}
-                onChange={(event) => {
-                  setLeagueFilter(event.target.value);
-                  setLinkSelected([]);
-                  setSelected("");
-                }}
-              >
-                <option value="">All Leagues</option>
-                {Array.from(new Map(games.filter((listedGame) => listedGame.league_id && listedGame.leagues?.name).map((listedGame) => [listedGame.league_id!, listedGame.leagues!.name])).entries()).sort((a, b) => a[1].localeCompare(b[1])).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-              </select>
-            </label>
-            <label>
-              Level
-              <select
-                aria-label="Show games at level"
-                value={levelFilter}
-                onChange={(event) => {
-                  setLevelFilter(event.target.value);
-                  setLinkSelected([]);
-                  setSelected("");
-                }}
-              >
-                <option value="">All Levels</option>
-                {Array.from(new Map(games.filter((listedGame) => listedGame.level_id && listedGame.levels?.name).map((listedGame) => [listedGame.level_id!, listedGame.levels!.name])).entries()).sort((a, b) => a[1].localeCompare(b[1])).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-              </select>
-            </label>
-            <label>
-              Official
-              <select
-                aria-label="Show games assigned to official"
-                value={officialFilter}
-                onChange={(event) => {
-                  setOfficialFilter(event.target.value);
-                  setLinkSelected([]);
-                  setSelected("");
-                }}
-              >
-                <option value="">All Officials</option>
-                {officials
-                  .filter((official) => assignments.some(
-                    (assignment) =>
-                      assignment.official_id === official.id &&
-                      assignment.status !== "declined",
-                  ))
-                  .map((official) => (
-                    <option key={official.id} value={official.id}>
-                      {official.last_name}, {official.first_name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label>
-              Assignment Status
-              <select
-                aria-label="Filter by assignment status"
-                value={completenessFilter}
-                onChange={(event) =>
-                  chooseCompleteness(event.target.value as Completeness)
-                }
-              >
-                <option value="all">All Assignment Statuses ({rangeGames.length})</option>
-                <option value="unassigned">Unassigned</option>
-                <option value="partial">Partially Assigned</option>
-                <option value="full">Fully Assigned</option>
-                <option value="awaiting">Awaiting Confirmation</option>
-                <option value="confirmed">Confirmed</option>
-                <option value="attention">Needs Attention</option>
-              </select>
-            </label>
-            <label className="assignmentCheckboxFilter">
-              <input
-                type="checkbox"
-                checked={unpublishedOnly}
-                onChange={toggleUnpublished}
-              />
-              Show not published only ({rangeGames.filter(isUnpublishedGame).length})
-            </label>
-            {hasDirectGameFilter && (
-              <span>Showing matching games across all dates and assignment statuses.</span>
-            )}
-            {savedViews.length > 0 && (
-              <div className="assignmentManageSavedViews">
-                <b>Manage Saved Views</b>
-                <div>
-                  {savedViews.map((view) => (
-                    <button type="button" key={view.id} onClick={() => deleteSavedView(view.id)}>
-                      Delete {view.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            </div>
-          </details>
-        )}
-        {showCalendar && (
-          <div className="assignmentCustomDateRow">
-            <label className="assignmentToolbarField">
-              <span>Specific Date</span>
-              <input
-                type="date"
-                value={customDate}
-                onChange={(event) => chooseDate(event.target.value)}
-              />
-            </label>
-            {customDate && (
-              <span className="assignmentCustomDateResult">
-                {new Date(`${customDate}T00:00:00`).toLocaleDateString()} ¬∑ {filteredGames.length} games
-              </span>
-            )}
-            <button type="button" className="secondary" onClick={() => setShowCalendar(false)}>Done</button>
-          </div>
-        )}
-        </div>
-        {canManage && linkSelected.length > 0 && (
-          <div className="assignmentSelectionBar">
-            <div className="assignmentSelectionSummary">
-              <b>
-                {assignmentSelectionIsLinked
-                  ? "1 linked group selected"
-                  : assignmentSelectionTarget
-                    ? `Game #${assignmentSelectionTarget.game_number} ‚Äî ${assignmentSelectionTarget.home?.name || "TBD"} vs ${assignmentSelectionTarget.away?.name || "TBD"}`
-                    : `${linkSelected.length} games selected`}
-              </b>
-              {assignmentSelectionTarget && (
-                <span>
-                  {assignmentSelectionTarget.officials_needed} positions ‚Ä¢ {assignments.filter((item) => item.game_id === assignmentSelectionTarget.id && item.status !== "declined").length} assigned ‚Ä¢ {Math.max(0, assignmentSelectionTarget.officials_needed - assignments.filter((item) => item.game_id === assignmentSelectionTarget.id && item.status !== "declined").length)} open
-                </span>
-              )}
-            </div>
-            <button className="primary" disabled={bulkWorking} onClick={prepareBulkAssignment}>Assign Official</button>
-            <button className="primary assignmentCrewButton" disabled={bulkWorking} onClick={prepareBulkCrew}>Assign Crews</button>
-            <button className="secondary assignmentTemplateButton" disabled={bulkWorking} onClick={openCrewTemplateTools}>Crew Templates</button>
-            <button className="success" disabled={bulkWorking || selfAssignSaving} onClick={prepareSelfAssignPositions}>Open Positions for Self Assign</button>
-            <button className="secondary" disabled={bulkWorking} onClick={() => void runBulkAction("publish")}>Publish</button>
-            <button className="secondary" disabled={bulkWorking} onClick={() => void runBulkAction("confirm")}>Confirm Officials</button>
-            <details className="assignmentMoreActions">
-              <summary>More Actions</summary>
-              <div>
-                <button className="secondary" disabled={bulkWorking} onClick={() => void runBulkAction("unassign")}>Unassign Officials</button>
-                <button className="secondary" disabled={bulkWorking || !selfAssignSlots.some((slot) => linkSelected.includes(slot.game_id))} onClick={() => void runBulkAction("closeSelfAssign")}>Close Self Assign</button>
-                <label>Game Status<select aria-label="Bulk game status" value={bulkStatus} disabled={bulkWorking} onChange={(e) => setBulkStatus(e.target.value)}>{gameStatusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-                <button className="secondary" disabled={bulkWorking} onClick={() => void runBulkAction("status")}>Apply Status</button>
-                <button className="secondary" disabled={linking || bulkWorking || linkSelected.length < 2} onClick={() => void linkGames()}>Link Selected Games</button>
-                <button className="secondary" disabled={bulkWorking} onClick={() => void exportAssignments(linkSelected)}>Export Selected</button>
-              </div>
-            </details>
-            <button className="assignmentClearSelection" disabled={bulkWorking} onClick={() => setLinkSelected([])}>Clear selection</button>
-            {bulkWorking && <span>Working‚Ä¶</span>}
-          </div>
-        )}
-        <div
-          className="assignmentGameTable"
-          style={{
-            margin: "14px 0",
-            border: "1px solid #cbd5e1",
-            borderRadius: 10,
-            overflow: "hidden",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 12,
-              padding: "10px 12px",
-              background: "#f8fafc",
-              borderBottom: "1px solid #e2e8f0",
-            }}
-          >
-            <b>
-              Games <small>{filteredGames.length} results</small>
-            </b>
-            <span
-              style={{
-                display: "flex",
-                gap: 7,
-                flexWrap: "wrap",
-                alignItems: "center",
-                justifyContent: "flex-end",
-              }}
-            >
-              <button
-                type="button"
-                className="secondary"
-                disabled={!filteredGames.length || bulkWorking}
-                onClick={() =>
-                  setLinkSelected(
-                    linkSelected.length === filteredGames.length
-                      ? []
-                      : filteredGames.map((g) => g.id),
-                  )
-                }
-              >
-                {linkSelected.length === filteredGames.length
-                  ? "Clear Selection"
-                  : "Select All Games"}
-              </button>
-            </span>
-          </div>
-          {pickedOfficial && (
-            <div className="assignmentPickedOfficial" role="status">
-              <span>
-                Assigning <b>{officials.find((official) => official.id === pickedOfficial)?.first_name} {officials.find((official) => official.id === pickedOfficial)?.last_name}</b>
-                <small>Click any game name below to fill its next open position.</small>
-              </span>
-              <button type="button" className="secondary" onClick={() => setPickedOfficial("")}>Cancel</button>
-            </div>
-          )}
-          <div
-            className="assignmentGameTableHeader"
-          >
-            <span />
-            <button
-              type="button"
-              onClick={() => sortGames("game")}
-              style={{
-                border: 0,
-                background: "none",
-                padding: 0,
-                textAlign: "left",
-                font: "inherit",
-                color: "inherit",
-                cursor: "pointer",
-              }}
-            >
-              Game{sortArrow("game")}
-            </button>
-            <button
-              type="button"
-              onClick={() => sortGames("location")}
-              style={{
-                border: 0,
-                background: "none",
-                padding: 0,
-                textAlign: "left",
-                font: "inherit",
-                color: "inherit",
-                cursor: "pointer",
-              }}
-            >
-              Location{sortArrow("location")}
-            </button>
-            <button
-              type="button"
-              onClick={() => sortGames("time")}
-              style={{
-                border: 0,
-                background: "none",
-                padding: 0,
-                textAlign: "left",
-                font: "inherit",
-                color: "inherit",
-                cursor: "pointer",
-              }}
-            >
-              Date &amp; Time{sortArrow("time")}
-            </button>
-            <button
-              type="button"
-              onClick={() => sortGames("power")}
-              style={{
-                border: 0,
-                background: "none",
-                padding: 0,
-                textAlign: "left",
-                font: "inherit",
-                color: "inherit",
-                cursor: "pointer",
-              }}
-            >
-              Power{sortArrow("power")}
-            </button>
-            <button
-              type="button"
-              onClick={() => sortGames("status")}
-              style={{
-                border: 0,
-                background: "none",
-                padding: 0,
-                textAlign: "left",
-                font: "inherit",
-                color: "inherit",
-                cursor: "pointer",
-              }}
-            >
-              Game Status{sortArrow("status")}
-            </button>
-            <button
-              type="button"
-              onClick={() => sortGames("assignments")}
-              style={{
-                border: 0,
-                background: "none",
-                padding: 0,
-                textAlign: "right",
-                font: "inherit",
-                color: "inherit",
-                cursor: "pointer",
-              }}
-            >
-              Assignment Status{sortArrow("assignments")}
-            </button>
-          </div>
-          <div className="assignmentGameRows" style={{ maxHeight: 420, overflowY: "auto" }}>
-            {gameUnits.length ? (
-              gameUnits.map((unit) => {
-                const warnings = unit.groupId
-                  ? linkedGroupWarnings(unit.games)
-                  : [];
-                return (
-                  <div key={unit.key}>
-                    {unit.groupId && (
-                      <>
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            gap: 10,
-                            padding: "8px 12px",
-                            background: "#dbeafe",
-                            color: "#1e3a8a",
-                            borderBottom: "1px solid #93c5fd",
-                            fontWeight: 900,
-                          }}
-                        >
-                          <span>
-                            üîó Linked Games{" "}
-                            <small style={{ fontWeight: 600 }}>
-                              ‚Ä¢ Drag games to set crew order
-                            </small>
-                          </span>
-                          <button
-                            type="button"
-                            className="secondary"
-                            disabled={linking}
-                            onClick={() => void unlinkGames(unit.groupId!)}
-                            style={{ padding: "5px 9px", fontSize: 11 }}
-                          >
-                            Unlink Group
-                          </button>
-                        </div>
-                        {warnings.map((warning) => (
-                          <div
-                            key={warning}
-                            role="alert"
-                            style={{
-                              padding: "8px 12px",
-                              background: "#fff7ed",
-                              color: "#9a3412",
-                              borderBottom: "1px solid #fdba74",
-                              fontSize: 12,
-                              fontWeight: 800,
-                            }}
-                          >
-                            ‚ö†Ô∏è {warning}
-                          </div>
-                        ))}
-                      </>
-                    )}
-                    {unit.games.map((listedGame, index) => {
-                      const previous = index > 0 ? unit.games[index - 1] : null;
-                      const travel = previous
-                        ? travelDetails(previous, listedGame)
-                        : null;
-                      return (
-                        <div
-                          key={listedGame.id}
-                          draggable={
-                            Boolean(unit.groupId) && canManage && !linking
-                          }
-                          onDragStart={() => setDraggingGame(listedGame.id)}
-                          onDragEnd={() => setDraggingGame("")}
-                          onDragOver={(event) => {
-                            if (unit.groupId) event.preventDefault();
-                          }}
-                          onDrop={(event) => {
-                            event.preventDefault();
-                            if (unit.groupId)
-                              void reorderLinkedGame(
-                                unit.groupId,
-                                draggingGame,
-                                listedGame.id,
-                              );
-                          }}
-                          style={{
-                            opacity: draggingGame === listedGame.id ? 0.7 : 1,
-                            position: "relative",
-                          }}
-                        >
-                          {unit.groupId && previous && travel && (
-                            <div
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 8,
-                                padding: "5px 12px 5px 50px",
-                                background:
-                                  travel.impossible && travel.shared.length
-                                    ? "#fff7ed"
-                                    : "#f8fafc",
-                                color:
-                                  travel.impossible && travel.shared.length
-                                    ? "#9a3412"
-                                    : "#475569",
-                                borderBottom: "1px dashed #cbd5e1",
-                                fontSize: 11,
-                                fontWeight: 700,
-                              }}
-                            >
-                              <span>‚Ü≥</span>
-                              <span>
-                                {travel.travel
-                                  ? `Estimated travel: ${travel.travel.minutes} min (${travel.travel.miles.toFixed(1)} mi)`
-                                  : "Travel time unavailable ‚Äî location coordinates needed"}
-                              </span>
-                              <span>
-                                ‚Ä¢ Schedule gap: {travel.gapMinutes} min
-                              </span>
-                            </div>
-                          )}
-                          {unit.groupId && canManage && (
-                            <div
-                              style={{
-                                position: "absolute",
-                                right: 8,
-                                top: 8,
-                                zIndex: 2,
-                                display: "flex",
-                                gap: 4,
-                              }}
-                            >
-                              <button
-                                type="button"
-                                className="secondary"
-                                aria-label={`Move ${listedGame.game_number} earlier`}
-                                title="Move earlier"
-                                disabled={linking || index === 0}
-                                onClick={() =>
-                                  void moveLinkedGame(
-                                    unit.groupId!,
-                                    listedGame.id,
-                                    -1,
-                                  )
-                                }
-                                style={{ padding: "3px 6px", fontSize: 10 }}
-                              >
-                                ‚Üë
-                              </button>
-                              <button
-                                type="button"
-                                className="secondary"
-                                aria-label={`Move ${listedGame.game_number} later`}
-                                title="Move later"
-                                disabled={
-                                  linking || index === unit.games.length - 1
-                                }
-                                onClick={() =>
-                                  void moveLinkedGame(
-                                    unit.groupId!,
-                                    listedGame.id,
-                                    1,
-                                  )
-                                }
-                                style={{ padding: "3px 6px", fontSize: 10 }}
-                              >
-                                ‚Üì
-                              </button>
-                              <button
-                                type="button"
-                                className="secondary"
-                                aria-label={`Unlink ${listedGame.game_number}`}
-                                title="Unlink this game"
-                                disabled={linking}
-                                onClick={() =>
-                                  void unlinkOneGame(
-                                    unit.groupId!,
-                                    listedGame.id,
-                                  )
-                                }
-                                style={{ padding: "3px 6px", fontSize: 10 }}
-                              >
-                                Unlink
-                              </button>
-                            </div>
-                          )}
-                          {renderGameRow(
-                            listedGame,
-                            Boolean(unit.groupId),
-                            Boolean(unit.groupId) && index > 0,
-                          )}
-                          {selected === listedGame.id && renderMobileInlineAssignment()}
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })
-            ) : (
-              <div className="assignmentNoGames">
-                <b>{selfAssignOnly ? "No games are open for Self Assign" : "No games match these filters"}</b>
-                <span>Change the filters or reset them to see all games.</span>
-                <button type="button" className="secondary" onClick={clearGameFilters}>Clear All Filters</button>
-              </div>
-            )}
-          </div>
-        </div>
-        <div
-          style={{
-            margin: "14px 0",
-            border: "1px solid #e2e8f0",
-            borderRadius: 10,
-            overflow: "hidden",
-            display: "none",
-          }}
-        >
-          <div
-            style={{
-              padding: "10px 12px",
-              background: "#f8fafc",
-              fontWeight: 800,
-            }}
-          >
-            Assignment Status ‚Äî {filteredGames.length} game
-            {filteredGames.length === 1 ? "" : "s"}
-          </div>
-          <div style={{ maxHeight: 300, overflow: "auto" }}>
-            {filteredGames.length ? (
-              filteredGames.map((g) => {
-                const d = new Date(g.starts_at),
-                  gp = positions
-                    .filter((p) => p.sport_id === g.sport_id)
-                    .sort((a, b) => a.sort_order - b.sort_order)
-                    .slice(0, Math.max(0, g.officials_needed));
-                return (
-                  <button
-                    key={g.id}
-                    type="button"
-                    onClick={() => {
-                      setSelected(g.id);
-                      setOverrideOfficial("");
-                    }}
-                    style={{
-                      width: "100%",
-                      display: "grid",
-                      gridTemplateColumns:
-                        "minmax(300px,1fr) minmax(390px,auto)",
-                      gap: 12,
-                      alignItems: "center",
-                      textAlign: "left",
-                      padding: "9px 12px",
-                      border: 0,
-                      borderBottom: "1px solid #e2e8f0",
-                      background: selected === g.id ? "#eff6ff" : "#fff",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <span style={{ minWidth: 0 }}>
-                      <span
-                        style={{
-                          fontSize: 16,
-                          fontWeight: 800,
-                          lineHeight: 1.15,
-                        }}
-                      >
-                        {g.home?.name || "TBD"} vs {g.away?.name || "TBD"}{" "}
-                        <small
-                          style={{
-                            fontSize: 11,
-                            color: "#94a3b8",
-                            fontWeight: 700,
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          ‚Ä¢ {g.game_number}
-                        </small>
-                      </span>
-                      <small
-                        style={{
-                          display: "block",
-                          color: "#64748b",
-                          marginTop: 3,
-                          fontSize: 12,
-                          lineHeight: 1.15,
-                        }}
-                      >
-                        {d.toLocaleDateString()}{" "}
-                        {d.toLocaleTimeString([], {
-                          hour: "numeric",
-                          minute: "2-digit",
-                        })}{" "}
-                        ‚Ä¢ {g.location?.name || "TBD"}
-                      </small>
-                    </span>
-                    <span
-                      style={{
-                        display: "flex",
-                        justifyContent: "flex-end",
-                        alignItems: "center",
-                        gap: "5px 12px",
-                        flexWrap: "wrap",
-                        fontSize: 11,
-                        lineHeight: 1.1,
-                      }}
-                    >
-                      {gp.map((pos) => {
-                        const a = assignments.find(
-                            (x) =>
-                              x.game_id === g.id &&
-                              x.position_id === pos.id &&
-                              x.status !== "declined",
-                          ),
-                          o = a
-                            ? officials.find((x) => x.id === a.official_id)
-                            : undefined,
-                          color = !a
-                            ? "#dc2626"
-                            : !a.published_at
-                              ? "#2563eb"
-                              : ["accepted", "confirmed"].includes(a.status)
-                                ? "#16a34a"
-                                : "#ca8a04";
-                        return (
-                          <span key={pos.id} style={{ whiteSpace: "nowrap" }}>
-                            <span
-                              style={{
-                                fontWeight: 800,
-                                color: a ? "#64748b" : "#dc2626",
-                              }}
-                            >
-                              {shortPositionName(pos.name)}
-                            </span>
-                            {o && (
-                              <span style={{ fontWeight: 800, color }}>
-                                {" "}
-                                {o.first_name} {o.last_name}
-                              </span>
-                            )}
-                          </span>
-                        );
-                      })}
-                    </span>
-                  </button>
-                );
-              })
-            ) : (
-              <div style={{ padding: 14, color: "#64748b" }}>
-                No games in this selection.
-              </div>
-            )}
-          </div>
-        </div>
-        <label style={{ display: "none" }}>
-          Select Game
-          <select
-            value={selected}
-            onChange={(e) => requestSelectedGame(e.target.value)}
-          >
-            <option value="">
-              {filteredGames.length ? "Select a game" : "No games on this date"}
-            </option>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "minmax(150px,1fr) 120px",
-                gap: 8,
-                padding: "6px 10px",
-                fontSize: 11,
-                fontWeight: 800,
-                color: "#64748b",
-                borderBottom: "1px solid #e2e8f0",
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => sortGames("location")}
-                style={{
-                  border: 0,
-                  background: "none",
-                  padding: 0,
-                  textAlign: "left",
-                  font: "inherit",
-                  fontWeight: 800,
-                  color: "inherit",
-                  cursor: "pointer",
-                }}
-              >
-                Location{sortArrow("location")}
-              </button>
-              <button
-                type="button"
-                onClick={() => sortGames("time")}
-                style={{
-                  border: 0,
-                  background: "none",
-                  padding: 0,
-                  textAlign: "left",
-                  font: "inherit",
-                  fontWeight: 800,
-                  color: "inherit",
-                  cursor: "pointer",
-                }}
-              >
-                Game Time{sortArrow("time")}
-              </button>
-            </div>
-            {filteredGames.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.game_number} ‚Äî {new Date(g.starts_at).toLocaleDateString()} ‚Äî{" "}
-                {g.home?.name || "TBD"} vs {g.away?.name || "TBD"} ‚Äî{" "}
-                {g.duration_minutes || 110} min ‚Äî Power{" "}
-                {gamePower(g).toFixed(1)}
-              </option>
-            ))}
-          </select>
-        </label>
-      </section>
-      {game && filteredGames.some((g) => g.id === game.id) && (
-        <div className="assignmentLayout selectedGameDetailStandalone">
-          <section
-            id="selected-game-assignment"
-            className="card assignmentMain"
-          >
-            <div className="cardHead selectedGameStickyHeader">
-              <div>
-                <button type="button" className="assignmentBackToGames" onClick={() => { setSelected(""); setLinkSelected([]); }}>‚Üê Back to games</button>
-                <h2>
-                  {game.home?.name || "TBD"} vs {game.away?.name || "TBD"}
-                </h2>
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: "#94a3b8",
-                    marginTop: 2,
-                    marginBottom: 5,
-                  }}
-                >
-                  Game #{game.game_number}
-                </div>
-                <p>
-                  {new Date(game.starts_at).toLocaleString()} ‚Ä¢{" "}
-                  {game.duration_minutes || 110} min ‚Ä¢ {game.sports?.name} ‚Ä¢{" "}
-                  {game.leagues?.name || "No league"} ‚Ä¢{" "}
-                  {game.location?.name || "TBD"} ‚Ä¢{" "}
-                  <b>{game.officials_needed} assignment slots</b>
-                </p>
-                <div className="selectedGameSummary" aria-label="Assignment summary">
-                  <span><b>{activeAssignmentCount}/{game.officials_needed}</b> Filled</span>
-                  <span><b>{openPositionCount}</b> Open</span>
-                  <span><b>{gameAssignments.filter((item) => item.status === "proposed" && item.published_at).length}</b> Awaiting</span>
-                  <span><b>{gameAssignments.filter((item) => ["accepted", "confirmed"].includes(item.status)).length}</b> Confirmed</span>
-                </div>
-                <div className="selectedGameUtilities">
-                  <button type="button" className="assignmentActivityLink" onClick={() => void openActivityTimeline()}>Activity timeline</button>
-                  {canManage && <button type="button" className="assignmentActivityLink" onClick={openCrewTemplateTools}>Crew templates</button>}
-                  <div
-                    className="assignmentConfirmMessage"
-                    aria-label="Notification history"
-                  >
-                    <b>Notifications:</b>{" "}
-                    {["canceled", "rained_out"].includes(game.status)
-                      ? `${cancellationEmailsSent} cancellation notice${cancellationEmailsSent === 1 ? "" : "s"} sent`
-                      : `${assignmentEmailsSent} assignment email${assignmentEmailsSent === 1 ? "" : "s"} sent`}
-                    {(cancellationEmailIssues || assignmentEmailIssues) > 0 && (
-                      <>
-                        {" ‚Ä¢ "}
-                        <b style={{ color: "#b91c1c" }}>
-                          {["canceled", "rained_out"].includes(game.status)
-                            ? cancellationEmailIssues
-                            : assignmentEmailIssues}{" "}
-                          need attention
-                        </b>
-                        <button
-                          type="button"
-                          className="secondary"
-                          disabled={retryingNotifications}
-                          onClick={() => void retryNotificationIssues()}
-                        >
-                          {retryingNotifications ? "Retrying‚Ä¶" : "Retry"}
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-            {gamePositions.length === 0 ? (
-              <div className="errorBox">
-                No assignment positions are configured for this sport.
-              </div>
-            ) : (
-              <>
-              <div className="positionFocusToggle desktopPositionFocus" role="group" aria-label="Positions shown">
-                <button type="button" className={!needsAssignmentOnly ? "active" : ""} onClick={() => setNeedsAssignmentView((current) => ({...current, [game.id]: false}))}>All Positions</button>
-                <button type="button" className={needsAssignmentOnly ? "active" : ""} onClick={() => setNeedsAssignmentView((current) => ({...current, [game.id]: true}))}>Needs Assignment ({openPositionCount})</button>
-              </div>
-              {visibleGamePositions.length ? <div className="tableWrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Self Assign</th>
-                      <th>Position</th>
-                      <th>Assigned Official</th>
-                      <th>Status</th>
-                      <th>Assign</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visibleGamePositions.map((pos) => {
-                      const index = gamePositions.findIndex((position) => position.id === pos.id);
-                      const current = assignments.find(
-                          (a) =>
-                            a.game_id === game.id &&
-                            a.position_id === pos.id &&
-                            a.status !== "declined",
-                        ),
-                        declined = assignments.find(
-                          (a) =>
-                            a.game_id === game.id &&
-                            a.position_id === pos.id &&
-                            a.status === "declined",
-                          ),
-                        replacementNeeded = isReplacementNeeded(game.id, pos.id),
-                        list = candidates(pos),
-                        label = rankLabel(pos),
-                        status = current ? assignmentStatus(current) : null;
-                      return (
-                        <tr
-                          key={pos.id}
-                          id={`assignment-position-${pos.id}`}
-                          style={{
-                            background:
-                              declined && !current ? "#fff1f2" : undefined,
-                          }}
-                        >
-                          <td>
-                            {!current && !isSelfAssignOpen(game.id, pos.id) ? (
-                              <input
-                                type="checkbox"
-                                checked={selfAssignSelected.includes(
-                                  selfAssignKey(game.id, pos.id),
-                                )}
-                                disabled={!canManage || selfAssignSaving}
-                                aria-label={`Select ${pos.name} for Self Assign`}
-                                onChange={() =>
-                                  toggleSelfAssignSelection(game.id, pos.id)
-                                }
-                              />
-                            ) : !current ? (
-                              <div className="selfAssignOpenControls">
-                                <button
-                                  type="button"
-                                  className="secondary selfAssignCloseButton"
-                                  disabled={!canManage || selfAssignSaving}
-                                  aria-label={`Close Self Assign for ${pos.name}`}
-                                  title="Close Self Assign"
-                                  onClick={() =>
-                                    void withdrawSelfAssignPosition(
-                                      game.id,
-                                      pos.id,
-                                    )
-                                  }
-                                >
-                                  Open <span aria-hidden="true">√ó</span>
-                                </button>
-                              </div>
-                            ) : (
-                              <span>‚Äî</span>
-                            )}
-                          </td>
-                          <td>
-                            <div
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 8,
-                              }}
-                            >
-                              {current && canManage && (
-                                <button
-                                  className="primary"
-                                  style={{ padding: "5px 8px", fontSize: 11 }}
-                                  disabled={saving === pos.id}
-                                  onClick={() =>
-                                    void unassign(current.id, pos.id)
-                                  }
-                                >
-                                  Unassign
-                                </button>
-                              )}
-                              <div>
-                                <b>{shortPositionName(pos.name)}</b>
-                                <small>
-                                  Slot {index + 1} of {game.officials_needed}
-                                </small>
-                              </div>
-                            </div>
-                          </td>
-                          <td>
-                            {current ? (
-                              <div>
-                                {officials.find(
-                                  (o) => o.id === current.official_id,
-                                )?.first_name +
-                                  " " +
-                                  officials.find(
-                                    (o) => o.id === current.official_id,
-                                  )?.last_name}
-                                {futureBadge(current.official_id)}
-                                {canManage && (
-                                  <span
-                                    className="assignmentPositionControls"
-                                    style={{
-                                      display: "inline-flex",
-                                      gap: 4,
-                                      marginLeft: 8,
-                                      alignItems: "center",
-                                    }}
-                                  >
-                                    <small
-                                      style={{
-                                        color: "#2563eb",
-                                        fontWeight: 900,
-                                      }}
-                                    >
-                                      Position
-                                    </small>
-                                    <button
-                                      type="button"
-                                      title="Move to previous position; swaps officials when occupied"
-                                      aria-label="Move official to previous position"
-                                      disabled={
-                                        index === 0 ||
-                                        movingAssignment === current.id
-                                      }
-                                      onClick={() =>
-                                        void moveAssignment(
-                                          game.id,
-                                          current.id,
-                                          -1,
-                                        )
-                                      }
-                                      style={{
-                                        padding: "5px 9px",
-                                        border: "1px solid #1d4ed8",
-                                        borderRadius: 6,
-                                        background:
-                                          index === 0 ? "#cbd5e1" : "#2563eb",
-                                        color: "#fff",
-                                        fontSize: 14,
-                                        fontWeight: 900,
-                                      }}
-                                    >
-                                      ‚Üê
-                                    </button>
-                                    <button
-                                      type="button"
-                                      title="Move to next position; swaps officials when occupied"
-                                      aria-label="Move official to next position"
-                                      disabled={
-                                        index === gamePositions.length - 1 ||
-                                        movingAssignment === current.id
-                                      }
-                                      onClick={() =>
-                                        void moveAssignment(
-                                          game.id,
-                                          current.id,
-                                          1,
-                                        )
-                                      }
-                                      style={{
-                                        padding: "5px 9px",
-                                        border: "1px solid #1d4ed8",
-                                        borderRadius: 6,
-                                        background:
-                                          index === gamePositions.length - 1
-                                            ? "#cbd5e1"
-                                            : "#2563eb",
-                                        color: "#fff",
-                                        fontSize: 14,
-                                        fontWeight: 900,
-                                      }}
-                                    >
-                                      ‚Üí
-                                    </button>
-                                  </span>
-                                )}
-                                {canManage &&
-                                  current.published_at &&
-                                  current.status !== "declined" &&
-                                  current.status !== "confirmed" && (
-                                    <div style={{ marginTop: 6 }}>
-                                      <button
-                                        type="button"
-                                        disabled={confirming === current.id}
-                                        onClick={() =>
-                                          void confirmAssignment(current)
-                                        }
-                                        style={{
-                                          background: "#facc15",
-                                          color: "#713f12",
-                                          border: "1px solid #eab308",
-                                          borderRadius: 7,
-                                          padding: "6px 10px",
-                                          fontSize: 11,
-                                          fontWeight: 800,
-                                          cursor: "pointer",
-                                        }}
-                                      >
-                                        {confirming === current.id
-                                          ? "Confirming‚Ä¶"
-                                          : "Confirm Official"}
-                                      </button>
-                                    </div>
-                                  )}
-                              </div>
-                            ) : replacementNeeded ? (
-                              <div>
-                                <b style={{ color: "#b91c1c" }}>
-                                  {declined ? "Open ‚Äî official declined" : "Open ‚Äî replacement needed"}
-                                </b>
-                                {declined && <small>
-                                  {
-                                    officials.find(
-                                      (o) => o.id === declined.official_id,
-                                    )?.first_name
-                                  }{" "}
-                                  {
-                                    officials.find(
-                                      (o) => o.id === declined.official_id,
-                                    )?.last_name
-                                  }
-                                  {declined.decline_reason
-                                    ? ` ‚Ä¢ ${declined.decline_reason}`
-                                    : ""}
-                                  {declined.responded_at
-                                    ? ` ‚Ä¢ ${new Date(declined.responded_at).toLocaleString()}`
-                                    : ""}
-                                </small>}
-                              </div>
-                            ) : (
-                              "Open"
-                            )}
-                          </td>
-                          <td>
-                            {current && status ? (
-                              <>
-                                <span className={status.className}>
-                                  {status.label}
-                                </span>
-                                {current.published_at &&
-                                  current.status === "proposed" && (
-                                    <small>
-                                      Accept By:{" "}
-                                      {formatDeadline(current.accept_by)}
-                                    </small>
-                                  )}
-                              </>
-                            ) : replacementNeeded ? (
-                              <span className="badge red">Replacement Needed</span>
-                            ) : (
-                              <span>‚Äî</span>
-                            )}
-                          </td>
-                          <td>
-                            <button
-                              type="button"
-                              className="primary candidatePanelButton"
-                              disabled={saving === pos.id}
-                              onClick={() => setCandidatePositionId(pos.id)}
-                            >
-                              {current ? "Change Official" : replacementNeeded ? "Find Replacement" : "View Candidates"}
-                              <small>{list.filter((candidate) => candidate.reasons.length === 0).length} eligible</small>
-                            </button>
-                            <details className="mobileAssignmentDetails">
-                              <summary>More Details</summary>
-                              <div>
-                                <small>Slot {index + 1} of {game.officials_needed} ‚Ä¢ {label}</small>
-                                <small>Self Assign: {isSelfAssignOpen(game.id, pos.id) ? "Open" : "Closed"}</small>
-                                {!current && isSelfAssignOpen(game.id, pos.id) && (
-                                  <button
-                                    type="button"
-                                    className="secondary"
-                                    disabled={!canManage || selfAssignSaving}
-                                    onClick={() => void withdrawSelfAssignPosition(game.id, pos.id)}
-                                  >
-                                    Close Self Assign
-                                  </button>
-                                )}
-                                {current && canManage && (
-                                  <div className="mobilePositionMove">
-                                    <span>Move official:</span>
-                                    <button type="button" aria-label="Move official to previous position" disabled={index === 0 || movingAssignment === current.id} onClick={() => void moveAssignment(game.id, current.id, -1)}>‚Üê</button>
-                                    <button type="button" aria-label="Move official to next position" disabled={index === gamePositions.length - 1 || movingAssignment === current.id} onClick={() => void moveAssignment(game.id, current.id, 1)}>‚Üí</button>
-                                  </div>
-                                )}
-                              </div>
-                            </details>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div> : <div className="positionsFilledMessage"><b>Every position is filled</b><span>Switch to All Positions to review or change the crew.</span></div>}
-              </>
-            )}
-            <p>
-              <small>
-                <b>Future+</b> means the official already has a later
-                non-declined assignment involving the home or away team in this
-                game. <b>‚ö† OVERRIDE</b> options are ineligible officials that an
-                Administrator or Assignor may manually assign after confirming
-                the warning. Officials already working during this game time are
-                hidden and cannot be overridden.
-              </small>
-            </p>
-          </section>
-          <aside className="availableOfficialsPanel">
-            <div className="availableOfficialsHead">
-              <h3>Officials</h3>
-              <span className="badge blue">
-                {availableOfficials.length} Available
-              </span>
-            </div>
-            <p>
-              Select an official, then choose a game to fill its next open position.
-              Ineligible officials remain visible in red and require an
-              override; overlapping assignments cannot be overridden.
-            </p>
-            <div className="officialListTools">
-              <input type="search" value={officialListSearch} onChange={(event) => setOfficialListSearch(event.target.value)} placeholder="Search officials" aria-label="Search available officials" />
-              <select value={officialListSort} onChange={(event) => setOfficialListSort(event.target.value as typeof officialListSort)} aria-label="Sort available officials">
-                <option value="best">Best qualified</option><option value="distance">Closest</option><option value="rank">Highest rank</option><option value="leastRecent">Least recently assigned</option><option value="name">Name</option>
-              </select>
-            </div>
-            <div className="availableOfficialsList">
-              {availableOfficials.map((o, i) => (
-                <div
-                  className="availableOfficial"
-                  key={o.id}
-                >
-                  <span className="availableOrder">{i + 1}</span>
-                  <div>
-                    <b>
-                      {o.first_name} {o.last_name}
-                    </b>
-                    {futureBadge(o.id)}
-                    <small>
-                      General Rank {o.rank.toFixed(1)}
-                      {teamRecencyLabel(o.id)}
-                      {o.distance != null
-                        ? ` ‚Ä¢ ${o.distance.toFixed(1)} mi`
-                        : ""}
-                    </small>
-                    {canManage && (
-                      <button
-                        type="button"
-                        className="pickOfficialButton"
-                        aria-pressed={pickedOfficial === o.id}
-                        onClick={() => chooseOfficialToAssign(o.id)}
-                      >
-                        {pickedOfficial === o.id ? "Selected" : "Select to Assign"}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-              {ineligibleOfficials.length > 0 && (
-                <div className="ineligibleOfficialsSection">
-                  <button
-                    type="button"
-                    className="ineligibleOfficialsToggle"
-                    aria-expanded={showIneligibleOfficials}
-                    onClick={() => setShowIneligibleOfficials((visible) => !visible)}
-                  >
-                    <span>INELIGIBLE ({ineligibleOfficials.length})</span>
-                    <span>{showIneligibleOfficials ? "Hide" : "Show"}</span>
-                  </button>
-                  {showIneligibleOfficials && (
-                    <>
-                      <div className="ineligibleOfficialFilters">
-                        <input
-                          type="search"
-                          value={ineligibleSearch}
-                          onChange={(event) => setIneligibleSearch(event.target.value)}
-                          placeholder="Search official"
-                          aria-label="Search ineligible officials"
-                        />
-                        <select
-                          value={ineligibleReasonFilter}
-                          onChange={(event) => setIneligibleReasonFilter(event.target.value)}
-                          aria-label="Filter ineligible officials by reason"
-                        >
-                          <option value="all">All reasons</option>
-                          <option value="eligibility">League or level</option>
-                          <option value="availability">Unavailable</option>
-                          <option value="conflict">Assignment conflict</option>
-                        </select>
-                      </div>
-                      {visibleIneligibleOfficials.map((o) => (
-                    <div
-                      className="availableOfficial ineligibleOfficial"
-                      key={o.id}
-                      style={{
-                        background: "#fef2f2",
-                        border: "1px solid #fecaca",
-                        color: "#b91c1c",
-                      }}
-                    >
-                      <span
-                        className="availableOrder"
-                        style={{ background: "#dc2626", color: "#fff" }}
-                      >
-                        !
-                      </span>
-                      <div style={{ flex: 1 }}>
-                        <b>
-                          {o.first_name} {o.last_name}
-                        </b>
-                        <small style={{ color: "#b91c1c", fontWeight: 700 }}>
-                          {o.reasons.join(" ‚Ä¢ ")}
-                        </small>
-                        {canManage && (
-                          <button
-                            type="button"
-                            className="pickOfficialButton ineligiblePick"
-                            aria-pressed={pickedOfficial === o.id}
-                            onClick={() => chooseOfficialToAssign(o.id)}
-                          >
-                            {pickedOfficial === o.id ? "Selected" : "Select to Assign"}
-                          </button>
-                        )}
-                        {canManage &&
-                          !o.reasons.some((reason) =>
-                            reason.startsWith("Overlaps Game #"),
-                          ) && (
-                            <div style={{ marginTop: 6 }}>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setOverrideOfficial(
-                                    overrideOfficial === o.id ? "" : o.id,
-                                  )
-                                }
-                                style={{
-                                  background: "#fff",
-                                  color: "#b91c1c",
-                                  border: "1px solid #dc2626",
-                                  borderRadius: 6,
-                                  padding: "4px 8px",
-                                  fontSize: 11,
-                                  fontWeight: 800,
-                                  cursor: "pointer",
-                                }}
-                              >
-                                {overrideOfficial === o.id
-                                  ? "Cancel Override"
-                                  : "Override Eligibility"}
-                              </button>
-                              {overrideOfficial === o.id && (
-                                <div style={{ marginTop: 6 }}>
-                                  <small
-                                    style={{
-                                      display: "block",
-                                      marginBottom: 4,
-                                      color: "#7f1d1d",
-                                    }}
-                                  >
-                                    Assign to position:
-                                  </small>
-                                  <select
-                                    value=""
-                                    onChange={(e) => {
-                                      if (e.target.value)
-                                        void assign(e.target.value, o.id);
-                                    }}
-                                  >
-                                    <option value="">Select position‚Ä¶</option>
-                                    {gamePositions.map((p) => (
-                                      <option key={p.id} value={p.id}>
-                                        {p.name}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        {o.reasons.some((reason) =>
-                          reason.startsWith("Overlaps Game #"),
-                        ) && (
-                          <small style={{ color: "#7f1d1d", fontWeight: 900 }}>
-                            Cannot override an overlapping assignment
-                          </small>
-                        )}
-                      </div>
-                    </div>
-                      ))}
-                      {!visibleIneligibleOfficials.length && (
-                        <div className="emptyState"><p>No ineligible officials match the filters.</p></div>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-              {!availableOfficials.length && !ineligibleOfficials.length && (
-                <div className="emptyState">
-                  <p>No officials found.</p>
-                </div>
-              )}
-            </div>
-          </aside>
-        </div>
-      )}
-      </div>
-    </>
-  );
-}
+H
+»_XúY›\ù
+ãåäKà^HH	ŸôŸ]]J
+_XúY›\ù
+ãåäN¬àô]\õà	ﬁYX\üKI€[€ùKIŸ^_X¬üBôù[ò›[€à›\ùŸYZ à]JH¬à€€ú›H›\ù^J
+Kà^HHôŸ]^J
+N¬àúŸ]]JôŸ]]J
+HH
+^HOOH»àà^HHJJN¬àô]\õà¬üBôù[ò›[€à[îò[ôŸJŒàÿ[YKéàò[ôŸK›\›€Q]HHàäH¬à€€ú›Hô]»]JÀú›\ù◊ÿ]
+N¬àYà
+àOOHò[äHô]\õàùYN¬àYà
+àOOHò›\›€HäH¬àYà
+X›\›€Q]JHô]\õàò[ŸN¬à€€ú››\ùHô]»]J	ÿ›\›€Q]_Uåå
+Kà[ôHô]»]J›\ù
+N¬à[ôúŸ]]J›\ùôŸ]]J
+H
+»JN¬àô]\õàèH›\ù	âà[ô¬àBà€€ú›õ›»Hô]»]J
+KàŸ^HH›\ù^Jõ› Kà€[‹úõ›»Hô]»]JŸ^JN¬à€[‹úõ›ÀúŸ]]JŸ^KôŸ]]J
+H
+»JN¬à€€ú›Yù\ï€[‹úõ›»Hô]»]JŸ^JN¬àYù\ï€[‹úõ›ÀúŸ]]JŸ^KôŸ]]J
+H
+»äN¬à€€ú›ŸYZ»H›\ùŸYZ õ› Kàô^Hô]»]JŸYZ N¬àô^úŸ]]JŸYZÀôŸ]]J
+H
+» N¬à€€ú›Yù\ìô^Hô]»]JŸYZ N¬àYù\ìô^úŸ]]JŸYZÀôŸ]]J
+H
+»M
+N¬àYà
+àOOHùŸ^HäHô]\õàèHŸ^H	âà€[‹úõ›Œ¬àYà
+àOOHù€[‹úõ›»äHô]\õàèH€[‹úõ›»	âàYù\ï€[‹úõ›Œ¬àYà
+àOOHù\’ŸYZ»äHô]\õàèHŸYZ»	âàô^¬àô]\õàèHô^	âàYù\ìô^¬üBô^‹ùYò][ù[ò›[€à\‹⁄Y€õY[ù”X[òYŸ\ïåä¬à‹ôÿ[ö^ò][€íYüNà¬à‹ôÿ[ö^ò][€íYŒà›ö[ôŒ¬üJH¬à€€ú››\Xò\ŸHH\ŸSY[[ 
+
+HOà‹ôX]P€Y[ù
+
+K◊JN¬à€€ú›Ÿÿ[Y\ÀŸ]ÿ[Y\◊HH\ŸT›]Oÿ[YV◊Oä◊JKà€ŸôöX⁄X[ÀŸ]ŸôöX⁄X[◊HH\ŸT›]OŸôöX⁄X[◊Oä◊JKà‹‹⁄][€úÀŸ]‹⁄][€ú◊HH\ŸT›]O‹⁄][€ñ◊Oä◊JKàÿ\‹⁄Y€õY[ùÀŸ]\‹⁄Y€õY[ù◊HH\ŸT›]O\‹⁄Y€õY[ù◊Oä◊JKà‹ò[ö‹ÀŸ]ò[ö‹◊HH\ŸT›]OôX€‹ô›ö[ôÀù[Xô\èèäﬂJKà‹‹⁄][€îò[ö‹ÀŸ]‹⁄][€îò[ö‹◊HH\ŸT›]OôX€‹ô›ö[ôÀ‹⁄][€îò[öœèäàﬂKà
+Kà‹›Ÿ\úÀŸ]›Ÿ\ú◊HH\ŸT›]OôX€‹ô›ö[ôÀù[Xô\èèäﬂJKà€XY›YQ[YÀŸ]XY›YQ[Y◊HH\ŸT›]O[Y”◊Oä◊JKà€]ô[[YÀŸ]]ô[[Y◊HH\ŸT›]O[Y’ñ◊Oä◊JKàÿõÿ⁄‹ÀŸ]õÿ⁄‹◊HH\ŸT›]Oõÿ⁄÷◊Oä◊JKà‹Ÿ[X›YŸ]Ÿ[X›YHH\ŸT›]JàäKà‹ò[ôŸKŸ]ò[ôŸWHH\ŸT›]Oò[ôŸOäò[äKàÿ›\›€Q]KŸ]›\›€Q]WHH\ŸT›]JàäKà‹⁄›–ÿ[[ô\ãŸ]⁄›–ÿ[[ô\óHH\ŸT›]Jò[ŸJKà›[úXõ\⁄Y€õKŸ][úXõ\⁄Y€õWHH\ŸT›]Jò[ŸJKà‹Ÿ[ê\‹⁄Y€ì€õKŸ]Ÿ[ê\‹⁄Y€ì€õWHH\ŸT›]Jò[ŸJKàÿ€€\][ô\‹—ö[\ãŸ]€€\][ô\‹—ö[\óHH\ŸT›]O€€\][ô\‹œäò[äKà€ŸôöX⁄X[ö[\ãŸ]ŸôöX⁄X[ö[\óHH\ŸT›]JàäKà€ÿÿ][€ëö[\ãŸ]ÿÿ][€ëö[\óHH\ŸT›]JàäKà€XY›YQö[\ãŸ]XY›YQö[\óHH\ŸT›]JàäKà€]ô[ö[\ãŸ]]ô[ö[\óHH\ŸT›]JàäKàŸ\úõ‹ãŸ]\úõ‹óHH\ŸT›]JàäKà€õ›XŸKŸ]õ›XŸWHH\ŸT›]JàäKà‹ÿ]ö[ôÀŸ]ÿ]ö[ô◊HH\ŸT›]JàäKà€[›ö[ô–\‹⁄Y€õY[ùŸ][›ö[ô–\‹⁄Y€õY[ùHH\ŸT›]JàäKà‹Xõ\⁄[ôÀŸ]Xõ\⁄[ô◊HH\ŸT›]Jò[ŸJKà‹ô]ûZ[ô”õ›YöXÿ][€úÀŸ]ô]ûZ[ô”õ›YöXÿ][€ú◊HH\ŸT›]Jò[ŸJKàÿ€€ôö\õZ[ôÀŸ]€€ôö\õZ[ô◊HH\ŸT›]JàäKàŸÿ[YT›]\‘ÿ]ö[ôÀŸ]ÿ[YT›]\‘ÿ]ö[ô◊HH\ŸT›]JàäKà‹[ô[ô—ÿ[YT›]\ÀŸ][ô[ô—ÿ[YT›]\◊HH\ŸT›]O¬àÿ[YRYà›ö[ôŒ¬à›]\Œà›ö[ôŒ¬àHù[äù[
+Kàÿÿ[ìX[òYŸKŸ]ÿ[ìX[òYŸWHH\ŸT›]Jò[ŸJKà€›ô\úöYSŸôöX⁄X[Ÿ]›ô\úöYSŸôöX⁄X[HH\ŸT›]JàäKàŸÿ[YT€‹ùŸ]ÿ[YT€‹ùHH\ŸT›]Oÿ[YT€‹ùäôYò][äKàŸÿ[YT€‹ù\ãŸ]ÿ[YT€‹ù\óHH\ŸT›]Oò\ÿ»àô\ÿ»èäò\ÿ»äKà€[ö—‹õ›\ÀŸ][ö—‹õ›\◊HH\ŸT›]O[ö—‹õ›\◊Oä◊JKà€[ö”Y[Xô\úÀŸ][ö”Y[Xô\ú◊HH\ŸT›]O[ö”Y[Xô\ñ◊Oä◊JKà€[ö‘Ÿ[X›YŸ][ö‘Ÿ[X›YHH\ŸT›]O›ö[ô÷◊Oä◊JKà€[ö⁄[ôÀŸ][ö⁄[ô◊HH\ŸT›]Jò[ŸJKàŸòYŸ⁄[ô—ÿ[YKŸ]òYŸ⁄[ô—ÿ[YWHH\ŸT›]JàäKàŸòYŸ⁄[ô”ŸôöX⁄X[Ÿ]òYŸ⁄[ô”ŸôöX⁄X[HH\ŸT›]JàäKà€ŸôöX⁄X[õ‹ÿ[YKŸ]ŸôöX⁄X[õ‹ÿ[YWHH\ŸT›]JàäKà‹X⁄ŸYŸôöX⁄X[Ÿ]X⁄ŸYŸôöX⁄X[HH\ŸT›]JàäKà‹[ô[ô’\\‹⁄Y€õY[ùŸ][ô[ô’\\‹⁄Y€õY[ùHH\ŸT›]O¬àÿ[YRYà›ö[ôŒ¬àŸôöX⁄X[Yà›ö[ôŒ¬à‹⁄][€íYà›ö[ôŒ¬àHù[äù[
+Kàÿù[’€‹ö⁄[ôÀŸ]ù[’€‹ö⁄[ô◊HH\ŸT›]Jò[ŸJKàÿù[‘›]\ÀŸ]ù[‘›]\◊HH\ŸT›]JòX›]ôHäKà‹⁄›–ù[–\‹⁄Y€ãŸ]⁄›–ù[–\‹⁄Y€óHH\ŸT›]Jò[ŸJKàÿù[–\‹⁄Y€ìŸôöX⁄X[Ÿ]ù[–\‹⁄Y€ìŸôöX⁄X[HH\ŸT›]JàäKàÿù[–\‹⁄Y€î‹⁄][€úÀŸ]ù[–\‹⁄Y€î‹⁄][€ú◊HH\ŸT›]OàôX€‹ô›ö[ôÀ›ö[ôœÇàäﬂJKàÿù[”›ô\úöYP€€ôö\õYYŸ]ù[”›ô\úöYP€€ôö\õYYHH\ŸT›]Jò[ŸJKàÿù[–\‹⁄Y€ìY\‹ÿYŸKŸ]ù[–\‹⁄Y€ìY\‹ÿYŸWHH\ŸT›]JàäKàÿù[”ŸôöX⁄X[ŸX\ò⁄Ÿ]ù[”ŸôöX⁄X[ŸX\ò⁄HH\ŸT›]JàäKàÿù[”ŸôöX⁄X[›]\ÀŸ]ù[”ŸôöX⁄X[›]\◊HH\ŸT›]Oàô[Y⁄XõHàò[àùÿ\õö[ô»àòõÿ⁄ŸYÇàäô[Y⁄XõHäKàÿù[–\‹⁄Y€õY[ùô\›[Ÿ]ù[–\‹⁄Y€õY[ùô\›[HBà\ŸT›]Où[–\‹⁄Y€õY[ùô\›[ù[äù[
+Kàÿù[‘ô]ûZ[ô—ÿ[YKŸ]ù[‘ô]ûZ[ô—ÿ[YWHH\ŸT›]JàäKà‹⁄›–ù[–‹ô]ÀŸ]⁄›–ù[–‹ô]◊HH\ŸT›]Jò[ŸJKàÿù[–‹ô]‘Ÿ[X›[€úÀŸ]ù[–‹ô]‘Ÿ[X›[€ú◊HH\ŸT›]OàôX€‹ô›ö[ôÀ›ö[ôœÇàäﬂJKàÿù[–‹ô]’€‹ö⁄[ôÀŸ]ù[–‹ô]’€‹ö⁄[ô◊HH\ŸT›]Jò[ŸJKàÿù[–‹ô]”Y\‹ÿYŸKŸ]ù[–‹ô]”Y\‹ÿYŸWHH\ŸT›]JàäKàÿù[–‹ô]”›ô\úöYP€€ôö\õYYŸ]ù[–‹ô]”›ô\úöYP€€ôö\õYYHH\ŸT›]Jò[ŸJKàÿ\‹⁄Y€õY[ù[\]\ÀŸ]\‹⁄Y€õY[ù[\]\◊HH\ŸT›]Oà\‹⁄Y€õY[ù[\]V◊Bàä◊JKà‹⁄›–‹ô]’[\]\ÀŸ]⁄›–‹ô]’[\]\◊HH\ŸT›]Jò[ŸJKàÿ‹ô]’[\]Sò[YKŸ]‹ô]’[\]Sò[YWHH\ŸT›]JàäKàÿ€‹P‹ô]‘€›\òŸQÿ[YRYŸ]€‹P‹ô]‘€›\òŸQÿ[YRYHH\ŸT›]JàäKàÿ‹ô]’[\]U€‹ö⁄[ôÀŸ]‹ô]’[\]U€‹ö⁄[ô◊HH\ŸT›]Jò[ŸJKàÿ‹ô]’[\]SY\‹ÿYŸKŸ]‹ô]’[\]SY\‹ÿYŸWHH\ŸT›]JàäKà‹Ÿ[ê\‹⁄Y€î€›ÀŸ]Ÿ[ê\‹⁄Y€î€›◊HH\ŸT›]OŸ[ê\‹⁄Y€î€›◊Oä◊JKà‹Ÿ[ê\‹⁄Y€îŸ[X›YŸ]Ÿ[ê\‹⁄Y€îŸ[X›YHH\ŸT›]O›ö[ô÷◊Oä◊JKà‹Ÿ[ê\‹⁄Y€îÿ]ö[ôÀŸ]Ÿ[ê\‹⁄Y€îÿ]ö[ô◊HH\ŸT›]Jò[ŸJKà‹⁄›‘Ÿ[ê\‹⁄Y€ëX[ŸÀŸ]⁄›‘Ÿ[ê\‹⁄Y€ëX[Ÿ◊HH\ŸT›]Jò[ŸJKà‹⁄›“[ô[Y⁄XõSŸôöX⁄X[ÀŸ]⁄›“[ô[Y⁄XõSŸôöX⁄X[◊HH\ŸT›]Jò[ŸJKà€ŸôöX⁄X[\›ŸX\ò⁄Ÿ]ŸôöX⁄X[\›ŸX\ò⁄HH\ŸT›]JàäKà€ŸôöX⁄X[\›€‹ùŸ]ŸôöX⁄X[\›€‹ùHH\ŸT›]Oàòô\›àô\›[òŸHàúò[ö»àõX\›ôXŸ[ùàõò[YHÇàäòô\›äKàÿÿ[ôY]TŸX\ò⁄Ÿ]ÿ[ôY]TŸX\ò⁄HH\ŸT›]JàäKàÿÿ[ôY]T€‹ùŸ]ÿ[ôY]T€‹ùHH\ŸT›]Oàòô\›àô\›[òŸHàúò[ö»àõX\›ôXŸ[ùàõò[YHÇàäòô\›äKà€ôYY–\‹⁄Y€õY[ùöY]ÀŸ]ôYY–\‹⁄Y€õY[ùöY]◊HH\ŸT›]OàôX€‹ô›ö[ôÀõ€€X[èÇàäﬂJKà⁄[ô[Y⁄XõTŸX\ò⁄Ÿ][ô[Y⁄XõTŸX\ò⁄HH\ŸT›]JàäKà⁄[ô[Y⁄XõTôX\€€ëö[\ãŸ][ô[Y⁄XõTôX\€€ëö[\óHH\ŸT›]Jò[äKà€›ô\ôYTõ€\€‹ŸYŸ]›ô\ôYTõ€\€‹ŸYHH\ŸT›]Jò[ŸJKà€›ô\ôYTô\€€ö[ôÀŸ]›ô\ôYTô\€€ö[ô◊HH\ŸT›]Jò[ŸJKà€›ô\ôYTŸ[X›YŸ]›ô\ôYTŸ[X›YHH\ŸT›]O›ö[ô÷◊Oä◊JKà‹⁄›‘Xõ\⁄ô]öY]ÀŸ]⁄›‘Xõ\⁄ô]öY]◊HH\ŸT›]Jò[ŸJKà‹⁄›–X›]ö]U[Y[[ôKŸ]⁄›–X›]ö]U[Y[[ôWHH\ŸT›]Jò[ŸJKàÿX›]ö]Tõ›‹ÀŸ]X›]ö]Tõ›‹◊HH\ŸT›]O]Y]]ô[ù◊Oä◊JKàÿX›]ö]SÿY[ôÀŸ]X›]ö]SÿY[ô◊HH\ŸT›]Jò[ŸJKàÿX›]ö]Q\úõ‹ãŸ]X›]ö]Q\úõ‹óHH\ŸT›]JàäKà‹ÿ]ôYöY]‹ÀŸ]ÿ]ôYöY]‹◊HH\ŸT›]Oÿ]ôY\‹⁄Y€õY[ùöY]÷◊Oä◊JKà‹]ZX⁄—Y]Ÿ]]ZX⁄—Y]HH\ŸT›]O]ZX⁄—Y]òYùù[äù[
+Kà‹]ZX⁄—Y]ÿ]ö[ôÀŸ]]ZX⁄—Y]ÿ]ö[ô◊HH\ŸT›]Jò[ŸJKà‹⁄›—XY[ôTŸ][ô‹ÀŸ]⁄›—XY[ôTŸ][ô‹◊HH\ŸT›]Jò[ŸJKàŸXY[ôSXY›YRYŸ]XY[ôSXY›YRYHH\ŸT›]JàäKàŸXY[ôQòYùŸ]XY[ôQòYùHH\ŸT›]J¬àö[àMàXÿŸ\[òŸNàçà\ÿÿ[][€éàÀàô[Z[ô\éàçàJKàŸXY[ôTÿ]ö[ôÀŸ]XY[ôTÿ]ö[ô◊HH\ŸT›]Jò[ŸJKà‹⁄›–€›ô\òYŸQõ‹ôXÿ\›Ÿ]⁄›–€›ô\òYŸQõ‹ôXÿ\›HH\ŸT›]Jò[ŸJKàÿÿ[ôY]T‹⁄][€íYŸ]ÿ[ôY]T‹⁄][€íYHH\ŸT›]JàäKà‹ô\XŸ[Y[ùXõ\⁄[ôÀŸ]ô\XŸ[Y[ùXõ\⁄[ô◊HH\ŸT›]JàäKà›[ò\‹⁄Y€ôY€›Ÿ^\ÀŸ][ò\‹⁄Y€ôY€›Ÿ^\◊HH\ŸT›]O›ö[ô÷◊Oä◊JKà‹[ô[ô‘ô\XŸ[Y[ùŸ][ô[ô‘ô\XŸ[Y[ùHH\ŸT›]O¬à‹⁄][€íYà›ö[ôŒ¬àŸôöX⁄X[Yà›ö[ôŒ¬àô^‹⁄][€íYŒà›ö[ôŒ¬àHù[äù[
+Kàÿù[‘ô\›[Ÿ]ù[‘ô\›[HH\ŸT›]Où[–X›[€îô\›[ù[äù[
+N¬à\ﬁ[ò»ù[ò›[€àÿY
+
+H¬àŸ]\úõ‹äàäN¬à€€ú›»]Nà\Ÿ\ë]HHH]ÿZ]›\Xò\ŸKò]]ôŸ]\Ÿ\ä
+N¬àYà
+\Ÿ\ë]Kù\Ÿ\äH¬à€€ú›»]Nà\Ÿ\îõ€\»HH]ÿZ]›\Xò\ŸKúú ò›\úô[ù›\Ÿ\ó‹õ€\»äN¬àŸ]ÿ[ìX[òYŸJà
+
+\Ÿ\îõ€\»◊JH\»›ö[ô÷◊JKú€€YJ
+õ€JHOÇà»òYZ[àãò\‹⁄Y€õ‹àóKö[ò€Y\ õ€JKà
+Kà
+N¬àH[ŸHŸ]ÿ[ìX[òYŸJò[ŸJN¬à€€ú›ÿ[Y\‘]Y\ûHH›\Xò\ŸBàôúõ€Jôÿ[Y\»äBàúŸ[X›
+àöYÿ[YW€ù[Xô\ã›]\À‹‹ù⁄YXY›YW⁄Y]ô[⁄Yÿÿ][€ó⁄Y›\ù◊ÿ]\ò][€ó€Z[ù]\ÀŸôöX⁄X[◊€ôYYY‹‹ù ò[YJKXY›Y\ ò[YK\‹⁄Y€õY[ùŸö[›\ôŸ]Ÿ^\À\‹⁄Y€õY[ùÿXÿŸ\[òŸW⁄›\úÀ\‹⁄Y€õY[ùŸ\ÿÿ[][€óŸ^\À\‹⁄Y€õY[ù‹ô[Z[ô\ó⁄›\ú K]ô[ Yò[YJK€YNùX[\»Yÿ[Y\◊⁄€YW›X[W⁄YŸöŸ^JYò[YJK]ÿ^NùX[\»Yÿ[Y\◊ÿ]ÿ^W›X[W⁄YŸöŸ^JYò[YJKÿÿ][€éõÿÿ][€ú Yò[YK⁄]K›]K]]YK€ô⁄]YJHãà
+Bàõ‹ô\äú›\ù◊ÿ]äN¬à€€ú›ŸÀ€ÀÀKããÀKôKõÀKÿ\ÀZ]HBà]ÿZ]õ€Z\ŸKò[
+¬à‹ôÿ[ö^ò][€íYà»ÿ[Y\‘]Y\ûKô\Jõ‹ôÿ[ö^ò][€ó⁄Yã‹ôÿ[ö^ò][€íY
+Bààÿ[Y\‘]Y\ûKà‹ôÿ[ö^ò][€íYà»›\Xò\ŸBàôúõ€Jõ‹ôÿ[ö^ò][€ó€ŸôöX⁄X[»äBàúŸ[X›
+õŸôöX⁄X[⁄YäBàô\Jõ‹ôÿ[ö^ò][€ó⁄Yã‹ôÿ[ö^ò][€íY
+Bàô\JòX›]ôHãùYJBààõ€Z\ŸKúô\€€ôJ»]Nàù[\úõ‹éàù[JKà›\Xò\ŸBàôúõ€JõŸôöX⁄X[»äBàúŸ[X›
+àöYö\ú›€ò[YK\›€ò[YK[XZ[€ôK‹‹ùÀX›]ôK€YWÿ⁄]K€YW‹›]K€YW€]]YK€YW€€ô⁄]YHãà
+Bàô\JòX›]ôHãùYJBàõ‹ô\äõ\›€ò[YHäBàõ‹ô\äôö\ú›€ò[YHäKà›\Xò\ŸBàôúõ€Jú‹‹ù‹‹⁄][€ú»äBàúŸ[X›
+öY‹‹ù⁄Yò[YKô\]Z\ôY€‹ù€‹ô\àäBàõ‹ô\äú€‹ù€‹ô\àäKà›\Xò\ŸBàôúõ€Jò\‹⁄Y€õY[ù»äBàúŸ[X›
+àöYÿ[YW⁄YŸôöX⁄X[⁄Y‹⁄][€ó⁄Y›]\ÀXõ\⁄Yÿ]XÿŸ\ÿûKô\‹€ôYÿ]X€[ôW‹ôX\€€ã›ô\ôYW‹ô]öY]ŸYÿ]\‹⁄Y€õY[ù‹€›\òŸK[XZ[‹Ÿ[ùÿ][XZ[Ÿ\úõ‹ãô\Ÿ[ôŸ[XZ[⁄Yÿ[òŸ[][€ó€õ›YöYYÿ]ÿ[òŸ[][€óŸ[XZ[Ÿ\úõ‹ãÿ[òŸ[][€óŸ[XZ[⁄Yãà
+Kà›\Xò\ŸKôúõ€JõŸôöX⁄X[‹ò[ö⁄[ô‹»äKúŸ[X›
+õŸôöX⁄X[⁄Yò[ö»äKà›\Xò\ŸBàôúõ€JõŸôöX⁄X[‹€ÿÿŸ\ó‹‹⁄][€ó‹ò[ö⁄[ô‹»äBàúŸ[X›
+àõŸôöX⁄X[⁄YôYó‹ò[öÀ\åW‹ò[öÀ\åó‹ò[öÀõ›\ù‹ò[öÀY[ù‹ó‹ò[ö»ãà
+Kà›\Xò\ŸKôúõ€JùX[W‹›Ÿ\ó‹ò[ö⁄[ô‹»äKúŸ[X›
+ùX[W⁄Y›Ÿ\àäKà›\Xò\ŸBàôúõ€JõŸôöX⁄X[€XY›YWŸ[Y⁄Xö[]HäBàúŸ[X›
+õŸôöX⁄X[⁄YXY›YW⁄YäKà›\Xò\ŸBàôúõ€JõŸôöX⁄X[€]ô[Ÿ[Y⁄Xö[]HäBàúŸ[X›
+õŸôöX⁄X[⁄Y]ô[⁄YäKà›\Xò\ŸBàôúõ€JõŸôöX⁄X[ÿ]òZ[Xö[]Wÿõÿ⁄‹»äBàúŸ[X›
+àõŸôöX⁄X[⁄Yõÿ⁄◊›\K›\ùŸ]K[ôŸ]K›\ù◊ÿ][ô◊ÿ]ÿÿ][€ó⁄YX[W⁄Yãà
+Kà›\Xò\ŸBàôúõ€Jôÿ[YW€[ö◊Ÿ‹õ›\»äBàúŸ[X›
+öYò[YK‹ôX]Yÿ]‹ôÿ[ö^ò][€ó⁄YäBàô\Jõ‹ôÿ[ö^ò][€ó⁄Yã‹ôÿ[ö^ò][€íYàäBàõ‹ô\äò‹ôX]Yÿ]ã»\ÿŸ[ô[ôŒàò[ŸHJKà›\Xò\ŸBàôúõ€Jôÿ[YW€[ö◊€Y[Xô\ú»äBàúŸ[X›
+ô‹õ›\⁄Yÿ[YW⁄Y€‹ù€‹ô\àäBàõ‹ô\äú€‹ù€‹ô\àäKà›\Xò\ŸBàôúõ€Jò\‹⁄Y€õY[ù‹Ÿ[óÿ\‹⁄Y€ó‹€›»äBàúŸ[X›
+öYÿ[YW⁄Y‹⁄][€ó⁄Y›]\»äBàô\Jú›]\»ãõ‹[àäKà›\Xò\ŸBàôúõ€Jò]Y]⁄\›‹ûHäBàúŸ[X›
+ôÿ[YW⁄Y€Ÿ]HäBàô\JòX›[€àãù[ò\‹⁄Y€ôYäKà›\Xò\ŸBàôúõ€Jò\‹⁄Y€õY[ù›[\]\»äBàúŸ[X›
+àöYò[YK‹‹ù⁄YXY›YW⁄Y‹ôX]YÿûK\]Yÿ]‹ôÿ[ö^ò][€ó⁄Y\‹⁄Y€õY[ù›[\]W‹€› Y‹⁄][€ó⁄YŸôöX⁄X[⁄Y€‹ù€‹ô\äHãà
+Bàô\Jõ‹ôÿ[ö^ò][€ó⁄Yã‹ôÿ[ö^ò][€íYàäBàõ‹ô\äù\]Yÿ]ã»\ÿŸ[ô[ôŒàò[ŸHJKàJN¬à€€ú›\úàBàÀô\úõ‹àà€Àô\úõ‹ààÀô\úõ‹ààô\úõ‹ààKô\úõ‹ààãô\úõ‹ààãô\úõ‹ààÀô\úõ‹ààKô\úõ‹ààôKô\úõ‹ààõô\úõ‹ààÀô\úõ‹ààKô\úõ‹ààÿ\Àô\úõ‹ààZô\úõ‹àà]ô\úõ‹é¬àYà
+\úäH¬àŸ]\úõ‹ä\úãõY\‹ÿYŸJN¬àô]\õé¬àBà€€ú›õNàôX€‹ô›ö[ôÀù[Xô\èàHﬂKàõNàôX€‹ô›ö[ôÀ‹⁄][€îò[öœàHﬂKàNàôX€‹ô›ö[ôÀù[Xô\èàHﬂN¬à
+
+ãô]H◊JH\»ò[ö÷◊JKôõ‹ëXX⁄
+à
+
+HOà
+õVﬁõŸôöX⁄X[⁄YHHù[Xô\äúò[ö JKà
+N¬à
+
+ãô]H◊JH\»‹⁄][€îò[ö÷◊JKôõ‹ëXX⁄
+à
+
+HOÇà
+õVﬁõŸôöX⁄X[⁄YHH¬àŸôöX⁄X[⁄YàõŸôöX⁄X[⁄YàôYó‹ò[öŒàù[Xô\äúôYó‹ò[ö Kà\åW‹ò[öŒàù[Xô\äò\åW‹ò[ö Kà\åó‹ò[öŒàù[Xô\äò\åó‹ò[ö Kàõ›\ù‹ò[öŒàù[Xô\äôõ›\ù‹ò[ö KàY[ù‹ó‹ò[öŒàù[Xô\äõY[ù‹ó‹ò[ö KàJKà
+N¬à
+
+Àô]H◊JH\»›Ÿ\ñ◊JKôõ‹ëXX⁄
+à
+
+HOà
+VﬁùX[W⁄YHHù[Xô\äú›Ÿ\äJKà
+N¬àŸ]ò[ö‹ õJN¬àŸ]‹⁄][€îò[ö‹ õJN¬àŸ]›Ÿ\ú JN¬à€€ú›‹ôÿ[ö^ò][€ìŸôöX⁄X[Y»H‹ôÿ[ö^ò][€íYà»ô]»Ÿ]
+
+€Àô]H◊JKõX\
+
+[ö HOà[öÀõŸôöX⁄X[⁄Y
+JBààù[¬àŸ]ŸôöX⁄X[ à
+
+Àô]H◊JH\»ŸôöX⁄X[◊JKôö[\äà
+ŸôöX⁄X[
+HOÇà[‹ôÿ[ö^ò][€ìŸôöX⁄X[Y»‹ôÿ[ö^ò][€ìŸôöX⁄X[YÀö\ ŸôöX⁄X[öY
+Kà
+Kà
+N¬àŸ]‹⁄][€ú 
+ô]H◊JH\»‹⁄][€ñ◊JN¬à€€ú›ÿ€‹Yÿ[Y\»H
+Àô]H◊JH\»[ö€õ›€à\»ÿ[YV◊N¬à€€ú›ÿ€‹Yÿ[YRY»Hô]»Ÿ]
+ÿ€‹Yÿ[Y\ÀõX\
+
+ÿ[YJHOàÿ[YKöY
+JN¬àŸ]\‹⁄Y€õY[ù à
+
+Kô]H◊JH\»\‹⁄Y€õY[ù◊JKôö[\ä
+\‹⁄Y€õY[ù
+HOÇàÿ€‹Yÿ[YRYÀö\ \‹⁄Y€õY[ùôÿ[YW⁄Y
+Kà
+Kà
+N¬àŸ]XY›YQ[Y 
+Kô]H◊JH\»[Y”◊JN¬àŸ]]ô[[Y 
+ôKô]H◊JH\»[Y’ñ◊JN¬àŸ]õÿ⁄‹ 
+õô]H◊JH\»õÿ⁄÷◊JN¬àŸ][ö—‹õ›\ 
+Àô]H◊JH\»[ö—‹õ›\◊JN¬àŸ][ö”Y[Xô\ú à
+
+Kô]H◊JH\»[ö”Y[Xô\ñ◊JKôö[\ä
+Y[Xô\äHOÇàÿ€‹Yÿ[YRYÀö\ Y[Xô\ãôÿ[YW⁄Y
+Kà
+Kà
+N¬àŸ]Ÿ[ê\‹⁄Y€î€› à
+
+ÿ\Àô]H◊JH\»Ÿ[ê\‹⁄Y€î€›◊JKôö[\ä
+€›
+HOÇàÿ€‹Yÿ[YRYÀö\ €›ôÿ[YW⁄Y
+Kà
+Kà
+N¬àŸ]\‹⁄Y€õY[ù[\]\ 
+]ô]H◊JH\»\‹⁄Y€õY[ù[\]V◊JN¬àŸ][ò\‹⁄Y€ôY€›Ÿ^\ ¬àããõô]»Ÿ]
+à
+
+Zô]H◊JH\»[ò\‹⁄Y€õY[ù]Y]◊JKôõ]X\
+
+õ› HOÇàõ›Àôÿ[YW⁄Y	âÇàÿ€‹Yÿ[YRYÀö\ õ›Àôÿ[YW⁄Y
+H	âÇàõ›Àõ€Ÿ]OÀú‹⁄][€ó⁄Yà»ÿ	‹õ›Àôÿ[YW⁄YNâ‹õ›Àõ€Ÿ]Kú‹⁄][€ó⁄YXBàà◊Kà
+Kà
+KàJN¬à€€ú›€‹ùYHÿ€‹Yÿ[Y\Àú€‹ù
+à
+JHOÇàÿ[YT›Ÿ\äKJHHÿ[YT›Ÿ\äJHàô]»]Jú›\ù◊ÿ]
+KôŸ][YJ
+HHô]»]JKú›\ù◊ÿ]
+KôŸ][YJ
+Kà
+N¬àŸ]ÿ[Y\ €‹ùY
+N¬àYà
+\Ÿ[X›Y	âà€‹ùYÃJHŸ]Ÿ[X›Y
+€‹ùYÃKöY
+N¬àBà\ŸQYôôX›
+
+
+HOà¬àõ⁄YÿY
+
+N¬àK€‹ôÿ[ö^ò][€íYJN¬à\ŸQYôôX›
+
+
+HOà¬àõ⁄YÿYÿ]ôYöY]‹ 
+N¬àK◊JN¬à\ﬁ[ò»ù[ò›[€àôYúô\⁄\‹⁄Y€õY[ù›]J
+H¬à€€ú›ÿ\‹⁄Y€õY[ùô\›[Ÿ[ê\‹⁄Y€îô\›[[ò\‹⁄Y€õY[ùô\›[HBà]ÿZ]õ€Z\ŸKò[
+¬à›\Xò\ŸBàôúõ€Jò\‹⁄Y€õY[ù»äBàúŸ[X›
+àöYÿ[YW⁄YŸôöX⁄X[⁄Y‹⁄][€ó⁄Y›]\ÀXõ\⁄Yÿ]XÿŸ\ÿûKô\‹€ôYÿ]X€[ôW‹ôX\€€ã›ô\ôYW‹ô]öY]ŸYÿ]\‹⁄Y€õY[ù‹€›\òŸK[XZ[‹Ÿ[ùÿ][XZ[Ÿ\úõ‹ãô\Ÿ[ôŸ[XZ[⁄Yÿ[òŸ[][€ó€õ›YöYYÿ]ÿ[òŸ[][€óŸ[XZ[Ÿ\úõ‹ãÿ[òŸ[][€óŸ[XZ[⁄Yãà
+Kà›\Xò\ŸBàôúõ€Jò\‹⁄Y€õY[ù‹Ÿ[óÿ\‹⁄Y€ó‹€›»äBàúŸ[X›
+öYÿ[YW⁄Y‹⁄][€ó⁄Y›]\»äBàô\Jú›]\»ãõ‹[àäKà›\Xò\ŸBàôúõ€Jò]Y]⁄\›‹ûHäBàúŸ[X›
+ôÿ[YW⁄Y€Ÿ]HäBàô\JòX›[€àãù[ò\‹⁄Y€ôYäKàJN¬à€€ú›ôYúô\⁄\úõ‹àBà\‹⁄Y€õY[ùô\›[ô\úõ‹ààŸ[ê\‹⁄Y€îô\›[ô\úõ‹àà[ò\‹⁄Y€õY[ùô\›[ô\úõ‹é¬àYà
+ôYúô\⁄\úõ‹äH¬àŸ]\úõ‹äôYúô\⁄\úõ‹ãõY\‹ÿYŸJN¬àô]\õàò[ŸN¬àBà€€ú›ö\⁄XõQÿ[YRY»Hô]»Ÿ]
+ÿ[Y\ÀõX\
+
+ÿ[YJHOàÿ[YKöY
+JN¬àŸ]\‹⁄Y€õY[ù à
+
+\‹⁄Y€õY[ùô\›[ô]H◊JH\»\‹⁄Y€õY[ù◊JKôö[\ä
+\‹⁄Y€õY[ù
+HOÇàö\⁄XõQÿ[YRYÀö\ \‹⁄Y€õY[ùôÿ[YW⁄Y
+Kà
+Kà
+N¬àŸ]Ÿ[ê\‹⁄Y€î€› à
+
+Ÿ[ê\‹⁄Y€îô\›[ô]H◊JH\»Ÿ[ê\‹⁄Y€î€›◊JKôö[\ä
+€›
+HOÇàö\⁄XõQÿ[YRYÀö\ €›ôÿ[YW⁄Y
+Kà
+Kà
+N¬àŸ][ò\‹⁄Y€ôY€›Ÿ^\ ¬àããõô]»Ÿ]
+à
+
+[ò\‹⁄Y€õY[ùô\›[ô]H◊JH\»[ò\‹⁄Y€õY[ù]Y]◊JKôõ]X\
+à
+õ› HOÇàõ›Àôÿ[YW⁄Y	âÇàö\⁄XõQÿ[YRYÀö\ õ›Àôÿ[YW⁄Y
+H	âÇàõ›Àõ€Ÿ]OÀú‹⁄][€ó⁄Yà»ÿ	‹õ›Àôÿ[YW⁄YNâ‹õ›Àõ€Ÿ]Kú‹⁄][€ó⁄YXBàà◊Kà
+Kà
+KàJN¬àô]\õàùYN¬àBà\ŸQYôôX›
+
+
+HOà¬àYà
+[õ›XŸJHô]\õé¬à€€ú›[Y\àH⁄[ô›ÀúŸ][Y[›]
+
+
+HOàŸ]õ›XŸJàäKL
+N¬àô]\õà
+
+HOà⁄[ô›Àò€X\ï[Y[›]
+[Y\äN¬àK€õ›XŸWJN¬àù[ò›[€àÿ[YT›Ÿ\äŒàÿ[YKX\H›Ÿ\ú H¬àô]\õà
+à
+
+Àö€YH»
+X\ŸÀö€YKöYHœ»JHàJH
+¬à
+Àò]ÿ^H»
+X\ŸÀò]ÿ^KöYHœ»JHàJJH¬àÇà
+N¬àBàù[ò›[€à\‘ô\XŸ[Y[ùôYYY
+ÿ[YRYà›ö[ôÀ‹⁄][€íYà›ö[ô H¬à€€ú›\–X›]ôP\‹⁄Y€õY[ùH\‹⁄Y€õY[ùÀú€€YJà
+\‹⁄Y€õY[ù
+HOÇà\‹⁄Y€õY[ùôÿ[YW⁄YOOHÿ[YRY	âÇà\‹⁄Y€õY[ùú‹⁄][€ó⁄YOOH‹⁄][€íY	âÇà\‹⁄Y€õY[ùú›]\»OOHôX€[ôYãà
+N¬àYà
+\–X›]ôP\‹⁄Y€õY[ù
+Hô]\õàò[ŸN¬àô]\õà
+à[ò\‹⁄Y€ôY€›Ÿ^\Àö[ò€Y\ 	Ÿÿ[YRYNâ‹‹⁄][€íYX
+Hà\‹⁄Y€õY[ùÀú€€YJà
+\‹⁄Y€õY[ù
+HOÇà\‹⁄Y€õY[ùôÿ[YW⁄YOOHÿ[YRY	âÇà\‹⁄Y€õY[ùú‹⁄][€ó⁄YOOH‹⁄][€íY	âÇà\‹⁄Y€õY[ùú›]\»OOHôX€[ôYãà
+Bà
+N¬àBàù[ò›[€à\’[úXõ\⁄Yÿ[YJŒàÿ[YJH¬à€€ú›ÿHH\‹⁄Y€õY[ùÀôö[\äà
+JHOàKôÿ[YW⁄YOOHÀöY	âàKú›]\»OOHôX€[ôYãà
+N¬àô]\õàÿKõ[ô›à	âàÿKú€€YJ
+JHOàXKúXõ\⁄Yÿ]
+N¬àBàù[ò›[€à\‹⁄Y€õY[ù€€\][ô\‹ Œàÿ[YJH¬à€€ú›€›»H‹⁄][€ú¬àôö[\ä
+‹⁄][€äHOà‹⁄][€ãú‹‹ù⁄YOOHÀú‹‹ù⁄Y
+Bàú€‹ù
+
+KäHOàKú€‹ù€‹ô\àHãú€‹ù€‹ô\äBàú€XŸJX]õX^
+ÀõŸôöX⁄X[◊€ôYYY
+JKàX›]ôHH\‹⁄Y€õY[ùÀôö[\äà
+\‹⁄Y€õY[ù
+HOÇà\‹⁄Y€õY[ùôÿ[YW⁄YOOHÀöY	âÇà\‹⁄Y€õY[ùú›]\»OOHôX€[ôYà	âÇà€›Àú€€YJ
+€›
+HOà€›öYOOH\‹⁄Y€õY[ùú‹⁄][€ó⁄Y
+Kà
+Kàö[YHô]»Ÿ]
+X›]ôKõX\
+
+\‹⁄Y€õY[ù
+HOà\‹⁄Y€õY[ùú‹⁄][€ó⁄Y
+JKú⁄^ôKàô\XŸ[Y[ù€›[ùH€›Àôö[\ä
+€›
+HOÇà\‘ô\XŸ[Y[ùôYYY
+ÀöY€›öY
+Kà
+Kõ[ô›¬àYà
+ô\XŸ[Y[ù€›[ù
+Bàô]\õà¬àŸ^Nàò][ù[€àà\»€€ú›àXô[àìôYY»][ù[€àãà€€‹éààŸÃçåçàãà]Z[à	‹ô\XŸ[Y[ù€›[ùH‹⁄][€â‹ô\XŸ[Y[ù€›[ùOOHH»àààú»üHôYYô\XŸ[Y[ùàN¬àYà
+\€›Àõ[ô›ö[YOOH
+Bàô]\õà¬àŸ^Nàù[ò\‹⁄Y€ôYà\»€€ú›àXô[àï[ò\‹⁄Y€ôYãà€€‹éààŸÃçåçàãà]Z[àìõ»\‹⁄Y€õY[ù€›»\ôHö[YãàN¬àYà
+ö[Y€›Àõ[ô›
+Bàô]\õà¬àŸ^Nàú\ùX[à\»€€ú›àXô[àî\ùX[H\‹⁄Y€ôYãà€€‹éààŸXMN»ãà]Z[à	Ÿö[YHŸà	‹€›Àõ[ô›H€›»ö[YàN¬à€€ú››ô\ôYHHX›]ôKú€€YJà
+\‹⁄Y€õY[ù
+HOÇà\‹⁄Y€õY[ùúXõ\⁄Yÿ]	âÇà\‹⁄Y€õY[ùú›]\»OOHúõ‹‹ŸYà	âÇà»ò]]◊ÿ\‹⁄Y€àãõX[òYŸ\àóKö[ò€Y\ \‹⁄Y€õY[ùò\‹⁄Y€õY[ù‹€›\òŸJH	âÇà\‹⁄Y€õY[ùòXÿŸ\ÿûH	âÇàô]»]J\‹⁄Y€õY[ùòXÿŸ\ÿûJKôŸ][YJ
+H]Kõõ› 
+Kà
+N¬àYà
+›ô\ôYJBàô]\õà¬àŸ^Nàò][ù[€àà\»€€ú›àXô[àìôYY»][ù[€àãà€€‹éààŸÃçåçàãà]Z[àì€ôH‹à[‹ôH€€ôö\õX][€àXY[ô\»]ôH\‹ŸYãàN¬àYà
+àX›]ôKô]ô\ûJ
+\‹⁄Y€õY[ù
+HOÇà»òXÿŸ\Yãò€€ôö\õYYóKö[ò€Y\ \‹⁄Y€õY[ùú›]\ Kà
+Bà
+Bàô]\õà¬àŸ^Nàò€€ôö\õYYà\»€€ú›àXô[àê€€ôö\õYYãà€€‹éààÃMòLÕHãà]Z[àë]ô\ûH\‹⁄Y€õY[ù\»€€ôö\õYYãàN¬àYà
+X›]ôKô]ô\ûJ
+\‹⁄Y€õY[ù
+HOàõ€€X[ä\‹⁄Y€õY[ùúXõ\⁄Yÿ]
+JJBàô]\õà¬àŸ^Nàò]ÿZ][ô»à\»€€ú›àXô[àê]ÿZ][ô»€€ôö\õX][€àãà€€‹éààÿÿNLãà]Z[àîXõ\⁄Y»ÿZ][ô»õ‹à€ôH‹à[‹ôH€€ôö\õX][€ú»ãàN¬àô]\õà¬àŸ^Nàôù[à\»€€ú›àXô[àëù[H\‹⁄Y€ôYãà€€‹éààÃçMåŸXàãà]Z[Çàë]ô\ûH‹⁄][€à\»ö[Y»€ôH‹à[‹ôH\‹⁄Y€õY[ù»›[ôYYXõ\⁄[ô»ãàN¬àBàù[ò›[€à›Yôö[ô–€›[ù Œàÿ[YJH¬à€€ú›€›»H‹⁄][€ú¬àôö[\ä
+‹⁄][€äHOà‹⁄][€ãú‹‹ù⁄YOOHÀú‹‹ù⁄Y
+Bàú€‹ù
+
+KäHOàKú€‹ù€‹ô\àHãú€‹ù€‹ô\äBàú€XŸJX]õX^
+ÀõŸôöX⁄X[◊€ôYYY
+JN¬à€€ú›ö[YHô]»Ÿ]
+à\‹⁄Y€õY[ù¬àôö[\äà
+\‹⁄Y€õY[ù
+HOÇà\‹⁄Y€õY[ùôÿ[YW⁄YOOHÀöY	âÇà\‹⁄Y€õY[ùú›]\»OOHôX€[ôYà	âÇà€›Àú€€YJ
+€›
+HOà€›öYOOH\‹⁄Y€õY[ùú‹⁄][€ó⁄Y
+Kà
+BàõX\
+
+\‹⁄Y€õY[ù
+HOà\‹⁄Y€õY[ùú‹⁄][€ó⁄Y
+Kà
+Kú⁄^ôN¬àô]\õà¬àö[Yà›[à€›Àõ[ô›à‹[éàX]õX^
+€›Àõ[ô›Hö[Y
+KàN¬àBàù[ò›[€àX]⁄\”ŸôöX⁄X[ö[\äŒàÿ[YJH¬àô]\õà
+à[ŸôöX⁄X[ö[\àà\‹⁄Y€õY[ùÀú€€YJà
+\‹⁄Y€õY[ù
+HOÇà\‹⁄Y€õY[ùôÿ[YW⁄YOOHÀöY	âÇà\‹⁄Y€õY[ùõŸôöX⁄X[⁄YOOHŸôöX⁄X[ö[\à	âÇà\‹⁄Y€õY[ùú›]\»OOHôX€[ôYãà
+Bà
+N¬àBàù[ò›[€àX]⁄\”ÿÿ][€ëö[\äŒàÿ[YJH¬àô]\õà[ÿÿ][€ëö[\àÀõÿÿ][€ó⁄YOOHÿÿ][€ëö[\é¬àBàù[ò›[€àX]⁄\”XY›YQö[\äŒàÿ[YJH¬àô]\õà[XY›YQö[\àÀõXY›YW⁄YOOHXY›YQö[\é¬àBàù[ò›[€àX]⁄\”]ô[ö[\äŒàÿ[YJH¬àô]\õà[]ô[ö[\àÀõ]ô[⁄YOOH]ô[ö[\é¬àBàù[ò›[€àŸ[ê\‹⁄Y€ì‹[ê€›[ù
+ÿ[YRYà›ö[ô H¬àô]\õàŸ[ê\‹⁄Y€î€›Àôö[\äà
+€›
+HOà€›ôÿ[YW⁄YOOHÿ[YRY	âà€›ú›]\»OOHõ‹[àãà
+Kõ[ô›¬àBà€€ú›Ÿ[ê\‹⁄Y€ëÿ[YP€›[ùHô]»Ÿ]
+àŸ[ê\‹⁄Y€î€›¬àôö[\ä
+€›
+HOà€›ú›]\»OOHõ‹[àäBàõX\
+
+€›
+HOà€›ôÿ[YW⁄Y
+Kà
+Kú⁄^ôN¬à€€ú›\—\ôX›ÿ[YQö[\àHõ€€X[äàÿÿ][€ëö[\àŸôöX⁄X[ö[\àXY›YQö[\à]ô[ö[\ãà
+N¬à€€ú›ò[ôŸQÿ[Y\»Hÿ[Y\Àôö[\ä
+ HOà[îò[ôŸJÀò[ôŸK›\›€Q]JJN¬à€€ú›ò\ŸQö[\ôYÿ[Y\»Hÿ[Y\Àôö[\ä
+ HOà¬à€€ú›X]⁄\‘Ÿ[ê\‹⁄Y€àH\Ÿ[ê\‹⁄Y€ì€õHŸ[ê\‹⁄Y€ì‹[ê€›[ù
+ÀöY
+Hà¬àYà
+\—\ôX›ÿ[YQö[\äBàô]\õà
+àX]⁄\”ÿÿ][€ëö[\ä H	âÇàX]⁄\”ŸôöX⁄X[ö[\ä H	âÇàX]⁄\”XY›YQö[\ä H	âÇàX]⁄\”]ô[ö[\ä H	âÇàX]⁄\‘Ÿ[ê\‹⁄Y€Çà
+N¬àô]\õà
+à[îò[ôŸJÀò[ôŸK›\›€Q]JH	âÇàX]⁄\‘Ÿ[ê\‹⁄Y€à	âÇà
+][úXõ\⁄Y€õH\’[úXõ\⁄Yÿ[YJ JH	âÇà
+€€\][ô\‹—ö[\àOOHò[àà\‹⁄Y€õY[ù€€\][ô\‹  KöŸ^HOOH€€\][ô\‹—ö[\äBà
+N¬àJN¬àù[ò›[€à€€\\ôQÿ[Y\ Nàÿ[YKéàÿ[YJH¬à]àH¬àYà
+ÿ[YT€‹ùOOHôÿ[YHäBààH	ÿKö€YOÀõò[YHàüH	ÿKò]ÿ^OÀõò[YHàüXõÿÿ[P€€\\ôJà	ÿãö€YOÀõò[YHàüH	ÿãò]ÿ^OÀõò[YHàüXà
+N¬à[ŸHYà
+ÿ[YT€‹ùOOHõÿÿ][€àäBààH
+Kõÿÿ][€èÀõò[YHàäKõÿÿ[P€€\\ôJãõÿÿ][€èÀõò[YHàäN¬à[ŸHYà
+ÿ[YT€‹ùOOHù[YHäBààHô]»]JKú›\ù◊ÿ]
+KôŸ][YJ
+HHô]»]Jãú›\ù◊ÿ]
+KôŸ][YJ
+N¬à[ŸHYà
+ÿ[YT€‹ùOOHú›Ÿ\àäHàHÿ[YT›Ÿ\äJHHÿ[YT›Ÿ\ääN¬à[ŸHYà
+ÿ[YT€‹ùOOHú›]\»äBààH
+Kú›]\»OOHõ‹[àà»òX›]ôHààKú›]\ Kõÿÿ[P€€\\ôJàãú›]\»OOHõ‹[àà»òX›]ôHààãú›]\Àà
+N¬à[ŸHYà
+ÿ[YT€‹ùOOHò\‹⁄Y€õY[ù»äBààH\‹⁄Y€õY[ù€€\][ô\‹ JKõXô[õÿÿ[P€€\\ôJà\‹⁄Y€õY[ù€€\][ô\‹ äKõXô[à
+N¬à[ŸBààBàÿ[YT›Ÿ\ääHHÿ[YT›Ÿ\äJHàô]»]JKú›\ù◊ÿ]
+KôŸ][YJ
+HHô]»]Jãú›\ù◊ÿ]
+KôŸ][YJ
+N¬àYà
+àOOH
+BààHô]»]JKú›\ù◊ÿ]
+KôŸ][YJ
+HHô]»]Jãú›\ù◊ÿ]
+KôŸ][YJ
+N¬àô]\õàÿ[YT€‹ù\àOOHô\ÿ»à»[ààé¬àBà€€ú›[ö—‹õ›\ûQÿ[YHHô]»X\
+à[ö”Y[Xô\úÀõX\
+
+Y[Xô\äHOà€Y[Xô\ãôÿ[YW⁄YY[Xô\ãô‹õ›\⁄YJKà
+N¬à€€ú›[ö”‹ô\êûQÿ[YHHô]»X\
+à[ö”Y[Xô\úÀõX\
+
+Y[Xô\äHOà€Y[Xô\ãôÿ[YW⁄YY[Xô\ãú€‹ù€‹ô\óJKà
+N¬à€€ú›‹õ›\Yÿ[Y\»Hô]»X\›ö[ôÀÿ[YV◊Oä
+N¬à€€ú›[õ[öŸYÿ[Y\Œàÿ[YV◊HH◊N¬àõ‹à
+€€ú››\úô[ùÿ[YHŸàò\ŸQö[\ôYÿ[Y\ H¬à€€ú›‹õ›\YH[ö—‹õ›\ûQÿ[YKôŸ]
+›\úô[ùÿ[YKöY
+N¬àYà
+Y‹õ›\Y
+H[õ[öŸYÿ[Y\Àú\⁄
+›\úô[ùÿ[YJN¬à[ŸH¬à€€ú›‹õ›\H‹õ›\Yÿ[Y\ÀôŸ]
+‹õ›\Y
+H◊N¬à‹õ›\ú\⁄
+›\úô[ùÿ[YJN¬à‹õ›\Yÿ[Y\ÀúŸ]
+‹õ›\Y‹õ›\
+N¬àBàBà€€ú›ÿ[YU[ö]Œà»Ÿ^Nà›ö[ôŒ»‹õ›\Yà›ö[ô»ù[»ÿ[Y\Œàÿ[YV◊HV◊HH¬àããê\úò^Kôúõ€J‹õ›\Yÿ[Y\Àô[ùöY\ 
+JKõX\
+
+Ÿ‹õ›\Y[öŸYJHOà
+¬àŸ^Nà‹õ›\Yà‹õ›\Yàÿ[Y\Œà[öŸYú€‹ù
+à
+KäHOÇà
+[ö”‹ô\êûQÿ[YKôŸ]
+KöY
+H
+HH
+[ö”‹ô\êûQÿ[YKôŸ]
+ãöY
+H
+Kà
+KàJJKàããù[õ[öŸYÿ[Y\ÀõX\
+
+⁄[ô€JHOà
+¬àŸ^Nà⁄[ô€KI‹⁄[ô€KöYXà‹õ›\Yàù[àÿ[Y\Œà‹⁄[ô€WKàJJKàKú€‹ù
+
+KäHOà€€\\ôQÿ[Y\ Kôÿ[Y\÷ÃKãôÿ[Y\÷ÃJJN¬à€€ú›ö[\ôYÿ[Y\»Hÿ[YU[ö]Àôõ]X\
+
+[ö]
+HOà[ö]ôÿ[Y\ N¬à€€ú›\‹⁄Y€õY[ùŸ[X›[€àHÿ[Y\Àôö[\ä
+\›Yÿ[YJHOÇà[ö‘Ÿ[X›Yö[ò€Y\ \›Yÿ[YKöY
+Kà
+N¬à€€ú›\‹⁄Y€õY[ùŸ[X›[€ë‹õ›\YH\‹⁄Y€õY[ùŸ[X›[€ãõ[ô›à»[ö—‹õ›\ûQÿ[YKôŸ]
+\‹⁄Y€õY[ùŸ[X›[€ñÃKöY
+Hù[ààù[¬à€€ú›\‹⁄Y€õY[ùŸ[X›[€í\”€ôU\ôŸ]Bà\‹⁄Y€õY[ùŸ[X›[€ãõ[ô›OOHHà
+õ€€X[ä\‹⁄Y€õY[ùŸ[X›[€ë‹õ›\Y
+H	âÇà\‹⁄Y€õY[ùŸ[X›[€ãô]ô\ûJà
+\›Yÿ[YJHOÇà[ö—‹õ›\ûQÿ[YKôŸ]
+\›Yÿ[YKöY
+HOOH\‹⁄Y€õY[ùŸ[X›[€ë‹õ›\Yà
+JN¬à€€ú›\‹⁄Y€õY[ùŸ[X›[€ï\ôŸ]H\‹⁄Y€õY[ùŸ[X›[€í\”€ôU\ôŸ]à»\‹⁄Y€õY[ùŸ[X›[€ñÃBààù[¬à€€ú›\‹⁄Y€õY[ùŸ[X›[€í\”[öŸYHõ€€X[äà\‹⁄Y€õY[ùŸ[X›[€ï\ôŸ]	âÇà[ö—‹õ›\ûQÿ[YKôŸ]
+\‹⁄Y€õY[ùŸ[X›[€ï\ôŸ]öY
+Kà
+N¬àù[ò›[€à€‹ùÿ[Y\ ûNà^€YOÿ[YT€‹ùôYò][èäH¬àYà
+ÿ[YT€‹ùOOHûJHŸ]ÿ[YT€‹ù\ä
+
+HOà
+OOHò\ÿ»à»ô\ÿ»ààò\ÿ»äJN¬à[ŸH¬àŸ]ÿ[YT€‹ù
+ûJN¬àŸ]ÿ[YT€‹ù\äò\ÿ»äN¬àBàBàù[ò›[€à€‹ù\úõ› ûNà^€YOÿ[YT€‹ùôYò][èäH¬àô]\õàÿ[YT€‹ùOOHûH»
+ÿ[YT€‹ù\àOOHò\ÿ»à»à8•¨àààà8•ØäHààé¬àBàù[ò›[€àŸŸ€S[ö‘Ÿ[X›[€äÿ[YRYà›ö[ô H¬àŸ]Ÿ[X›Y
+ÿ[YRY
+N¬àŸ]›ô\úöYSŸôöX⁄X[
+àäN¬àŸ][ö‘Ÿ[X›Y
+
+›\úô[ù
+HOÇà›\úô[ùö[ò€Y\ ÿ[YRY
+Bà»›\úô[ùôö[\ä
+Y
+HOàYOOHÿ[YRY
+BààÀããò›\úô[ùÿ[YRYKà
+N¬àBà\ﬁ[ò»ù[ò›[€à[ö—ÿ[Y\ 
+H¬àYà
+[ö‘Ÿ[X›Yõ[ô›äHô]\õé¬àŸ][ö⁄[ô ùYJN¬àŸ]\úõ‹äàäN¬àŸ]õ›XŸJàäN¬à€€ú›[ôXYS[öŸYH[ö‘Ÿ[X›Yú€€YJ
+Y
+HOà[ö—‹õ›\ûQÿ[YKö\ Y
+JN¬àYà
+[ôXYS[öŸY
+H¬àŸ]\úõ‹äàï[õ[ö»Ÿ[X›Yÿ[Y\»úõ€HZ\à›\úô[ù‹õ›\ôYõ‹ôH[ö⁄[ô»[HYÿZ[ãàãà
+N¬àŸ][ö⁄[ô ò[ŸJN¬àô]\õé¬àBà€€ú›»]Nà\Ÿ\ë]HHH]ÿZ]›\Xò\ŸKò]]ôŸ]\Ÿ\ä
+N¬à€€ú›»]Nà‹õ›\\úõ‹éà‹õ›\\úõ‹àHH]ÿZ]›\Xò\ŸBàôúõ€Jôÿ[YW€[ö◊Ÿ‹õ›\»äBàö[úŸ\ù
+¬àò[YNàì[öŸYÿ[Y\»ãà‹ôX]YÿûNà\Ÿ\ë]Kù\Ÿ\èÀöYù[à‹ôÿ[ö^ò][€ó⁄Yà‹ôÿ[ö^ò][€íYàJBàúŸ[X›
+öYäBàú⁄[ô€J
+N¬àYà
+‹õ›\\úõ‹àY‹õ›\
+H¬àŸ]\úõ‹ä‹õ›\\úõ‹èÀõY\‹ÿYŸHï[òXõH»[ö»ÿ[Y\ÀàäN¬àŸ][ö⁄[ô ò[ŸJN¬àô]\õé¬àBà€€ú›‹ô\ôYY»Hö[\ôYÿ[Y\¬àôö[\ä
+\›Yÿ[YJHOà[ö‘Ÿ[X›Yö[ò€Y\ \›Yÿ[YKöY
+JBàõX\
+
+\›Yÿ[YJHOà\›Yÿ[YKöY
+N¬à€€ú›»\úõ‹éàY[Xô\ë\úõ‹àHH]ÿZ]›\Xò\ŸBàôúõ€Jôÿ[YW€[ö◊€Y[Xô\ú»äBàö[úŸ\ù
+à‹ô\ôYYÀõX\
+
+ÿ[YW⁄Y€‹ù€‹ô\äHOà
+¬à‹õ›\⁄Yà‹õ›\öYàÿ[YW⁄Yà€‹ù€‹ô\ãàJJKà
+N¬àYà
+Y[Xô\ë\úõ‹äH¬à]ÿZ]›\Xò\ŸKôúõ€Jôÿ[YW€[ö◊Ÿ‹õ›\»äKô[]J
+Kô\JöYã‹õ›\öY
+N¬àŸ]\úõ‹äY[Xô\ë\úõ‹ãõY\‹ÿYŸJN¬àH[ŸH¬àŸ]õ›XŸJ	€‹ô\ôYYÀõ[ô›Hÿ[Y\»[öŸY[ô‹õ›\YŸŸ]\ãò
+N¬àŸ][ö‘Ÿ[X›Y
+◊JN¬àBà]ÿZ]ÿY
+
+N¬àŸ][ö⁄[ô ò[ŸJN¬àBà\ﬁ[ò»ù[ò›[€à[õ[ö—ÿ[Y\ ‹õ›\Yà›ö[ô H¬àYà
+à]⁄[ô›Àò€€ôö\õJàï[õ[ö»\ŸHÿ[Y\œ»Hÿ[Y\»[ô\‹⁄Y€õY[ù»⁄[ô[XZ[ãàãà
+Bà
+Bàô]\õé¬àŸ][ö⁄[ô ùYJN¬àŸ]\úõ‹äàäN¬à€€ú›»\úõ‹éà[]Q\úõ‹àHH]ÿZ]›\Xò\ŸBàôúõ€Jôÿ[YW€[ö◊Ÿ‹õ›\»äBàô[]J
+Bàô\JöYã‹õ›\Y
+N¬àYà
+[]Q\úõ‹äHŸ]\úõ‹ä[]Q\úõ‹ãõY\‹ÿYŸJN¬à[ŸHŸ]õ›XŸJëÿ[Y\»[õ[öŸYàäN¬à]ÿZ]ÿY
+
+N¬àŸ][ö⁄[ô ò[ŸJN¬àBàù[ò›[€àò]ô[ô]ŸY[äö\ú›àÿ[YKŸX€€ôàÿ[YJH¬àYà
+ö\ú›õÿÿ][€ó⁄Y	âàö\ú›õÿÿ][€ó⁄YOOHŸX€€ôõÿÿ][€ó⁄Y
+Bàô]\õà»Z[\ŒàZ[ù]\ŒàN¬à€€ú›\ôX›Z[\»HZ[\ àö\ú›õÿÿ][€èÀõ]]YHœ»ù[àö\ú›õÿÿ][€èÀõ€ô⁄]YHœ»ù[àŸX€€ôõÿÿ][€èÀõ]]YHœ»ù[àŸX€€ôõÿÿ][€èÀõ€ô⁄]YHœ»ù[à
+N¬àYà
+\ôX›Z[\»OHù[
+Hô]\õàù[¬à€€ú›õÿYZ[\»H\ôX›Z[\»
+àKåé¬àô]\õà¬àZ[\ŒàõÿYZ[\ÀàZ[ù]\ŒàX]õX^
+LX]òŸZ[
+
+õÿYZ[\»»ÕJH
+àå
+»L
+JKàN¬àBàù[ò›[€à⁄\ôY‹ô] ö\ú›àÿ[YKŸX€€ôàÿ[YJH¬à€€ú›ö\ú›Y»Hô]»Ÿ]
+à\‹⁄Y€õY[ù¬àôö[\äà
+\‹⁄Y€õY[ù
+HOÇà\‹⁄Y€õY[ùôÿ[YW⁄YOOHö\ú›öY	âà\‹⁄Y€õY[ùú›]\»OOHôX€[ôYãà
+BàõX\
+
+\‹⁄Y€õY[ù
+HOà\‹⁄Y€õY[ùõŸôöX⁄X[⁄Y
+Kà
+N¬àô]\õà¬àããõô]»Ÿ]
+à\‹⁄Y€õY[ù¬àôö[\äà
+\‹⁄Y€õY[ù
+HOÇà\‹⁄Y€õY[ùôÿ[YW⁄YOOHŸX€€ôöY	âÇà\‹⁄Y€õY[ùú›]\»OOHôX€[ôYà	âÇàö\ú›YÀö\ \‹⁄Y€õY[ùõŸôöX⁄X[⁄Y
+Kà
+BàõX\
+
+\‹⁄Y€õY[ù
+HOà\‹⁄Y€õY[ùõŸôöX⁄X[⁄Y
+Kà
+KàN¬àBàù[ò›[€àò]ô[]Z[ ö\ú›àÿ[YKŸX€€ôàÿ[YJH¬à€€ú›ò]ô[Hò]ô[ô]ŸY[äö\ú›ŸX€€ô
+N¬à€€ú›ö\ú›[ô»Bàô]»]Jö\ú›ú›\ù◊ÿ]
+KôŸ][YJ
+H
+»ö\ú›ô\ò][€ó€Z[ù]\»
+àå¬à€€ú›ÿ\Z[ù]\»HX]ôõ€‹äà
+ô]»]JŸX€€ôú›\ù◊ÿ]
+KôŸ][YJ
+HHö\ú›[ô H»åà
+N¬à€€ú›⁄\ôYH⁄\ôY‹ô] ö\ú›ŸX€€ô
+N¬à€€ú›[\‹‹⁄XõHBàÿ\Z[ù]\»
+ò]ô[OHù[	âàÿ\Z[ù]\»ò]ô[õZ[ù]\ N¬àô]\õà»ò]ô[ÿ\Z[ù]\À⁄\ôY[\‹‹⁄XõHN¬àBàù[ò›[€à[öŸY‹õ›\ÿ\õö[ô‹ ‹õ›\ÿ[Y\Œàÿ[YV◊JH¬à€€ú›ÿ\õö[ô‹Œà›ö[ô÷◊HH◊N¬àõ‹à
+][ô^HN»[ô^‹õ›\ÿ[Y\Àõ[ô›»[ô^
+  H¬à€€ú›ö\ú›H‹õ›\ÿ[Y\÷⁄[ô^HWKàŸX€€ôH‹õ›\ÿ[Y\÷⁄[ô^N¬à€€ú›]Z[»Hò]ô[]Z[ ö\ú›ŸX€€ô
+N¬àYà
+Y]Z[Àö[\‹‹⁄XõHY]Z[Àú⁄\ôYõ[ô›
+H€€ù[ùYN¬à€€ú›ò[Y\»H]Z[Àú⁄\ôYõX\
+
+ŸôöX⁄X[Y
+HOà¬à€€ú›ŸôöX⁄X[HŸôöX⁄X[Àôö[ô
+à
+ÿ[ôY]JHOàÿ[ôY]KöYOOHŸôöX⁄X[Yà
+N¬àô]\õàŸôöX⁄X[à»	€ŸôöX⁄X[ôö\ú›€ò[Y_H	€ŸôöX⁄X[õ\›€ò[Y_Xààê\‹⁄Y€ôYŸôöX⁄X[é¬àJN¬àÿ\õö[ô‹Àú\⁄
+à	€ò[Y\Àöõ⁄[äãä_Hÿ[õõ›ôX\€€òXõHò]ô[úõ€H	Ÿö\ú›õÿÿ][€èÀõò[YHùHö\ú›ÿÿ][€àüH»	‹ŸX€€ôõÿÿ][€èÀõò[YHùHô^ÿÿ][€àüH[àH	”X]õX^
+]Z[Àôÿ\Z[ù]\ _HZ[ù]\»]òZ[XõKòà
+N¬àBàô]\õàÿ\õö[ô‹Œ¬àBà\ﬁ[ò»ù[ò›[€àô[‹ô\ì[öŸYÿ[YJà‹õ›\Yà›ö[ôÀàòYŸŸYYà›ö[ôÀà\ôŸ]Yà›ö[ôÀà
+H¬àYà
+Xÿ[ìX[òYŸHYòYŸŸYYòYŸŸYYOOH\ôŸ]Y
+Hô]\õé¬à€€ú›‹ô\ôYH[ö”Y[Xô\ú¬àôö[\ä
+Y[Xô\äHOàY[Xô\ãô‹õ›\⁄YOOH‹õ›\Y
+Bàú€‹ù
+
+KäHOàKú€‹ù€‹ô\àHãú€‹ù€‹ô\äBàõX\
+
+Y[Xô\äHOàY[Xô\ãôÿ[YW⁄Y
+N¬à€€ú›úõ€HH‹ô\ôYö[ô^ŸäòYŸŸYY
+Kà»H‹ô\ôYö[ô^Ÿä\ôŸ]Y
+N¬àYà
+úõ€H»
+Hô]\õé¬à€€ú›ô^HÀããõ‹ô\ôYN¬àô^ú‹XŸJÀô^ú‹XŸJúõ€KJVÃJN¬àŸ][ö⁄[ô ùYJN¬àŸ]\úõ‹äàäN¬àŸ]õ›XŸJàäN¬à€€ú›ô\›[»H]ÿZ]õ€Z\ŸKò[
+àô^õX\
+
+ÿ[YRY€‹ù‹ô\äHOÇà›\Xò\ŸBàôúõ€Jôÿ[YW€[ö◊€Y[Xô\ú»äBàù\]J»€‹ù€‹ô\éà€‹ù‹ô\àJBàô\Jô‹õ›\⁄Yã‹õ›\Y
+Bàô\Jôÿ[YW⁄Yãÿ[YRY
+Kà
+Kà
+N¬à€€ú›òZ[YHô\›[Àôö[ô
+
+ô\›[
+HOàô\›[ô\úõ‹äOÀô\úõ‹é¬àYà
+òZ[Y
+HŸ]\úõ‹äòZ[YõY\‹ÿYŸJN¬à[ŸHŸ]õ›XŸJì[öŸYYÿ[YH‹ô\à\]YàäN¬àŸ]òYŸ⁄[ô—ÿ[YJàäN¬à]ÿZ]ÿY
+
+N¬àŸ][ö⁄[ô ò[ŸJN¬àBà\ﬁ[ò»ù[ò›[€à[›ôS[öŸYÿ[YJà‹õ›\Yà›ö[ôÀàÿ[YRYà›ö[ôÀà\ôX›[€éàLHKà
+H¬à€€ú›‹ô\ôYH[ö”Y[Xô\ú¬àôö[\ä
+Y[Xô\äHOàY[Xô\ãô‹õ›\⁄YOOH‹õ›\Y
+Bàú€‹ù
+
+KäHOàKú€‹ù€‹ô\àHãú€‹ù€‹ô\äN¬à€€ú›[ô^H‹ô\ôYôö[ô[ô^
+
+Y[Xô\äHOàY[Xô\ãôÿ[YW⁄YOOHÿ[YRY
+N¬à€€ú›\ôŸ]H‹ô\ôY⁄[ô^
+»\ôX›[€óN¬àYà
+\ôŸ]
+H]ÿZ]ô[‹ô\ì[öŸYÿ[YJ‹õ›\Yÿ[YRY\ôŸ]ôÿ[YW⁄Y
+N¬àBà\ﬁ[ò»ù[ò›[€à[õ[ö”€ôQÿ[YJ‹õ›\Yà›ö[ôÀÿ[YRYà›ö[ô H¬àYà
+Xÿ[ìX[òYŸH[ö⁄[ô Hô]\õé¬àŸ][ö⁄[ô ùYJN¬àŸ]\úõ‹äàäN¬àŸ]õ›XŸJàäN¬à€€ú›Y[Xô\ú»H[ö”Y[Xô\úÀôö[\ä
+Y[Xô\äHOàY[Xô\ãô‹õ›\⁄YOOH‹õ›\Y
+N¬à€€ú›»\úõ‹éàô[[›ôQ\úõ‹àHH]ÿZ]›\Xò\ŸBàôúõ€Jôÿ[YW€[ö◊€Y[Xô\ú»äBàô[]J
+Bàô\Jô‹õ›\⁄Yã‹õ›\Y
+Bàô\Jôÿ[YW⁄Yãÿ[YRY
+N¬àYà
+ô[[›ôQ\úõ‹äHŸ]\úõ‹äô[[›ôQ\úõ‹ãõY\‹ÿYŸJN¬à[ŸHYà
+Y[Xô\úÀõ[ô›HäH¬à€€ú›»\úõ‹éà‹õ›\\úõ‹àHH]ÿZ]›\Xò\ŸBàôúõ€Jôÿ[YW€[ö◊Ÿ‹õ›\»äBàô[]J
+Bàô\JöYã‹õ›\Y
+N¬àYà
+‹õ›\\úõ‹äHŸ]\úõ‹ä‹õ›\\úõ‹ãõY\‹ÿYŸJN¬à[ŸBàŸ]õ›XŸJàëÿ[YH[õ[öŸY»Hô[XZ[ö[ô»⁄[ô€KYÿ[YH‹õ›\ÿ\»ô[[›ôYàãà
+N¬àH[ŸHŸ]õ›XŸJëÿ[YHô[[›ôYúõ€H[öŸYÿ[Y\ÀàäN¬à]ÿZ]ÿY
+
+N¬àŸ][ö⁄[ô ò[ŸJN¬àBàù[ò›[€àŸ[ê\‹⁄Y€íŸ^Jÿ[YRYà›ö[ôÀ‹⁄][€íYà›ö[ô H¬àô]\õà	Ÿÿ[YRYNâ‹‹⁄][€íYX¬àBàù[ò›[€à\‘Ÿ[ê\‹⁄Y€ì‹[äÿ[YRYà›ö[ôÀ‹⁄][€íYà›ö[ô H¬àô]\õàŸ[ê\‹⁄Y€î€›Àú€€YJà
+€›
+HOà€›ôÿ[YW⁄YOOHÿ[YRY	âà€›ú‹⁄][€ó⁄YOOH‹⁄][€íYà
+N¬àBàù[ò›[€àŸŸ€TŸ[ê\‹⁄Y€îŸ[X›[€äÿ[YRYà›ö[ôÀ‹⁄][€íYà›ö[ô H¬à€€ú›Ÿ^HHŸ[ê\‹⁄Y€íŸ^Jÿ[YRY‹⁄][€íY
+N¬àŸ]Ÿ[ê\‹⁄Y€îŸ[X›Y
+
+›\úô[ù
+HOÇà›\úô[ùö[ò€Y\ Ÿ^JBà»›\úô[ùôö[\ä
+][JHOà][HOOHŸ^JBààÀããò›\úô[ùŸ^WKà
+N¬àBàù[ò›[€àŸ[ê\‹⁄Y€ì‹[€ú—õ‹ëÿ[Y\ ÿ[YRYŒà›ö[ô÷◊JH¬àô]\õàÿ[YRYÀôõ]X\
+
+ÿ[YRY
+HOà¬à€€ú›\›Yÿ[YHHÿ[Y\Àôö[ô
+
+][JHOà][KöYOOHÿ[YRY
+N¬àYà
+[\›Yÿ[YJHô]\õà◊N¬àô]\õà‹⁄][€ú¬àôö[\ä
+‹⁄][€äHOà‹⁄][€ãú‹‹ù⁄YOOH\›Yÿ[YKú‹‹ù⁄Y
+Bàú€‹ù
+
+KäHOàKú€‹ù€‹ô\àHãú€‹ù€‹ô\äBàú€XŸJX]õX^
+\›Yÿ[YKõŸôöX⁄X[◊€ôYYY
+JBàôö[\äà
+‹⁄][€äHOÇàX\‹⁄Y€õY[ùÀú€€YJà
+\‹⁄Y€õY[ù
+HOÇà\‹⁄Y€õY[ùôÿ[YW⁄YOOHÿ[YRY	âÇà\‹⁄Y€õY[ùú‹⁄][€ó⁄YOOH‹⁄][€ãöY	âÇà\‹⁄Y€õY[ùú›]\»OOHôX€[ôYãà
+H	âàZ\‘Ÿ[ê\‹⁄Y€ì‹[äÿ[YRY‹⁄][€ãöY
+Kà
+BàõX\
+
+‹⁄][€äHOà
+¬àÿ[YRYà‹⁄][€íYà‹⁄][€ãöYà‹⁄][€ìò[YNà‹⁄][€ãõò[YKàÿ[YNà\›Yÿ[YKàŸ^NàŸ[ê\‹⁄Y€íŸ^Jÿ[YRY‹⁄][€ãöY
+KàJJN¬àJN¬àBàù[ò›[€àô\\ôTŸ[ê\‹⁄Y€î‹⁄][€ú 
+H¬à€€ú›ÿ[YRY»H[ö‘Ÿ[X›Yõ[ô›»[ö‘Ÿ[X›Yàÿ[YH»Ÿÿ[YKöYHà◊N¬à€€ú›‹[€ú»HŸ[ê\‹⁄Y€ì‹[€ú—õ‹ëÿ[Y\ ÿ[YRY N¬àŸ]õ›XŸJàäN¬àYà
+[‹[€úÀõ[ô›
+H¬àŸ]\úõ‹äàïHŸ[X›Yÿ[YH\»õ»[ò\‹⁄Y€ôY‹⁄][€ú»]òZ[XõHõ‹àŸ[à\‹⁄Y€ãàãà
+N¬àô]\õé¬àBàŸ]\úõ‹äàäN¬àŸ]Ÿ[ê\‹⁄Y€îŸ[X›Y
+‹[€úÀõX\
+
+‹[€äHOà‹[€ãöŸ^JJN¬àŸ]⁄›‘Ÿ[ê\‹⁄Y€ëX[Ÿ ùYJN¬àBà\ﬁ[ò»ù[ò›[€à‹[îŸ[ê\‹⁄Y€î‹⁄][€ú 
+H¬àYà
+Xÿ[ìX[òYŸJH¬àŸ]\úõ‹äàì€õHYZ[ö\›ò]‹ú»[ô\‹⁄Y€õ‹ú»ÿ[à‹[àŸ[à\‹⁄Y€à‹⁄][€úÀàãà
+N¬àô]\õé¬àBà€€ú›\ŸYÿ[YTŸ[X›[€àHŸ[ê\‹⁄Y€îŸ[X›Yõ[ô›OOH¬à]€›»HŸ[ê\‹⁄Y€îŸ[X›YõX\
+
+Ÿ^JHOà¬à€€ú›Ÿÿ[YW⁄Y‹⁄][€ó⁄YHHŸ^Kú‹]
+éàäN¬àô]\õà»ÿ[YW⁄Y‹⁄][€ó⁄YN¬àJN¬àYà
+\€›Àõ[ô›
+H¬à€€ú›Ÿ[X›Yÿ[YRY»H[ö‘Ÿ[X›Yõ[ô›à»[ö‘Ÿ[X›Yààÿ[YBà»Ÿÿ[YKöYBàà◊N¬à€›»HŸ[X›Yÿ[YRYÀôõ]X\
+
+ÿ[YRY
+HOà¬à€€ú›Ÿ[X›Yÿ[YHHÿ[Y\Àôö[ô
+
+][JHOà][KöYOOHÿ[YRY
+N¬àYà
+\Ÿ[X›Yÿ[YJHô]\õà◊N¬àô]\õà‹⁄][€ú¬àôö[\ä
+‹⁄][€äHOà‹⁄][€ãú‹‹ù⁄YOOHŸ[X›Yÿ[YKú‹‹ù⁄Y
+Bàú€‹ù
+
+KäHOàKú€‹ù€‹ô\àHãú€‹ù€‹ô\äBàú€XŸJX]õX^
+Ÿ[X›Yÿ[YKõŸôöX⁄X[◊€ôYYY
+JBàôö[\äà
+‹⁄][€äHOÇàX\‹⁄Y€õY[ùÀú€€YJà
+\‹⁄Y€õY[ù
+HOÇà\‹⁄Y€õY[ùôÿ[YW⁄YOOHÿ[YRY	âÇà\‹⁄Y€õY[ùú‹⁄][€ó⁄YOOH‹⁄][€ãöY	âÇà\‹⁄Y€õY[ùú›]\»OOHôX€[ôYãà
+H	âàZ\‘Ÿ[ê\‹⁄Y€ì‹[äÿ[YRY‹⁄][€ãöY
+Kà
+BàõX\
+
+‹⁄][€äHOà
+»ÿ[YW⁄Yàÿ[YRY‹⁄][€ó⁄Yà‹⁄][€ãöYJJN¬àJN¬àBà€›»H€›Àôö[\äà
+€›[ô^[
+HOÇà[ôö[ô[ô^
+à
+][JHOÇà][Kôÿ[YW⁄YOOH€›ôÿ[YW⁄Y	âÇà][Kú‹⁄][€ó⁄YOOH€›ú‹⁄][€ó⁄Yà
+HOOH[ô^à
+N¬àYà
+\€›Àõ[ô›
+H¬àŸ]\úõ‹äàïHŸ[X›Yÿ[YH\»õ»[ò\‹⁄Y€ôY‹⁄][€ú»]òZ[XõHõ‹àŸ[à\‹⁄Y€ãàãà
+N¬àŸ]õ›XŸJàäN¬àô]\õé¬àBàŸ]Ÿ[ê\‹⁄Y€îÿ]ö[ô ùYJN¬àŸ]\úõ‹äàäN¬àŸ]õ›XŸJàäN¬àûH¬à€€ú›»]K\úõ‹éàÿ]ôQ\úõ‹àHH]ÿZ]›\Xò\ŸKúú àúŸ]‹Ÿ[óÿ\‹⁄Y€ó‹‹⁄][€ú»ãà»‹€›Œà€›»Kà
+N¬àYà
+ÿ]ôQ\úõ‹äHõ›»ÿ]ôQ\úõ‹é¬Çà€€ú›€›[ùHù[Xô\ä]Hœ»€›Àõ[ô›
+N¬à]ÿZ]ôYúô\⁄\‹⁄Y€õY[ù›]J
+N¬àŸ]õ›XŸJà	ÿ€›[ùH	ÿ€›[ùOOHH»ú‹⁄][€à\»ààú‹⁄][€ú»\ôHüHõ›»]òZ[XõHõ‹àŸ[à\‹⁄Y€ãòà
+N¬àŸ]⁄›‘Ÿ[ê\‹⁄Y€ëX[Ÿ ò[ŸJN¬àŸ]Ÿ[ê\‹⁄Y€îŸ[X›Y
+◊JN¬àYà
+\ŸYÿ[YTŸ[X›[€äHŸ][ö‘Ÿ[X›Y
+◊JN¬àHÿ]⁄
+ÿ]ôQ\úõ‹äH¬àŸ]\úõ‹äàÿ]ôQ\úõ‹à[ú›[òŸ[Ÿà\úõ‹Çà»ÿ]ôQ\úõ‹ãõY\‹ÿYŸBàà\[Ÿàÿ]ôQ\úõ‹àOOHõÿöôX›à	âÇàÿ]ôQ\úõ‹àOOHù[	âÇàõY\‹ÿYŸHà[àÿ]ôQ\úõ‹Çà»›ö[ô ÿ]ôQ\úõ‹ãõY\‹ÿYŸJBààï[òXõH»‹[àHŸ[X›Y‹⁄][€ú»õ‹àŸ[à\‹⁄Y€ãàãà
+N¬àHö[ò[H¬àŸ]Ÿ[ê\‹⁄Y€îÿ]ö[ô ò[ŸJN¬àBàBà\ﬁ[ò»ù[ò›[€à⁄]ò]‘Ÿ[ê\‹⁄Y€î‹⁄][€äàÿ[YRYà›ö[ôÀà‹⁄][€íYà›ö[ôÀà
+H¬àYà
+Xÿ[ìX[òYŸJHô]\õé¬àŸ]Ÿ[ê\‹⁄Y€îÿ]ö[ô ùYJN¬àŸ]\úõ‹äàäN¬à€€ú›»\úõ‹éà⁄]ò]—\úõ‹àHH]ÿZ]›\Xò\ŸKúú àù⁄]ò]◊‹Ÿ[óÿ\‹⁄Y€ó‹‹⁄][€àãà»Ÿÿ[YW⁄Yàÿ[YRY‹‹⁄][€ó⁄Yà‹⁄][€íYKà
+N¬àYà
+⁄]ò]—\úõ‹äHŸ]\úõ‹ä⁄]ò]—\úõ‹ãõY\‹ÿYŸJN¬à[ŸHŸ]õ›XŸJîŸ[à\‹⁄Y€à‹⁄][€àô[[›ôYàäN¬à]ÿZ]ôYúô\⁄\‹⁄Y€õY[ù›]J
+N¬àŸ]Ÿ[ê\‹⁄Y€îÿ]ö[ô ò[ŸJN¬àBà€€ú›ÿ[YHHÿ[Y\Àôö[ô
+
+ HOàÀöYOOHŸ[X›Y
+N¬à€€ú›‹‹ù‹⁄][€ú»Hÿ[YBà»‹⁄][€ú¬àôö[\ä
+
+HOàú‹‹ù⁄YOOHÿ[YKú‹‹ù⁄Y
+Bàú€‹ù
+
+KäHOàKú€‹ù€‹ô\àHãú€‹ù€‹ô\äBàà◊N¬à€€ú›ÿ[YT‹⁄][€ú»Hÿ[YBà»‹‹ù‹⁄][€úÀú€XŸJààX]õX^
+X]õZ[äÿ[YKõŸôöX⁄X[◊€ôYYY‹‹ù‹⁄][€úÀõ[ô›
+JKà
+Bàà◊N¬à€€ú›ÿ[YP\‹⁄Y€õY[ù»Hÿ[YBà»\‹⁄Y€õY[ùÀôö[\ä
+JHOàKôÿ[YW⁄YOOHÿ[YKöY
+Bàà◊N¬à€€ú›ôYY–\‹⁄Y€õY[ù€õHHÿ[YBà»õ€€X[äôYY–\‹⁄Y€õY[ùöY]÷Ÿÿ[YKöYJBààò[ŸN¬àù[ò›[€à‹⁄][€ìôYY–\‹⁄Y€õY[ù
+‹⁄][€éà‹⁄][€äH¬àYà
+Yÿ[YJHô]\õàò[ŸN¬àô]\õàX\‹⁄Y€õY[ùÀú€€YJà
+\‹⁄Y€õY[ù
+HOÇà\‹⁄Y€õY[ùôÿ[YW⁄YOOHÿ[YKöY	âÇà\‹⁄Y€õY[ùú‹⁄][€ó⁄YOOH‹⁄][€ãöY	âÇàV»ôX€[ôYãòÿ[òŸ[YóKö[ò€Y\ \‹⁄Y€õY[ùú›]\ Kà
+N¬àBà€€ú›ö\⁄XõQÿ[YT‹⁄][€ú»HôYY–\‹⁄Y€õY[ù€õBà»ÿ[YT‹⁄][€úÀôö[\ä‹⁄][€ìôYY–\‹⁄Y€õY[ù
+Bààÿ[YT‹⁄][€úŒ¬à€€ú›[úXõ\⁄Y€›[ùHÿ[YP\‹⁄Y€õY[ùÀôö[\äà
+JHOàXKúXõ\⁄Yÿ]	âàKú›]\»OOHôX€[ôYãà
+Kõ[ô›¬à€€ú›[úXõ\⁄Y\‹⁄Y€õY[ù»Hÿ[YP\‹⁄Y€õY[ùÀôö[\äà
+\‹⁄Y€õY[ù
+HOÇàX\‹⁄Y€õY[ùúXõ\⁄Yÿ]	âà\‹⁄Y€õY[ùú›]\»OOHôX€[ôYãà
+N¬à€€ú›Xõ\⁄Z\‹⁄[ô—[XZ[»H[úXõ\⁄Y\‹⁄Y€õY[ùÀôö[\äà
+\‹⁄Y€õY[ù
+HOÇà[ŸôöX⁄X[Àôö[ô
+
+][JHOà][KöYOOH\‹⁄Y€õY[ùõŸôöX⁄X[⁄Y
+OÀô[XZ[à
+Kõ[ô›¬à€€ú›Xõ\⁄XÿŸ\[òŸR›\ú»Bàÿ[YOÀõXY›Y\œÀò\‹⁄Y€õY[ùÿXÿŸ\[òŸW⁄›\ú»œ»ç¬à€€ú›X›]ôP\‹⁄Y€õY[ù€›[ùHÿ[YP\‹⁄Y€õY[ùÀôö[\äà
+JHOàV»ôX€[ôYãòÿ[òŸ[YóKö[ò€Y\ Kú›]\ Kà
+Kõ[ô›¬à€€ú›‹[î‹⁄][€ê€›[ùHX]õX^
+ààÿ[YT‹⁄][€úÀõ[ô›HX›]ôP\‹⁄Y€õY[ù€›[ùà
+N¬à€€ú›\‹⁄Y€õY[ù[XZ[‘Ÿ[ùHÿ[YP\‹⁄Y€õY[ùÀôö[\äà
+JHOàKô[XZ[‹Ÿ[ùÿ]à
+Kõ[ô›¬à€€ú›\‹⁄Y€õY[ù[XZ[\‹›Y\»Hÿ[YP\‹⁄Y€õY[ùÀôö[\äà
+JHOàKúXõ\⁄Yÿ]	âàXKô[XZ[‹Ÿ[ùÿ]à
+Kõ[ô›¬à€€ú›ÿ[òŸ[][€ë[XZ[‘Ÿ[ùHÿ[YP\‹⁄Y€õY[ùÀôö[\äà
+JHOàKòÿ[òŸ[][€ó€õ›YöYYÿ]à
+Kõ[ô›¬à€€ú›ÿ[òŸ[][€ë[XZ[\‹›Y\»Hÿ[YP\‹⁄Y€õY[ùÀôö[\äà
+JHOÇà»òÿ[òŸ[YãúòZ[ôY€›]óKö[ò€Y\ ÿ[YOÀú›]\»àäH	âÇàKú›]\»OOHòÿ[òŸ[Yà	âÇàXKòÿ[òŸ[][€ó€õ›YöYYÿ]à
+Kõ[ô›¬àù[ò›[€à€‹ö€ÿY⁄[ô› ŸôöX⁄X[Yà›ö[ôÀ^\Œàù[Xô\äH¬à€€ú›õ›»H]Kõõ› 
+Kà[ôHõ›»
+»^\»
+àç¬àô]\õà\‹⁄Y€õY[ù¬àôö[\äà
+][JHOÇà][KõŸôöX⁄X[⁄YOOHŸôöX⁄X[Y	âÇàV»ôX€[ôYãòÿ[òŸ[YóKö[ò€Y\ ][Kú›]\ Kà
+Bàôö[\ä
+][JHOà¬à€€ú››\ùHô]»]Jàÿ[Y\Àôö[ô
+
+\›Y
+HOà\›YöYOOH][Kôÿ[YW⁄Y
+OÀú›\ù◊ÿ]à
+KôŸ][YJ
+N¬àô]\õà›\ùèHõ›»	âà›\ùH[ô¬àJKõ[ô›¬àBàù[ò›[€àô\]Y\›Ÿ[X›Yÿ[YJô^ÿ[YRYà›ö[ô H¬àYà
+àô^ÿ[YRY	âÇàô^ÿ[YRYOOHŸ[X›Y	âÇà[úXõ\⁄Y€›[ùà	âÇà]⁄[ô›Àò€€ôö\õJàÿ[YH…Ÿÿ[YOÀôÿ[YW€ù[Xô\ààüH\»	›[úXõ\⁄Y€›[ùH[úXõ\⁄Y\‹⁄Y€õY[ù	›[úXõ\⁄Y€›[ùOOHH»àààú»üKà›⁄]⁄ÿ[Y\»⁄]›]Xõ\⁄[ôœÿà
+Bà
+Bàô]\õé¬àŸ]Ÿ[X›Y
+ô^ÿ[YRY
+N¬àŸ]›ô\úöYSŸôöX⁄X[
+àäN¬àBàù[ò›[€à⁄€‹ŸTò[ôŸJéàò[ôŸJH¬àŸ]ò[ôŸJäN¬àŸ]⁄›–ÿ[[ô\äò[ŸJN¬àŸ]›ô\úöYSŸôöX⁄X[
+àäN¬àŸ]Ÿ[X›Y
+àäN¬àŸ][ö‘Ÿ[X›Y
+◊JN¬àBàù[ò›[€à⁄€‹ŸQ]Jò[YNà›ö[ô H¬àŸ]›\›€Q]Jò[YJN¬àŸ]ò[ôŸJò›\›€HäN¬àŸ]›ô\úöYSŸôöX⁄X[
+àäN¬àŸ]Ÿ[X›Y
+àäN¬àŸ][ö‘Ÿ[X›Y
+◊JN¬àBàù[ò›[€àŸŸ€U[úXõ\⁄Y
+
+H¬à€€ú›ô^H][úXõ\⁄Y€õN¬àŸ][úXõ\⁄Y€õJô^
+N¬àŸ]›ô\úöYSŸôöX⁄X[
+àäN¬àŸ]Ÿ[X›Y
+àäN¬àŸ][ö‘Ÿ[X›Y
+◊JN¬àBàù[ò›[€à⁄€‹ŸP€€\][ô\‹ ò[YNà€€\][ô\‹ H¬àŸ]€€\][ô\‹—ö[\äò[YJN¬àŸ]›ô\úöYSŸôöX⁄X[
+àäN¬àŸ]Ÿ[X›Y
+àäN¬àŸ][ö‘Ÿ[X›Y
+◊JN¬àBàù[ò›[€à€X\ëÿ[YQö[\ú 
+H¬àŸ]ò[ôŸJò[äN¬àŸ]›\›€Q]JàäN¬àŸ]⁄›–ÿ[[ô\äò[ŸJN¬àŸ][úXõ\⁄Y€õJò[ŸJN¬àŸ]Ÿ[ê\‹⁄Y€ì€õJò[ŸJN¬àŸ]€€\][ô\‹—ö[\äò[äN¬àŸ]ŸôöX⁄X[ö[\äàäN¬àŸ]ÿÿ][€ëö[\äàäN¬àŸ]XY›YQö[\äàäN¬àŸ]]ô[ö[\äàäN¬àŸ]Ÿ[X›Y
+àäN¬àŸ][ö‘Ÿ[X›Y
+◊JN¬àBà\ﬁ[ò»ù[ò›[€àÿYÿ]ôYöY]‹ 
+H¬à€€ú›»]K\úõ‹éàöY]—\úõ‹àHH]ÿZ]›\Xò\ŸBàôúõ€Jò\‹⁄Y€õY[ù‹ÿ]ôY›öY]‹»äBàúŸ[X›
+öYò[YKö[\ú»äBàõ‹ô\äù\]Yÿ]ã»\ÿŸ[ô[ôŒàò[ŸHJN¬àYà
+öY]—\úõ‹äHô]\õé¬àŸ]ÿ]ôYöY]‹ à
+]H◊JKõX\
+
+õ› HOà
+¬àYàõ›ÀöYàò[YNàõ›Àõò[YKàããäõ›Àôö[\ú»\»€Z]ÿ]ôY\‹⁄Y€õY[ùöY]ÀöYàõò[YHèäKàJJKà
+N¬àBà\ﬁ[ò»ù[ò›[€àÿ]ôP›\úô[ùöY] 
+H¬à€€ú›ò[YHH⁄[ô›Àúõ€\
+ìò[YH\»\‹⁄Y€õY[ùŸ[ù\àöY]ŒàäOÀùö[J
+N¬àYà
+[ò[YJHô]\õé¬à€€ú›ö[\ú»H¬àò[ôŸKà›\›€Q]Kàÿÿ][€ëö[\ãàŸôöX⁄X[ö[\ãàXY›YQö[\ãà]ô[ö[\ãà€€\][ô\‹—ö[\ãà[úXõ\⁄Y€õKàŸ[ê\‹⁄Y€ì€õKàN¬à€€ú›»]Nà]]HH]ÿZ]›\Xò\ŸKò]]ôŸ]\Ÿ\ä
+N¬àYà
+X]]ù\Ÿ\äHô]\õàŸ]\úõ‹äî⁄Y€à[à»ÿ]ôHH⁄\ôYöY]ÀàäN¬à€€ú›»\úõ‹éàÿ]ôQ\úõ‹àHH]ÿZ]›\Xò\ŸBàôúõ€Jò\‹⁄Y€õY[ù‹ÿ]ôY›öY]‹»äBàù\Ÿ\ù
+à¬à\Ÿ\ó⁄Yà]]ù\Ÿ\ãöYàò[YKàö[\úÀà\]Yÿ]àô]»]J
+Kù“T”‘›ö[ô 
+KàKà»€ê€€ôõX›àù\Ÿ\ó⁄Yò[YHàKà
+N¬àYà
+ÿ]ôQ\úõ‹äHô]\õàŸ]\úõ‹äÿ]ôQ\úõ‹ãõY\‹ÿYŸJN¬à]ÿZ]ÿYÿ]ôYöY]‹ 
+N¬àŸ]õ›XŸJÿ]ôY⁄\ôYöY]»8†'	€ò[Y_x†'Kò
+N¬àBàù[ò›[€à\Tÿ]ôYöY] öY]Œàÿ]ôY\‹⁄Y€õY[ùöY] H¬àŸ]ò[ôŸJöY]Àúò[ôŸJN¬àŸ]›\›€Q]JöY]Àò›\›€Q]JN¬àŸ]ÿÿ][€ëö[\äöY]Àõÿÿ][€ëö[\äN¬àŸ]ŸôöX⁄X[ö[\äöY]ÀõŸôöX⁄X[ö[\äN¬àŸ]XY›YQö[\äöY]ÀõXY›YQö[\ààäN¬àŸ]]ô[ö[\äöY]Àõ]ô[ö[\ààäN¬àŸ]€€\][ô\‹—ö[\äöY]Àò€€\][ô\‹—ö[\äN¬àŸ][úXõ\⁄Y€õJöY]Àù[úXõ\⁄Y€õJN¬àŸ]Ÿ[ê\‹⁄Y€ì€õJöY]ÀúŸ[ê\‹⁄Y€ì€õJN¬àŸ][ö‘Ÿ[X›Y
+◊JN¬àŸ]Ÿ[X›Y
+àäN¬àŸ]õ›XŸJ⁄›⁄[ô»ÿ]ôYöY]»8†'	›öY]Àõò[Y_x†'Kò
+N¬àBà\ﬁ[ò»ù[ò›[€à[]Tÿ]ôYöY] öY]“Yà›ö[ô H¬à€€ú›»\úõ‹éà[]Q\úõ‹àHH]ÿZ]›\Xò\ŸBàôúõ€Jò\‹⁄Y€õY[ù‹ÿ]ôY›öY]‹»äBàô[]J
+Bàô\JöYãöY]“Y
+N¬àYà
+[]Q\úõ‹äHô]\õàŸ]\úõ‹ä[]Q\úõ‹ãõY\‹ÿYŸJN¬àŸ]ÿ]ôYöY]‹ 
+›\úô[ù
+HOà›\úô[ùôö[\ä
+öY] HOàöY]ÀöYOOHöY]“Y
+JN¬àBàù[ò›[€à[öŸY\‹⁄Y€õY[ùÿ[Y\ 
+H¬àYà
+Yÿ[YJHô]\õà◊N¬à€€ú›‹õ›\YH[ö—‹õ›\ûQÿ[YKôŸ]
+ÿ[YKöY
+N¬àô]\õà‹õ›\Yà»ÿ[Y\Àôö[\äà
+\›Yÿ[YJHOà[ö—‹õ›\ûQÿ[YKôŸ]
+\›Yÿ[YKöY
+HOOH‹õ›\Yà
+BààŸÿ[YWN¬àBàù[ò›[€àX]⁄[ô‘‹⁄][€íY
+\ôŸ]ÿ[YNàÿ[YK€›\òŸT‹⁄][€íYà›ö[ô H¬àYà
+Yÿ[YH\€›\òŸT‹⁄][€íY
+Hô]\õààé¬à€€ú›€›\òŸT‹⁄][€ú»H‹⁄][€ú¬àôö[\ä
+‹⁄][€äHOà‹⁄][€ãú‹‹ù⁄YOOHÿ[YKú‹‹ù⁄Y
+Bàú€‹ù
+
+KäHOàKú€‹ù€‹ô\àHãú€‹ù€‹ô\àKöYõÿÿ[P€€\\ôJãöY
+JN¬à€€ú›€›\òŸT€›H€›\òŸT‹⁄][€úÀôö[ô[ô^
+à
+‹⁄][€äHOà‹⁄][€ãöYOOH€›\òŸT‹⁄][€íYà
+N¬àYà
+€›\òŸT€›
+Hô]\õààé¬àô]\õà
+à‹⁄][€ú¬àôö[\ä
+‹⁄][€äHOà‹⁄][€ãú‹‹ù⁄YOOH\ôŸ]ÿ[YKú‹‹ù⁄Y
+Bàú€‹ù
+à
+KäHOàKú€‹ù€‹ô\àHãú€‹ù€‹ô\àKöYõÿÿ[P€€\\ôJãöY
+Kà
+V‹€›\òŸT€›OÀöYàÇà
+N¬àBàù[ò›[€à\‹⁄Y€õY[ù€€ôõX›ôX\€€ú—õ‹ëÿ[YJàŒàŸôöX⁄X[à\ôŸ]ÿ[YNàÿ[YKàY€õ‹ôT‹⁄][€íYHàãà
+H¬à€€ú›ôX\€€úŒà›ö[ô÷◊HH◊N¬àõ‹à
+€€ú›HŸà\‹⁄Y€õY[ù H¬àYà
+àKõŸôöX⁄X[⁄YOOHÀöYà»ôX€[ôYãòÿ[òŸ[YóKö[ò€Y\ Kú›]\ Bà
+Bà€€ù[ùYN¬àYà
+àY€õ‹ôT‹⁄][€íY	âÇàKôÿ[YW⁄YOOH\ôŸ]ÿ[YKöY	âÇàKú‹⁄][€ó⁄YOOHY€õ‹ôT‹⁄][€íYà
+Bà€€ù[ùYN¬à€€ú››\àHÿ[Y\Àôö[ô
+
+ HOàÀöYOOHKôÿ[YW⁄Y
+N¬àYà
+à›\à	âÇà›ô\õ\ à\ôŸ]ÿ[YKú›\ù◊ÿ]à\ôŸ]ÿ[YKô\ò][€ó€Z[ù]\»LLà›\ãú›\ù◊ÿ]à›\ãô\ò][€ó€Z[ù]\»LLà
+Bà
+H¬à€€ú›⁄[àHô]»]J›\ãú›\ù◊ÿ]
+Kù”ÿÿ[T›ö[ô ◊K¬à]T›[Nàú⁄‹ùãà[YT›[Nàú⁄‹ùãàJN¬àôX\€€úÀú\⁄
+à›ô\õ\»ÿ[YH…€›\ãôÿ[YW€ù[Xô\üH
+	€›\ãö€YOÀõò[YHïëüHú»	€›\ãò]ÿ^OÀõò[YHïëüJH]	›⁄[üXà
+N¬àBàBàô]\õàôX\€€úŒ¬àBàù[ò›[€à\Xÿ]P\‹⁄Y€õY[ùôX\€€ú—õ‹ëÿ[YJàŸôöX⁄X[Yà›ö[ôÀà\ôŸ]ÿ[YNàÿ[YKà‹⁄][€íYà›ö[ôÀà
+H¬àô]\õà\‹⁄Y€õY[ùÀú€€YJà
+\‹⁄Y€õY[ù
+HOÇà\‹⁄Y€õY[ùôÿ[YW⁄YOOH\ôŸ]ÿ[YKöY	âÇà\‹⁄Y€õY[ùõŸôöX⁄X[⁄YOOHŸôöX⁄X[Y	âÇà\‹⁄Y€õY[ùú‹⁄][€ó⁄YOOH‹⁄][€íY	âÇà\‹⁄Y€õY[ùú›]\»OOHôX€[ôYãà
+Bà»»ê[ôXYH\‹⁄Y€ôY»[õ›\à‹⁄][€à€à\»ÿ[YHóBàà◊N¬àBàù[ò›[€à\‹⁄Y€õY[ù€€ôõX›ôX\€€ú ŒàŸôöX⁄X[€›\òŸT‹⁄][€íYHàäH¬àô]\õà[öŸY\‹⁄Y€õY[ùÿ[Y\ 
+Kôõ]X\
+
+\ôŸ]ÿ[YJHOÇà\‹⁄Y€õY[ù€€ôõX›ôX\€€ú—õ‹ëÿ[YJàÀà\ôŸ]ÿ[YKàX]⁄[ô‘‹⁄][€íY
+\ôŸ]ÿ[YK€›\òŸT‹⁄][€íY
+Kà
+Kà
+N¬àBàù[ò›[€à€‹ö⁄[ô–]ÿ[YU[YJŒàŸôöX⁄X[Y€õ‹ôT‹⁄][€íYHàäH¬àô]\õà\‹⁄Y€õY[ù€€ôõX›ôX\€€ú ÀY€õ‹ôT‹⁄][€íY
+Kõ[ô›à¬àBàù[ò›[€à[ô[Y⁄XõTôX\€€ú—õ‹ëÿ[YJàŒàŸôöX⁄X[à\ôŸ]ÿ[YNàÿ[YKàY€õ‹ôT‹⁄][€íYHàãà
+H¬à€€ú›ôX\€€úŒà›ö[ô÷◊HH◊N¬àôX\€€úÀú\⁄
+àããò\‹⁄Y€õY[ù€€ôõX›ôX\€€ú—õ‹ëÿ[YJÀ\ôŸ]ÿ[YKY€õ‹ôT‹⁄][€íY
+Kà
+N¬à€€ú›^HH\ôŸ]ÿ[YKú›\ù◊ÿ]ú€XŸJL
+Kà‹»Hô]»]J\ôŸ]ÿ[YKú›\ù◊ÿ]
+KôŸ][YJ
+KàŸHH‹»
+»
+\ôŸ]ÿ[YKô\ò][€ó€Z[ù]\»LL
+H
+àå¬àõ‹à
+€€ú›àŸàõÿ⁄‹ H¬àYà
+ãõŸôöX⁄X[⁄YOOHÀöY
+H€€ù[ùYN¬àYà
+àãú›\ù◊ÿ]	âÇàãô[ô◊ÿ]	âÇàô]»]Jãú›\ù◊ÿ]
+KôŸ][YJ
+HŸH	âÇàô]»]Jãô[ô◊ÿ]
+KôŸ][YJ
+Hà‹¬à
+BàôX\€€úÀú\⁄
+à[ò]òZ[XõHúõ€H	€ô]»]Jãú›\ù◊ÿ]
+Kù”ÿÿ[T›ö[ô 
+_H»	€ô]»]Jãô[ô◊ÿ]
+Kù”ÿÿ[T›ö[ô 
+_Xà
+N¬à[ŸHYà
+àãòõÿ⁄◊›\HOOHô]Hà	âÇàãú›\ùŸ]H	âÇàãô[ôŸ]H	âÇà^HèHãú›\ùŸ]H	âÇà^HHãô[ôŸ]Bà
+BàôX\€€úÀú\⁄
+[ò]òZ[XõHúõ€H	ÿãú›\ùŸ]_Hõ›Y⁄	ÿãô[ôŸ]_X
+N¬à[ŸHYà
+àãòõÿ⁄◊›\HOOHõÿÿ][€àà	âÇàãõÿÿ][€ó⁄YOOH\ôŸ]ÿ[YKõÿÿ][€ó⁄Yà
+BàôX\€€úÀú\⁄
+àõÿ⁄ŸY]	›\ôŸ]ÿ[YKõÿÿ][€èÀõò[YHù\»ÿÿ][€àüXà
+N¬à[ŸHYà
+àãòõÿ⁄◊›\HOOHùX[Hà	âÇàãùX[W⁄Y	âÇà
+ãùX[W⁄YOOH\ôŸ]ÿ[YKö€YOÀöYãùX[W⁄YOOH\ôŸ]ÿ[YKò]ÿ^OÀöY
+Bà
+BàôX\€€úÀú\⁄
+àõÿ⁄ŸYõ‹à	ÿãùX[W⁄YOOH\ôŸ]ÿ[YKö€YOÀöY»\ôŸ]ÿ[YKö€YOÀõò[YHà\ôŸ]ÿ[YKò]ÿ^OÀõò[YHù\»X[HüXà
+N¬àBàYà
+à[Àú‹‹ùÀú€€YJà
+ HOàÀù”›Ÿ\êÿ\ŸJ
+HOOH\ôŸ]ÿ[YKú‹‹ùœÀõò[YKù”›Ÿ\êÿ\ŸJ
+Kà
+Bà
+BàôX\€€úÀú\⁄
+õ›[Y⁄XõHõ‹à	›\ôŸ]ÿ[YKú‹‹ùœÀõò[YHú‹‹ùüX
+N¬à€€ú›€HXY›YQ[YÀôö[\ä
+
+HOàõŸôöX⁄X[⁄YOOHÀöY
+Kà›àH]ô[[YÀôö[\ä
+
+HOàõŸôöX⁄X[⁄YOOHÀöY
+N¬àYà
+à\ôŸ]ÿ[YKõXY›YW⁄Y	âÇà€õ[ô›	âÇà[€ú€€YJ
+
+HOàõXY›YW⁄YOOH\ôŸ]ÿ[YKõXY›YW⁄Y
+Bà
+BàôX\€€úÀú\⁄
+àõ›[Y⁄XõHõ‹àXY›YH	›\ôŸ]ÿ[YKõXY›Y\œÀõò[YHúŸ[X›YXY›YHüXà
+N¬àYà
+à\ôŸ]ÿ[YKõ]ô[⁄Y	âÇà›ãõ[ô›	âÇà[›ãú€€YJ
+
+HOàõ]ô[⁄YOOH\ôŸ]ÿ[YKõ]ô[⁄Y
+Bà
+BàôX\€€úÀú\⁄
+àõ›[Y⁄XõHõ‹à]ô[	›\ôŸ]ÿ[YKõ]ô[œÀõò[YHúŸ[X›Y]ô[üXà
+N¬àYà
+à\‹⁄Y€õY[ùÀú€€YJà
+JHOÇàKôÿ[YW⁄YOOH\ôŸ]ÿ[YKöY	âÇàKõŸôöX⁄X[⁄YOOHÀöY	âÇàKú›]\»OOHôX€[ôYà	âÇàJY€õ‹ôT‹⁄][€íY	âàKú‹⁄][€ó⁄YOOHY€õ‹ôT‹⁄][€íY
+Kà
+Bà
+BàôX\€€úÀú\⁄
+ê[ôXYH\‹⁄Y€ôY»\»ÿ[YHäN¬àô]\õàÀããõô]»Ÿ]
+ôX\€€ú WN¬àBàù[ò›[€à[ô[Y⁄XõTôX\€€ú ŒàŸôöX⁄X[€›\òŸT‹⁄][€íYHàäH¬à€€ú›\ôŸ]ÿ[Y\»H[öŸY\‹⁄Y€õY[ùÿ[Y\ 
+N¬à€€ú›[öŸYH\ôŸ]ÿ[Y\Àõ[ô›àN¬àô]\õà¬àããõô]»Ÿ]
+à\ôŸ]ÿ[Y\Àôõ]X\
+
+\ôŸ]ÿ[YJHOÇà[ô[Y⁄XõTôX\€€ú—õ‹ëÿ[YJàÀà\ôŸ]ÿ[YKàX]⁄[ô‘‹⁄][€íY
+\ôŸ]ÿ[YK€›\òŸT‹⁄][€íY
+Kà
+KõX\
+
+ôX\€€äHOÇà[öŸY	âà\ôX\€€ãú›\ù’⁄]
+ì›ô\õ\»ÿ[YH»äBà»ÿ[YH…›\ôŸ]ÿ[YKôÿ[YW€ù[Xô\üNà	‹ôX\€€üXààôX\€€ãà
+Kà
+Kà
+KàN¬àBàù[ò›[€à[Y⁄XõJŒàŸôöX⁄X[
+H¬àô]\õà[ô[Y⁄XõTôX\€€ú  Kõ[ô›OOH¬àBàù[ò›[€à^\‘⁄[òŸUX[JàŸôöX⁄X[Yà›ö[ôÀàX[RYà›ö[ô»ù[[ôYö[ôYà
+H¬àYà
+Yÿ[YH]X[RY
+Hô]\õàù[¬à€€ú›\ôŸ]Hô]»]Jÿ[YKú›\ù◊ÿ]
+KôŸ][YJ
+N¬à]\›H¬àõ‹à
+€€ú›HŸà\‹⁄Y€õY[ù H¬àYà
+àKõŸôöX⁄X[⁄YOOHŸôöX⁄X[YàV»òXÿŸ\Yãò€€ôö\õYYóKö[ò€Y\ Kú›]\ Bà
+Bà€€ù[ùYN¬à€€ú›»Hÿ[Y\Àôö[ô
+
+
+HOàöYOOHKôÿ[YW⁄Y
+N¬àYà
+Y H€€ù[ùYN¬à€€ú›Hô]»]JÀú›\ù◊ÿ]
+KôŸ][YJ
+N¬àYà
+èH\ôŸ]
+H€€ù[ùYN¬àYà
+Àö€YOÀöYOOHX[RYÀò]ÿ^OÀöYOOHX[RY
+Bà\›HX]õX^
+\›
+N¬àBàô]\õà\›»X]õX^
+X]ôõ€‹ä
+\ôŸ]H\›
+H»ç
+JHàù[¬àBàù[ò›[€à\—ù]\ôUX[P\‹⁄Y€õY[ù
+ŸôöX⁄X[Yà›ö[ô H¬àYà
+Yÿ[YJHô]\õàò[ŸN¬à€€ú›\ôŸ]Hô]»]Jÿ[YKú›\ù◊ÿ]
+KôŸ][YJ
+KàX[RY»HŸÿ[YKö€YOÀöYÿ[YKò]ÿ^OÀöYKôö[\äõ€€X[äN¬àYà
+]X[RYÀõ[ô›
+Hô]\õàò[ŸN¬àô]\õà\‹⁄Y€õY[ùÀú€€YJ
+JHOà¬àYà
+àKõŸôöX⁄X[⁄YOOHŸôöX⁄X[YàKôÿ[YW⁄YOOHÿ[YKöYàKú›]\»OOHôX€[ôYÇà
+Bàô]\õàò[ŸN¬à€€ú›»Hÿ[Y\Àôö[ô
+
+
+HOàöYOOHKôÿ[YW⁄Y
+N¬àYà
+Y»ô]»]JÀú›\ù◊ÿ]
+KôŸ][YJ
+HH\ôŸ]
+Hô]\õàò[ŸN¬àô]\õàX[RYÀö[ò€Y\ Àö€YOÀöY
+HX[RYÀö[ò€Y\ Àò]ÿ^OÀöY
+N¬àJN¬àBàù[ò›[€àù]\ôPòYŸJŸôöX⁄X[Yà›ö[ô H¬àô]\õà\—ù]\ôUX[P\‹⁄Y€õY[ù
+ŸôöX⁄X[Y
+H»
+à‹[Çà]OHï\»ŸôöX⁄X[[ôXYH\»H]\à\‹⁄Y€õY[ù[ùõ€ö[ô»€ôHŸà\ŸHX[\»Çà›[O^ﬁ¬à\‹^Nàö[õ[ôKXõÿ⁄»ãàX\ô⁄[ìYùàãàòX⁄Ÿ‹õ›[ôààÃçMåŸXàãà€€‹éààŸôôàãàõ‹ô\îòY]\ŒàãàY[ôŒàåúúãàõ€ù⁄^ôNàLàõ€ùŸZY⁄ààô\ùXÿ[[Y€éàõZYHãà_BàÇàù]\ôJ¬à‹‹[èÇà
+Hàù[¬àBàù[ò›[€àX[TôXŸ[òﬁSXô[
+ŸôöX⁄X[Yà›ö[ô H¬àYà
+Yÿ[YJHô]\õààé¬à€€ú›H^\‘⁄[òŸUX[JŸôöX⁄X[Yÿ[YKö€YOÀöY
+KàHH^\‘⁄[òŸUX[JŸôöX⁄X[Yÿ[YKò]ÿ^OÀöY
+N¬àô]\õà8†(à	Ÿÿ[YKö€YOÀõò[YHí€YHüH	⁄OHù[»ìô]ô\ààà	⁄YH8†(à	Ÿÿ[YKò]ÿ^OÀõò[YHê]ÿ^HüH	ÿHOHù[»ìô]ô\ààà	ÿ_YX¬àBàù[ò›[€à\”Y[ù‹ä‹Œà‹⁄][€äH¬àô]\õà‹Àõò[YKù”›Ÿ\êÿ\ŸJ
+Kö[ò€Y\ õY[ù‹àäN¬àBàù[ò›[€à‹⁄][€îò[ö—õ‹äŸôöX⁄X[Yà›ö[ôÀ‹Œà‹⁄][€äH¬à€€ú›àH‹⁄][€îò[ö‹÷€ŸôöX⁄X[YKàò[YHH‹Àõò[YKù”›Ÿ\êÿ\ŸJ
+N¬àYà
+\”Y[ù‹ä‹ JHô]\õàèÀõY[ù‹ó‹ò[ö»œ»N¬àYà
+ò[YKö[ò€Y\ ò\‹⁄\›[ùôYô\ôYHHäHò[YHOOHò\åHäBàô]\õàèÀò\åW‹ò[ö»œ»ò[ö‹÷€ŸôöX⁄X[YHœ»N¬àYà
+ò[YKö[ò€Y\ ò\‹⁄\›[ùôYô\ôYHàäHò[YHOOHò\åàäBàô]\õàèÀò\åó‹ò[ö»œ»ò[ö‹÷€ŸôöX⁄X[YHœ»N¬àYà
+ò[YKö[ò€Y\ çäHò[YKö[ò€Y\ ôõ›\ùäJBàô]\õàèÀôõ›\ù‹ò[ö»œ»ò[ö‹÷€ŸôöX⁄X[YHœ»N¬àYà
+àò[YKö[ò€Y\ òŸ[ù\àäHàò[YHOOHúôYààà
+ò[YKö[ò€Y\ úôYô\ôYHäH	âà[ò[YKö[ò€Y\ ò\‹⁄\›[ùäJBà
+Bàô]\õàèÀúôYó‹ò[ö»œ»ò[ö‹÷€ŸôöX⁄X[YHœ»N¬àô]\õàò[ö‹÷€ŸôöX⁄X[YHœ»N¬àBàù[ò›[€àò[ö”Xô[
+‹Œà‹⁄][€äH¬à€€ú›ò[YHH‹Àõò[YKù”›Ÿ\êÿ\ŸJ
+N¬àYà
+\”Y[ù‹ä‹ JHô]\õàìY[ù‹àé¬àYà
+ò[YKö[ò€Y\ ò\‹⁄\›[ùôYô\ôYHHäHò[YHOOHò\åHäHô]\õàêTåHé¬àYà
+ò[YKö[ò€Y\ ò\‹⁄\›[ùôYô\ôYHàäHò[YHOOHò\åàäHô]\õàêTåàé¬àYà
+ò[YKö[ò€Y\ çäHò[YKö[ò€Y\ ôõ›\ùäJHô]\õàçé¬àYà
+àò[YKö[ò€Y\ òŸ[ù\àäHàò[YHOOHúôYààà
+ò[YKö[ò€Y\ úôYô\ôYHäH	âà[ò[YKö[ò€Y\ ò\‹⁄\›[ùäJBà
+Bàô]\õàîëQàé¬àô]\õàîò[ö»é¬àBàù[ò›[€àÿ[ôY]\ ‹Œà‹⁄][€äH¬àYà
+Yÿ[YJHô]\õà◊N¬à€€ú››\úô[ùH\‹⁄Y€õY[ùÀôö[ô
+à
+JHOÇàKôÿ[YW⁄YOOHÿ[YKöY	âÇàKú‹⁄][€ó⁄YOOH‹ÀöY	âÇàKú›]\»OOHôX€[ôYãà
+Kà\ŸYHô]»Ÿ]
+à\‹⁄Y€õY[ù¬àôö[\äà
+JHOÇàKôÿ[YW⁄YOOHÿ[YKöY	âÇàKú‹⁄][€ó⁄YOOH‹ÀöY	âÇàKú›]\»OOHôX€[ôYãà
+BàõX\
+
+JHOàKõŸôöX⁄X[⁄Y
+Kà
+N¬àô]\õàŸôöX⁄X[¬àôö[\äà
+ HOÇà]€‹ö⁄[ô–]ÿ[YU[YJÀ‹ÀöY
+H	âÇà
+[Y⁄XõJ Hÿ[ìX[òYŸH›\úô[ùÀõŸôöX⁄X[⁄YOOHÀöY
+H	âÇà]\ŸYö\ ÀöY
+H	âÇà
+Z\”Y[ù‹ä‹ Hà‹⁄][€îò[ö—õ‹äÀöY‹ HàHàÿ[ìX[òYŸHà›\úô[ùÀõŸôöX⁄X[⁄YOOHÀöY
+Kà
+BàõX\
+
+ HOà
+¬àããõÀà\›[òŸNàZ[\ àÀö€YW€]]YKàÀö€YW€€ô⁄]YKàÿ[YKõÿÿ][€èÀõ]]YHœ»ù[àÿ[YKõÿÿ][€èÀõ€ô⁄]YHœ»ù[à
+Kàò[öŒà‹⁄][€îò[ö—õ‹äÀöY‹ KàôX\€€úŒà[ô[Y⁄XõTôX\€€ú À‹ÀöY
+Kôö[\äà
+äHOÇàJà›\úô[ùÀõŸôöX⁄X[⁄YOOHÀöY	âÇààOOHê[ôXYH\‹⁄Y€ôY»\»ÿ[YHÇà
+Kà
+KàJJBàú€‹ù
+à
+KäHOÇà
+KúôX\€€úÀõ[ô›»Hà
+HH
+ãúôX\€€úÀõ[ô›»Hà
+Hàãúò[ö»HKúò[ö»à
+Kô\›[òŸHœ»NNNJHH
+ãô\›[òŸHœ»NNNJKà
+N¬àBàù[ò›[€à\›\‹⁄Y€õY[ù[YJŸôöX⁄X[Yà›ö[ô H¬àYà
+Yÿ[YJHô]\õà¬à€€ú››\úô[ùÿ[YU[YHHô]»]Jÿ[YKú›\ù◊ÿ]
+KôŸ][YJ
+N¬àô]\õà\‹⁄Y€õY[ùÀúôYXŸJ
+]\›\‹⁄Y€õY[ù
+HOà¬àYà
+à\‹⁄Y€õY[ùõŸôöX⁄X[⁄YOOHŸôöX⁄X[Yà\‹⁄Y€õY[ùú›]\»OOHôX€[ôYÇà
+Bàô]\õà]\›¬à€€ú›\‹⁄Y€ôYÿ[YHHÿ[Y\Àôö[ô
+
+][JHOà][KöYOOH\‹⁄Y€õY[ùôÿ[YW⁄Y
+N¬àYà
+X\‹⁄Y€ôYÿ[YJHô]\õà]\›¬à€€ú›[YHHô]»]J\‹⁄Y€ôYÿ[YKú›\ù◊ÿ]
+KôŸ][YJ
+N¬àô]\õà[YH›\úô[ùÿ[YU[YH»X]õX^
+]\›[YJHà]\›¬àK
+N¬àBàù[ò›[€à€‹ùŸôöX⁄X[œà^[ô»ŸôöX⁄X[	à»ò[öŒàù[Xô\é»\›[òŸNàù[Xô\àù[Kàä][\Œà◊K€‹ùà\[ŸàŸôöX⁄X[\›€‹ù
+H¬àô]\õàÀããö][\◊Kú€‹ù
+
+KäHOà¬àYà
+€‹ùOOHô\›[òŸHäBàô]\õà
+Kô\›[òŸHœ»NNNJHH
+ãô\›[òŸHœ»NNNJHãúò[ö»HKúò[öŒ¬àYà
+€‹ùOOHúò[ö»äBàô]\õàãúò[ö»HKúò[ö»
+Kô\›[òŸHœ»NNNJHH
+ãô\›[òŸHœ»NNNJN¬àYà
+€‹ùOOHõX\›ôXŸ[ùäBàô]\õà
+à\›\‹⁄Y€õY[ù[YJKöY
+HH\›\‹⁄Y€õY[ù[YJãöY
+Hãúò[ö»HKúò[ö¬à
+N¬àYà
+€‹ùOOHõò[YHäBàô]\õà	ÿKõ\›€ò[Y_H	ÿKôö\ú›€ò[Y_Xõÿÿ[P€€\\ôJà	ÿãõ\›€ò[Y_H	ÿãôö\ú›€ò[Y_Xà
+N¬àô]\õàãúò[ö»HKúò[ö»
+Kô\›[òŸHœ»NNNJHH
+ãô\›[òŸHœ»NNNJN¬àJN¬àBà€€ú›]òZ[XõSŸôöX⁄X[–ò\ŸHHÿ[YBà»ŸôöX⁄X[¬àôö[\ä
+ HOà[Y⁄XõJ H	âà]€‹ö⁄[ô–]ÿ[YU[YJ JBàõX\
+
+ HOà
+¬àããõÀàò[öŒàò[ö‹÷€ÀöYHœ»Kà\›[òŸNàZ[\ àÀö€YW€]]YKàÀö€YW€€ô⁄]YKàÿ[YKõÿÿ][€èÀõ]]YHœ»ù[àÿ[YKõÿÿ][€èÀõ€ô⁄]YHœ»ù[à
+KàJJBàú€‹ù
+à
+KäHOÇàãúò[ö»HKúò[ö»
+Kô\›[òŸHœ»NNNJHH
+ãô\›[òŸHœ»NNNJKà
+Bàà◊N¬à€€ú›]òZ[XõSŸôöX⁄X[»H€‹ùŸôöX⁄X[ à]òZ[XõSŸôöX⁄X[–ò\ŸKôö[\ä
+ŸôöX⁄X[
+HOÇà	€ŸôöX⁄X[ôö\ú›€ò[Y_H	€ŸôöX⁄X[õ\›€ò[Y_Xàù”›Ÿ\êÿ\ŸJ
+Bàö[ò€Y\ ŸôöX⁄X[\›ŸX\ò⁄ùö[J
+Kù”›Ÿ\êÿ\ŸJ
+JKà
+KàŸôöX⁄X[\›€‹ùà
+N¬à€€ú›[ô[Y⁄XõSŸôöX⁄X[»Hÿ[YBà»ŸôöX⁄X[¬àõX\
+
+ HOà
+»ããõÀôX\€€úŒà[ô[Y⁄XõTôX\€€ú  HJJBàôö[\ä
+ HOàÀúôX\€€úÀõ[ô›à
+Bàú€‹ù
+à
+KäHOÇàKõ\›€ò[YKõÿÿ[P€€\\ôJãõ\›€ò[YJHàKôö\ú›€ò[YKõÿÿ[P€€\\ôJãôö\ú›€ò[YJKà
+Bàà◊N¬à€€ú›ö\⁄XõR[ô[Y⁄XõSŸôöX⁄X[»H[ô[Y⁄XõSŸôöX⁄X[Àôö[\ä
+ŸôöX⁄X[
+HOà¬à€€ú›ŸX\ò⁄H[ô[Y⁄XõTŸX\ò⁄ùö[J
+Kù”›Ÿ\êÿ\ŸJ
+N¬à€€ú›X]⁄\‘ŸX\ò⁄Bà\ŸX\ò⁄à	€ŸôöX⁄X[ôö\ú›€ò[Y_H	€ŸôöX⁄X[õ\›€ò[Y_Xàù”›Ÿ\êÿ\ŸJ
+Bàö[ò€Y\ ŸX\ò⁄
+N¬à€€ú›ôX\€€ï^HŸôöX⁄X[úôX\€€úÀöõ⁄[äàäKù”›Ÿ\êÿ\ŸJ
+N¬à€€ú›X]⁄\‘ôX\€€àBà[ô[Y⁄XõTôX\€€ëö[\àOOHò[àà
+[ô[Y⁄XõTôX\€€ëö[\àOOHô[Y⁄Xö[]Hà	âÇà
+ôX\€€ï^ö[ò€Y\ õXY›YHäHôX\€€ï^ö[ò€Y\ õ]ô[äJJHà
+[ô[Y⁄XõTôX\€€ëö[\àOOHò]òZ[Xö[]Hà	âÇà
+ôX\€€ï^ö[ò€Y\ ù[ò]òZ[XõHäHôX\€€ï^ö[ò€Y\ òõÿ⁄»äJJHà
+[ô[Y⁄XõTôX\€€ëö[\àOOHò€€ôõX›à	âÇà
+ôX\€€ï^ö[ò€Y\ õ›ô\õ\äHôX\€€ï^ö[ò€Y\ ò\‹⁄Y€ôYäJJN¬àô]\õàX]⁄\‘ŸX\ò⁄	âàX]⁄\‘ôX\€€é¬àJN¬àù[ò›[€à‹[î‹⁄][€ú—õ‹ëÿ[YJ\ôŸ]ÿ[YNàÿ[YJH¬àô]\õà‹⁄][€ú¬àôö[\ä
+‹⁄][€äHOà‹⁄][€ãú‹‹ù⁄YOOH\ôŸ]ÿ[YKú‹‹ù⁄Y
+Bàú€‹ù
+
+KäHOàKú€‹ù€‹ô\àHãú€‹ù€‹ô\àKöYõÿÿ[P€€\\ôJãöY
+JBàú€XŸJX]õX^
+\ôŸ]ÿ[YKõŸôöX⁄X[◊€ôYYY
+JBàôö[\äà
+‹⁄][€äHOÇàX\‹⁄Y€õY[ùÀú€€YJà
+\‹⁄Y€õY[ù
+HOÇà\‹⁄Y€õY[ùôÿ[YW⁄YOOH\ôŸ]ÿ[YKöY	âÇà\‹⁄Y€õY[ùú‹⁄][€ó⁄YOOH‹⁄][€ãöY	âÇà\‹⁄Y€õY[ùú›]\»OOHôX€[ôYãà
+Kà
+N¬àBàù[ò›[€à‹[î‹⁄][€ëõ‹ëÿ[YJ\ôŸ]ÿ[YNàÿ[YJH¬àô]\õà‹[î‹⁄][€ú—õ‹ëÿ[YJ\ôŸ]ÿ[YJVÃN¬àBà\ﬁ[ò»ù[ò›[€à\‹⁄Y€ï—ÿ[YJà\ôŸ]ÿ[YNàÿ[YKà‹⁄][€íYà›ö[ôÀàŸôöX⁄X[Yà›ö[ôÀà\‹⁄Y€õY[ùô]öY]ŸYHò[ŸKà
+H¬à€€ú›ŸôöX⁄X[HŸôöX⁄X[Àôö[ô
+
+ HOàÀöYOOHŸôöX⁄X[Y
+N¬à€€ú›€€ôõX›ôX\€€ú»HŸôöX⁄X[à»¬àããò\‹⁄Y€õY[ù€€ôõX›ôX\€€ú—õ‹ëÿ[YJŸôöX⁄X[\ôŸ]ÿ[YK‹⁄][€íY
+Kàããô\Xÿ]P\‹⁄Y€õY[ùôX\€€ú—õ‹ëÿ[YJàŸôöX⁄X[öYà\ôŸ]ÿ[YKà‹⁄][€íYà
+KàBàà◊N¬àYà
+ŸôöX⁄X[Y	âàŸôöX⁄X[	âà€€ôõX›ôX\€€úÀõ[ô›
+H¬àŸ]\úõ‹äà	€ŸôöX⁄X[ôö\ú›€ò[Y_H	€ŸôöX⁄X[õ\›€ò[Y_Hÿ[õõ›ôH\‹⁄Y€ôYà	ÿ€€ôõX›ôX\€€úÀöõ⁄[äé»ä_Kòà
+N¬àô]\õàò[ŸN¬àBà€€ú›ôX\€€ú»HŸôöX⁄X[à»[ô[Y⁄XõTôX\€€ú—õ‹ëÿ[YJŸôöX⁄X[\ôŸ]ÿ[YK‹⁄][€íY
+Kôö[\äà
+äHOà¬àYà
+àOOHê[ôXYH\‹⁄Y€ôY»\»ÿ[YHäHô]\õàùYN¬àô]\õàX\‹⁄Y€õY[ùÀú€€YJà
+\‹⁄Y€õY[ù
+HOÇà\‹⁄Y€õY[ùôÿ[YW⁄YOOH\ôŸ]ÿ[YKöY	âÇà\‹⁄Y€õY[ùú‹⁄][€ó⁄YOOH‹⁄][€íY	âÇà\‹⁄Y€õY[ùõŸôöX⁄X[⁄YOOHŸôöX⁄X[öY	âÇà\‹⁄Y€õY[ùú›]\»OOHôX€[ôYãà
+N¬àKà
+Bàà◊N¬àYà
+ŸôöX⁄X[Y	âàôX\€€úÀõ[ô›
+H¬àYà
+Xÿ[ìX[òYŸJH¬àŸ]\úõ‹äï\»ŸôöX⁄X[\»õ›[Y⁄XõHõ‹à\»ÿ[YKàäN¬àô]\õàò[ŸN¬àBàYà
+àX\‹⁄Y€õY[ùô]öY]ŸY	âÇà]⁄[ô›Àò€€ôö\õJà›ô\úöYH[Y⁄Xö[]H[ô\‹⁄Y€à	€ŸôöX⁄X[Àôö\ú›€ò[Y_H	€ŸôöX⁄X[Àõ\›€ò[Y_O◊óïÿ\õö[ôŒà	‹ôX\€€úÀöõ⁄[äãä_Xà
+Bà
+Bàô]\õàò[ŸN¬àBàŸ]ÿ]ö[ô ‹⁄][€íY
+N¬àŸ]\úõ‹äàäN¬àŸ]õ›XŸJàäN¬à€€ú›^\›[ô»H\‹⁄Y€õY[ùÀôö[ô
+à
+JHOàKôÿ[YW⁄YOOH\ôŸ]ÿ[YKöY	âàKú‹⁄][€ó⁄YOOH‹⁄][€íYà
+N¬à]ô\›[¬àYà
+[ŸôöX⁄X[Y	âà^\›[ô Bàô\›[H]ÿZ]›\Xò\ŸBàôúõ€Jò\‹⁄Y€õY[ù»äBàô[]J
+Bàô\JöYã^\›[ôÀöY
+N¬à[ŸHYà
+ŸôöX⁄X[Y
+Bàô\›[H]ÿZ]›\Xò\ŸKúú ò\‹⁄Y€ó€ŸôöX⁄X[›◊€[öŸYŸÿ[Y\»ã¬àŸÿ[YW⁄Yà\ôŸ]ÿ[YKöYà‹‹⁄][€ó⁄Yà‹⁄][€íYà€ŸôöX⁄X[⁄YàŸôöX⁄X[YàJN¬àYà
+\ô\›[
+H¬àŸ]ÿ]ö[ô àäN¬àô]\õàò[ŸN¬àBàYà
+ô\›[ô\úõ‹äHŸ]\úõ‹äô\›[ô\úõ‹ãõY\‹ÿYŸJN¬à[ŸHYà
+ŸôöX⁄X[Y
+H¬à€€ú›[öŸY€›[ùHù[Xô\äô\›[ô]HJN¬à€€ú›‹⁄][€àH‹⁄][€úÀôö[ô
+
+][JHOà][KöYOOH‹⁄][€íY
+N¬àŸ]õ›XŸJà	€ŸôöX⁄X[Àôö\ú›€ò[Y_H	€ŸôöX⁄X[Àõ\›€ò[Y_H\‹⁄Y€ôY»	‹‹⁄][€à»⁄‹ù‹⁄][€ìò[YJ‹⁄][€ãõò[YJHàùH‹⁄][€àüI€[öŸY€›[ùàH»X‹õ‹‹»	€[öŸY€›[ùH[öŸYÿ[Y\ÿà€àÿ[YH…›\ôŸ]ÿ[YKôÿ[YW€ù[Xô\üXI‹ôX\€€úÀõ[ô›»à⁄][à[Y⁄Xö[]H›ô\úöYHàààüKòà
+N¬à[õõ›[òŸU[ô–]òZ[XõJà	€ŸôöX⁄X[Àôö\ú›€ò[YHìŸôöX⁄X[üH	€ŸôöX⁄X[Àõ\›€ò[YHàüH\‹⁄Y€ôY»	‹‹⁄][€à»⁄‹ù‹⁄][€ìò[YJ‹⁄][€ãõò[YJHàùH‹⁄][€àüH€àÿ[YH…›\ôŸ]ÿ[YKôÿ[YW€ù[Xô\üKòúô\XŸJà◊ ÀŸÀààãà
+Kà
+N¬àH[ŸH¬à€€ú›ô[[›ôY\‹⁄Y€õY[ùH^\›[ôŒ¬à€€ú›ô[[›ôYŸôöX⁄X[HŸôöX⁄X[Àôö[ô
+à
+ŸôöX⁄X[
+HOàŸôöX⁄X[öYOOHô[[›ôY\‹⁄Y€õY[ùÀõŸôöX⁄X[⁄Yà
+N¬à€€ú›ô[[›ôY‹⁄][€àH‹⁄][€úÀôö[ô
+à
+‹⁄][€äHOà‹⁄][€ãöYOOH‹⁄][€íYà
+N¬à[õõ›[òŸU[ô–]òZ[XõJà	‹ô[[›ôYŸôöX⁄X[»	‹ô[[›ôYŸôöX⁄X[ôö\ú›€ò[Y_H	‹ô[[›ôYŸôöX⁄X[õ\›€ò[Y_XàìŸôöX⁄X[üH[ò\‹⁄Y€ôYúõ€H	‹ô[[›ôY‹⁄][€à»⁄‹ù‹⁄][€ìò[YJô[[›ôY‹⁄][€ãõò[YJHàùH‹⁄][€àüKòà
+N¬àBà]ÿZ]ôYúô\⁄\‹⁄Y€õY[ù›]J
+N¬àŸ]ÿ]ö[ô àäN¬àŸ]›ô\úöYSŸôöX⁄X[
+àäN¬àô]\õà\ô\›[ô\úõ‹é¬àBà\ﬁ[ò»ù[ò›[€à\‹⁄Y€ä‹⁄][€íYà›ö[ôÀŸôöX⁄X[Yà›ö[ô H¬àYà
+Yÿ[YJHô]\õé¬à]ÿZ]\‹⁄Y€ï—ÿ[YJÿ[YK‹⁄][€íYŸôöX⁄X[Y
+N¬àBàù[ò›[€àô^‹[î‹⁄][€êYù\ä‹⁄][€íYà›ö[ô H¬àYà
+Yÿ[YJHô]\õà[ôYö[ôY¬à€€ú››\úô[ù[ô^Hÿ[YT‹⁄][€úÀôö[ô[ô^
+à
+][JHOà][KöYOOH‹⁄][€íYà
+N¬à€€ú›‹ô\ôYH¬àããôÿ[YT‹⁄][€úÀú€XŸJ›\úô[ù[ô^
+»JKàããôÿ[YT‹⁄][€úÀú€XŸJX]õX^
+›\úô[ù[ô^
+JKàN¬àô]\õà‹ô\ôYôö[ô
+à
+‹⁄][€äHOÇàX\‹⁄Y€õY[ùÀú€€YJà
+\‹⁄Y€õY[ù
+HOÇà\‹⁄Y€õY[ùôÿ[YW⁄YOOHÿ[YKöY	âÇà\‹⁄Y€õY[ùú‹⁄][€ó⁄YOOH‹⁄][€ãöY	âÇà\‹⁄Y€õY[ùú›]\»OOHôX€[ôYãà
+Kà
+N¬àBà\ﬁ[ò»ù[ò›[€à\‹⁄Y€ëúõ€Pÿ[ôY]J‹⁄][€íYà›ö[ôÀŸôöX⁄X[Yà›ö[ô H¬àYà
+Yÿ[YJHô]\õé¬à€€ú›ô^‹⁄][€àHô^‹[î‹⁄][€êYù\ä‹⁄][€íY
+N¬à€€ú›\‹⁄Y€ôYH]ÿZ]\‹⁄Y€ï—ÿ[YJÿ[YK‹⁄][€íYŸôöX⁄X[Y
+N¬àYà
+\‹⁄Y€ôY
+H¬àŸ]ÿ[ôY]TŸX\ò⁄
+àäN¬àŸ]ÿ[ôY]T‹⁄][€íY
+ô^‹⁄][€èÀöY‹⁄][€íY
+N¬àBàBà\ﬁ[ò»ù[ò›[€àõ‹ŸôöX⁄X[€ëÿ[YJÿ[YRYà›ö[ôÀŸôöX⁄X[Yà›ö[ô H¬à€€ú›\ôŸ]ÿ[YHHÿ[Y\Àôö[ô
+
+\›Yÿ[YJHOà\›Yÿ[YKöYOOHÿ[YRY
+N¬àYà
+]\ôŸ]ÿ[YH[ŸôöX⁄X[YXÿ[ìX[òYŸJHô]\õé¬à€€ú›‹[î‹⁄][€ú»H‹[î‹⁄][€ú—õ‹ëÿ[YJ\ôŸ]ÿ[YJN¬àŸ]ŸôöX⁄X[õ‹ÿ[YJàäN¬àŸ]òYŸ⁄[ô”ŸôöX⁄X[
+àäN¬àYà
+[‹[î‹⁄][€úÀõ[ô›
+H¬àŸ]\úõ‹äàÿ[YH…›\ôŸ]ÿ[YKôÿ[YW€ù[Xô\üH\»õ»‹[à\‹⁄Y€õY[ù‹⁄][€úÀòà
+N¬àô]\õé¬àBàŸ]Ÿ[X›Y
+\ôŸ]ÿ[YKöY
+N¬àŸ][ô[ô’\\‹⁄Y€õY[ù
+¬àÿ[YRYà\ôŸ]ÿ[YKöYàŸôöX⁄X[Yà‹⁄][€íYà‹[î‹⁄][€ú÷ÃKöYàJN¬àBà\ﬁ[ò»ù[ò›[€à€€ôö\õU\\‹⁄Y€õY[ù
+
+H¬àYà
+\[ô[ô’\\‹⁄Y€õY[ù
+Hô]\õé¬à€€ú›\ôŸ]ÿ[YHHÿ[Y\Àôö[ô
+à
+][JHOà][KöYOOH[ô[ô’\\‹⁄Y€õY[ùôÿ[YRYà
+N¬àYà
+]\ôŸ]ÿ[YJHô]\õé¬à€€ú›\‹⁄Y€ôYH]ÿZ]\‹⁄Y€ï—ÿ[YJà\ôŸ]ÿ[YKà[ô[ô’\\‹⁄Y€õY[ùú‹⁄][€íYà[ô[ô’\\‹⁄Y€õY[ùõŸôöX⁄X[YàùYKà
+N¬àYà
+\‹⁄Y€ôY
+H¬àŸ][ô[ô’\\‹⁄Y€õY[ù
+ù[
+N¬àŸ]X⁄ŸYŸôöX⁄X[
+àäN¬àBàBàù[ò›[€àô\\ôPù[–\‹⁄Y€õY[ù
+
+H¬à€€ú›Ÿ[X›Yÿ[Y\»Hÿ[Y\Àôö[\ä
+][JHOÇà[ö‘Ÿ[X›Yö[ò€Y\ ][KöY
+Kà
+N¬à€€ú›\‹⁄Y€òXõQÿ[Y\»HŸ[X›Yÿ[Y\Àôö[\äÿ[YPXÿŸ\–\‹⁄Y€õY[ù N¬à€€ú›^€YY€›[ùHŸ[X›Yÿ[Y\Àõ[ô›H\‹⁄Y€òXõQÿ[Y\Àõ[ô›¬àŸ]ù[–\‹⁄Y€ìŸôöX⁄X[
+àäN¬àŸ]ù[–\‹⁄Y€î‹⁄][€ú àÿöôX›ôúõ€Q[ùöY\ à\‹⁄Y€òXõQÿ[Y\ÀõX\
+
+][JHOà¬à][KöYà‹[î‹⁄][€ëõ‹ëÿ[YJ][JOÀöYàãàJKà
+Kà
+N¬àŸ]ù[”›ô\úöYP€€ôö\õYY
+ò[ŸJN¬àŸ]ù[–\‹⁄Y€ìY\‹ÿYŸJà^€YY€›[ùà»	Ÿ^€YY€›[ùH[òX›]ôHÿ[YIŸ^€YY€›[ùOOHH»àÿ\»ààú»Ÿ\ôHüH^€YYúõ€Hù[»\‹⁄Y€õY[ùòàààãà
+N¬àŸ]ù[”ŸôöX⁄X[ŸX\ò⁄
+àäN¬àŸ]ù[”ŸôöX⁄X[›]\ ô[Y⁄XõHäN¬àŸ]⁄›–ù[–\‹⁄Y€äùYJN¬àBàù[ò›[€àù[–\‹⁄Y€õY[ùô]öY] ŸôöX⁄X[YHù[–\‹⁄Y€ìŸôöX⁄X[
+H¬à€€ú›ŸôöX⁄X[HŸôöX⁄X[Àôö[ô
+
+][JHOà][KöYOOHŸôöX⁄X[Y
+N¬à€€ú›\ôŸ]»Hÿ[Y\Àôö[\äà
+][JHOÇàÿ[YPXÿŸ\–\‹⁄Y€õY[ù ][JH	âÇà[ö‘Ÿ[X›Yö[ò€Y\ ][KöY
+H	âÇàù[–\‹⁄Y€î‹⁄][€ú÷⁄][KöYKà
+N¬à€€ú›õÿ⁄⁄[ôŒà»ÿ[YRYà›ö[ôŒ»ôX\€€éà›ö[ô»V◊HH◊N¬à€€ú›ÿ\õö[ô‹Œà»ÿ[YRYà›ö[ôŒ»ôX\€€éà›ö[ô»V◊HH◊N¬àYà
+[ŸôöX⁄X[
+Hô]\õà»\ôŸ]Àõÿ⁄⁄[ôÀÿ\õö[ô‹»N¬àõ‹à
+€€ú›\ôŸ]Ÿà\ôŸ] H¬à€€ú›‹⁄][€íYHù[–\‹⁄Y€î‹⁄][€ú÷›\ôŸ]öYN¬àõ‹à
+€€ú›ôX\€€àŸà¬àããò\‹⁄Y€õY[ù€€ôõX›ôX\€€ú—õ‹ëÿ[YJŸôöX⁄X[\ôŸ]‹⁄][€íY
+Kàããô\Xÿ]P\‹⁄Y€õY[ùôX\€€ú—õ‹ëÿ[YJŸôöX⁄X[öY\ôŸ]‹⁄][€íY
+KàJBàõÿ⁄⁄[ôÀú\⁄
+»ÿ[YRYà\ôŸ]öYôX\€€àJN¬àõ‹à
+€€ú›ôX\€€àŸà[ô[Y⁄XõTôX\€€ú—õ‹ëÿ[YJàŸôöX⁄X[à\ôŸ]à‹⁄][€íYà
+JH¬àYà
+ôX\€€àOOHê[ôXYH\‹⁄Y€ôY»\»ÿ[YHäBàÿ\õö[ô‹Àú\⁄
+»ÿ[YRYà\ôŸ]öYôX\€€àJN¬àBà€€ú›‹⁄][€àH‹⁄][€úÀôö[ô
+
+][JHOà][KöYOOH‹⁄][€íY
+N¬àYà
+à‹⁄][€à	âÇà\”Y[ù‹ä‹⁄][€äH	âÇà‹⁄][€îò[ö—õ‹äŸôöX⁄X[öY‹⁄][€äHHBà
+Bàÿ\õö[ô‹Àú\⁄
+¬àÿ[YRYà\ôŸ]öYàôX\€€éàõ›[Y⁄XõHõ‹à	‹‹⁄][€ãõò[Y_XàJN¬àBàõ‹à
+][ô^H»[ô^\ôŸ]Àõ[ô›»[ô^
+œHJH¬àõ‹à
+à]›\í[ô^H[ô^
+»N¬à›\í[ô^\ôŸ]Àõ[ô›¬à›\í[ô^
+œHBà
+H¬à€€ú›ö\ú›H\ôŸ]÷⁄[ô^KàŸX€€ôH\ôŸ]÷€›\í[ô^N¬àYà
+à›ô\õ\ àö\ú›ú›\ù◊ÿ]àö\ú›ô\ò][€ó€Z[ù]\»LLàŸX€€ôú›\ù◊ÿ]àŸX€€ôô\ò][€ó€Z[ù]\»LLà
+Bà
+H¬àõÿ⁄⁄[ôÀú\⁄
+¬àÿ[YRYàŸX€€ôöYàôX\€€éà›ô\õ\»Ÿ[X›Yÿ[YH…Ÿö\ú›ôÿ[YW€ù[Xô\üXàJN¬àBàBàBàô]\õà¬à\ôŸ]Ààõÿ⁄⁄[ôŒà¬àããõô]»X\
+àõÿ⁄⁄[ôÀõX\
+
+][JHOàÿ	⁄][Kôÿ[YRYNâ⁄][KúôX\€€üX][WJKà
+Kùò[Y\ 
+KàKàÿ\õö[ô‹Œà¬àããõô]»X\
+àÿ\õö[ô‹ÀõX\
+
+][JHOàÿ	⁄][Kôÿ[YRYNâ⁄][KúôX\€€üX][WJKà
+Kùò[Y\ 
+KàKàN¬àBà\ﬁ[ò»ù[ò›[€à€€ôö\õPù[–\‹⁄Y€õY[ù
+
+H¬à€€ú›ô]öY]»Hù[–\‹⁄Y€õY[ùô]öY] 
+N¬àYà
+Xù[–\‹⁄Y€ìŸôöX⁄X[
+H¬àŸ]ù[–\‹⁄Y€ìY\‹ÿYŸJê⁄€‹ŸH[àŸôöX⁄X[ôYõ‹ôH\‹⁄Y€ö[ô»Hÿ[Y\ÀàäN¬àô]\õé¬àBàYà
+\ô]öY]Àù\ôŸ]Àõ[ô›
+H¬àŸ]ù[–\‹⁄Y€ìY\‹ÿYŸJàìõ€ôHŸàHŸ[X›Yÿ[Y\»\»[à‹[à‹⁄][€à»\‹⁄Y€ãàãà
+N¬àô]\õé¬àBàYà
+ô]öY]Àòõÿ⁄⁄[ôÀõ[ô›
+H¬àŸ]ù[–\‹⁄Y€ìY\‹ÿYŸJàï\»ŸôöX⁄X[ÿ[õõ›ôH\‹⁄Y€ôY[ù[H€€ôõX›»⁄›€àô[›»\ôHô\€€ôYàãà
+N¬àô]\õé¬àBàYà
+ô]öY]Àùÿ\õö[ô‹Àõ[ô›	âàXù[”›ô\úöYP€€ôö\õYY
+H¬àŸ]ù[–\‹⁄Y€ìY\‹ÿYŸJàê€€ôö\õHH[Y⁄Xö[]H›ô\úöYHôYõ‹ôH\‹⁄Y€ö[ô»\ŸHÿ[Y\Ààãà
+N¬àô]\õé¬àBàŸ]ù[’€‹ö⁄[ô ùYJN¬àŸ]ù[–\‹⁄Y€ìY\‹ÿYŸJ\‹⁄Y€ö[ô»Ÿà	‹ô]öY]Àù\ôŸ]Àõ[ô›Hÿ[Y\¯†)ò
+N¬à€€ú›Ÿ[X›YŸôöX⁄X[HŸôöX⁄X[Àôö[ô
+à
+][JHOà][KöYOOHù[–\‹⁄Y€ìŸôöX⁄X[à
+N¬à€€ú›ô\›[Œàù[–\‹⁄Y€õY[ù][V◊HH◊N¬à]\‹⁄Y€ôYH¬àûH¬àõ‹à
+€€ú›\ôŸ]Ÿàô]öY]Àù\ôŸ] H¬à€€ú›‹⁄][€íYHù[–\‹⁄Y€î‹⁄][€ú÷›\ôŸ]öYN¬à€€ú›‹⁄][€àH‹⁄][€úÀôö[ô
+
+][JHOà][KöYOOH‹⁄][€íY
+N¬àYà
+Yÿ[YPXÿŸ\–\‹⁄Y€õY[ù \ôŸ]
+JH¬àô\›[Àú\⁄
+¬àÿ[YRYà\ôŸ]öYàÿ[YSù[Xô\éà\ôŸ]ôÿ[YW€ù[Xô\ãàX]⁄\à	›\ôŸ]ö€YOÀõò[YHïëüHú»	›\ôŸ]ò]ÿ^OÀõò[YHïëüXà‹⁄][€íYà‹⁄][€ìò[YNà‹⁄][€èÀõò[YHî‹⁄][€àãàŸôöX⁄X[Yàù[–\‹⁄Y€ìŸôöX⁄X[àŸôöX⁄X[ò[YNàŸ[X›YŸôöX⁄X[à»	‹Ÿ[X›YŸôöX⁄X[ôö\ú›€ò[Y_H	‹Ÿ[X›YŸôöX⁄X[õ\›€ò[Y_XààîŸ[X›YŸôöX⁄X[ãà›]\Œàú⁄⁄\Yãà\úõ‹éà	⁄[òX›]ôQÿ[YT›]\”Xô[
+\ôŸ]ú›]\ _Hÿ[Y\»ÿ[õõ›ôXŸZ]ôH\‹⁄Y€õY[ùÀòàJN¬à€€ù[ùYN¬àBà€€ú›ô\›[H]ÿZ]›\Xò\ŸKúú ò\‹⁄Y€ó€ŸôöX⁄X[›◊€[öŸYŸÿ[Y\»ã¬àŸÿ[YW⁄Yà\ôŸ]öYà‹‹⁄][€ó⁄Yà‹⁄][€íYà€ŸôöX⁄X[⁄Yàù[–\‹⁄Y€ìŸôöX⁄X[àJN¬à€€ú›][Nàù[–\‹⁄Y€õY[ù][HH¬àÿ[YRYà\ôŸ]öYàÿ[YSù[Xô\éà\ôŸ]ôÿ[YW€ù[Xô\ãàX]⁄\à	›\ôŸ]ö€YOÀõò[YHïëüHú»	›\ôŸ]ò]ÿ^OÀõò[YHïëüXà‹⁄][€íYà‹⁄][€ìò[YNà‹⁄][€èÀõò[YHî‹⁄][€àãàŸôöX⁄X[Yàù[–\‹⁄Y€ìŸôöX⁄X[àŸôöX⁄X[ò[YNàŸ[X›YŸôöX⁄X[à»	‹Ÿ[X›YŸôöX⁄X[ôö\ú›€ò[Y_H	‹Ÿ[X›YŸôöX⁄X[õ\›€ò[Y_XààîŸ[X›YŸôöX⁄X[ãà›]\Œàô\›[ô\úõ‹à»ôòZ[Yààú›XÿŸ\‹»ãà\úõ‹éàô\›[ô\úõ‹èÀõY\‹ÿYŸHàãàN¬àô\›[Àú\⁄
+][JN¬àYà
+\ô\›[ô\úõ‹äH\‹⁄Y€ôY
+œHN¬àŸ]ù[–\‹⁄Y€ìY\‹ÿYŸJàõÿŸ\‹ŸY	‹ô\›[Àõ[ô›HŸà	‹ô]öY]Àù\ôŸ]Àõ[ô›Hÿ[Y\¯†)òà
+N¬àBà]ÿZ]ôYúô\⁄\‹⁄Y€õY[ù›]J
+N¬àŸ]⁄›–ù[–\‹⁄Y€äò[ŸJN¬àYà
+\‹⁄Y€ôYOOHô]öY]Àù\ôŸ]Àõ[ô›
+HŸ][ö‘Ÿ[X›Y
+◊JN¬àŸ]ù[–\‹⁄Y€õY[ùô\›[
+¬àŸôöX⁄X[Yàù[–\‹⁄Y€ìŸôöX⁄X[àŸôöX⁄X[ò[YNàŸ[X›YŸôöX⁄X[à»	‹Ÿ[X›YŸôöX⁄X[ôö\ú›€ò[Y_H	‹Ÿ[X›YŸôöX⁄X[õ\›€ò[Y_XààîŸ[X›YŸôöX⁄X[ãà][\Œàô\›[ÀàJN¬àŸ]õ›XŸJà	ÿ\‹⁄Y€ôYHŸà	‹ô]öY]Àù\ôŸ]Àõ[ô›HŸ[X›Yÿ[YI‹ô]öY]Àù\ôŸ]Àõ[ô›OOHH»àààú»üH\‹⁄Y€ôY›XÿŸ\‹Ÿù[Kòà
+N¬àHÿ]⁄
+\‹⁄Y€õY[ù\úõ‹äH¬à€€ú›Y\‹ÿYŸHBà\‹⁄Y€õY[ù\úõ‹à[ú›[òŸ[Ÿà\úõ‹Çà»\‹⁄Y€õY[ù\úõ‹ãõY\‹ÿYŸBààï[ô^X›Y\‹⁄Y€õY[ù\úõ‹àé¬à€€ú›€€\]YY»Hô]»Ÿ]
+ô\›[ÀõX\
+
+][JHOà][Kôÿ[YRY
+JN¬à€€ú›ô[XZ[ö[ô»Hô]öY]Àù\ôŸ]¬àôö[\ä
+][JHOàX€€\]YYÀö\ ][KöY
+JBàõX\
+
+\ôŸ]
+HOà¬à€€ú›‹⁄][€íYHù[–\‹⁄Y€î‹⁄][€ú÷›\ôŸ]öYN¬àô]\õà¬àÿ[YRYà\ôŸ]öYàÿ[YSù[Xô\éà\ôŸ]ôÿ[YW€ù[Xô\ãàX]⁄\à	›\ôŸ]ö€YOÀõò[YHïëüHú»	›\ôŸ]ò]ÿ^OÀõò[YHïëüXà‹⁄][€íYà‹⁄][€ìò[YNÇà‹⁄][€úÀôö[ô
+
+][JHOà][KöYOOH‹⁄][€íY
+OÀõò[YHàî‹⁄][€àãàŸôöX⁄X[Yàù[–\‹⁄Y€ìŸôöX⁄X[àŸôöX⁄X[ò[YNàŸ[X›YŸôöX⁄X[à»	‹Ÿ[X›YŸôöX⁄X[ôö\ú›€ò[Y_H	‹Ÿ[X›YŸôöX⁄X[õ\›€ò[Y_XààîŸ[X›YŸôöX⁄X[ãà›]\Œàú⁄⁄\Yà\»€€ú›à\úõ‹éàY\‹ÿYŸKàN¬àJN¬àŸ]⁄›–ù[–\‹⁄Y€äò[ŸJN¬àŸ]ù[–\‹⁄Y€õY[ùô\›[
+¬àŸôöX⁄X[Yàù[–\‹⁄Y€ìŸôöX⁄X[àŸôöX⁄X[ò[YNàŸ[X›YŸôöX⁄X[à»	‹Ÿ[X›YŸôöX⁄X[ôö\ú›€ò[Y_H	‹Ÿ[X›YŸôöX⁄X[õ\›€ò[Y_XààîŸ[X›YŸôöX⁄X[ãà][\ŒàÀããúô\›[Àããúô[XZ[ö[ô◊KàJN¬àHö[ò[H¬àŸ]ù[’€‹ö⁄[ô ò[ŸJN¬àBàBà\ﬁ[ò»ù[ò›[€àô]ûPù[–\‹⁄Y€õY[ù][J][Nàù[–\‹⁄Y€õY[ù][JH¬àYà
+Xù[–\‹⁄Y€õY[ùô\›[ù[‘ô]ûZ[ô—ÿ[YJHô]\õé¬à€€ú›\ôŸ]Hÿ[Y\Àôö[ô
+
+ÿ[YJHOàÿ[YKöYOOH][Kôÿ[YRY
+N¬àYà
+]\ôŸ]Yÿ[YPXÿŸ\–\‹⁄Y€õY[ù \ôŸ]
+JH¬àŸ]ù[–\‹⁄Y€õY[ùô\›[
+
+›\úô[ù
+HOÇà›\úô[ùà»¬àããò›\úô[ùà][\Œà›\úô[ùö][\ÀõX\
+
+\›Y][JHOÇà\›Y][Kôÿ[YRYOOH][Kôÿ[YRYà»¬àããõ\›Y][Kà›]\Œàú⁄⁄\Yãà\úõ‹éà	⁄[òX›]ôQÿ[YT›]\”Xô[
+\ôŸ]Àú›]\»àä_Hÿ[Y\»ÿ[õõ›ôXŸZ]ôH\‹⁄Y€õY[ùÀòàBàà\›Y][Kà
+KàBàà›\úô[ùà
+N¬àô]\õé¬àBàŸ]ù[‘ô]ûZ[ô—ÿ[YJ][Kôÿ[YRY
+N¬à€€ú›ô\›[H]ÿZ]›\Xò\ŸKúú ò\‹⁄Y€ó€ŸôöX⁄X[›◊€[öŸYŸÿ[Y\»ã¬àŸÿ[YW⁄Yà][Kôÿ[YRYà‹‹⁄][€ó⁄Yà][Kú‹⁄][€íYà€ŸôöX⁄X[⁄Yà][KõŸôöX⁄X[Yù[–\‹⁄Y€õY[ùô\›[õŸôöX⁄X[YàJN¬àŸ]ù[–\‹⁄Y€õY[ùô\›[
+
+›\úô[ù
+HOÇà›\úô[ùà»¬àããò›\úô[ùà][\Œà›\úô[ùö][\ÀõX\
+
+\›Y][JHOÇà\›Y][Kôÿ[YRYOOH][Kôÿ[YRYà»¬àããõ\›Y][Kà›]\Œàô\›[ô\úõ‹à»ôòZ[Yààú›XÿŸ\‹»ãà\úõ‹éàô\›[ô\úõ‹èÀõY\‹ÿYŸHàãàBàà\›Y][Kà
+KàBàà›\úô[ùà
+N¬àYà
+\ô\›[ô\úõ‹äH]ÿZ]ôYúô\⁄\‹⁄Y€õY[ù›]J
+N¬àŸ]ù[‘ô]ûZ[ô—ÿ[YJàäN¬àBàù[ò›[€à‹ô]‘€›Ÿ^Jÿ[YRYà›ö[ôÀ‹⁄][€íYà›ö[ô H¬àô]\õà	Ÿÿ[YRYNâ‹‹⁄][€íYX¬àBàù[ò›[€àù[–‹ô]‘€› 
+H¬àô]\õàÿ[Y\¬àôö[\äà
+][JHOÇàÿ[YPXÿŸ\–\‹⁄Y€õY[ù ][JH	âà[ö‘Ÿ[X›Yö[ò€Y\ ][KöY
+Kà
+Bàôõ]X\
+
+\ôŸ]
+HOÇà‹[î‹⁄][€ú—õ‹ëÿ[YJ\ôŸ]
+KõX\
+
+‹⁄][€äHOà
+¬à\ôŸ]à‹⁄][€ãàŸ^Nà‹ô]‘€›Ÿ^J\ôŸ]öY‹⁄][€ãöY
+KàJJKà
+N¬àBàù[ò›[€à‹ô]–ÿ[ôY]\—õ‹î€›
+à\ôŸ]àÿ[YKà‹⁄][€éà‹⁄][€ãàŸ[X›[€ú»Hù[–‹ô]‘Ÿ[X›[€úÀà
+H¬à€€ú›Ÿ^HH‹ô]‘€›Ÿ^J\ôŸ]öY‹⁄][€ãöY
+N¬àô]\õàŸôöX⁄X[¬àõX\
+
+ŸôöX⁄X[
+HOà¬à€€ú›õÿ⁄⁄[ô»H¬àããò\‹⁄Y€õY[ù€€ôõX›ôX\€€ú—õ‹ëÿ[YJŸôöX⁄X[\ôŸ]‹⁄][€ãöY
+Kàããô\Xÿ]P\‹⁄Y€õY[ùôX\€€ú—õ‹ëÿ[YJàŸôöX⁄X[öYà\ôŸ]à‹⁄][€ãöYà
+KàN¬à€€ú›ÿ\õö[ô‹»H[ô[Y⁄XõTôX\€€ú—õ‹ëÿ[YJàŸôöX⁄X[à\ôŸ]à‹⁄][€ãöYà
+Kôö[\äà
+ôX\€€äHOÇàXõÿ⁄⁄[ôÀö[ò€Y\ ôX\€€äH	âÇàôX\€€àOOHê[ôXYH\‹⁄Y€ôY»\»ÿ[YHãà
+N¬àYà
+\”Y[ù‹ä‹⁄][€äH	âà‹⁄][€îò[ö—õ‹äŸôöX⁄X[öY‹⁄][€äHHJBàÿ\õö[ô‹Àú\⁄
+õ›[Y⁄XõHõ‹à	‹‹⁄][€ãõò[Y_X
+N¬àõ‹à
+€€ú›€›\íŸ^K›\ìŸôöX⁄X[YHŸàÿöôX›ô[ùöY\ Ÿ[X›[€ú JH¬àYà
+›\íŸ^HOOHŸ^H›\ìŸôöX⁄X[YOOHŸôöX⁄X[öY
+H€€ù[ùYN¬à€€ú›€›\ëÿ[YRYHH›\íŸ^Kú‹]
+éàäN¬à€€ú››\ëÿ[YHHÿ[Y\Àôö[ô
+
+][JHOà][KöYOOH›\ëÿ[YRY
+N¬àYà
+[›\ëÿ[YJH€€ù[ùYN¬àYà
+›\ëÿ[YKöYOOH\ôŸ]öY
+Bàõÿ⁄⁄[ôÀú\⁄
+ê[ôXYHŸ[X›Yõ‹à[õ›\à‹⁄][€à€à\»ÿ[YHäN¬à[ŸHYà
+à›ô\õ\ à\ôŸ]ú›\ù◊ÿ]à\ôŸ]ô\ò][€ó€Z[ù]\»LLà›\ëÿ[YKú›\ù◊ÿ]à›\ëÿ[YKô\ò][€ó€Z[ù]\»LLà
+Bà
+Bàõÿ⁄⁄[ôÀú\⁄
+›ô\õ\»Ÿ[X›Yÿ[YH…€›\ëÿ[YKôÿ[YW€ù[Xô\üX
+N¬àBà€€ú›\›[òŸHHZ[\ àŸôöX⁄X[ö€YW€]]YKàŸôöX⁄X[ö€YW€€ô⁄]YKà\ôŸ]õÿÿ][€èÀõ]]YHœ»ù[à\ôŸ]õÿÿ][€èÀõ€ô⁄]YHœ»ù[à
+N¬à€€ú›€‹ö€ÿYH\‹⁄Y€õY[ùÀôö[\äà
+\‹⁄Y€õY[ù
+HOÇà\‹⁄Y€õY[ùõŸôöX⁄X[⁄YOOHŸôöX⁄X[öY	âÇà\‹⁄Y€õY[ùú›]\»OOHôX€[ôYãà
+Kõ[ô›¬à€€ú›ò[ö»H‹⁄][€îò[ö—õ‹äŸôöX⁄X[öY‹⁄][€äN¬à€€ú›ÿ€‹ôHHò[ö»
+àLH
+\›[òŸHœ»L
+HH€‹ö€ÿY
+à¬àô]\õà¬àŸôöX⁄X[àõÿ⁄⁄[ôŒàÀããõô]»Ÿ]
+õÿ⁄⁄[ô WKàÿ\õö[ô‹ŒàÀããõô]»Ÿ]
+ÿ\õö[ô‹ WKà\›[òŸKà€‹ö€ÿYàò[öÀàÿ€‹ôKàN¬àJBàú€‹ù
+à
+KäHOÇà
+Kòõÿ⁄⁄[ôÀõ[ô›»Hà
+HH
+ãòõÿ⁄⁄[ôÀõ[ô›»Hà
+Hà
+Kùÿ\õö[ô‹Àõ[ô›»Hà
+HH
+ãùÿ\õö[ô‹Àõ[ô›»Hà
+Hàãúÿ€‹ôHHKúÿ€‹ôHàKõŸôöX⁄X[õ\›€ò[YKõÿÿ[P€€\\ôJãõŸôöX⁄X[õ\›€ò[YJKà
+N¬àBàù[ò›[€àô\\ôPù[–‹ô] 
+H¬à€€ú›^€YY€›[ùHÿ[Y\Àôö[\äà
+][JHOà[ö‘Ÿ[X›Yö[ò€Y\ ][KöY
+H	âàYÿ[YPXÿŸ\–\‹⁄Y€õY[ù ][JKà
+Kõ[ô›¬àŸ]ù[–‹ô]‘Ÿ[X›[€ú ﬂJN¬àŸ]ù[–‹ô]”Y\‹ÿYŸJà^€YY€›[ùà»	Ÿ^€YY€›[ùH[òX›]ôHÿ[YIŸ^€YY€›[ùOOHH»àÿ\»ààú»Ÿ\ôHüH^€YYúõ€H‹ô]»\‹⁄Y€õY[ùòàààãà
+N¬àŸ]ù[–‹ô]”›ô\úöYP€€ôö\õYY
+ò[ŸJN¬àŸ]⁄›–ù[–‹ô] ùYJN¬àBàù[ò›[€à\T€X\ù‹ô]‘ôX€€[Y[ô][€ú 
+H¬à€€ú›ô^àôX€‹ô›ö[ôÀ›ö[ôœàHﬂN¬àõ‹à
+€€ú›€›Ÿàù[–‹ô]‘€› 
+JH¬à€€ú›ôX€€[Y[ôYH‹ô]–ÿ[ôY]\—õ‹î€›
+à€›ù\ôŸ]à€›ú‹⁄][€ãàô^à
+Kôö[ô
+à
+ÿ[ôY]JHOàXÿ[ôY]Kòõÿ⁄⁄[ôÀõ[ô›	âàXÿ[ôY]Kùÿ\õö[ô‹Àõ[ô›à
+N¬àYà
+ôX€€[Y[ôY
+Hô^‹€›öŸ^WHHôX€€[Y[ôYõŸôöX⁄X[öY¬àBàŸ]ù[–‹ô]‘Ÿ[X›[€ú ô^
+N¬àŸ]ù[–‹ô]”›ô\úöYP€€ôö\õYY
+ò[ŸJN¬àŸ]ù[–‹ô]”Y\‹ÿYŸJà	”ÿöôX›öŸ^\ ô^
+Kõ[ô›HŸà	ÿù[–‹ô]‘€› 
+Kõ[ô›H‹[à‹⁄][€ú»ö[Y⁄]ôX€€[Y[ô][€úÀòà
+N¬àBà\ﬁ[ò»ù[ò›[€à€€ôö\õPù[–‹ô]–\‹⁄Y€õY[ù
+
+H¬à€€ú›€›»Hù[–‹ô]‘€› 
+Kôö[\äà
+€›
+HOàù[–‹ô]‘Ÿ[X›[€ú÷‹€›öŸ^WKà
+N¬àYà
+\€›Àõ[ô›
+H¬àŸ]ù[–‹ô]”Y\‹ÿYŸJàê⁄€‹ŸH]X\›€ôHŸôöX⁄X[‹à\ŸH€X\ùö[ö\ú›àãà
+N¬àô]\õé¬àBà€€ú›ô]öY]‹»H€›ÀõX\
+
+€›
+HOà
+¬àããú€›àÿ[ôY]Nà‹ô]–ÿ[ôY]\—õ‹î€›
+€›ù\ôŸ]€›ú‹⁄][€äKôö[ô
+à
+][JHOà][KõŸôöX⁄X[öYOOHù[–‹ô]‘Ÿ[X›[€ú÷‹€›öŸ^WKà
+KàJJN¬àYà
+ô]öY]‹Àú€€YJ
+ô]öY] HOàô]öY]Àòÿ[ôY]OÀòõÿ⁄⁄[ôÀõ[ô›
+JH¬àŸ]ù[–‹ô]”Y\‹ÿYŸJàîô\€€ôHHY⁄Y⁄Y€€ôõX›»ôYõ‹ôH\‹⁄Y€ö[ô»\»‹ô]Ààãà
+N¬àô]\õé¬àBàYà
+àô]öY]‹Àú€€YJ
+ô]öY] HOàô]öY]Àòÿ[ôY]OÀùÿ\õö[ô‹Àõ[ô›
+H	âÇàXù[–‹ô]”›ô\úöYP€€ôö\õYYà
+H¬àŸ]ù[–‹ô]”Y\‹ÿYŸJàê€€ôö\õHH[Y⁄Xö[]H›ô\úöY\»ôYõ‹ôH\‹⁄Y€ö[ô»\»‹ô]Ààãà
+N¬àô]\õé¬àBàŸ]ù[–‹ô]’€‹ö⁄[ô ùYJN¬àŸ]ù[–‹ô]”Y\‹ÿYŸJ\‹⁄Y€ö[ô»Ÿà	‹ô]öY]‹Àõ[ô›H‹⁄][€ú¯†)ò
+N¬à€€ú›ô\›[Œàù[–\‹⁄Y€õY[ù][V◊HH◊N¬àûH¬àõ‹à
+€€ú›ô]öY]»Ÿàô]öY]‹ H¬à€€ú›ŸôöX⁄X[YHù[–‹ô]‘Ÿ[X›[€ú÷‹ô]öY]ÀöŸ^WN¬à€€ú›ŸôöX⁄X[HŸôöX⁄X[Àôö[ô
+
+][JHOà][KöYOOHŸôöX⁄X[Y
+N¬àYà
+Yÿ[YPXÿŸ\–\‹⁄Y€õY[ù ô]öY]Àù\ôŸ]
+JH¬àô\›[Àú\⁄
+¬àÿ[YRYàô]öY]Àù\ôŸ]öYàÿ[YSù[Xô\éàô]öY]Àù\ôŸ]ôÿ[YW€ù[Xô\ãàX]⁄\à	‹ô]öY]Àù\ôŸ]ö€YOÀõò[YHïëüHú»	‹ô]öY]Àù\ôŸ]ò]ÿ^OÀõò[YHïëüXà‹⁄][€íYàô]öY]Àú‹⁄][€ãöYà‹⁄][€ìò[YNàô]öY]Àú‹⁄][€ãõò[YKàŸôöX⁄X[YàŸôöX⁄X[ò[YNàŸôöX⁄X[à»	€ŸôöX⁄X[ôö\ú›€ò[Y_H	€ŸôöX⁄X[õ\›€ò[Y_XààîŸ[X›YŸôöX⁄X[ãà›]\Œàú⁄⁄\Yãà\úõ‹éà	⁄[òX›]ôQÿ[YT›]\”Xô[
+ô]öY]Àù\ôŸ]ú›]\ _Hÿ[Y\»ÿ[õõ›ôXŸZ]ôH\‹⁄Y€õY[ùÀòàJN¬à€€ù[ùYN¬àBà€€ú›ô\›[H]ÿZ]›\Xò\ŸKúú ò\‹⁄Y€ó€ŸôöX⁄X[›◊€[öŸYŸÿ[Y\»ã¬àŸÿ[YW⁄Yàô]öY]Àù\ôŸ]öYà‹‹⁄][€ó⁄Yàô]öY]Àú‹⁄][€ãöYà€ŸôöX⁄X[⁄YàŸôöX⁄X[YàJN¬àô\›[Àú\⁄
+¬àÿ[YRYàô]öY]Àù\ôŸ]öYàÿ[YSù[Xô\éàô]öY]Àù\ôŸ]ôÿ[YW€ù[Xô\ãàX]⁄\à	‹ô]öY]Àù\ôŸ]ö€YOÀõò[YHïëüHú»	‹ô]öY]Àù\ôŸ]ò]ÿ^OÀõò[YHïëüXà‹⁄][€íYàô]öY]Àú‹⁄][€ãöYà‹⁄][€ìò[YNàô]öY]Àú‹⁄][€ãõò[YKàŸôöX⁄X[YàŸôöX⁄X[ò[YNàŸôöX⁄X[à»	€ŸôöX⁄X[ôö\ú›€ò[Y_H	€ŸôöX⁄X[õ\›€ò[Y_XààîŸ[X›YŸôöX⁄X[ãà›]\Œàô\›[ô\úõ‹à»ôòZ[Yààú›XÿŸ\‹»ãà\úõ‹éàô\›[ô\úõ‹èÀõY\‹ÿYŸHàãàJN¬àŸ]ù[–‹ô]”Y\‹ÿYŸJàõÿŸ\‹ŸY	‹ô\›[Àõ[ô›HŸà	‹ô]öY]‹Àõ[ô›H‹⁄][€ú¯†)òà
+N¬àBà]ÿZ]ôYúô\⁄\‹⁄Y€õY[ù›]J
+N¬àŸ]⁄›–ù[–‹ô] ò[ŸJN¬àŸ]ù[–\‹⁄Y€õY[ùô\›[
+¬àŸôöX⁄X[YààãàŸôöX⁄X[ò[YNàê‹ô]»\‹⁄Y€õY[ùãà][\Œàô\›[ÀàJN¬àYà
+ô\›[Àô]ô\ûJ
+][JHOà][Kú›]\»OOHú›XÿŸ\‹»äJBàŸ][ö‘Ÿ[X›Y
+◊JN¬àHÿ]⁄
+‹ô]—\úõ‹äH¬àŸ]ù[–‹ô]”Y\‹ÿYŸJà‹ô]—\úõ‹à[ú›[òŸ[Ÿà\úõ‹Çà»‹ô]—\úõ‹ãõY\‹ÿYŸBààï[òXõH»€€\]H‹ô]»\‹⁄Y€õY[ùàãà
+N¬àHö[ò[H¬àŸ]ù[–‹ô]’€‹ö⁄[ô ò[ŸJN¬àBàBàù[ò›[€à‹ô]’[\]U\ôŸ]ÿ[Y\ 
+H¬à€€ú›ô\]Y\›YH[ö‘Ÿ[X›Yõ[ô›à»ÿ[Y\Àôö[\ä
+][JHOà[ö‘Ÿ[X›Yö[ò€Y\ ][KöY
+JBààÿ[YBà»Ÿÿ[YWBàà◊N¬à€€ú›ŸY[àHô]»Ÿ]›ö[ôœä
+N¬àô]\õàô\]Y\›Yôö[\ä
+\ôŸ]
+HOà¬à€€ú›[ö]Ÿ^HH[ö—‹õ›\ûQÿ[YKôŸ]
+\ôŸ]öY
+H\ôŸ]öY¬àYà
+ŸY[ãö\ [ö]Ÿ^JJHô]\õàò[ŸN¬àŸY[ãòY
+[ö]Ÿ^JN¬àô]\õàùYN¬àJN¬àBàù[ò›[€à]òZ[XõP‹ô]’[\]\ 
+H¬à€€ú›\ôŸ]H‹ô]’[\]U\ôŸ]ÿ[Y\ 
+VÃN¬àYà
+]\ôŸ]
+Hô]\õà◊N¬àô]\õà\‹⁄Y€õY[ù[\]\Àôö[\äà
+[\]JHOÇà[\]Kú‹‹ù⁄YOOH\ôŸ]ú‹‹ù⁄Y	âÇà
+][\]KõXY›YW⁄Y[\]KõXY›YW⁄YOOH\ôŸ]õXY›YW⁄Y
+Kà
+N¬àBàù[ò›[€àô]ö[›\–‹ô]—ÿ[Y\ 
+H¬à€€ú›\ôŸ]H‹ô]’[\]U\ôŸ]ÿ[Y\ 
+VÃN¬àYà
+]\ôŸ]
+Hô]\õà◊N¬à€€ú›\ôŸ]Y»Hô]»Ÿ]
+[ö‘Ÿ[X›Yõ[ô›»[ö‘Ÿ[X›Yà›\ôŸ]öYJN¬àô]\õàÿ[Y\¬àôö[\äà
+\›Yÿ[YJHOÇà\›Yÿ[YKú‹‹ù⁄YOOH\ôŸ]ú‹‹ù⁄Y	âÇà]\ôŸ]YÀö\ \›Yÿ[YKöY
+H	âÇà\‹⁄Y€õY[ùÀú€€YJà
+\‹⁄Y€õY[ù
+HOÇà\‹⁄Y€õY[ùôÿ[YW⁄YOOH\›Yÿ[YKöY	âÇàV»ôX€[ôYãòÿ[òŸ[Yãòÿ[òŸ[YóKö[ò€Y\ à\‹⁄Y€õY[ùú›]\Àà
+Kà
+Kà
+Bàú€‹ù
+à
+KäHOÇàX]òXú àô]»]JKú›\ù◊ÿ]
+KôŸ][YJ
+HBàô]»]J\ôŸ]ú›\ù◊ÿ]
+KôŸ][YJ
+Kà
+HBàX]òXú àô]»]Jãú›\ù◊ÿ]
+KôŸ][YJ
+HBàô]»]J\ôŸ]ú›\ù◊ÿ]
+KôŸ][YJ
+Kà
+Kà
+Bàú€XŸJ
+N¬àBàù[ò›[€à‹[ê‹ô]’[\]U€€ 
+H¬à€€ú›\ôŸ]H‹ô]’[\]U\ôŸ]ÿ[Y\ 
+VÃN¬àYà
+]\ôŸ]
+Hô]\õé¬àŸ]‹ô]’[\]Sò[YJà	›\ôŸ]õXY›Y\œÀõò[YH\ôŸ]ú‹‹ùœÀõò[YHîÿ]ôYüH‹ô]ÿà
+N¬àŸ]€‹P‹ô]‘€›\òŸQÿ[YRY
+ô]ö[›\–‹ô]—ÿ[Y\ 
+VÃOÀöYàäN¬àŸ]‹ô]’[\]SY\‹ÿYŸJàäN¬àŸ]⁄›–‹ô]’[\]\ ùYJN¬àBà\ﬁ[ò»ù[ò›[€àôYúô\⁄‹ô]’[\]\ 
+H¬à€€ú›»]K\úõ‹éà[\]Q\úõ‹àHH]ÿZ]›\Xò\ŸBàôúõ€Jò\‹⁄Y€õY[ù›[\]\»äBàúŸ[X›
+àöYò[YK‹‹ù⁄YXY›YW⁄Y‹ôX]YÿûK\]Yÿ]‹ôÿ[ö^ò][€ó⁄Y\‹⁄Y€õY[ù›[\]W‹€› Y‹⁄][€ó⁄YŸôöX⁄X[⁄Y€‹ù€‹ô\äHãà
+Bàô\Jõ‹ôÿ[ö^ò][€ó⁄Yã‹ôÿ[ö^ò][€íYàäBàõ‹ô\äù\]Yÿ]ã»\ÿŸ[ô[ôŒàò[ŸHJN¬àYà
+[\]Q\úõ‹äHõ›»[\]Q\úõ‹é¬àŸ]\‹⁄Y€õY[ù[\]\ 
+]H◊JH\»\‹⁄Y€õY[ù[\]V◊JN¬àBà\ﬁ[ò»ù[ò›[€àÿ]ôP›\úô[ù‹ô]’[\]J
+H¬à€€ú›€›\òŸHH‹ô]’[\]U\ôŸ]ÿ[Y\ 
+VÃN¬àYà
+\€›\òŸHX‹ô]’[\]Sò[YKùö[J
+JH¬àŸ]‹ô]’[\]SY\‹ÿYŸJë[ù\àH[\]Hò[YHö\ú›àäN¬àô]\õé¬àBà€€ú›€›\òŸP\‹⁄Y€õY[ù»H\‹⁄Y€õY[ùÀôö[\äà
+\‹⁄Y€õY[ù
+HOÇà\‹⁄Y€õY[ùôÿ[YW⁄YOOH€›\òŸKöY	âÇàV»ôX€[ôYãòÿ[òŸ[Yãòÿ[òŸ[YóKö[ò€Y\ \‹⁄Y€õY[ùú›]\ Kà
+N¬àYà
+\€›\òŸP\‹⁄Y€õY[ùÀõ[ô›
+H¬àŸ]‹ô]’[\]SY\‹ÿYŸJàê\‹⁄Y€à]X\›€ôHŸôöX⁄X[ôYõ‹ôHÿ]ö[ô»\»‹ô]Ààãà
+N¬àô]\õé¬àBàŸ]‹ô]’[\]U€‹ö⁄[ô ùYJN¬àŸ]‹ô]’[\]SY\‹ÿYŸJîÿ]ö[ô»‹ô]»[\]x†)àäN¬à€€ú›»]Nà\Ÿ\ë]HHH]ÿZ]›\Xò\ŸKò]]ôŸ]\Ÿ\ä
+N¬à€€ú›»]Nà[\]K\úõ‹éà[\]Q\úõ‹àHH]ÿZ]›\Xò\ŸBàôúõ€Jò\‹⁄Y€õY[ù›[\]\»äBàö[úŸ\ù
+¬àò[YNà‹ô]’[\]Sò[YKùö[J
+Kà‹‹ù⁄Yà€›\òŸKú‹‹ù⁄YàXY›YW⁄Yà€›\òŸKõXY›YW⁄Yà‹ôX]YÿûNà\Ÿ\ë]Kù\Ÿ\èÀöYà‹ôÿ[ö^ò][€ó⁄Yà‹ôÿ[ö^ò][€íYàJBàúŸ[X›
+öYäBàú⁄[ô€J
+N¬àYà
+[\]Q\úõ‹à][\]JH¬àŸ]‹ô]’[\]SY\‹ÿYŸJà[\]Q\úõ‹èÀõY\‹ÿYŸHï[òXõH»ÿ]ôHH‹ô]»[\]Kàãà
+N¬àŸ]‹ô]’[\]U€‹ö⁄[ô ò[ŸJN¬àô]\õé¬àBà€€ú›»\úõ‹éà€›—\úõ‹àHH]ÿZ]›\Xò\ŸBàôúõ€Jò\‹⁄Y€õY[ù›[\]W‹€›»äBàö[úŸ\ù
+à€›\òŸP\‹⁄Y€õY[ùÀõX\
+
+\‹⁄Y€õY[ù[ô^
+HOà
+¬à[\]W⁄Yà[\]KöYà‹⁄][€ó⁄Yà\‹⁄Y€õY[ùú‹⁄][€ó⁄YàŸôöX⁄X[⁄Yà\‹⁄Y€õY[ùõŸôöX⁄X[⁄Yà€‹ù€‹ô\éà[ô^àJJKà
+N¬àYà
+€›—\úõ‹äH¬à]ÿZ]›\Xò\ŸBàôúõ€Jò\‹⁄Y€õY[ù›[\]\»äBàô[]J
+Bàô\JöYã[\]KöY
+N¬àŸ]‹ô]’[\]SY\‹ÿYŸJ€›—\úõ‹ãõY\‹ÿYŸJN¬àH[ŸH¬à]ÿZ]ôYúô\⁄‹ô]’[\]\ 
+N¬àŸ]‹ô]’[\]SY\‹ÿYŸJàÿ]ôY8†'	ÿ‹ô]’[\]Sò[YKùö[J
+_x†'Hõ‹àù]\ôHÿ[Y\Àòà
+N¬àBàŸ]‹ô]’[\]U€‹ö⁄[ô ò[ŸJN¬àBà\ﬁ[ò»ù[ò›[€à\P‹ô]‘€› à€›ŒàX⁄œ\‹⁄Y€õY[ù[\]T€›ú‹⁄][€ó⁄YàõŸôöX⁄X[⁄Yèñ◊KàXô[à›ö[ôÀà
+H¬à€€ú›\ôŸ]»H‹ô]’[\]U\ôŸ]ÿ[Y\ 
+N¬àYà
+]\ôŸ]Àõ[ô›\€›Àõ[ô›
+Hô]\õé¬àŸ]‹ô]’[\]U€‹ö⁄[ô ùYJN¬àŸ]‹ô]’[\]SY\‹ÿYŸJ\Z[ô»	€Xô[x†)ò
+N¬à]\‹⁄Y€ôYH¬à]⁄⁄\YH¬à€€ú›òZ[\ô\Œà›ö[ô÷◊HH◊N¬àõ‹à
+€€ú›\ôŸ]Ÿà\ôŸ] H¬àYà
+Yÿ[YPXÿŸ\–\‹⁄Y€õY[ù \ôŸ]
+JH¬à⁄⁄\Y
+œH€›Àõ[ô›¬à€€ù[ùYN¬àBàõ‹à
+€€ú›€›Ÿà€› H¬à€€ú›ò[Y‹⁄][€àH‹⁄][€úÀú€€YJà
+‹⁄][€äHOÇà‹⁄][€ãöYOOH€›ú‹⁄][€ó⁄Y	âÇà‹⁄][€ãú‹‹ù⁄YOOH\ôŸ]ú‹‹ù⁄Yà
+N¬à€€ú›[ôXYQö[YH\‹⁄Y€õY[ùÀú€€YJà
+\‹⁄Y€õY[ù
+HOÇà\‹⁄Y€õY[ùôÿ[YW⁄YOOH\ôŸ]öY	âÇà\‹⁄Y€õY[ùú‹⁄][€ó⁄YOOH€›ú‹⁄][€ó⁄Y	âÇàV»ôX€[ôYãòÿ[òŸ[Yãòÿ[òŸ[YóKö[ò€Y\ \‹⁄Y€õY[ùú›]\ Kà
+N¬àYà
+]ò[Y‹⁄][€à[ôXYQö[Y
+H¬à⁄⁄\Y
+œHN¬à€€ù[ùYN¬àBà€€ú›ô\›[H]ÿZ]›\Xò\ŸKúú ò\‹⁄Y€ó€ŸôöX⁄X[›◊€[öŸYŸÿ[Y\»ã¬àŸÿ[YW⁄Yà\ôŸ]öYà‹‹⁄][€ó⁄Yà€›ú‹⁄][€ó⁄Yà€ŸôöX⁄X[⁄Yà€›õŸôöX⁄X[⁄YàJN¬àYà
+ô\›[ô\úõ‹äHòZ[\ô\Àú\⁄
+ô\›[ô\úõ‹ãõY\‹ÿYŸJN¬à[ŸH\‹⁄Y€ôY
+œHN¬àBàBà]ÿZ]ôYúô\⁄\‹⁄Y€õY[ù›]J
+N¬à€€ú›]Z[H¬à	ÿ\‹⁄Y€ôYH‹⁄][€âÿ\‹⁄Y€ôYOOHH»àààú»üH\‹⁄Y€ôYà⁄⁄\Yà»	‹⁄⁄\YHö[Y‹à[òX›]ôH‹⁄][€â‹⁄⁄\YOOHH»àààú»üH⁄⁄\YàààãàòZ[\ô\Àõ[ô›à»	ŸòZ[\ô\Àõ[ô›H€€ôõX›	ŸòZ[\ô\Àõ[ô›OOHH»àààú»üHõ›\‹⁄Y€ôYàààãàBàôö[\äõ€€X[äBàöõ⁄[äà8†(àäN¬àŸ]‹ô]’[\]SY\‹ÿYŸJ]Z[
+N¬àŸ]õ›XŸJ	€Xô[Nà	Ÿ]Z[Kàô]öY]»H‹ô]À[àXõ\⁄⁄[àôXYKò
+N¬àŸ]‹ô]’[\]U€‹ö⁄[ô ò[ŸJN¬àBà\ﬁ[ò»ù[ò›[€à€‹P‹ô]—úõ€Qÿ[YJ
+H¬à€€ú›€›\òŸHHÿ[Y\Àôö[ô
+
+][JHOà][KöYOOH€‹P‹ô]‘€›\òŸQÿ[YRY
+N¬àYà
+\€›\òŸJH¬àŸ]‹ô]’[\]SY\‹ÿYŸJê⁄€‹ŸHHô]ö[›\»ÿ[YHö\ú›àäN¬àô]\õé¬àBà€€ú›€›»H\‹⁄Y€õY[ù¬àôö[\äà
+\‹⁄Y€õY[ù
+HOÇà\‹⁄Y€õY[ùôÿ[YW⁄YOOH€›\òŸKöY	âÇàV»ôX€[ôYãòÿ[òŸ[Yãòÿ[òŸ[YóKö[ò€Y\ \‹⁄Y€õY[ùú›]\ Kà
+BàõX\
+
+\‹⁄Y€õY[ù
+HOà
+¬à‹⁄][€ó⁄Yà\‹⁄Y€õY[ùú‹⁄][€ó⁄YàŸôöX⁄X[⁄Yà\‹⁄Y€õY[ùõŸôöX⁄X[⁄YàJJN¬à]ÿZ]\P‹ô]‘€› €›À‹ô]»úõ€Hÿ[YH…‹€›\òŸKôÿ[YW€ù[Xô\üX
+N¬àBà\ﬁ[ò»ù[ò›[€à[]P‹ô]’[\]J[\]RYà›ö[ô H¬àŸ]‹ô]’[\]U€‹ö⁄[ô ùYJN¬à€€ú›»\úõ‹éà[]Q\úõ‹àHH]ÿZ]›\Xò\ŸBàôúõ€Jò\‹⁄Y€õY[ù›[\]\»äBàô[]J
+Bàô\JöYã[\]RY
+N¬àYà
+[]Q\úõ‹äHŸ]‹ô]’[\]SY\‹ÿYŸJ[]Q\úõ‹ãõY\‹ÿYŸJN¬à[ŸH¬à]ÿZ]ôYúô\⁄‹ô]’[\]\ 
+N¬àŸ]‹ô]’[\]SY\‹ÿYŸJê‹ô]»[\]H[]YàäN¬àBàŸ]‹ô]’[\]U€‹ö⁄[ô ò[ŸJN¬àBàù[ò›[€à⁄€‹ŸSŸôöX⁄X[–\‹⁄Y€äŸôöX⁄X[Yà›ö[ô H¬à€€ú›ô^HX⁄ŸYŸôöX⁄X[OOHŸôöX⁄X[Y»àààŸôöX⁄X[Y¬àŸ]X⁄ŸYŸôöX⁄X[
+ô^
+N¬àBà\ﬁ[ò»ù[ò›[€à\‹⁄Y€ê[ôXõ\⁄ô\XŸ[Y[ù
+à‹⁄][€íYà›ö[ôÀàŸôöX⁄X[Yà›ö[ôÀàô^‹⁄][€íYŒà›ö[ôÀà
+H¬àYà
+Xÿ[ìX[òYŸHYÿ[YJHô]\õé¬àŸ][ô[ô‘ô\XŸ[Y[ù
+ù[
+N¬à€€ú›€‹ö“Ÿ^HH	‹‹⁄][€íYNâ€ŸôöX⁄X[YX¬àŸ]ô\XŸ[Y[ùXõ\⁄[ô €‹ö“Ÿ^JN¬àŸ]\úõ‹äàäN¬àŸ]õ›XŸJàäN¬àûH¬à€€ú›»\úõ‹éà\‹⁄Y€õY[ù\úõ‹àHH]ÿZ]›\Xò\ŸKúú àò\‹⁄Y€ó€ŸôöX⁄X[›◊€[öŸYŸÿ[Y\»ãà¬àŸÿ[YW⁄Yàÿ[YKöYà‹‹⁄][€ó⁄Yà‹⁄][€íYà€ŸôöX⁄X[⁄YàŸôöX⁄X[YàKà
+N¬àYà
+\‹⁄Y€õY[ù\úõ‹äHõ›»\‹⁄Y€õY[ù\úõ‹é¬à€€ú›ô\‹€úŸHH]ÿZ]ô]⁄
+àÿ\Kÿ\‹⁄Y€õY[ùÀ‹Xõ\⁄€‹ôÿ[ö^ò][€íYIŸ[ò€ŸUTíP€€\€ô[ù
+‹ôÿ[ö^ò][€íYàä_Xà¬àY]Ÿàî‘’ãàXY\úŒà»ê€€ù[ùU\Héàò\Xÿ][€ã⁄ú€€ààKàõŸNàî””ãú›ö[ô⁄YûJ»ÿ[YRYàÿ[YKöYJKàKà
+N¬à€€ú›ô\›[H
+]ÿZ]ô\‹€úŸKöú€€ä
+Kòÿ]⁄
+
+
+HOà
+ﬂJJJH\»¬àŸ[ùŒàù[Xô\é¬àòZ[YŒàù[Xô\é¬àòZ[\ô\œŒà›ö[ô÷◊N¬à\úõ‹èŒà›ö[ôŒ¬àN¬àYà
+\ô\‹€úŸKõ⁄ Bàõ›»ô]»\úõ‹äàô\›[ô\úõ‹àïHô\XŸ[Y[ù€›[õ›ôHXõ\⁄Yàãà
+N¬àYà
+ô\›[ôòZ[Y
+BàŸ]\úõ‹äàô\XŸ[Y[ù\‹⁄Y€ôYù]	‹ô\›[ôòZ[YHõ›YöXÿ][€â‹ô\›[ôòZ[YOOHH»àààú»üHòZ[Yà	 ô\›[ôòZ[\ô\»◊JKöõ⁄[äé»ä_Xà
+N¬à[ŸBàŸ]õ›XŸJàô\XŸ[Y[ù\‹⁄Y€ôY[ô	‹ô\›[úŸ[ùHõ›YöXÿ][€â‹ô\›[úŸ[ùOOHH»àààú»üHŸ[ùòà
+N¬à[õõ›[òŸU[ô–]òZ[XõJ
+N¬à]ÿZ]ôYúô\⁄\‹⁄Y€õY[ù›]J
+N¬àŸ]ÿ[ôY]TŸX\ò⁄
+àäN¬àŸ]ÿ[ôY]T‹⁄][€íY
+ô^‹⁄][€íY‹⁄][€íY
+N¬àHÿ]⁄
+ô\XŸ[Y[ù\úõ‹äH¬àŸ]\úõ‹äàô\XŸ[Y[ù\úõ‹à[ú›[òŸ[Ÿà\úõ‹Çà»ô\XŸ[Y[ù\úõ‹ãõY\‹ÿYŸBààïHô\XŸ[Y[ù€›[õ›ôH\‹⁄Y€ôY[ôXõ\⁄Yàãà
+N¬àBàŸ]ô\XŸ[Y[ùXõ\⁄[ô àäN¬àBà\ﬁ[ò»ù[ò›[€à[›ôP\‹⁄Y€õY[ù
+àÿ[YRYà›ö[ôÀà\‹⁄Y€õY[ùYà›ö[ôÀà\ôX›[€éàLHKà
+H¬àYà
+Xÿ[ìX[òYŸJHô]\õé¬àŸ][›ö[ô–\‹⁄Y€õY[ù
+\‹⁄Y€õY[ùY
+N¬àŸ]\úõ‹äàäN¬àŸ]õ›XŸJàäN¬à€€ú›»\úõ‹éà[›ôQ\úõ‹àHH]ÿZ]›\Xò\ŸKúú àõ[›ôWÿ\‹⁄Y€õY[ù‹‹⁄][€àãà¬àŸÿ[YW⁄Yàÿ[YRYàÿ\‹⁄Y€õY[ù⁄Yà\‹⁄Y€õY[ùYàŸ\ôX›[€éà\ôX›[€ãàKà
+N¬àYà
+[›ôQ\úõ‹äHŸ]\úõ‹ä[›ôQ\úõ‹ãõY\‹ÿYŸJN¬à[ŸHŸ]õ›XŸJìŸôöX⁄X[‹⁄][€ú»\]YàäN¬à]ÿZ]ôYúô\⁄\‹⁄Y€õY[ù›]J
+N¬àŸ][›ö[ô–\‹⁄Y€õY[ù
+àäN¬àBà\ﬁ[ò»ù[ò›[€à[ò\‹⁄Y€ä\‹⁄Y€õY[ùYà›ö[ôÀ‹⁄][€íYà›ö[ô H¬àYà
+Xÿ[ìX[òYŸJH¬àŸ]\úõ‹äì€õHYZ[ö\›ò]‹ú»[ô\‹⁄Y€õ‹ú»ÿ[à[ò\‹⁄Y€àŸôöX⁄X[ÀàäN¬àô]\õé¬àBàŸ]ÿ]ö[ô ‹⁄][€íY
+N¬àŸ]\úõ‹äàäN¬àŸ]õ›XŸJàäN¬à€€ú›ô[[›ôY\‹⁄Y€õY[ùH\‹⁄Y€õY[ùÀôö[ô
+à
+\‹⁄Y€õY[ù
+HOà\‹⁄Y€õY[ùöYOOH\‹⁄Y€õY[ùYà
+N¬à€€ú›Ÿ[X›Yÿ[YRYHô[[›ôY\‹⁄Y€õY[ùÀôÿ[YW⁄YŸ[X›Y¬à€€ú›ô[[›ôYŸôöX⁄X[HŸôöX⁄X[Àôö[ô
+à
+ŸôöX⁄X[
+HOàŸôöX⁄X[öYOOHô[[›ôY\‹⁄Y€õY[ùÀõŸôöX⁄X[⁄Yà
+N¬à€€ú›ô[[›ôY‹⁄][€àH‹⁄][€úÀôö[ô
+à
+‹⁄][€äHOà‹⁄][€ãöYOOH‹⁄][€íYà
+N¬à€€ú›»\úõ‹éà[]Q\úõ‹àHH]ÿZ]›\Xò\ŸBàôúõ€Jò\‹⁄Y€õY[ù»äBàô[]J
+Bàô\JöYã\‹⁄Y€õY[ùY
+N¬àYà
+[]Q\úõ‹äHŸ]\úõ‹ä[]Q\úõ‹ãõY\‹ÿYŸJN¬à[ŸH¬à€€ú›⁄[ôŸQ\ÿ‹ö\[€àH	‹ô[[›ôYŸôöX⁄X[»	‹ô[[›ôYŸôöX⁄X[ôö\ú›€ò[Y_H	‹ô[[›ôYŸôöX⁄X[õ\›€ò[Y_XàìŸôöX⁄X[üH[ò\‹⁄Y€ôYúõ€H	‹ô[[›ôY‹⁄][€à»⁄‹ù‹⁄][€ìò[YJô[[›ôY‹⁄][€ãõò[YJHàùH‹⁄][€àüKò¬àŸ]õ›XŸJ⁄[ôŸQ\ÿ‹ö\[€äN¬à[õõ›[òŸU[ô–]òZ[XõJ⁄[ôŸQ\ÿ‹ö\[€äN¬àYà
+Ÿ[X›Yÿ[YRY
+H¬àŸ]Ÿ[X›Y
+Ÿ[X›Yÿ[YRY
+N¬àŸ][ö‘Ÿ[X›Y
+
+›\úô[ù
+HOÇà›\úô[ùö[ò€Y\ Ÿ[X›Yÿ[YRY
+Bà»›\úô[ùààÀããò›\úô[ùŸ[X›Yÿ[YRYKà
+N¬àBàBà]ÿZ]ôYúô\⁄\‹⁄Y€õY[ù›]J
+N¬àŸ]ÿ]ö[ô àäN¬àBà\ﬁ[ò»ù[ò›[€à€€ôö\õP\‹⁄Y€õY[ù
+Nà\‹⁄Y€õY[ù
+H¬àYà
+àXÿ[ìX[òYŸHàXKúXõ\⁄Yÿ]àKú›]\»OOHôX€[ôYààKú›]\»OOHò€€ôö\õYYÇà
+Bàô]\õé¬àŸ]€€ôö\õZ[ô KöY
+N¬àŸ]\úõ‹äàäN¬àŸ]õ›XŸJàäN¬àûH¬à€€ú›ô\‹€úŸHH]ÿZ]ô]⁄
+àÿ\Kÿ\‹⁄Y€õY[ùÀÿ€€ôö\õO€‹ôÿ[ö^ò][€íYIŸ[ò€ŸUTíP€€\€ô[ù
+‹ôÿ[ö^ò][€íYàä_Xà¬àY]Ÿàî‘’ãàXY\úŒà»ê€€ù[ùU\Héàò\Xÿ][€ã⁄ú€€ààKàõŸNàî””ãú›ö[ô⁄YûJ»\‹⁄Y€õY[ùYàKöYJKàKà
+N¬à€€ú›ô\›[H
+]ÿZ]ô\‹€úŸKöú€€ä
+JH\»¬à€€ôö\õYYŒàõ€€X[é¬à\úõ‹èŒà›ö[ôŒ¬àN¬àYà
+\ô\‹€úŸKõ⁄ Bàõ›»ô]»\úõ‹äô\›[ô\úõ‹àï[òXõH»€€ôö\õH\‹⁄Y€õY[ùàäN¬àŸ]õ›XŸJàê\‹⁄Y€õY[ù€€ôö\õYY[ô€€ôö\õYYÿ[YH[ôõ‹õX][€à[XZ[Y»HŸôöX⁄X[àãà
+N¬àHÿ]⁄
+JH¬àŸ]\úõ‹äàH[ú›[òŸ[Ÿà\úõ‹à»KõY\‹ÿYŸHàï[òXõH»€€ôö\õH\‹⁄Y€õY[ùàãà
+N¬àBà]ÿZ]ôYúô\⁄\‹⁄Y€õY[ù›]J
+N¬àŸ]€€ôö\õZ[ô àäN¬àBàù[ò›[€àô\]Y\›ÿ[YT›]\–⁄[ôŸJÿ[YRYà›ö[ôÀ›]\Œà›ö[ô H¬àŸ][ô[ô—ÿ[YT›]\ »ÿ[YRY›]\»JN¬àBàù[ò›[€à‹[î]ZX⁄—Y]
+\ôŸ]àÿ[YJH¬à€€ú›]HHô]»]J\ôŸ]ú›\ù◊ÿ]
+N¬à€€ú›ÿÿ[Hô]»]J]KôŸ][YJ
+HH]KôŸ][Y^õ€ôSŸôúŸ]
+
+H
+àå
+Bàù“T”‘›ö[ô 
+Bàú€XŸJMäN¬àŸ]]ZX⁄—Y]
+¬àÿ[YRYà\ôŸ]öYà›\ù–]àÿÿ[à\ò][€ìZ[ù]\Œà\ôŸ]ô\ò][€ó€Z[ù]\Ààÿÿ][€íYà\ôŸ]õÿÿ][€ó⁄Yàãà]ô[Yà\ôŸ]õ]ô[⁄YàãàJN¬àBà\ﬁ[ò»ù[ò›[€àÿ]ôT]ZX⁄—Y]
+
+H¬àYà
+\]ZX⁄—Y]
+Hô]\õé¬àYà
+à\]ZX⁄—Y]ú›\ù–]à]ZX⁄—Y]ô\ò][€ìZ[ù]\»MHà]ZX⁄—Y]ô\ò][€ìZ[ù]\»àà
+Bàô]\õàŸ]\úõ‹äàë[ù\àHò[Yÿ[YH[YH[ô\ò][€àô]ŸY[àMH[ôZ[ù]\Ààãà
+N¬àŸ]]ZX⁄—Y]ÿ]ö[ô ùYJN¬àŸ]\úõ‹äàäN¬à€€ú›»\úõ‹éà\]Q\úõ‹àHH]ÿZ]›\Xò\ŸBàôúõ€Jôÿ[Y\»äBàù\]J¬à›\ù◊ÿ]àô]»]J]ZX⁄—Y]ú›\ù–]
+Kù“T”‘›ö[ô 
+Kà\ò][€ó€Z[ù]\Œà]ZX⁄—Y]ô\ò][€ìZ[ù]\Ààÿÿ][€ó⁄Yà]ZX⁄—Y]õÿÿ][€íYù[à]ô[⁄Yà]ZX⁄—Y]õ]ô[Yù[àJBàô\JöYã]ZX⁄—Y]ôÿ[YRY
+N¬àYà
+\]Q\úõ‹äHŸ]\úõ‹ä\]Q\úõ‹ãõY\‹ÿYŸJN¬à[ŸH¬àŸ]]ZX⁄—Y]
+ù[
+N¬àŸ]õ›XŸJàëÿ[YH\]Yà\‹⁄Y€õY[ù[\X›»Ÿ\ôHô]öY]ŸY[ôHX›]ö]Hÿ\»ôX€‹ôYàãà
+N¬à]ÿZ]ÿY
+
+N¬àBàŸ]]ZX⁄—Y]ÿ]ö[ô ò[ŸJN¬àBàù[ò›[€àXY[ôT›]J\ôŸ]àÿ[YJH¬à€€ú››Yôö[ô»H›Yôö[ô–€›[ù \ôŸ]
+N¬àYà
+\›Yôö[ôÀõ‹[äHô]\õà»Xô[àëö[Yã€€‹éààÃMNŸàN¬à€€ú›\ôŸ]]Bàô]»]J\ôŸ]ú›\ù◊ÿ]
+KôŸ][YJ
+HBà
+\ôŸ]õXY›Y\œÀò\‹⁄Y€õY[ùŸö[›\ôŸ]Ÿ^\»œ»M
+H
+àç¬à€€ú›^\»HX]òŸZ[
+
+\ôŸ]]H]Kõõ› 
+JH»ç
+N¬àô]\õà^\»à»»Xô[à	”X]òXú ^\ _Y›ô\ôYX€€‹éààÿéLXÃX»àBàà^\»H¬à»»Xô[àYH[à	Ÿ^\ﬂY€€‹éààÿçLÃHàBàà»Xô[à\ôŸ]	Ÿ^\ﬂY€€‹éààÕÕMMéHàN¬àBà\ﬁ[ò»ù[ò›[€àÿ]ôQXY[ôTŸ][ô‹ 
+H¬àYà
+YXY[ôSXY›YRY
+Hô]\õé¬àŸ]XY[ôTÿ]ö[ô ùYJN¬à€€ú›ò[Y\»H¬à\‹⁄Y€õY[ùŸö[›\ôŸ]Ÿ^\ŒàXY[ôQòYùôö[à\‹⁄Y€õY[ùÿXÿŸ\[òŸW⁄›\úŒàXY[ôQòYùòXÿŸ\[òŸKà\‹⁄Y€õY[ùŸ\ÿÿ[][€óŸ^\ŒàXY[ôQòYùô\ÿÿ[][€ãà\‹⁄Y€õY[ù‹ô[Z[ô\ó⁄›\úŒàXY[ôQòYùúô[Z[ô\ãàN¬à€€ú›»\úõ‹éàXY[ôQ\úõ‹àHH]ÿZ]›\Xò\ŸBàôúõ€JõXY›Y\»äBàù\]Jò[Y\ Bàô\JöYãXY[ôSXY›YRY
+N¬àYà
+XY[ôQ\úõ‹äHŸ]\úõ‹äXY[ôQ\úõ‹ãõY\‹ÿYŸJN¬à[ŸH¬àŸ]⁄›—XY[ôTŸ][ô‹ ò[ŸJN¬àŸ]õ›XŸJê\‹⁄Y€õY[ùXY[ô\»\]Yõ‹àHXY›YKàäN¬à]ÿZ]ÿY
+
+N¬àBàŸ]XY[ôTÿ]ö[ô ò[ŸJN¬àBà\ﬁ[ò»ù[ò›[€à⁄[ôŸQÿ[YT›]\ ÿ[YRYà›ö[ôÀ›]\Œà›ö[ô H¬àYà
+Xÿ[ìX[òYŸJH¬àŸ]\úõ‹äì€õHYZ[ö\›ò]‹ú»[ô\‹⁄Y€õ‹ú»ÿ[à⁄[ôŸHÿ[YH›]\ÀàäN¬àô]\õé¬àBàŸ][ô[ô—ÿ[YT›]\ ù[
+N¬àŸ]ÿ[YT›]\‘ÿ]ö[ô ÿ[YRY
+N¬àŸ]\úõ‹äàäN¬àŸ]õ›XŸJàäN¬à€€ú›ô\‹€úŸHH]ÿZ]ô]⁄
+àÿ\KŸÿ[Y\À‹›]\œ€‹ôÿ[ö^ò][€íYIŸ[ò€ŸUTíP€€\€ô[ù
+‹ôÿ[ö^ò][€íYàä_Xà¬àY]Ÿàî‘’ãàXY\úŒà»ê€€ù[ùU\Héàò\Xÿ][€ã⁄ú€€ààKàõŸNàî””ãú›ö[ô⁄YûJ»ÿ[YRY›]\»JKàKà
+N¬à€€ú›ô\›[H
+]ÿZ]ô\‹€úŸKöú€€ä
+Kòÿ]⁄
+
+
+HOà
+ﬂJJJH\»¬à\úõ‹èŒà›ö[ôŒ¬àŸ[ùŒàù[Xô\é¬àòZ[YŒàù[Xô\é¬àòZ[\ô\œŒà›ö[ô÷◊N¬àN¬àYà
+\ô\‹€úŸKõ⁄ HŸ]\úõ‹äô\›[ô\úõ‹àï[òXõH»⁄[ôŸHÿ[YH›]\ÀàäN¬à[ŸH¬àŸ]ÿ[Y\ 
+›\úô[ù
+HOÇà›\úô[ùõX\
+
+\›Yÿ[YJHOÇà\›Yÿ[YKöYOOHÿ[YRY»»ããõ\›Yÿ[YK›]\»Hà\›Yÿ[YKà
+Kà
+N¬à€€ú›õ›YöXÿ][€àH»òÿ[òŸ[YãúòZ[ôY€›]óKö[ò€Y\ ›]\ Bà»	‹ô\›[úŸ[ùHŸôöX⁄X[õ›YöXÿ][€â‹ô\›[úŸ[ùOOHH»àààú»üHŸ[ù	‹ô\›[ôòZ[Y»»	‹ô\›[ôòZ[YHòZ[YààüKòàààé¬àŸ]õ›XŸJàÿ[YH›]\»⁄[ôŸY»	Ÿÿ[YT›]\”‹[€úÀôö[ô
+
+›ò[YWJHOàò[YHOOH›]\ OÀñÃWH›]\ﬂKâ€õ›YöXÿ][€üXà
+N¬àBàYà
+»òÿ[òŸ[YãúòZ[ôY€›]óKö[ò€Y\ ›]\ JBà]ÿZ]ôYúô\⁄\‹⁄Y€õY[ù›]J
+N¬àŸ]ÿ[YT›]\‘ÿ]ö[ô àäN¬àBà\ﬁ[ò»ù[ò›[€àXõ\⁄\‹⁄Y€õY[ù 
+H¬àYà
+Yÿ[YH[úXõ\⁄Y€›[ùOOH
+Hô]\õé¬àŸ]⁄›‘Xõ\⁄ô]öY] ò[ŸJN¬àŸ]Xõ\⁄[ô ùYJN¬àŸ]\úõ‹äàäN¬àŸ]õ›XŸJàäN¬àûH¬à€€ú›ô\‹€úŸHH]ÿZ]ô]⁄
+àÿ\Kÿ\‹⁄Y€õY[ùÀ‹Xõ\⁄€‹ôÿ[ö^ò][€íYIŸ[ò€ŸUTíP€€\€ô[ù
+‹ôÿ[ö^ò][€íYàä_Xà¬àY]Ÿàî‘’ãàXY\úŒà»ê€€ù[ùU\Héàò\Xÿ][€ã⁄ú€€ààKàõŸNàî””ãú›ö[ô⁄YûJ»ÿ[YRYàÿ[YKöYJKàKà
+N¬à€€ú›ô\›[H
+]ÿZ]ô\‹€úŸKöú€€ä
+JH\»¬àŸ[ùŒàù[Xô\é¬àòZ[YŒàù[Xô\é¬àòZ[\ô\œŒà›ö[ô÷◊N¬à\úõ‹èŒà›ö[ôŒ¬àN¬àYà
+\ô\‹€úŸKõ⁄ Bàõ›»ô]»\úõ‹äô\›[ô\úõ‹àï[òXõH»Xõ\⁄\‹⁄Y€õY[ùÀàäN¬àYà
+ô\›[ôòZ[Y
+BàŸ]\úõ‹äà	‹ô\›[úŸ[ùH\‹⁄Y€õY[ù[XZ[	‹ô\›[úŸ[ùOOHH»àààú»üHŸ[ùà	‹ô\›[ôòZ[YHòZ[Yà	 ô\›[ôòZ[\ô\»◊JKöõ⁄[äé»ä_Xà
+N¬à[ŸBàŸ]õ›XŸJà	‹ô\›[úŸ[ùH\‹⁄Y€õY[ù[XZ[	‹ô\›[úŸ[ùOOHH»àààú»üHŸ[ù›XÿŸ\‹Ÿù[Kòà
+N¬àHÿ]⁄
+JH¬àŸ]\úõ‹äàH[ú›[òŸ[Ÿà\úõ‹à»KõY\‹ÿYŸHàï[òXõH»Xõ\⁄\‹⁄Y€õY[ùÀàãà
+N¬àBà]ÿZ]ôYúô\⁄\‹⁄Y€õY[ù›]J
+N¬àŸ]Xõ\⁄[ô ò[ŸJN¬àBà\ﬁ[ò»ù[ò›[€à‹[êX›]ö]U[Y[[ôJ
+H¬àYà
+Yÿ[YJHô]\õé¬àŸ]⁄›–X›]ö]U[Y[[ôJùYJN¬àŸ]X›]ö]SÿY[ô ùYJN¬àŸ]X›]ö]Q\úõ‹äàäN¬à€€ú›»]K\úõ‹éàX›]ö]SÿY\úõ‹àHH]ÿZ]›\Xò\ŸBàôúõ€Jò]Y]⁄\›‹ûHäBàúŸ[X›
+öYX›[€ãX›‹ó€ò[YK›[[X\ûKÿÿ›\úôYÿ]äBàô\Jôÿ[YW⁄Yãÿ[YKöY
+Bàõ‹ô\äõÿÿ›\úôYÿ]ã»\ÿŸ[ô[ôŒàò[ŸHJBàõ[Z]
+L
+N¬àYà
+X›]ö]SÿY\úõ‹äHŸ]X›]ö]Q\úõ‹äX›]ö]SÿY\úõ‹ãõY\‹ÿYŸJN¬à[ŸHŸ]X›]ö]Tõ›‹ 
+]H◊JH\»]Y]]ô[ù◊JN¬àŸ]X›]ö]SÿY[ô ò[ŸJN¬àBà\ﬁ[ò»ù[ò›[€àô]ûSõ›YöXÿ][€í\‹›Y\ 
+H¬àYà
+Yÿ[YHô]ûZ[ô”õ›YöXÿ][€ú Hô]\õé¬àŸ]ô]ûZ[ô”õ›YöXÿ][€ú ùYJN¬àŸ]\úõ‹äàäN¬àŸ]õ›XŸJàäN¬àûH¬à€€ú›ÿ[òŸ[][€àH»òÿ[òŸ[YãúòZ[ôY€›]óKö[ò€Y\ ÿ[YKú›]\ N¬à€€ú›ô\‹€úŸHH]ÿZ]ô]⁄
+àÿ[òŸ[][€à»ãÿ\KŸÿ[Y\À‹›]\»ààãÿ\Kÿ\‹⁄Y€õY[ùÀ‹Xõ\⁄ãà¬àY]Ÿàî‘’ãàXY\úŒà»ê€€ù[ùU\Héàò\Xÿ][€ã⁄ú€€ààKàõŸNàî””ãú›ö[ô⁄YûJàÿ[òŸ[][€Çà»»ÿ[YRYàÿ[YKöY›]\Œàÿ[YKú›]\»Bàà»ÿ[YRYàÿ[YKöYKà
+KàKà
+N¬à€€ú›ô\›[H
+]ÿZ]ô\‹€úŸKöú€€ä
+Kòÿ]⁄
+
+
+HOà
+ﬂJJJH\»¬à\úõ‹èŒà›ö[ôŒ¬àŸ[ùŒàù[Xô\é¬àòZ[YŒàù[Xô\é¬àòZ[\ô\œŒà›ö[ô÷◊N¬àN¬àYà
+\ô\‹€úŸKõ⁄ Bàõ›»ô]»\úõ‹äô\›[ô\úõ‹àìõ›YöXÿ][€ú»€›[õ›ôHô]öYYàäN¬àYà
+ô\›[ôòZ[Y
+BàŸ]\úõ‹äà	‹ô\›[úŸ[ùHõ›YöXÿ][€â‹ô\›[úŸ[ùOOHH»àààú»üHŸ[ù»	‹ô\›[ôòZ[YH›[òZ[Yà	 ô\›[ôòZ[\ô\»◊JKöõ⁄[äé»ä_Xà
+N¬à[ŸBàŸ]õ›XŸJà	‹ô\›[úŸ[ùHõ›YöXÿ][€â‹ô\›[úŸ[ùOOHH»àààú»üHŸ[ù›XÿŸ\‹Ÿù[Kòà
+N¬à]ÿZ]ôYúô\⁄\‹⁄Y€õY[ù›]J
+N¬àHÿ]⁄
+ô]ûQ\úõ‹äH¬àŸ]\úõ‹äàô]ûQ\úõ‹à[ú›[òŸ[Ÿà\úõ‹Çà»ô]ûQ\úõ‹ãõY\‹ÿYŸBààìõ›YöXÿ][€ú»€›[õ›ôHô]öYYàãà
+N¬àBàŸ]ô]ûZ[ô”õ›YöXÿ][€ú ò[ŸJN¬àBàù[ò›[€à\‹⁄Y€õY[ù›]\ Nà\‹⁄Y€õY[ù
+H¬àYà
+Kú›]\»OOHòXÿŸ\YàKú›]\»OOHò€€ôö\õYYäBàô]\õà»Xô[àêXÿŸ\Yã€\‹”ò[YNàòòYŸH‹ôY[ààN¬àYà
+Kú›]\»OOHôX€[ôYäBàô]\õà»Xô[àëX€[ôYã€\‹”ò[YNàòòYŸHôYàN¬àYà
+KúXõ\⁄Yÿ]
+Bàô]\õà»Xô[àï[ô\àô]öY]»ã€\‹”ò[YNàòòYŸHY[›»àN¬àô]\õà»Xô[àìõ›Xõ\⁄Yã€\‹”ò[YNàòòYŸHõYHàN¬àBàù[ò›[€àõ‹õX]XY[ôJò[YNà›ö[ô»ù[
+H¬àô]\õàò[YH»ô]»]Jò[YJKù”ÿÿ[T›ö[ô 
+Hààé¬àBà\ﬁ[ò»ù[ò›[€à^‹ù\‹⁄Y€õY[ù ÿ[YRYœŒà›ö[ô÷◊JH¬à€€ú›÷H]ÿZ][\‹ù
+ûﬁäN¬à€€ú›^‹ùÿ[Y\»Hÿ[YRYœÀõ[ô›à»ö[\ôYÿ[Y\Àôö[\ä
+\›Yÿ[YJHOàÿ[YRYÀö[ò€Y\ \›Yÿ[YKöY
+JBààö[\ôYÿ[Y\Œ¬à€€ú›‹⁄][€ìò[Y\Œà›ö[ô÷◊HH◊N¬àõ‹à
+€€ú›»Ÿà^‹ùÿ[Y\ H¬à€€ú›‹H‹⁄][€ú¬àôö[\ä
+
+HOàú‹‹ù⁄YOOHÀú‹‹ù⁄Y
+Bàú€‹ù
+
+KäHOàKú€‹ù€‹ô\àHãú€‹ù€‹ô\äBàú€XŸJX]õX^
+ÀõŸôöX⁄X[◊€ôYYY
+JN¬àõ‹à
+€€ú›‹»Ÿà‹
+BàYà
+\‹⁄][€ìò[Y\Àö[ò€Y\ ‹Àõò[YJJH‹⁄][€ìò[Y\Àú\⁄
+‹Àõò[YJN¬àBà€€ú›]HH^‹ùÿ[Y\ÀõX\
+
+ HOà¬à€€ú›Hô]»]JÀú›\ù◊ÿ]
+Kàõ›ŒàôX€‹ô›ö[ôÀ›ö[ô»ù[Xô\èàH¬àëÿ[YHù[Xô\àéàÀôÿ[YW€ù[Xô\ãà]Nàù”ÿÿ[Q]T›ö[ô 
+Kà[YNàù”ÿÿ[U[YT›ö[ô ◊K¬à›\éàõù[Y\öX»ãàZ[ù]NàåãYY⁄]ãàJKà‹‹ùàÀú‹‹ùœÀõò[YHàãàXY›YNàÀõXY›Y\œÀõò[YHàãàí€YHX[HéàÀö€YOÀõò[YHïëãàê]ÿ^HX[HéàÀò]ÿ^OÀõò[YHïëãàÿÿ][€éàÀõÿÿ][€èÀõò[YHïëãà›Ÿ\éàù[Xô\äÿ[YT›Ÿ\ä Kù—ö^Y
+JJKàN¬àõ‹à
+€€ú›ò[YHŸà‹⁄][€ìò[Y\ H¬àõ›÷ÿ	€ò[Y_HŸôöX⁄X[HHàé¬àõ›÷ÿ	€ò[Y_H[XZ[HHàé¬àõ›÷ÿ	€ò[Y_H€ôXHHàé¬àõ›÷ÿ	€ò[Y_H›]\ÿHHàé¬àõ›÷ÿ	€ò[Y_HXõ\⁄YHHàé¬àõ›÷ÿ	€ò[Y_HXÿŸ\ûXHHàé¬àBà€€ú›‹H‹⁄][€ú¬àôö[\ä
+
+HOàú‹‹ù⁄YOOHÀú‹‹ù⁄Y
+Bàú€‹ù
+
+KäHOàKú€‹ù€‹ô\àHãú€‹ù€‹ô\äBàú€XŸJX]õX^
+ÀõŸôöX⁄X[◊€ôYYY
+JN¬àõ‹à
+€€ú›‹»Ÿà‹
+H¬à€€ú›HH\‹⁄Y€õY[ùÀôö[ô
+à
+
+HOÇàôÿ[YW⁄YOOHÀöY	âÇàú‹⁄][€ó⁄YOOH‹ÀöY	âÇàú›]\»OOHôX€[ôYãà
+Kà»HH»ŸôöX⁄X[Àôö[ô
+
+
+HOàöYOOHKõŸôöX⁄X[⁄Y
+Hà[ôYö[ôY¬àõ›÷ÿ	‹‹Àõò[Y_HŸôöX⁄X[HH¬à»	€Àôö\ú›€ò[Y_H	€Àõ\›€ò[Y_XààïSêT‘“Q”ëQé¬àõ›÷ÿ	‹‹Àõò[Y_H[XZ[HHœÀô[XZ[àé¬àõ›÷ÿ	‹‹Àõò[Y_H€ôXHHœÀú€ôHàé¬àõ›÷ÿ	‹‹Àõò[Y_H›]\ÿHHBà»\‹⁄Y€õY[ù›]\ JKõXô[ààï[ò\‹⁄Y€ôYé¬àõ›÷ÿ	‹‹Àõò[Y_HXõ\⁄YHHOÀúXõ\⁄Yÿ]»ñY\»ààìõ»é¬àõ›÷ÿ	‹‹Àõò[Y_HXÿŸ\ûXHHOÀòXÿŸ\ÿûBà»ô]»]JKòXÿŸ\ÿûJKù”ÿÿ[T›ö[ô 
+Bàààé¬àBàô]\õàõ›Œ¬àJN¬à€€ú›‹»H÷ù][Àöú€€ó›◊‹⁄Y]
+]JKàÿàH÷ù][Àòõ€⁄◊€ô] 
+N¬à÷ù][Àòõ€⁄◊ÿ\[ô‹⁄Y]
+ÿã‹Àê\‹⁄Y€õY[ù»äN¬à÷ù‹ö]Qö[JÿãúôYò\‹⁄Y€ãYÿ[YKX\‹⁄Y€õY[ùÀûﬁäN¬àBà\ﬁ[ò»ù[ò›[€àù[êù[–X›[€äàX›[€éàúXõ\⁄àò€€ôö\õHàù[ò\‹⁄Y€ààú›]\»àò€‹ŸTŸ[ê\‹⁄Y€àãà
+H¬àYà
+Xÿ[ìX[òYŸH[[ö‘Ÿ[X›Yõ[ô›ù[’€‹ö⁄[ô Hô]\õé¬à€€ú›Ÿ[X›YY»HÀããõ[ö‘Ÿ[X›YN¬à€€ú›Ÿ[X›Y\‹⁄Y€õY[ù»H\‹⁄Y€õY[ùÀôö[\äà
+JHOàŸ[X›YYÀö[ò€Y\ Kôÿ[YW⁄Y
+H	âàKú›]\»OOHôX€[ôYãà
+N¬à€€ú›Xô[»H¬àXõ\⁄àúXõ\⁄\‹⁄Y€õY[ù»õ‹àãà€€ôö\õNàò€€ôö\õHŸôöX⁄X[»€àãà[ò\‹⁄Y€éàù[ò\‹⁄Y€à]ô\ûHŸôöX⁄X[úõ€Hãà€‹ŸTŸ[ê\‹⁄Y€éàò€‹ŸH]ô\ûH‹[àŸ[à\‹⁄Y€à‹⁄][€àõ‹àãà›]\Œà⁄[ôŸHH›]\»»	Ÿÿ[YT›]\”‹[€úÀôö[ô
+
+›ò[YWJHOàò[YHOOHù[‘›]\ OÀñÃWHù[‘›]\ﬂHõ‹òàN¬à€€ú›ŸôöX⁄X[õ›YöXÿ][€ïÿ\õö[ô»BàX›[€àOOHú›]\»à	âà»òÿ[òŸ[YãúòZ[ôY€›]óKö[ò€Y\ ù[‘›]\ Bà»óóê\‹⁄Y€ôYŸôöX⁄X[»⁄[ôHõ›YöYYŸà\»⁄[ôŸKàÇàààé¬àYà
+à]⁄[ô›Àò€€ôö\õJà	€Xô[÷ÿX›[€ó_H	‹Ÿ[X›YYÀõ[ô›HŸ[X›Yÿ[YI‹Ÿ[X›YYÀõ[ô›OOHH»àààú»üO…€ŸôöX⁄X[õ›YöXÿ][€ïÿ\õö[ôﬂXà
+Bà
+Bàô]\õé¬àŸ]ù[’€‹ö⁄[ô ùYJN¬àŸ]ù[‘ô\›[
+ù[
+N¬àŸ]\úõ‹äàäN¬àŸ]õ›XŸJàäN¬à]›XÿŸYYYH¬à€€ú›òZ[\ô\Œà›ö[ô÷◊HH◊N¬à€€ú›[ô”‹\ò][€íYŒà›ö[ô÷◊HH◊N¬àûH¬àYà
+X›[€àOOHù[ò\‹⁄Y€àäH¬à€€ú›»\úõ‹éà[]Q\úõ‹àHH]ÿZ]›\Xò\ŸBàôúõ€Jò\‹⁄Y€õY[ù»äBàô[]J
+Bàö[äôÿ[YW⁄YãŸ[X›YY N¬àYà
+[]Q\úõ‹äHòZ[\ô\Àú\⁄
+[]Q\úõ‹ãõY\‹ÿYŸJN¬à[ŸH¬à›XÿŸYYYHŸ[X›Y\‹⁄Y€õY[ùÀõ[ô›¬à€€ú›»]Nà[ô‘õ›‹»HH]ÿZ]›\Xò\ŸKúú àõ]\››[ô◊€‹\ò][€àãà
+N¬à€€ú›[ô“YH
+[ô‘õ›‹»\»»Yà›ö[ô»V◊Hù[
+OÀñÃOÀöY¬àYà
+[ô“Y
+H[ô”‹\ò][€íYÀú\⁄
+[ô“Y
+N¬àBàH[ŸHYà
+X›[€àOOHò€‹ŸTŸ[ê\‹⁄Y€àäH¬à€€ú›‹[î€›»HŸ[ê\‹⁄Y€î€›Àôö[\ä
+€›
+HOÇàŸ[X›YYÀö[ò€Y\ €›ôÿ[YW⁄Y
+Kà
+N¬àõ‹à
+€€ú›€›Ÿà‹[î€› H¬à€€ú›»\úõ‹éà€‹ŸQ\úõ‹àHH]ÿZ]›\Xò\ŸKúú àù⁄]ò]◊‹Ÿ[óÿ\‹⁄Y€ó‹‹⁄][€àãà¬àŸÿ[YW⁄Yà€›ôÿ[YW⁄Yà‹‹⁄][€ó⁄Yà€›ú‹⁄][€ó⁄YàKà
+N¬àYà
+€‹ŸQ\úõ‹äHòZ[\ô\Àú\⁄
+€‹ŸQ\úõ‹ãõY\‹ÿYŸJN¬à[ŸH›XÿŸYYY
+ Œ¬àBàH[ŸHYà
+X›[€àOOHú›]\»äH¬àõ‹à
+€€ú›ÿ[YRYŸàŸ[X›YY H¬à€€ú›ô\‹€úŸHH]ÿZ]ô]⁄
+àÿ\KŸÿ[Y\À‹›]\œ€‹ôÿ[ö^ò][€íYIŸ[ò€ŸUTíP€€\€ô[ù
+‹ôÿ[ö^ò][€íYàä_Xà¬àY]Ÿàî‘’ãàXY\úŒà»ê€€ù[ùU\Héàò\Xÿ][€ã⁄ú€€ààKàõŸNàî””ãú›ö[ô⁄YûJ»ÿ[YRY›]\Œàù[‘›]\»JKàKà
+N¬à€€ú›õŸHH
+]ÿZ]ô\‹€úŸKöú€€ä
+Kòÿ]⁄
+
+
+HOà
+ﬂJJJH\»¬à\úõ‹èŒà›ö[ôŒ¬àN¬àYà
+ô\‹€úŸKõ⁄ H¬à›XÿŸYYY
+ Œ¬à€€ú›»]Nà[ô‘õ›‹»HH]ÿZ]›\Xò\ŸKúú àõ]\››[ô◊€‹\ò][€àãà
+N¬à€€ú›[ô“YH
+[ô‘õ›‹»\»»Yà›ö[ô»V◊Hù[
+OÀñÃOÀöY¬àYà
+[ô“Y	âà][ô”‹\ò][€íYÀö[ò€Y\ [ô“Y
+JBà[ô”‹\ò][€íYÀú\⁄
+[ô“Y
+N¬àH[ŸHòZ[\ô\Àú\⁄
+õŸKô\úõ‹à€›[õ›\]Hÿ[YH	Ÿÿ[YRYX
+N¬àBàH[ŸHYà
+X›[€àOOHúXõ\⁄äH¬àõ‹à
+€€ú›ÿ[YRYŸàŸ[X›YY H¬à€€ú›ô\‹€úŸHH]ÿZ]ô]⁄
+àÿ\Kÿ\‹⁄Y€õY[ùÀ‹Xõ\⁄€‹ôÿ[ö^ò][€íYIŸ[ò€ŸUTíP€€\€ô[ù
+‹ôÿ[ö^ò][€íYàä_Xà¬àY]Ÿàî‘’ãàXY\úŒà»ê€€ù[ùU\Héàò\Xÿ][€ã⁄ú€€ààKàõŸNàî””ãú›ö[ô⁄YûJ»ÿ[YRYJKàKà
+N¬à€€ú›õŸHH
+]ÿZ]ô\‹€úŸKöú€€ä
+Kòÿ]⁄
+
+
+HOà
+ﬂJJJH\»¬à\úõ‹èŒà›ö[ôŒ¬àòZ[YŒàù[Xô\é¬àòZ[\ô\œŒà›ö[ô÷◊N¬àN¬àYà
+ô\‹€úŸKõ⁄ H¬à›XÿŸYYY
+ Œ¬àYà
+õŸKôòZ[Y
+HòZ[\ô\Àú\⁄
+ããäõŸKôòZ[\ô\»◊JJN¬àH[ŸBàòZ[\ô\Àú\⁄
+õŸKô\úõ‹à€›[õ›Xõ\⁄ÿ[YH	Ÿÿ[YRYX
+N¬àBàH[ŸHYà
+X›[€àOOHò€€ôö\õHäH¬à€€ú›[Y⁄XõHHŸ[X›Y\‹⁄Y€õY[ùÀôö[\äà
+JHOàKúXõ\⁄Yÿ]	âàKú›]\»OOHò€€ôö\õYYãà
+N¬àõ‹à
+€€ú›HŸà[Y⁄XõJH¬à€€ú›ô\‹€úŸHH]ÿZ]ô]⁄
+àÿ\Kÿ\‹⁄Y€õY[ùÀÿ€€ôö\õO€‹ôÿ[ö^ò][€íYIŸ[ò€ŸUTíP€€\€ô[ù
+‹ôÿ[ö^ò][€íYàä_Xà¬àY]Ÿàî‘’ãàXY\úŒà»ê€€ù[ùU\Héàò\Xÿ][€ã⁄ú€€ààKàõŸNàî””ãú›ö[ô⁄YûJ»\‹⁄Y€õY[ùYàKöYJKàKà
+N¬à€€ú›õŸHH
+]ÿZ]ô\‹€úŸKöú€€ä
+Kòÿ]⁄
+
+
+HOà
+ﬂJJJH\»¬à\úõ‹èŒà›ö[ôŒ¬àN¬àYà
+ô\‹€úŸKõ⁄ H›XÿŸYYY
+ Œ¬à[ŸBàòZ[\ô\Àú\⁄
+õŸKô\úõ‹à€›[õ›€€ôö\õH\‹⁄Y€õY[ù	ÿKöYX
+N¬àBàBàYà
+òZ[\ô\Àõ[ô›
+BàŸ]\úõ‹äàù[»X›[€à€€\]Y⁄]	ŸòZ[\ô\Àõ[ô›H\‹›YIŸòZ[\ô\Àõ[ô›OOHH»àààú»üNà	ŸòZ[\ô\Àú€XŸJ
+Köõ⁄[äàä_IŸòZ[\ô\Àõ[ô›à»à8†)ààààüXà
+N¬àŸ]õ›XŸJàù[»X›[€à€€\]Nà	‹›XÿŸYYYH	ÿX›[€àOOHú›]\»à»ôÿ[YHààX›[€àOOHò€€ôö\õHàX›[€àOOHù[ò\‹⁄Y€àà»ò\‹⁄Y€õY[ùààôÿ[YHüI‹›XÿŸYYYOOHH»àààú»üHõÿŸ\‹ŸYòà
+N¬àŸ]ù[‘ô\›[
+¬àX›[€éàXô[÷ÿX›[€óKà›XÿŸYYYàòZ[\ô\ŒàÀããôòZ[\ô\◊KàJN¬àYà
+›XÿŸYYY	âà
+X›[€àOOHú›]\»àX›[€àOOHù[ò\‹⁄Y€àäJH¬à]ÿZ]›\Xò\ŸKúú ô‹õ›\›[ô◊€‹\ò][€ú»ã¬à€‹\ò][€ó⁄YŒà[ô”‹\ò][€íYÀàŸ\ÿ‹ö\[€éÇàX›[€àOOHú›]\»Çà»êù[»ÿ[YK\›]\»⁄[ôŸHÇààêù[»[ò\‹⁄Y€õY[ùãàJN¬à[õõ›[òŸU[ô–]òZ[XõJ
+N¬àBà]ÿZ]ÿY
+
+N¬àYà
+X›[€àOOHù[ò\‹⁄Y€àäH¬àŸ][ö‘Ÿ[X›Y
+Ÿ[X›YY N¬àŸ]Ÿ[X›Y
+
+›\úô[ù
+HOÇà›\úô[ù	âàŸ[X›YYÀö[ò€Y\ ›\úô[ù
+Bà»›\úô[ùààŸ[X›YY÷ÃHàãà
+N¬àH[ŸH¬àŸ][ö‘Ÿ[X›Y
+◊JN¬àBàHÿ]⁄
+JH¬àŸ]\úõ‹äàH[ú›[òŸ[Ÿà\úõ‹à»KõY\‹ÿYŸHàï[òXõH»€€\]HHù[»X›[€ãàãà
+N¬àHö[ò[H¬àŸ]ù[’€‹ö⁄[ô ò[ŸJN¬àBàBà€€ú›ö[\úŒà‘ò[ôŸK›ö[ô◊V◊HH¬à»ò[ãê[ÿ[Y\»óKà»ùŸ^HãïŸ^I‹»ÿ[Y\»óKà»ù€[‹úõ›»ãï€[‹úõ›…‹»ÿ[Y\»óKà»ù\’ŸYZ»ãï\»ŸYZ»óKà»õô^ŸYZ»ãìô^ŸYZ»óKàN¬à€€ú›][ù[€î]Y]YHH¬àô\XŸ[Y[ùŒàò[ôŸQÿ[Y\Àôö[\ä
+\›Yÿ[YJHOÇà‹⁄][€ú¬àôö[\ä
+‹⁄][€äHOà‹⁄][€ãú‹‹ù⁄YOOH\›Yÿ[YKú‹‹ù⁄Y
+Bàú€XŸJ\›Yÿ[YKõŸôöX⁄X[◊€ôYYY
+Bàú€€YJ
+‹⁄][€äHOà\‘ô\XŸ[Y[ùôYYY
+\›Yÿ[YKöY‹⁄][€ãöY
+JKà
+Kõ[ô›àôYY–X›[€éàò[ôŸQÿ[Y\Àôö[\äà
+\›Yÿ[YJHOà\‹⁄Y€õY[ù€€\][ô\‹ \›Yÿ[YJKöŸ^HOOHò][ù[€àãà
+Kõ[ô›à[ò\‹⁄Y€ôYàò[ôŸQÿ[Y\Àôö[\äà
+\›Yÿ[YJHOà\‹⁄Y€õY[ù€€\][ô\‹ \›Yÿ[YJKöŸ^HOOHù[ò\‹⁄Y€ôYãà
+Kõ[ô›à]ÿZ][ôŒàò[ôŸQÿ[Y\Àôö[\äà
+\›Yÿ[YJHOà\‹⁄Y€õY[ù€€\][ô\‹ \›Yÿ[YJKöŸ^HOOHò]ÿZ][ô»ãà
+Kõ[ô›à[úXõ\⁄Yàò[ôŸQÿ[Y\Àôö[\ä\’[úXõ\⁄Yÿ[YJKõ[ô›àN¬à€€ú›€›ô\òYŸQõ‹ôXÿ\›H\úò^Kôúõ€J»[ô›àMK
+À[ô^
+HOà¬à€€ú›]HH›\ù^Jô]»]J
+JN¬à]KúŸ]]J]KôŸ]]J
+H
+»[ô^
+N¬à€€ú›Ÿ^HHÿÿ[]RŸ^J]JKà^Qÿ[Y\»Hÿ[Y\Àôö[\äà
+\›Yÿ[YJHOÇàÿÿ[]RŸ^Jô]»]J\›Yÿ[YKú›\ù◊ÿ]
+JHOOHŸ^H	âÇàV»òÿ[òŸ[YãúòZ[ôY€›]óKö[ò€Y\ \›Yÿ[YKú›]\ Kà
+Kà€›»H^Qÿ[Y\ÀúôYXŸJà
+›[\›Yÿ[YJHOà›[
+»\›Yÿ[YKõŸôöX⁄X[◊€ôYYYàà
+Kàö[YH^Qÿ[Y\ÀúôYXŸJ
+›[\›Yÿ[YJHOà¬à€€ú›\‹⁄Y€ôYHô]»Ÿ]
+à\‹⁄Y€õY[ù¬àôö[\äà
+\‹⁄Y€õY[ù
+HOÇà\‹⁄Y€õY[ùôÿ[YW⁄YOOH\›Yÿ[YKöY	âÇàV»ôX€[ôYãòÿ[òŸ[YóKö[ò€Y\ \‹⁄Y€õY[ùú›]\ Kà
+BàõX\
+
+\‹⁄Y€õY[ù
+HOà\‹⁄Y€õY[ùú‹⁄][€ó⁄Y
+Kà
+Kú⁄^ôN¬àô]\õà›[
+»X]õZ[ä\›Yÿ[YKõŸôöX⁄X[◊€ôYYY\‹⁄Y€ôY
+N¬àK
+Kà\òŸ[ùH€›»»X]úõ›[ô
+
+ö[Y»€› H
+àL
+HàL¬àô]\õà»]KŸ^Kÿ[Y\Œà^Qÿ[Y\Àõ[ô›€›Àö[Y\òŸ[ùN¬àJN¬àù[ò›[€à⁄‹ù‹⁄][€ìò[YJò[YNà›ö[ô H¬à€€ú›õ‹õX[^ôYHò[YBàùö[J
+Bàù”›Ÿ\êÿ\ŸJ
+Bàúô\XŸJ÷◊òK^åNWKŸÀàäN¬àYà
+»ò\‹⁄\›[ùôYô\ôYLHãò\‹⁄\›[ùHãò\åHóKö[ò€Y\ õ‹õX[^ôY
+JBàô]\õàêTåHé¬àYà
+à»ò\‹⁄\›[ùôYô\ôYLàãò\‹⁄\›[ùàãò\‹⁄\›[ùôYô\ôYHãò\åàóKö[ò€Y\ àõ‹õX[^ôYà
+Bà
+Bàô]\õàêTåàé¬àYà
+à»òŸ[ù\úôYô\ôYHãòŸ[ù\àãúôYô\ôYHãò‹àãúôYàóKö[ò€Y\ õ‹õX[^ôY
+Bà
+Bàô]\õàîëQàé¬àô]\õàò[YN¬àBà€€ú››ô\ôYQ‹õ›\»H\úò^Kôúõ€Jà\‹⁄Y€õY[ù¬àôö[\ä
+\‹⁄Y€õY[ù
+HOà¬à€€ú››ô\ôYQÿ[YHHÿ[Y\Àôö[ô
+à
+\›Yÿ[YJHOà\›Yÿ[YKöYOOH\‹⁄Y€õY[ùôÿ[YW⁄Yà
+N¬àô]\õàõ€€X[äà›ô\ôYQÿ[YH	âÇà\‹⁄Y€õY[ùú›]\»OOHúõ‹‹ŸYà	âÇà\‹⁄Y€õY[ùúXõ\⁄Yÿ]	âÇà\‹⁄Y€õY[ùòXÿŸ\ÿûH	âÇàô]»]J\‹⁄Y€õY[ùòXÿŸ\ÿûJKôŸ][YJ
+H]Kõõ› 
+H	âÇàX\‹⁄Y€õY[ùõ›ô\ôYW‹ô]öY]ŸYÿ]	âÇàô]»]J›ô\ôYQÿ[YKú›\ù◊ÿ]
+KôŸ][YJ
+Hà]Kõõ› 
+H	âÇàV»òÿ[òŸ[YãúòZ[ôY€›]óKö[ò€Y\ ›ô\ôYQÿ[YKú›]\ Kà
+N¬àJBàúôYXŸJ
+‹õ›\À\‹⁄Y€õY[ù
+HOà¬à€€ú›‹õ›\H‹õ›\ÀôŸ]
+\‹⁄Y€õY[ùõŸôöX⁄X[⁄Y
+H◊N¬à‹õ›\ú\⁄
+\‹⁄Y€õY[ù
+N¬à‹õ›\ÀúŸ]
+\‹⁄Y€õY[ùõŸôöX⁄X[⁄Y‹õ›\
+N¬àô]\õà‹õ›\Œ¬àKô]»X\›ö[ôÀ\‹⁄Y€õY[ù◊Oä
+JKà
+Kú€‹ù
+
+KäHOà¬à€€ú›QXY[ôHHX]õZ[äàããòVÃWKõX\
+
+\‹⁄Y€õY[ù
+HOàô]»]J\‹⁄Y€õY[ùòXÿŸ\ÿûHJKôŸ][YJ
+JKà
+N¬à€€ú›ëXY[ôHHX]õZ[äàããòñÃWKõX\
+
+\‹⁄Y€õY[ù
+HOàô]»]J\‹⁄Y€õY[ùòXÿŸ\ÿûHJKôŸ][YJ
+JKà
+N¬àô]\õàQXY[ôHHëXY[ôN¬àJN¬à€€ú››ô\ôYQ‹õ›\H›ô\ôYQ‹õ›\÷ÃHù[¬à€€ú››ô\ôYQ‹õ›\\‹⁄Y€õY[ùY»H›ô\ôYQ‹õ›\à»›ô\ôYQ‹õ›\ÃWKõX\
+
+\‹⁄Y€õY[ù
+HOà\‹⁄Y€õY[ùöY
+Bàà◊N¬à€€ú››ô\ôYQ‹õ›\Ÿ[X›[€íŸ^HH›ô\ôYQ‹õ›\\‹⁄Y€õY[ùYÀöõ⁄[äãäN¬à\ŸQYôôX›
+
+
+HOà¬àŸ]›ô\ôYTŸ[X›Y
+à›ô\ôYQ‹õ›\Ÿ[X›[€íŸ^H»›ô\ôYQ‹õ›\Ÿ[X›[€íŸ^Kú‹]
+ãäHà◊Kà
+N¬àK€›ô\ôYQ‹õ›\Ÿ[X›[€íŸ^WJN¬àù[ò›[€àŸŸ€S›ô\ôYTŸ[X›[€ä\‹⁄Y€õY[ùYà›ö[ô H¬àŸ]›ô\ôYTŸ[X›Y
+
+›\úô[ù
+HOÇà›\úô[ùö[ò€Y\ \‹⁄Y€õY[ùY
+Bà»›\úô[ùôö[\ä
+Y
+HOàYOOH\‹⁄Y€õY[ùY
+BààÀããò›\úô[ù\‹⁄Y€õY[ùYKà
+N¬àBà\ﬁ[ò»ù[ò›[€àô\€€ôS›ô\ôYJàX›[€éàöŸY\àúô[[›ôHàúô[[›ôWÿ[ôÿõÿ⁄»ãà
+H¬àYà
+[›ô\ôYQ‹õ›\›ô\ôYTŸ[X›Yõ[ô›OOH
+Hô]\õé¬àŸ]›ô\ôYTô\€€ö[ô ùYJN¬àŸ]\úõ‹äàäN¬àŸ]õ›XŸJàäN¬à€€ú›»]K\úõ‹éàô\€€ôQ\úõ‹àHH]ÿZ]›\Xò\ŸKúú àúô\€€ôW€›ô\ôYWÿ\‹⁄Y€õY[ù»ãà¬àÿ\‹⁄Y€õY[ù⁄YŒà›ô\ôYTŸ[X›YàÿX›[€éàX›[€ãàKà
+N¬àYà
+ô\€€ôQ\úõ‹äHŸ]\úõ‹äô\€€ôQ\úõ‹ãõY\‹ÿYŸJN¬à[ŸH¬à€€ú›ô\›[H]H\»¬à\‹⁄Y€õY[ù◊‹ô\€€ôYŒàù[Xô\é¬àõÿ⁄‹◊ÿ‹ôX]YŒàù[Xô\é¬àHù[¬à€€ú›ŸôöX⁄X[HŸôöX⁄X[Àôö[ô
+
+][JHOà][KöYOOH›ô\ôYQ‹õ›\ÃJN¬à€€ú›ò[YHHŸôöX⁄X[à»	€ŸôöX⁄X[ôö\ú›€ò[Y_H	€ŸôöX⁄X[õ\›€ò[Y_XààìŸôöX⁄X[é¬àŸ]õ›XŸJàX›[€àOOHöŸY\Çà»	€ò[Y_Hÿ\»Ÿ\€à	‹ô\›[Àò\‹⁄Y€õY[ù◊‹ô\€€ôY›ô\ôYTŸ[X›Yõ[ô›HŸ[X›Y›ô\ôYHÿ[YH\‹⁄Y€õY[ù
+ Kòàà	€ò[Y_Hÿ\»ô[[›ôYúõ€H	‹ô\›[Àò\‹⁄Y€õY[ù◊‹ô\€€ôY›ô\ôYTŸ[X›Yõ[ô›HŸ[X›Y[òXÿŸ\Yÿ[YJ IÿX›[€àOOHúô[[›ôWÿ[ôÿõÿ⁄»à»[ô	‹ô\›[Àòõÿ⁄‹◊ÿ‹ôX]YH[YHõÿ⁄  HŸ\ôH‹ôX]Yàà⁄]›]‹ôX][ô»õÿ⁄‹»üKòà
+N¬àŸ]›ô\ôYTõ€\€‹ŸY
+ò[ŸJN¬à]ÿZ]ÿY
+
+N¬àYà
+X›[€àOOHöŸY\äH[õõ›[òŸU[ô–]òZ[XõJ
+N¬àBàŸ]›ô\ôYTô\€€ö[ô ò[ŸJN¬àBàù[ò›[€àô[ô\ì[ÿö[R[õ[ôP\‹⁄Y€õY[ù
+
+H¬àYà
+Yÿ[YJHô]\õàù[¬àô]\õà
+àŸX›[€Çà€\‹”ò[YOHòÿ\ô\‹⁄Y€õY[ùXZ[à[ÿö[R[õ[ôP\‹⁄Y€õY[ùÇà\öXK[Xô[^ÿ\‹⁄Y€õY[ù»õ‹àÿ[YH	Ÿÿ[YKôÿ[YW€ù[Xô\üXBàÇà]à€\‹”ò[YOHõ[ÿö[R[õ[ôP\‹⁄Y€õY[ùXYèÇà]èÇàèÇàŸÿ[YKö€YOÀõò[YHïëüHú»Ÿÿ[YKò]ÿ^OÀõò[YHïëüBà⁄èÇàÇàÿ[YHﬁŸÿ[YKôÿ[YW€ù[Xô\üH8†(û»àüBà€ô]»]Jÿ[YKú›\ù◊ÿ]
+Kù”ÿÿ[T›ö[ô 
+_Bà‹ÇàŸ]èÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHÇà€ê€X⁄œ^ 
+HOàŸ]Ÿ[X›Y
+àä_Bà\öXK[Xô[Hê€‹ŸHÿ[YH\‹⁄Y€õY[ù»ÇàÇà€‹ŸBàÿù]€èÇàŸ]èÇà]à€\‹”ò[YOHõ[ÿö[R[õ[ôT›[[X\ûHèÇà‹[èÇàèÇàÿX›]ôP\‹⁄Y€õY[ù€›[ùKﬁŸÿ[YKõŸôöX⁄X[◊€ôYYYBàÿèû»àüBàö[Yà‹‹[èÇà‹[èÇàèû€‹[î‹⁄][€ê€›[ùOÿèà‹[Çà‹‹[èÇà‹[èÇàèÇà¬àÿ[YP\‹⁄Y€õY[ùÀôö[\äà
+][JHOà][Kú›]\»OOHúõ‹‹ŸYà	âà][KúXõ\⁄Yÿ]à
+Kõ[ô›àBàÿèû»àüBà]ÿZ][ô¬à‹‹[èÇà‹[èÇàèÇà¬àÿ[YP\‹⁄Y€õY[ùÀôö[\ä
+][JHOÇà»òXÿŸ\Yãò€€ôö\õYYóKö[ò€Y\ ][Kú›]\ Kà
+Kõ[ô›àBàÿèû»àüBà€€ôö\õYYà‹‹[èÇàŸ]èÇà]Çà€\‹”ò[YOHú‹⁄][€ëõÿ›\’ŸŸ€HÇàõ€OHô‹õ›\Çà\öXK[Xô[Hî‹⁄][€ú»⁄›€àÇàÇàù]€Çà\OHòù]€àÇà€\‹”ò[YO^»[ôYY–\‹⁄Y€õY[ù€õH»òX›]ôHàààüBà€ê€X⁄œ^ 
+HOÇàŸ]ôYY–\‹⁄Y€õY[ùöY] 
+›\úô[ù
+HOà
+¬àããò›\úô[ùàŸÿ[YKöYNàò[ŸKàJJBàBàÇà[‹⁄][€ú¬àÿù]€èÇàù]€Çà\OHòù]€àÇà€\‹”ò[YO^€ôYY–\‹⁄Y€õY[ù€õH»òX›]ôHàààüBà€ê€X⁄œ^ 
+HOÇàŸ]ôYY–\‹⁄Y€õY[ùöY] 
+›\úô[ù
+HOà
+¬àããò›\úô[ùàŸÿ[YKöYNàùYKàJJBàBàÇàôYY»\‹⁄Y€õY[ù
+€‹[î‹⁄][€ê€›[ùJBàÿù]€èÇàŸ]èÇà]à€\‹”ò[YOHõ[ÿö[R[õ[ôT‹⁄][€ú»èÇà›ö\⁄XõQÿ[YT‹⁄][€úÀõX\
+
+‹ HOà¬à€€ú›[ô^Hÿ[YT‹⁄][€úÀôö[ô[ô^
+à
+‹⁄][€äHOà‹⁄][€ãöYOOH‹ÀöYà
+N¬à€€ú››\úô[ùH\‹⁄Y€õY[ùÀôö[ô
+à
+\‹⁄Y€õY[ù
+HOÇà\‹⁄Y€õY[ùôÿ[YW⁄YOOHÿ[YKöY	âÇà\‹⁄Y€õY[ùú‹⁄][€ó⁄YOOH‹ÀöY	âÇà\‹⁄Y€õY[ùú›]\»OOHôX€[ôYãà
+N¬à€€ú››]\»H›\úô[ù»\‹⁄Y€õY[ù›]\ ›\úô[ù
+Hàù[¬à€€ú›ô\XŸ[Y[ùôYYYH\‘ô\XŸ[Y[ùôYYY
+ÿ[YKöY‹ÀöY
+N¬à€€ú›[Y⁄XõP€›[ùHÿ[ôY]\ ‹ Kôö[\äà
+ÿ[ôY]JHOàÿ[ôY]KúôX\€€úÀõ[ô›OOHà
+Kõ[ô›¬à€€ú›ŸôöX⁄X[H›\úô[ùà»ŸôöX⁄X[Àôö[ô
+
+][JHOà][KöYOOH›\úô[ùõŸôöX⁄X[⁄Y
+Bààù[¬àô]\õà
+à\ùX€BàŸ^O^‹‹ÀöYBà€\‹”ò[YO^¬àô\XŸ[Y[ùôYYY	âàX›\úô[ù»õôYY‘ô\XŸ[Y[ùàààÇàBàÇà]à€\‹”ò[YOHõ[ÿö[R[õ[ôT‹⁄][€ï‹èÇà‹[èÇàèû‹⁄‹ù‹⁄][€ìò[YJ‹Àõò[YJ_OÿèÇà€X[Çà‹⁄][€à⁄[ô^
+»_HŸàŸÿ[YKõŸôöX⁄X[◊€ôYYYBà‹€X[Çà‹‹[èÇà‹›]\»»
+à‹[à€\‹”ò[YO^‹›]\Àò€\‹”ò[Y_Oû‹›]\ÀõXô[O‹‹[èÇà
+Hàô\XŸ[Y[ùôYYY»
+à‹[à€\‹”ò[YOHòòYŸHôYèîô\XŸ[Y[ùôYYY‹‹[èÇà
+Hà
+à‹[à€\‹”ò[YOHòòYŸH‹ò^Hèì‹[è‹‹[èÇà
+_BàŸ]èÇà]à€\‹”ò[YOHõ[ÿö[R[õ[ôSŸôöX⁄X[èÇà‹[èÇà€X[ì—ëíP“PS‹€X[ÇàèÇà€ŸôöX⁄X[à»	€ŸôöX⁄X[ôö\ú›€ò[Y_H	€ŸôöX⁄X[õ\›€ò[Y_Xààï[ò\‹⁄Y€ôYüBàÿèÇà‹‹[èÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúö[X\ûHÿ[ôY]T[ô[ù]€àÇà\ÿXõY^‹ÿ]ö[ô»OOH‹ÀöYBà€ê€X⁄œ^ 
+HOàŸ]ÿ[ôY]T‹⁄][€íY
+‹ÀöY
+_BàÇàÿ›\úô[ùà»ê⁄[ôŸHŸôöX⁄X[Çààô\XŸ[Y[ùôYYYà»ëö[ôô\XŸ[Y[ùÇààê\‹⁄Y€àŸôöX⁄X[üBà€X[ûŸ[Y⁄XõP€›[ùH[Y⁄XõO‹€X[Çàÿù]€èÇàŸ]èÇàÿ›\úô[ù	âàÿ[ìX[òYŸH	âà
+à]à€\‹”ò[YOHõ[ÿö[R[õ[ôPX›[€ú»èÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHÇà\ÿXõY^‹ÿ]ö[ô»OOH‹ÀöYBà€ê€X⁄œ^ 
+HOàõ⁄Y[ò\‹⁄Y€ä›\úô[ùöY‹ÀöY
+_BàÇà[ò\‹⁄Y€Çàÿù]€èÇàÿ›\úô[ùúXõ\⁄Yÿ]	âà›\úô[ùú›]\»OOHò€€ôö\õYYà	âà
+àù]€Çà\OHòù]€àÇà€\‹”ò[YOHò€€ôö\õPù]€àÇà\ÿXõY^ÿ€€ôö\õZ[ô»OOH›\úô[ùöYBà€ê€X⁄œ^ 
+HOàõ⁄Y€€ôö\õP\‹⁄Y€õY[ù
+›\úô[ù
+_BàÇàÿ€€ôö\õZ[ô»OOH›\úô[ùöYà»ê€€ôö\õZ[ô¯†)àÇààê€€ôö\õHŸôöX⁄X[üBàÿù]€èÇà
+_BàŸ]èÇà
+_Bàÿ\ùX€OÇà
+N¬àJ_Bà»]ö\⁄XõQÿ[YT‹⁄][€úÀõ[ô›	âà
+à]à€\‹”ò[YOHú‹⁄][€ú—ö[YY\‹ÿYŸHèÇàèë]ô\ûH‹⁄][€à\»ö[YÿèÇà‹[èî›⁄]⁄»[‹⁄][€ú»»ô]öY]»‹à⁄[ôŸHH‹ô]Àè‹‹[èÇàŸ]èÇà
+_BàŸ]èÇà‹ŸX›[€èÇà
+N¬àBàù[ò›[€àô[ô\ëÿ[YTõ› Œàÿ[YK[öŸYàõ€€X[ã⁄›–⁄Z[éàõ€€X[äH¬à€€ú›Hô]»]JÀú›\ù◊ÿ]
+N¬à€€ú›€€\][ô\‹»H\‹⁄Y€õY[ù€€\][ô\‹  N¬à€€ú››Yôö[ô»H›Yôö[ô–€›[ù  N¬à€€ú›õ‹õX[^ôY›]\»HÀú›]\»OOHõ‹[àà»òX›]ôHààÀú›]\Œ¬à€€ú›\‘òZ[ì›]Hõ‹õX[^ôY›]\»OOHúòZ[ôY€›]é¬à€€ú››]\–òX⁄Ÿ‹õ›[ôBàõ‹õX[^ôY›]\»OOHòÿ[òŸ[YÇà»àŸôYLôLàÇààõ‹õX[^ôY›]\»OOHú›\‹[ôYÇà»àŸôYéXÃ»Çàà\‘òZ[ì›]à»àÃYLÿNHÇààù[¬à€€ú››]\–õ‹ô\àBàõ‹õX[^ôY›]\»OOHòÿ[òŸ[YÇà»àŸôXÿXÿHÇààõ‹õX[^ôY›]\»OOHú›\‹[ôYÇà»àŸôMéHÇàà\‘òZ[ì›]à»àÃYMYàÇààù[¬àô]\õà
+à]ÇàŸ^O^ŸÀöYBà€\‹”ò[YO^ÿ\‹⁄Y€õY[ùÿ[YTõ›…€ŸôöX⁄X[õ‹ÿ[YHOOHÀöY»àŸôöX⁄X[õ‹\ôŸ]àààüIŸòYŸ⁄[ô”ŸôöX⁄X[»àŸôöX⁄X[õ‹ôXYHàààüXBà€ëòY—[ù\è^ ]ô[ù
+HOà¬àYà
+YòYŸ⁄[ô”ŸôöX⁄X[Xÿ[ìX[òYŸJHô]\õé¬à]ô[ùúô]ô[ùYò][
+
+N¬à]ô[ùú›‹õ‹Yÿ][€ä
+N¬àŸ]ŸôöX⁄X[õ‹ÿ[YJÀöY
+N¬à_Bà€ëòY”›ô\è^ ]ô[ù
+HOà¬àYà
+YòYŸ⁄[ô”ŸôöX⁄X[Xÿ[ìX[òYŸJHô]\õé¬à]ô[ùúô]ô[ùYò][
+
+N¬à]ô[ùú›‹õ‹Yÿ][€ä
+N¬à]ô[ùô]Uò[úŸô\ãôõ‹YôôX›Hõ[›ôHé¬à_Bà€ëòY”X]ôO^ ]ô[ù
+HOà¬àYà
+Y]ô[ùò›\úô[ù\ôŸ]ò€€ùZ[ú ]ô[ùúô[]Y\ôŸ]\»õŸJJBàŸ]ŸôöX⁄X[õ‹ÿ[YJàäN¬à_Bà€ëõ‹^ ]ô[ù
+HOà¬à€€ú›ŸôöX⁄X[YBà]ô[ùô]Uò[úŸô\ãôŸ]]Jù^‹Z[àäHòYŸ⁄[ô”ŸôöX⁄X[¬àYà
+[ŸôöX⁄X[YXÿ[ìX[òYŸJHô]\õé¬à]ô[ùúô]ô[ùYò][
+
+N¬à]ô[ùú›‹õ‹Yÿ][€ä
+N¬àõ⁄Yõ‹ŸôöX⁄X[€ëÿ[YJÀöYŸôöX⁄X[Y
+N¬à_Bà›[O^ﬁ¬àõ‹ô\êõ›€Nà\€€Y	‹›]\–õ‹ô\à
+[öŸY»àÿôôôôHàààŸLôNåä_XàòX⁄Ÿ‹õ›[ôÇà›]\–òX⁄Ÿ‹õ›[ôà
+[öŸY»àŸYôçôôàààŸ[X›YOOHÀöY»àŸéòYò»àààŸôôàäKà€€‹éà\‘òZ[ì›]»àŸôôàààö[ö\ö]ãà_BàÇàXô[à]OHîŸ[X›ÿ[YHõ‹àù[»X›[€ú»‹à[ö⁄[ô»Çà›[O^ﬁ»\‹^Nàôõ^ãù\›YûP€€ù[ùàòŸ[ù\àà_BàÇà[ú]à\OHò⁄X⁄ÿõﬁÇà\öXK[Xô[^ÿŸ[X›ÿ[YH	ŸÀôÿ[YW€ù[Xô\üXBà⁄X⁄ŸY^€[ö‘Ÿ[X›Yö[ò€Y\ ÀöY
+_Bà\ÿXõY^€[ö⁄[ô»ù[’€‹ö⁄[ôﬂBà€ê⁄[ôŸO^ 
+HOàŸŸ€S[ö‘Ÿ[X›[€äÀöY
+_BàœÇà€Xô[Çàù]€Çà\OHòù]€àÇà€ê€X⁄œ^ 
+HOà¬àYà
+X⁄ŸYŸôöX⁄X[
+Hõ⁄Yõ‹ŸôöX⁄X[€ëÿ[YJÀöYX⁄ŸYŸôöX⁄X[
+N¬à[ŸHô\]Y\›Ÿ[X›Yÿ[YJÀöY
+N¬à_Bà]O^¬àX⁄ŸYŸôöX⁄X[à»ê\‹⁄Y€àŸ[X›YŸôöX⁄X[»\»ÿ[YHÇààì‹[àÿ[YHÇàBà›[O^ﬁ¬àõ‹ô\éààòX⁄Ÿ‹õ›[ôàùò[ú‹\ô[ùãàY[ôŒàà^[Y€éàõYùãà›\ú€‹éàú⁄[ù\àãà€€‹éàö[ö\ö]ãà_BàÇà‹[à€\‹”ò[YOHò\‹⁄Y€õY[ùÿ[YSò[YHèÇà‹⁄›–⁄Z[à	âà
+à‹[à\öXKZY[èHùùYHà€\‹”ò[YOHò\‹⁄Y€õY[ù[öŸY\úõ›»èÇà8°¨¬à‹‹[èÇà
+_BàŸÀö€YOÀõò[YHïëüHú»ŸÀò]ÿ^OÀõò[YHïëüBà‹Ÿ[ê\‹⁄Y€ì‹[ê€›[ù
+ÀöY
+Hà	âà
+à‹[Çà€\‹”ò[YOHòòYŸH‹ôY[àÇà›[O^ﬁ»X\ô⁄[ìYùàô\ùXÿ[[Y€éàõZYHà_BàÇàŸ[à\‹⁄Y€à8†(à‹Ÿ[ê\‹⁄Y€ì‹[ê€›[ù
+ÀöY
+_H‹[Çà‹‹[èÇà
+_Bà‹‹[èÇà€X[›[O^ﬁ»€€‹éà\‘òZ[ì›]»àŸôXYôHàà[ôYö[ôY_OÇàŸÀôÿ[YW€ù[Xô\üBà‹€X[Çàÿù]€èÇà‹[Çà€\‹”ò[YOHò\‹⁄Y€õY[ùÿ[YSÿÿ][€àÇà›[O^ﬁ¬à€€‹éà\‘òZ[ì›]»àŸôôààààÕÕMMéHãàõ€ù⁄^ôNàLKàõ€ùŸZY⁄àÃà_BàÇàŸÀõÿÿ][€èÀõò[YHïëüBà‹‹[èÇà‹[Çà€\‹”ò[YOHò\‹⁄Y€õY[ùÿ[YQ]HÇà›[O^ﬁ»€€‹éà\‘òZ[ì›]»àŸôôààà[ôYö[ôY_BàÇà‹[èÇàŸù”ÿÿ[Q]T›ö[ô ◊K¬à[€ùàú⁄‹ùãà^Nàõù[Y\öX»ãàYX\éàõù[Y\öX»ãàJ_Bà‹‹[èÇà€X[ÇàŸù”ÿÿ[U[YT›ö[ô ◊K»›\éàõù[Y\öX»ãZ[ù]NàåãYY⁄]àJ_Bà‹€X[Çà‹‹[èÇà‹[Çà€\‹”ò[YOHò\‹⁄Y€õY[ùÿ[YT›Ÿ\àÇà]OHê]ô\òYŸHŸàH€YH[ô]ÿ^HX[H›Ÿ\àò[ö⁄[ô‹»Çà›[O^ﬁ¬à€€‹éà\‘òZ[ì›]»àŸôôààààÕÿÃÿYYãàõ€ù⁄^ôNàLãàõ€ùŸZY⁄àLà_BàÇàŸÿ[YT›Ÿ\ä Kù—ö^Y
+J_Bà‹‹[èÇàŸ[X›à€\‹”ò[YOHò\‹⁄Y€õY[ùÿ[YT›]\‘Ÿ[X›Çà\öXK[Xô[^ÿ›]\»õ‹àÿ[YH	ŸÀôÿ[YW€ù[Xô\üXBà\ÿXõY^»Xÿ[ìX[òYŸHÿ[YT›]\‘ÿ]ö[ô»OOHÀöYBàò[YO^ŸÀú›]\»OOHõ‹[àà»òX›]ôHààÀú›]\ﬂBà€ê⁄[ôŸO^ ]ô[ù
+HOÇàô\]Y\›ÿ[YT›]\–⁄[ôŸJÀöY]ô[ùù\ôŸ]ùò[YJBàBà›[O^ﬁ¬à⁄YàåL	HãàZ[ï⁄YààY[ôŒàç\ãàõ€ù⁄^ôNàLKà_BàÇàŸÿ[YT›]\”‹[€úÀõX\
+
+›ò[YKXô[JHOà
+à‹[€àŸ^O^›ò[Y_Hò[YO^›ò[Y_OÇà€Xô[Bà€‹[€èÇà
+J_Bà‹Ÿ[X›Çà]à€\‹”ò[YOHò\‹⁄Y€õY[ù›]\–Ÿ[èÇà‹[Çà]O^ÿ€€\][ô\‹Àô]Z[Bà€\‹”ò[YOHò\‹⁄Y€õY[ù›]\–òYŸHÇà›[O^ﬁ¬àõ‹ô\éà\€€Y	ÿ€€\][ô\‹Àò€€‹üXà€€‹éà\‘òZ[ì›]»àŸôôààà€€\][ô\‹Àò€€‹ãàòX⁄Ÿ‹õ›[ôà\‘òZ[ì›]»úôÿòJçMKçMKçMKåLäHàààŸôôàãà_BàÇàÿ€€\][ô\‹ÀõXô[Bà‹‹[èÇà‹[à€\‹”ò[YOHò\‹⁄Y€õY[ù›Yôö[ô–€›[ùèÇàèÇà‹›Yôö[ôÀôö[YHŸà‹›Yôö[ôÀù›[Bàÿèû»àüBàö[Yà€X[Çà‹›Yôö[ôÀõ‹[à»	‹›Yôö[ôÀõ‹[üH‹[òàëù[H›YôôYüBà‹€X[Çà€X[›[O^ﬁ»€€‹éàXY[ôT›]J Kò€€‹à_OÇàŸXY[ôT›]J KõXô[Bà‹€X[Çà‹‹[èÇà‹[Çà€\‹”ò[YOHò\‹⁄Y€õY[ù›Yôö[ô–ò\àÇà\öXK[Xô[^ÿ	‹›Yôö[ôÀôö[YHŸà	‹›Yôö[ôÀù›[H‹⁄][€ú»ö[YBàÇà‹[Çà›[O^ﬁ¬à⁄Yà	‹›Yôö[ôÀù›[»X]úõ›[ô
+
+›Yôö[ôÀôö[Y»›Yôö[ôÀù›[
+H
+àL
+HàLIXà_BàœÇà‹‹[èÇàÿÿ[ìX[òYŸH	âà
+àù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHÇà›[O^ﬁ»Y[ôŒàå‹‹ãõ€ù⁄^ôNàL_Bà€ê€X⁄œ^ ]ô[ù
+HOà¬à]ô[ùú›‹õ‹Yÿ][€ä
+N¬à‹[î]ZX⁄—Y]
+ N¬à_BàÇà]ZX⁄»Y]àÿù]€èÇà
+_BàŸ]èÇàŸ]èÇà
+N¬àBà€€ú›\‹⁄Y€õY[ùŸôöX⁄X[YHòYŸ⁄[ô”ŸôöX⁄X[X⁄ŸYŸôöX⁄X[¬àô]\õà
+àÇàÿ\‹⁄Y€õY[ùŸôöX⁄X[Y	âàÿ[ìX[òYŸH	âà
+àŸX›[€Çà€\‹”ò[YOHõŸôöX⁄X[õ‹ò^HÇà\öXK[Xô[Hê⁄€‹ŸHHÿ[YHõ‹àHòYŸŸYŸôöX⁄X[ÇàÇàXY\èÇà‹[èÇàèûŸòYŸ⁄[ô”ŸôöX⁄X[»ëõ‹€àHÿ[YHààê⁄€‹ŸHHÿ[YHüOÿèÇà€X[Çà¬àŸôöX⁄X[Àôö[ô
+à
+ŸôöX⁄X[
+HOàŸôöX⁄X[öYOOH\‹⁄Y€õY[ùŸôöX⁄X[Yà
+OÀôö\ú›€ò[YBà^»àüBà¬àŸôöX⁄X[Àôö[ô
+à
+ŸôöX⁄X[
+HOàŸôöX⁄X[öYOOH\‹⁄Y€õY[ùŸôöX⁄X[Yà
+OÀõ\›€ò[YBàBà‹€X[Çà‹‹[èÇàù]€Çà\OHòù]€àÇà\öXK[Xô[Hê€‹ŸHÿ[YH⁄€‹Ÿ\àÇà€ê€X⁄œ^ 
+HOà¬àŸ]X⁄ŸYŸôöX⁄X[
+àäN¬àŸ]òYŸ⁄[ô”ŸôöX⁄X[
+àäN¬à_BàÇà0Â¬àÿù]€èÇà⁄XY\èÇà]èÇà \‹⁄Y€õY[ùŸ[X›[€ãõ[ô›à»\‹⁄Y€õY[ùŸ[X›[€Çààö[\ôYÿ[Y\¬à
+KõX\
+
+\ôŸ]ÿ[YJHOà¬à€€ú›‹[î‹⁄][€àH‹[î‹⁄][€ëõ‹ëÿ[YJ\ôŸ]ÿ[YJN¬àô]\õà
+à]ÇàŸ^O^›\ôŸ]ÿ[YKöYBà€\‹”ò[YO^ÿŸôöX⁄X[ò^Qÿ[YI€ŸôöX⁄X[õ‹ÿ[YHOOH\ôŸ]ÿ[YKöY»àX›]ôHàààüI€‹[î‹⁄][€à»ààààù[üXBà€ëòY—[ù\è^ ]ô[ù
+HOà¬à]ô[ùúô]ô[ùYò][
+
+N¬àŸ]ŸôöX⁄X[õ‹ÿ[YJ\ôŸ]ÿ[YKöY
+N¬à_Bà€ëòY”›ô\è^ ]ô[ù
+HOà¬à]ô[ùúô]ô[ùYò][
+
+N¬à]ô[ùô]Uò[úŸô\ãôõ‹YôôX›H‹[î‹⁄][€Çà»õ[›ôHÇààõõ€ôHé¬à_Bà€ëòY”X]ôO^ ]ô[ù
+HOà¬àYà
+àY]ô[ùò›\úô[ù\ôŸ]ò€€ùZ[ú ]ô[ùúô[]Y\ôŸ]\»õŸJBà
+BàŸ]ŸôöX⁄X[õ‹ÿ[YJàäN¬à_Bà€ëõ‹^ ]ô[ù
+HOà¬à]ô[ùúô]ô[ùYò][
+
+N¬à€€ú›ŸôöX⁄X[YBà]ô[ùô]Uò[úŸô\ãôŸ]]Jù^‹Z[àäHà\‹⁄Y€õY[ùŸôöX⁄X[Y¬àYà
+‹[î‹⁄][€à	âàŸôöX⁄X[Y
+Bàõ⁄Yõ‹ŸôöX⁄X[€ëÿ[YJ\ôŸ]ÿ[YKöYŸôöX⁄X[Y
+N¬à_Bà€ê€X⁄œ^ 
+HOà¬àYà
+àYòYŸ⁄[ô”ŸôöX⁄X[	âÇà‹[î‹⁄][€à	âÇà\‹⁄Y€õY[ùŸôöX⁄X[Yà
+Bàõ⁄Yõ‹ŸôöX⁄X[€ëÿ[YJà\ôŸ]ÿ[YKöYà\‹⁄Y€õY[ùŸôöX⁄X[Yà
+N¬à_BàÇàèÇà›\ôŸ]ÿ[YKö€YOÀõò[YHïëüHúﬁ»àüBà›\ôŸ]ÿ[YKò]ÿ^OÀõò[YHïëüBàÿèÇà‹[èÇàÿ[YHﬁ›\ôŸ]ÿ[YKôÿ[YW€ù[Xô\üH0≠ﬁ»àüBà€ô]»]J\ôŸ]ÿ[YKú›\ù◊ÿ]
+Kù”ÿÿ[Q]T›ö[ô ◊K¬à[€ùàú⁄‹ùãà^Nàõù[Y\öX»ãàJ_^»àüBà€ô]»]J\ôŸ]ÿ[YKú›\ù◊ÿ]
+Kù”ÿÿ[U[YT›ö[ô ◊K¬à›\éàõù[Y\öX»ãàZ[ù]NàåãYY⁄]ãàJ_Bà‹‹[èÇà€X[Çà€‹[î‹⁄][€Çà»ô^à	€‹[î‹⁄][€ãõò[Y_Xààìõ»‹[à‹⁄][€ú»üBà‹€X[ÇàŸ]èÇà
+N¬àJ_BàŸ]èÇà‹ŸX›[€èÇà
+_Bà‹[ô[ô’\\‹⁄Y€õY[ù	âÇà
+
+
+HOà¬à€€ú›\ôŸ]ÿ[YHHÿ[Y\Àôö[ô
+à
+][JHOà][KöYOOH[ô[ô’\\‹⁄Y€õY[ùôÿ[YRYà
+N¬à€€ú›ŸôöX⁄X[HŸôöX⁄X[Àôö[ô
+à
+][JHOà][KöYOOH[ô[ô’\\‹⁄Y€õY[ùõŸôöX⁄X[Yà
+N¬àYà
+]\ôŸ]ÿ[YH[ŸôöX⁄X[
+Hô]\õàù[¬à€€ú›‹[î‹⁄][€ú»H‹[î‹⁄][€ú—õ‹ëÿ[YJ\ôŸ]ÿ[YJN¬à€€ú›€€ôõX›»H¬àããò\‹⁄Y€õY[ù€€ôõX›ôX\€€ú—õ‹ëÿ[YJàŸôöX⁄X[à\ôŸ]ÿ[YKà[ô[ô’\\‹⁄Y€õY[ùú‹⁄][€íYà
+Kàããô\Xÿ]P\‹⁄Y€õY[ùôX\€€ú—õ‹ëÿ[YJàŸôöX⁄X[öYà\ôŸ]ÿ[YKà[ô[ô’\\‹⁄Y€õY[ùú‹⁄][€íYà
+KàN¬à€€ú›ÿ\õö[ô‹»H[ô[Y⁄XõTôX\€€ú—õ‹ëÿ[YJàŸôöX⁄X[à\ôŸ]ÿ[YKà[ô[ô’\\‹⁄Y€õY[ùú‹⁄][€íYà
+Kôö[\äà
+ôX\€€äHOÇàX€€ôõX›Àö[ò€Y\ ôX\€€äH	âÇàJ€€ôõX›Àõ[ô›	âàôX\€€àOOHê[ôXYH\‹⁄Y€ôY»\»ÿ[YHäKà
+N¬àô]\õà
+à]Çà€\‹”ò[YOHù\\‹⁄Y€ì›ô\õ^HÇàõ€OHúô\Ÿ[ù][€àÇà€ì[›\ŸQ›€è^ ]ô[ù
+HOà¬àYà
+]ô[ùù\ôŸ]OOH]ô[ùò›\úô[ù\ôŸ]
+BàŸ][ô[ô’\\‹⁄Y€õY[ù
+ù[
+N¬à_BàÇàŸX›[€Çà€\‹”ò[YOHù\\‹⁄Y€ëX[Ÿ»Çàõ€OHôX[Ÿ»Çà\öXK[[Ÿ[HùùYHÇà\öXK[Xô[YûOHù\X\‹⁄Y€ã]]HÇàÇàXY\èÇà]èÇà€X[êT‘“Q”à—ëíP“PS‹€X[Çà»YHù\X\‹⁄Y€ã]]HèÇà€ŸôöX⁄X[ôö\ú›€ò[Y_H€ŸôöX⁄X[õ\›€ò[Y_Bà⁄œÇàŸ]èÇàù]€Çà\OHòù]€àÇà\öXK[Xô[Hê€‹ŸH\‹⁄Y€õY[ùô]öY]»Çà€ê€X⁄œ^ 
+HOàŸ][ô[ô’\\‹⁄Y€õY[ù
+ù[
+_BàÇà0Â¬àÿù]€èÇà⁄XY\èÇà]à€\‹”ò[YOHù\\‹⁄Y€ëÿ[YT›[[X\ûHèÇàèÇà›\ôŸ]ÿ[YKö€YOÀõò[YHïëüHúﬁ»àüBà›\ôŸ]ÿ[YKò]ÿ^OÀõò[YHïëüBàÿèÇà‹[èÇàÿ[YHﬁ›\ôŸ]ÿ[YKôÿ[YW€ù[Xô\üH0≠ﬁ»àüBà€ô]»]J\ôŸ]ÿ[YKú›\ù◊ÿ]
+Kù”ÿÿ[T›ö[ô ◊K¬à]T›[NàõYY][Hãà[YT›[Nàú⁄‹ùãàJ_Bà‹‹[èÇà‹[èÇà›\ôŸ]ÿ[YKõÿÿ][€èÀõò[YHìÿÿ][€àëüH0≠ﬁ»àüBà›\ôŸ]ÿ[YKõXY›Y\œÀõò[YHìXY›YHõ›Ÿ]üH0≠ﬁ»àüBà›\ôŸ]ÿ[YKõ]ô[œÀõò[YHì]ô[õ›Ÿ]üBà‹‹[èÇàŸ]èÇàöY[Ÿ]€\‹”ò[YOHù\\‹⁄Y€î‹⁄][€ú»èÇàYŸ[ôê⁄€‹ŸH[à‹[à‹⁄][€è€YŸ[ôÇà€‹[î‹⁄][€úÀõX\
+
+‹⁄][€äHOà
+àXô[Ÿ^O^‹‹⁄][€ãöYOÇà[ú]à\OHúòY[»Çàò[YOHù\X\‹⁄Y€õY[ù\‹⁄][€àÇàò[YO^‹‹⁄][€ãöYBà⁄X⁄ŸY^¬à[ô[ô’\\‹⁄Y€õY[ùú‹⁄][€íYOOH‹⁄][€ãöYàBà€ê⁄[ôŸO^ 
+HOÇàŸ][ô[ô’\\‹⁄Y€õY[ù
+¬àããú[ô[ô’\\‹⁄Y€õY[ùà‹⁄][€íYà‹⁄][€ãöYàJBàBàœÇà‹[èû‹‹⁄][€ãõò[Y_O‹‹[èÇà€Xô[Çà
+J_BàŸöY[Ÿ]Çàÿ€€ôõX›Àõ[ô›à	âà
+à]à€\‹”ò[YOHù\\‹⁄Y€ê[\ùõÿ⁄⁄[ô»èÇàèêÿ[õõ›\‹⁄Y€àYH»Hÿ⁄Y[H€€ôõX›ÿèÇàÿ€€ôõX›ÀõX\
+
+ôX\€€äHOà
+à‹[àŸ^O^‹ôX\€€üOû‹ôX\€€üO‹‹[èÇà
+J_BàŸ]èÇà
+_Bà»X€€ôõX›Àõ[ô›	âàÿ\õö[ô‹Àõ[ô›à	âà
+à]à€\‹”ò[YOHù\\‹⁄Y€ê[\ùÿ\õö[ô»èÇàèìX[òYŸ\à›ô\úöYHô\]Z\ôYÿèÇà›ÿ\õö[ô‹ÀõX\
+
+ôX\€€äHOà
+à‹[àŸ^O^‹ôX\€€üOû‹ôX\€€üO‹‹[èÇà
+J_BàŸ]èÇà
+_Bà»X€€ôõX›Àõ[ô›	âà]ÿ\õö[ô‹Àõ[ô›	âà
+à]à€\‹”ò[YOHù\\‹⁄Y€ê[\ù€X\àèÇàèìõ»€€ôõX›»õ›[ôÿèÇà‹[èÇà\»ŸôöX⁄X[\»]òZ[XõH[ô[Y⁄XõHõ‹àHŸ[X›Yà‹⁄][€ãÇà‹‹[èÇàŸ]èÇà
+_Bàõ€›\èÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHÇà€ê€X⁄œ^ 
+HOàŸ][ô[ô’\\‹⁄Y€õY[ù
+ù[
+_BàÇàÿ[òŸ[àÿù]€èÇàù]€Çà\OHòù]€àÇà€\‹”ò[YO^›ÿ\õö[ô‹Àõ[ô›»ô[ôŸ\àààúö[X\ûHüBà\ÿXõY^¬àõ€€X[ä€€ôõX›Àõ[ô›
+Hà\[ô[ô’\\‹⁄Y€õY[ùú‹⁄][€íYàõ€€X[äÿ]ö[ô BàBà€ê€X⁄œ^ 
+HOàõ⁄Y€€ôö\õU\\‹⁄Y€õY[ù
+
+_BàÇà‹ÿ]ö[ô¬à»ê\‹⁄Y€ö[ô¯†)àÇààÿ\õö[ô‹Àõ[ô›à»ê€€ôö\õH›ô\úöYH	à\‹⁄Y€àÇààê€€ôö\õH\‹⁄Y€õY[ùüBàÿù]€èÇàŸõ€›\èÇà‹ŸX›[€èÇàŸ]èÇà
+N¬àJJ
+_Bà‹⁄›–ù[–\‹⁄Y€à	âÇà
+
+
+HOà¬à€€ú›ô]öY]»Hù[–\‹⁄Y€õY[ùô]öY] 
+N¬à€€ú›^€YYŸ[X›Yÿ[Y\»Hÿ[Y\Àôö[\äà
+][JHOÇà[ö‘Ÿ[X›Yö[ò€Y\ ][KöY
+H	âàYÿ[YPXÿŸ\–\‹⁄Y€õY[ù ][JKà
+N¬à€€ú›ŸôöX⁄X[HŸôöX⁄X[Àôö[ô
+à
+][JHOà][KöYOOHù[–\‹⁄Y€ìŸôöX⁄X[à
+N¬à€€ú›ŸôöX⁄X[\‹Ÿ\‹€Y[ù»HŸôöX⁄X[¬àõX\
+
+][JHOà¬à€€ú›\‹Ÿ\‹€Y[ùHù[–\‹⁄Y€õY[ùô]öY] ][KöY
+N¬à€€ú››]\»H\‹Ÿ\‹€Y[ùòõÿ⁄⁄[ôÀõ[ô›à»òõÿ⁄ŸYÇàà\‹Ÿ\‹€Y[ùùÿ\õö[ô‹Àõ[ô›à»ùÿ\õö[ô»Çààô[Y⁄XõHé¬à€€ú›õ€Tò][ô‹»H\‹Ÿ\‹€Y[ùù\ôŸ]¬àõX\
+
+\ôŸ]
+HOÇà‹⁄][€úÀôö[ô
+à
+‹⁄][€äHOÇà‹⁄][€ãöYOOHù[–\‹⁄Y€î‹⁄][€ú÷›\ôŸ]öYKà5◊ﬁı∂âûÀk∫wµÁH\OHòù]€àÇà\öXK[Xô[Hë\€Z\‹»\úõ‹àÇà€ê€X⁄œ^ 
+HOàŸ]\úõ‹äàä_BàÇà0Â¬àÿù]€èÇàŸ]èÇà
+_Bà€õ›XŸH	âà
+à]à€\‹”ò[YOHò\‹⁄Y€õY[ùÿ\›\‹⁄Y€õY[ùôYYòX⁄»àõ€OHú›]\»èÇà‹[èû€õ›XŸ_O‹‹[èÇàù]€Çà\OHòù]€àÇà\öXK[Xô[Hë\€Z\‹»Y\‹ÿYŸHÇà€ê€X⁄œ^ 
+HOàŸ]õ›XŸJàä_BàÇà0Â¬àÿù]€èÇàŸ]èÇà
+_Bà‹]ZX⁄—Y]	âÇà
+
+
+HOà¬à€€ú›\ôŸ]Hÿ[Y\Àôö[ô
+à
+][JHOà][KöYOOH]ZX⁄—Y]ôÿ[YRYà
+HN¬à€€ú›X›]ôHH\‹⁄Y€õY[ùÀôö[\äà
+][JHOÇà][Kôÿ[YW⁄YOOH\ôŸ]öY	âÇàV»ôX€[ôYãòÿ[òŸ[YóKö[ò€Y\ ][Kú›]\ Kà
+N¬à€€ú›[öŸY€›[ùH[ö”Y[Xô\úÀôö[\äà
+][JHOà][Kô‹õ›\⁄YOOH[ö—‹õ›\ûQÿ[YKôŸ]
+\ôŸ]öY
+Kà
+Kõ[ô›¬à€€ú›⁄[ôŸY[YHBà
+]ZX⁄—Y]ú›\ù–]à»ô]»]J]ZX⁄—Y]ú›\ù–]
+Kù“T”‘›ö[ô 
+BàààäHOOH\ôŸ]ú›\ù◊ÿ]à]ZX⁄—Y]ô\ò][€ìZ[ù]\»OOH\ôŸ]ô\ò][€ó€Z[ù]\Œ¬à€€ú›⁄[ôŸYô[ùYHBà]ZX⁄—Y]õÿÿ][€íYOOH
+\ôŸ]õÿÿ][€ó⁄YàäN¬à€€ú›⁄[ôŸY]ô[Bà]ZX⁄—Y]õ]ô[YOOH
+\ôŸ]õ]ô[⁄YàäN¬àô]\õà
+à]Çà€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ–òX⁄Ÿõ‹Çàõ€OHúô\Ÿ[ù][€àÇà€ì[›\ŸQ›€è^ 
+HOà\]ZX⁄—Y]ÿ]ö[ô»	âàŸ]]ZX⁄—Y]
+ù[
+_BàÇà]Çà€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ»\‹⁄Y€õY[ùXõ\⁄ô]öY]»Çàõ€OHôX[Ÿ»Çà\öXK[[Ÿ[HùùYHÇà\öXK[Xô[YûOHú]ZX⁄—Y]]HÇà€ì[›\ŸQ›€è^ ]ô[ù
+HOà]ô[ùú›‹õ‹Yÿ][€ä
+_BàÇà]à€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ“XYèÇà]èÇà»YHú]ZX⁄—Y]]Hèî]ZX⁄»Y]	à[\X›ô]öY]œ⁄œÇàÇàÿ[YHﬁ›\ôŸ]ôÿ[YW€ù[Xô\üH8†%ô]öY]»›€ú›ôX[Bà\‹⁄Y€õY[ùYôôX›»ôYõ‹ôHÿ]ö[ôÀÇà‹ÇàŸ]èÇàù]€Çà\OHòù]€àÇà\öXK[Xô[Hê€‹ŸHÇà€ê€X⁄œ^ 
+HOàŸ]]ZX⁄—Y]
+ù[
+_BàÇà0Â¬àÿù]€èÇàŸ]èÇà]à€\‹”ò[YOHúXõ\⁄ô]öY]‘›[[X\ûHèÇà‹[èÇàèûÿX›]ôKõ[ô›Oÿèà\‹⁄Y€ôYŸôöX⁄X[»YôôX›Yà‹‹[èÇà‹[Çà€\‹”ò[YO^¬àX›]ôKú€€YJ
+][JHOà][KúXõ\⁄Yÿ]
+Bà»ùÿ\õö[ô»ÇààúôXYHÇàBàÇàèÇàÿX›]ôKôö[\ä
+][JHOà][KúXõ\⁄Yÿ]
+Kõ[ô›Bàÿèû»àüBàXõ\⁄Yõ›YöXÿ][€ú¬à‹‹[èÇà‹[èÇàèû€[öŸY€›[ùOÿèà[öŸYÿ[Y\»[à‹õ›\à‹‹[èÇàŸ]èÇà]Çà€\‹”ò[YOHò\‹⁄Y€õY[ù\ôX›ö[\ú»Çà›[O^ﬁ»Y[ôŒàMà_BàÇàXô[Çà]H	à[YBà[ú]à\OHô]][YK[ÿÿ[Çàò[YO^‹]ZX⁄—Y]ú›\ù–]Bà€ê⁄[ôŸO^ JHOÇàŸ]]ZX⁄—Y]
+¬àããú]ZX⁄—Y]à›\ù–]àKù\ôŸ]ùò[YKàJBàBàœÇà€Xô[ÇàXô[Çà\ò][€à
+Z[ù]\ Bà[ú]à\OHõù[Xô\àÇàZ[èHåMHÇàX^HçÇàò[YO^‹]ZX⁄—Y]ô\ò][€ìZ[ù]\ﬂBà€ê⁄[ôŸO^ JHOÇàŸ]]ZX⁄—Y]
+¬àããú]ZX⁄—Y]à\ò][€ìZ[ù]\Œàù[Xô\äKù\ôŸ]ùò[YJKàJBàBàœÇà€Xô[ÇàXô[Çàÿÿ][€ÇàŸ[X›àò[YO^‹]ZX⁄—Y]õÿÿ][€íYBà€ê⁄[ôŸO^ JHOÇàŸ]]ZX⁄—Y]
+¬àããú]ZX⁄—Y]àÿÿ][€íYàKù\ôŸ]ùò[YKàJBàBàÇà‹[€àò[YOHàèïë€‹[€èÇà–\úò^Kôúõ€Jàô]»X\
+àÿ[Y\¬àôö[\ä
+][JHOà][Kõÿÿ][€äBàõX\
+
+][JHOà¬à][Kõÿÿ][€àKöYà][Kõÿÿ][€àKõò[YKàJKà
+Kô[ùöY\ 
+Kà
+KõX\
+
+⁄Yò[YWJHOà
+à‹[€àŸ^O^⁄YHò[YO^⁄YOÇà€ò[Y_Bà€‹[€èÇà
+J_Bà‹Ÿ[X›Çà€Xô[ÇàXô[Çà]ô[àŸ[X›àò[YO^‹]ZX⁄—Y]õ]ô[YBà€ê⁄[ôŸO^ JHOÇàŸ]]ZX⁄—Y]
+¬àããú]ZX⁄—Y]à]ô[YàKù\ôŸ]ùò[YKàJBàBàÇà‹[€àò[YOHàèìõ»]ô[€‹[€èÇà–\úò^Kôúõ€Jàô]»X\
+àÿ[Y\¬àôö[\ä
+][JHOà][Kõ]ô[ BàõX\
+
+][JHOà¬à][Kõ]ô[»KöYà][Kõ]ô[»Kõò[YKàJKà
+Kô[ùöY\ 
+Kà
+KõX\
+
+⁄Yò[YWJHOà
+à‹[€àŸ^O^⁄YHò[YO^⁄YOÇà€ò[Y_Bà€‹[€èÇà
+J_Bà‹Ÿ[X›Çà€Xô[ÇàŸ]èÇà€\‹”ò[YOHúXõ\⁄ô]öY]”õ›HèÇàô]öY]»ô\]Z\ôYû»àüBà÷¬à⁄[ôŸY[YH	âàù[YKÿ€€ôõX›[\X›ãà⁄[ôŸYô[ùYH	âàùò]ô[[\X›ãà⁄[ôŸY]ô[	âàô[Y⁄Xö[]H[\X›ãàBàôö[\äõ€€X[äBàöõ⁄[äãäHàõõ»ÿ⁄Y[Kô[ùYK‹à]ô[⁄[ôŸ\»Y]üBààXõ\⁄YŸôöX⁄X[»X^HôYY[à\]Yõ›XŸKÇà‹Çà]à€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ—õ€›\àèÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHÇà€ê€X⁄œ^ 
+HOàŸ]]ZX⁄—Y]
+ù[
+_BàÇàÿ[òŸ[àÿù]€èÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúö[X\ûHÇà\ÿXõY^‹]ZX⁄—Y]ÿ]ö[ôﬂBà€ê€X⁄œ^ 
+HOàõ⁄Yÿ]ôT]ZX⁄—Y]
+
+_BàÇà‹]ZX⁄—Y]ÿ]ö[ô»»îÿ]ö[ô¯†)àààîÿ]ôHô]öY]ŸY⁄[ôŸ\»üBàÿù]€èÇàŸ]èÇàŸ]èÇàŸ]èÇà
+N¬àJJ
+_Bà‹⁄›—XY[ôTŸ][ô‹»	âà
+à]Çà€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ–òX⁄Ÿõ‹Çàõ€OHúô\Ÿ[ù][€àÇà€ì[›\ŸQ›€è^ 
+HOÇàYXY[ôTÿ]ö[ô»	âàŸ]⁄›—XY[ôTŸ][ô‹ ò[ŸJBàBàÇà]Çà€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ»\‹⁄Y€õY[ù€€ôö\õQX[Ÿ»Çàõ€OHôX[Ÿ»Çà\öXK[[Ÿ[HùùYHÇà\öXK[Xô[YûOHôXY[ôU]HÇà€ì[›\ŸQ›€è^ ]ô[ù
+HOà]ô[ùú›‹õ‹Yÿ][€ä
+_BàÇà]à€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ“XYèÇà]èÇà»YHôXY[ôU]Hèê\‹⁄Y€õY[ùXY[ô\œ⁄œÇàÇàŸ]XY›YK[]ô[›Yôö[ô»\ôŸ]ÀXÿŸ\[òŸH⁄[ô›‹Ààô[Z[ô\úÀ[ô\ÿÿ[][€à[Z[ôÀÇà‹ÇàŸ]èÇàù]€Çà\OHòù]€àÇà€ê€X⁄œ^ 
+HOàŸ]⁄›—XY[ôTŸ][ô‹ ò[ŸJ_BàÇà0Â¬àÿù]€èÇàŸ]èÇà]Çà€\‹”ò[YOHò\‹⁄Y€õY[ù\ôX›ö[\ú»Çà›[O^ﬁ»Y[ôŒàMà_BàÇàXô[ÇàXY›YBàŸ[X›àò[YO^ŸXY[ôSXY›YRYBà€ê⁄[ôŸO^ JHOà¬à€€ú›ô^Hÿ[Y\Àôö[ô
+à
+][JHOà][KõXY›YW⁄YOOHKù\ôŸ]ùò[YKà
+N¬àŸ]XY[ôSXY›YRY
+Kù\ôŸ]ùò[YJN¬àYà
+ô^
+BàŸ]XY[ôQòYù
+¬àö[Çàô^õXY›Y\œÀò\‹⁄Y€õY[ùŸö[›\ôŸ]Ÿ^\»œ»MàXÿŸ\[òŸNÇàô^õXY›Y\œÀò\‹⁄Y€õY[ùÿXÿŸ\[òŸW⁄›\ú»œ»çà\ÿÿ[][€éÇàô^õXY›Y\œÀò\‹⁄Y€õY[ùŸ\ÿÿ[][€óŸ^\»œ»Ààô[Z[ô\éÇàô^õXY›Y\œÀò\‹⁄Y€õY[ù‹ô[Z[ô\ó⁄›\ú»œ»çàJN¬à_BàÇà–\úò^Kôúõ€Jàô]»X\
+àÿ[Y\¬àôö[\ä
+][JHOà][KõXY›YW⁄Y	âà][KõXY›Y\ BàõX\
+
+][JHOà¬à][KõXY›YW⁄YKà][KõXY›Y\»Kõò[YKàJKà
+Kô[ùöY\ 
+Kà
+KõX\
+
+⁄Yò[YWJHOà
+à‹[€àŸ^O^⁄YHò[YO^⁄YOÇà€ò[Y_Bà€‹[€èÇà
+J_Bà‹Ÿ[X›Çà€Xô[ÇàXô[Çàö[\ôŸ]
+^\»ôYõ‹ôJBà[ú]à\OHõù[Xô\àÇàZ[èHåÇàX^HéLÇàò[YO^ŸXY[ôQòYùôö[Bà€ê⁄[ôŸO^ JHOÇàŸ]XY[ôQòYù
+¬àããôXY[ôQòYùàö[àù[Xô\äKù\ôŸ]ùò[YJKàJBàBàœÇà€Xô[ÇàXô[ÇàXÿŸ\[òŸH⁄[ô›»
+›\ú Bà[ú]à\OHõù[Xô\àÇàZ[èHåHÇàX^HåMéÇàò[YO^ŸXY[ôQòYùòXÿŸ\[òŸ_Bà€ê⁄[ôŸO^ JHOÇàŸ]XY[ôQòYù
+¬àããôXY[ôQòYùàXÿŸ\[òŸNàù[Xô\äKù\ôŸ]ùò[YJKàJBàBàœÇà€Xô[ÇàXô[Çàô[Z[ô\à
+›\ú»ôYõ‹ôHYJBà[ú]à\OHõù[Xô\àÇàZ[èHåHÇàX^HåMéÇàò[YO^ŸXY[ôQòYùúô[Z[ô\üBà€ê⁄[ôŸO^ JHOÇàŸ]XY[ôQòYù
+¬àããôXY[ôQòYùàô[Z[ô\éàù[Xô\äKù\ôŸ]ùò[YJKàJBàBàœÇà€Xô[ÇàXô[Çà\ÿÿ[]HYù\à
+^\ Bà[ú]à\OHõù[Xô\àÇàZ[èHåÇàX^HåÃÇàò[YO^ŸXY[ôQòYùô\ÿÿ[][€üBà€ê⁄[ôŸO^ JHOÇàŸ]XY[ôQòYù
+¬àããôXY[ôQòYùà\ÿÿ[][€éàù[Xô\äKù\ôŸ]ùò[YJKàJBàBàœÇà€Xô[ÇàŸ]èÇà]à€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ—õ€›\àèÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHÇà€ê€X⁄œ^ 
+HOàŸ]⁄›—XY[ôTŸ][ô‹ ò[ŸJ_BàÇàÿ[òŸ[àÿù]€èÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúö[X\ûHÇà\ÿXõY^»YXY[ôSXY›YRYXY[ôTÿ]ö[ôﬂBà€ê€X⁄œ^ 
+HOàõ⁄Yÿ]ôQXY[ôTŸ][ô‹ 
+_BàÇàŸXY[ôTÿ]ö[ô»»îÿ]ö[ô¯†)àààîÿ]ôHXY[ô\»üBàÿù]€èÇàŸ]èÇàŸ]èÇàŸ]èÇà
+_Bà‹[ô[ô—ÿ[YT›]\»	âà
+à]Çà€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ–òX⁄Ÿõ‹Çàõ€OHúô\Ÿ[ù][€àÇà€ì[›\ŸQ›€è^ 
+HOÇàYÿ[YT›]\‘ÿ]ö[ô»	âàŸ][ô[ô—ÿ[YT›]\ ù[
+BàBàÇà]Çà€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ»\‹⁄Y€õY[ù€€ôö\õQX[Ÿ»Çàõ€OHôX[Ÿ»Çà\öXK[[Ÿ[HùùYHÇà\öXK[Xô[YûOHôÿ[YT›]\–€€ôö\õU]HÇà€ì[›\ŸQ›€è^ ]ô[ù
+HOà]ô[ùú›‹õ‹Yÿ][€ä
+_BàÇà]à€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ“XYèÇà]èÇà»YHôÿ[YT›]\–€€ôö\õU]Hèê€€ôö\õHÿ[YH›]\œ⁄œÇàÇà⁄[ôŸHÿ[YH¬àŸÿ[Y\Àôö[ô
+à
+][JHOà][KöYOOH[ô[ô—ÿ[YT›]\Àôÿ[YRYà
+OÀôÿ[YW€ù[Xô\ààü^»àüBàﬁ»àüBàŸÿ[YT›]\”‹[€úÀôö[ô
+à
+›ò[YWJHOàò[YHOOH[ô[ô—ÿ[YT›]\Àú›]\Àà
+OÀñÃWH[ô[ô—ÿ[YT›]\Àú›]\ﬂBà¬à‹ÇàŸ]èÇàù]€Çà\OHòù]€àÇà\öXK[Xô[Hê€‹ŸHÇà\ÿXõY^–õ€€X[äÿ[YT›]\‘ÿ]ö[ô _Bà€ê€X⁄œ^ 
+HOàŸ][ô[ô—ÿ[YT›]\ ù[
+_BàÇà0Â¬àÿù]€èÇàŸ]èÇà 
+
+HOà¬à€€ú›YôôX›YH\‹⁄Y€õY[ùÀôö[\äà
+][JHOÇà][Kôÿ[YW⁄YOOH[ô[ô—ÿ[YT›]\Àôÿ[YRY	âÇàV»ôX€[ôYãòÿ[òŸ[YóKö[ò€Y\ ][Kú›]\ Kà
+N¬à€€ú›Xõ\⁄YHYôôX›Yôö[\äà
+][JHOà][KúXõ\⁄Yÿ]à
+N¬à€€ú›[öŸYH[ö”Y[Xô\úÀôö[\äà
+][JHOÇà][Kô‹õ›\⁄YOOBà[ö—‹õ›\ûQÿ[YKôŸ]
+[ô[ô—ÿ[YT›]\Àôÿ[YRY
+Kà
+Kõ[ô›¬à€€ú›Ÿ[ô»H»òÿ[òŸ[YãúòZ[ôY€›]óKö[ò€Y\ à[ô[ô—ÿ[YT›]\Àú›]\Àà
+N¬àô]\õà
+àÇà]à€\‹”ò[YOHúXõ\⁄ô]öY]‘›[[X\ûHèÇà‹[èÇàèûÿYôôX›Yõ[ô›Oÿèà\‹⁄Y€õY[ù»YôôX›Yà‹‹[èÇà‹[Çà€\‹”ò[YO^‹Xõ\⁄Yõ[ô›»ùÿ\õö[ô»ààúôXYHüBàÇàèû‹Ÿ[ô»»Xõ\⁄Yõ[ô›àOÿèàŸôöX⁄X[õ›XŸ\¬à‹‹[èÇà‹[èÇàèû€[öŸYOÿèà[öŸYÿ[Y\¬à‹‹[èÇàŸ]èÇà]à€\‹”ò[YOHò\‹⁄Y€õY[ù€€ôö\õSY\‹ÿYŸHèÇà‹Ÿ[ô¬à»îXõ\⁄YŸôöX⁄X[»⁄[ôXŸZ]ôHHÿ[òŸ[][€à‹àòZ[ã[›]õ›XŸKà\‹⁄Y€õY[ù»⁄[ôH€‹ŸYàÇààìõ»]]€X]X»ŸôöX⁄X[[XZ[\»Ÿ[ùõ‹à\»›]\Àà^\›[ô»\‹⁄Y€õY[ù»ô[XZ[à]òZ[XõHõ‹àô]öY]ÀàüBàŸ]èÇàœÇà
+N¬àJJ
+_Bà]à€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ—õ€›\àèÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHÇà\ÿXõY^–õ€€X[äÿ[YT›]\‘ÿ]ö[ô _Bà€ê€X⁄œ^ 
+HOàŸ][ô[ô—ÿ[YT›]\ ù[
+_BàÇàŸY\›\úô[ù›]\¬àÿù]€èÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHô[ôŸ\àÇà\ÿXõY^–õ€€X[äÿ[YT›]\‘ÿ]ö[ô _Bà€ê€X⁄œ^ 
+HOÇàõ⁄Y⁄[ôŸQÿ[YT›]\ à[ô[ô—ÿ[YT›]\Àôÿ[YRYà[ô[ô—ÿ[YT›]\Àú›]\Àà
+BàBàÇàŸÿ[YT›]\‘ÿ]ö[ô¬à»ï\][ô¯†)àÇàà€€ôö\õH	Ÿÿ[YT›]\”‹[€úÀôö[ô
+
+›ò[YWJHOàò[YHOOH[ô[ô—ÿ[YT›]\Àú›]\ OÀñÃWHê⁄[ôŸHüXBàÿù]€èÇàŸ]èÇàŸ]èÇàŸ]èÇà
+_Bà‹[ô[ô‘ô\XŸ[Y[ù	âÇàÿ[YH	âÇà
+
+
+HOà¬à€€ú›ô\XŸ[Y[ùŸôöX⁄X[HŸôöX⁄X[Àôö[ô
+à
+][JHOà][KöYOOH[ô[ô‘ô\XŸ[Y[ùõŸôöX⁄X[Yà
+N¬à€€ú›ô\XŸ[Y[ù‹⁄][€àH‹⁄][€úÀôö[ô
+à
+][JHOà][KöYOOH[ô[ô‘ô\XŸ[Y[ùú‹⁄][€íYà
+N¬àô]\õà
+à]Çà€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ–òX⁄Ÿõ‹Çàõ€OHúô\Ÿ[ù][€àÇà€ì[›\ŸQ›€è^ 
+HOÇà\ô\XŸ[Y[ùXõ\⁄[ô»	âàŸ][ô[ô‘ô\XŸ[Y[ù
+ù[
+BàBàÇà]Çà€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ»\‹⁄Y€õY[ù€€ôö\õQX[Ÿ»Çàõ€OHôX[Ÿ»Çà\öXK[[Ÿ[HùùYHÇà\öXK[Xô[YûOHúô\XŸ[Y[ù€€ôö\õU]HÇà€ì[›\ŸQ›€è^ ]ô[ù
+HOà]ô[ùú›‹õ‹Yÿ][€ä
+_BàÇà]à€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ“XYèÇà]èÇà»YHúô\XŸ[Y[ù€€ôö\õU]HèÇà€€ôö\õHô\XŸ[Y[ùà⁄œÇàÇàÿ[YHﬁŸÿ[YKôÿ[YW€ù[Xô\üH8†%Ÿÿ[YKö€YOÀõò[YHïëü^»àüBàú»Ÿÿ[YKò]ÿ^OÀõò[YHïëüBà‹ÇàŸ]èÇàù]€Çà\OHòù]€àÇà\öXK[Xô[Hê€‹ŸHÇà\ÿXõY^–õ€€X[äô\XŸ[Y[ùXõ\⁄[ô _Bà€ê€X⁄œ^ 
+HOàŸ][ô[ô‘ô\XŸ[Y[ù
+ù[
+_BàÇà0Â¬àÿù]€èÇàŸ]èÇà]à€\‹”ò[YOHúô\XŸ[Y[ù€€ôö\õT›[[X\ûHèÇà‹[èÇà€X[î‘“US”è‹€X[Çàèû‹ô\XŸ[Y[ù‹⁄][€èÀõò[YHìŸôöX⁄X[üOÿèÇà‹‹[èÇà‹[èÇà€X[ìëU»—ëíP“PS‹€X[ÇàèÇà‹ô\XŸ[Y[ùŸôöX⁄X[à»	‹ô\XŸ[Y[ùŸôöX⁄X[ôö\ú›€ò[Y_H	‹ô\XŸ[Y[ùŸôöX⁄X[õ\›€ò[Y_XààîŸ[X›YŸôöX⁄X[üBàÿèÇà‹‹[èÇàŸ]èÇà]à€\‹”ò[YOHò\‹⁄Y€õY[ù€€ôö\õSY\‹ÿYŸHèÇà\»⁄[\‹⁄Y€àHô\XŸ[Y[ùXõ\⁄H\‹⁄Y€õY[ùà[ô[[YYX][Hõ›YûHHô]»ŸôöX⁄X[ûH[XZ[ÇàŸ]èÇà]à€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ—õ€›\àèÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHÇà\ÿXõY^–õ€€X[äô\XŸ[Y[ùXõ\⁄[ô _Bà€ê€X⁄œ^ 
+HOàŸ][ô[ô‘ô\XŸ[Y[ù
+ù[
+_BàÇà€»òX⁄¬àÿù]€èÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúö[X\ûHÇà\ÿXõY^–õ€€X[äô\XŸ[Y[ùXõ\⁄[ô _Bà€ê€X⁄œ^ 
+HOÇàõ⁄Y\‹⁄Y€ê[ôXõ\⁄ô\XŸ[Y[ù
+à[ô[ô‘ô\XŸ[Y[ùú‹⁄][€íYà[ô[ô‘ô\XŸ[Y[ùõŸôöX⁄X[Yà[ô[ô‘ô\XŸ[Y[ùõô^‹⁄][€íYà
+BàBàÇà‹ô\XŸ[Y[ùXõ\⁄[ô¬à»ê\‹⁄Y€ö[ô»	àŸ[ô[ô¯†)àÇààê\‹⁄Y€à	àõ›YûHŸôöX⁄X[üBàÿù]€èÇàŸ]èÇàŸ]èÇàŸ]èÇà
+N¬àJJ
+_Bàÿÿ[ôY]T‹⁄][€íY	âÇàÿ[YH	âÇà
+
+
+HOà¬à€€ú›ÿ[ôY]T‹⁄][€àHÿ[YT‹⁄][€úÀôö[ô
+à
+][JHOà][KöYOOHÿ[ôY]T‹⁄][€íYà
+N¬àYà
+Xÿ[ôY]T‹⁄][€äHô]\õàù[¬à€€ú›ÿ[ôY]T‹⁄][€í[ô^Hÿ[YT‹⁄][€úÀôö[ô[ô^
+à
+][JHOà][KöYOOHÿ[ôY]T‹⁄][€ãöYà
+N¬à€€ú›ÿ[ôY]T]Y\ûHHÿ[ôY]TŸX\ò⁄ùö[J
+Kù”›Ÿ\êÿ\ŸJ
+N¬à€€ú›\›H€‹ùŸôöX⁄X[ àÿ[ôY]\ ÿ[ôY]T‹⁄][€äKôö[\ä
+ÿ[ôY]JHOÇà	ÿÿ[ôY]Kôö\ú›€ò[Y_H	ÿÿ[ôY]Kõ\›€ò[Y_Xàù”›Ÿ\êÿ\ŸJ
+Bàö[ò€Y\ ÿ[ôY]T]Y\ûJKà
+Kàÿ[ôY]T€‹ùà
+N¬à€€ú››\úô[ùH\‹⁄Y€õY[ùÀôö[ô
+à
+][JHOÇà][Kôÿ[YW⁄YOOHÿ[YKöY	âÇà][Kú‹⁄][€ó⁄YOOHÿ[ôY]T‹⁄][€ãöY	âÇà][Kú›]\»OOHôX€[ôYãà
+N¬à€€ú›ô\XŸ[Y[ùôYYYH\‘ô\XŸ[Y[ùôYYY
+àÿ[YKöYàÿ[ôY]T‹⁄][€ãöYà
+N¬à€€ú›[Y⁄XõP€›[ùH\›ôö[\äà
+][JHOà][KúôX\€€úÀõ[ô›OOHà
+Kõ[ô›¬à€€ú›Xô[Hò[ö”Xô[
+ÿ[ôY]T‹⁄][€äN¬àô]\õà
+à]Çà€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ–òX⁄Ÿõ‹ÿ[ôY]T[ô[òX⁄Ÿõ‹Çàõ€OHúô\Ÿ[ù][€àÇà€ì[›\ŸQ›€è^ 
+HOàŸ]ÿ[ôY]T‹⁄][€íY
+àä_BàÇà]Çà€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ»ÿ[ôY]T[ô[X[Ÿ»Çàõ€OHôX[Ÿ»Çà\öXK[[Ÿ[HùùYHÇà\öXK[Xô[YûOHòÿ[ôY]T[ô[]HÇà€ì[›\ŸQ›€è^ ]ô[ù
+HOà]ô[ùú›‹õ‹Yÿ][€ä
+_BàÇà]à€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ“XYèÇà]èÇà»YHòÿ[ôY]T[ô[]HèÇà‹ô\XŸ[Y[ùôYYY	âàX›\úô[ùà»ê⁄€‹ŸHHô\XŸ[Y[ùÇàà›\úô[ùà»ê⁄[ôŸHŸôöX⁄X[Çààê⁄€‹ŸH[àŸôöX⁄X[üBà⁄œÇàÇà‹⁄‹ù‹⁄][€ìò[YJÿ[ôY]T‹⁄][€ãõò[YJ_H8†(àÿ[YH¬àŸÿ[YKôÿ[YW€ù[Xô\üH8†(àŸ[Y⁄XõP€›[ùH[Y⁄XõBà‹ÇàŸ]èÇàù]€Çà\OHòù]€àÇà\öXK[Xô[Hê€‹ŸHÿ[ôY]\»Çà€ê€X⁄œ^ 
+HOàŸ]ÿ[ôY]T‹⁄][€íY
+àä_BàÇà0Â¬àÿù]€èÇàŸ]èÇà]à€\‹”ò[YOHòÿ[ôY]T[ô[›[[X\ûHèÇà‹[èÇà€X[î‘“US”è‹€X[Çà]à€\‹”ò[YOHòÿ[ôY]T‹⁄][€ìò]àèÇàù]€Çà\OHòù]€àÇà\öXK[Xô[Hîô]ö[›\»‹⁄][€àÇà\ÿXõY^ÿÿ[ôY]T‹⁄][€í[ô^OOHBà€ê€X⁄œ^ 
+HOÇàŸ]ÿ[ôY]T‹⁄][€íY
+àÿ[YT‹⁄][€ú÷ÿÿ[ôY]T‹⁄][€í[ô^HWKöYà
+BàBàÇà8°§àÿù]€èÇàèû‹⁄‹ù‹⁄][€ìò[YJÿ[ôY]T‹⁄][€ãõò[YJ_OÿèÇàù]€Çà\OHòù]€àÇà\öXK[Xô[Hìô^‹⁄][€àÇà\ÿXõY^¬àÿ[ôY]T‹⁄][€í[ô^OOBàÿ[YT‹⁄][€úÀõ[ô›HBàBà€ê€X⁄œ^ 
+HOÇàŸ]ÿ[ôY]T‹⁄][€íY
+àÿ[YT‹⁄][€ú÷ÿÿ[ôY]T‹⁄][€í[ô^
+»WKöYà
+BàBàÇà8°§Çàÿù]€èÇàŸ]èÇà‹‹[èÇà‹[èÇà€X[ê’TîëSï—ëíP“PS‹€X[ÇàèÇàÿ›\úô[ùà»	€ŸôöX⁄X[Àôö[ô
+
+][JHOà][KöYOOH›\úô[ùõŸôöX⁄X[⁄Y
+OÀôö\ú›€ò[YHàüH	€ŸôöX⁄X[Àôö[ô
+
+][JHOà][KöYOOH›\úô[ùõŸôöX⁄X[⁄Y
+OÀõ\›€ò[YHàüXùö[J
+Bààì‹[àüBàÿèÇà‹‹[èÇàŸ]èÇà]à€\‹”ò[YOHõŸôöX⁄X[\›€€»ÿ[ôY]S\›€€»èÇà[ú]à\OHúŸX\ò⁄Çàò[YO^ÿÿ[ôY]TŸX\ò⁄Bà€ê⁄[ôŸO^ ]ô[ù
+HOÇàŸ]ÿ[ôY]TŸX\ò⁄
+]ô[ùù\ôŸ]ùò[YJBàBàXŸZ€\èHîŸX\ò⁄ŸôöX⁄X[»Çà\öXK[Xô[HîŸX\ò⁄ŸôöX⁄X[»ÇàœÇàŸ[X›àò[YO^ÿÿ[ôY]T€‹ùBà€ê⁄[ôŸO^ ]ô[ù
+HOÇàŸ]ÿ[ôY]T€‹ù
+à]ô[ùù\ôŸ]ùò[YH\»\[Ÿàÿ[ôY]T€‹ùà
+BàBà\öXK[Xô[Hî€‹ùŸôöX⁄X[»ÇàÇà‹[€àò[YOHòô\›èêô\›]X[YöYY€‹[€èÇà‹[€àò[YOHô\›[òŸHèê€‹Ÿ\›€‹[€èÇà‹[€àò[YOHúò[ö»èíY⁄\›ò[öœ€‹[€èÇà‹[€àò[YOHõX\›ôXŸ[ùèÇàX\›ôXŸ[ùH\‹⁄Y€ôYà€‹[€èÇà‹[€àò[YOHõò[YHèìò[YO€‹[€èÇà‹Ÿ[X›ÇàŸ]èÇà]à€\‹”ò[YOHòÿ[ôY]T[ô[\›èÇà€\›õX\
+
+ÿ[ôY]Kÿ[ôY]R[ô^
+HOà
+à\ùX€BàŸ^O^ÿÿ[ôY]KöYBà€\‹”ò[YO^¬àÿ[ôY]KúôX\€€úÀõ[ô›à»òÿ[ôY]Uÿ\õö[ô»Çààòÿ[ôY]Q[Y⁄XõHÇàBàÇà]èÇàèÇàÿÿ[ôY]R[ô^
+»_Kàÿÿ[ôY]Kôö\ú›€ò[Y_^»àüBàÿÿ[ôY]Kõ\›€ò[Y_BàÿèÇà‹[èÇà€Xô[Hÿÿ[ôY]Kúò[öÀù—ö^Y
+J_Bàÿÿ[ôY]Kô\›[òŸHOHù[à»8†(à	ÿÿ[ôY]Kô\›[òŸKù—ö^Y
+J_HZXàààü^»àüBà8†(à›€‹ö€ÿY⁄[ô› ÿ[ôY]KöY _Hÿ[Y\ÀÕŸ8†(û»àüBà›€‹ö€ÿY⁄[ô› ÿ[ôY]KöYÃ
+_Hÿ[Y\ÀÃÃà‹‹[èÇà€X[Çàÿÿ[ôY]KúôX\€€úÀõ[ô›à»ÿ[ôY]KúôX\€€úÀöõ⁄[äà8†(àäBààë[Y⁄XõH[ô€€ôõX›YúôYHüBà‹€X[Çà]Z[»€\‹”ò[YOHòÿ[ôY]Q]Z[»èÇà›[[X\ûOïöY]»]Z[œ‹›[[X\ûOÇà‹[èÇà›X[TôXŸ[òﬁSXô[
+ÿ[ôY]KöY
+Kúô\XŸJà◊à8†(àÀààãà
+Hìõ»ôXŸ[ùX[H\›‹ûHüBà‹‹[èÇàŸ]Z[œÇàŸ]èÇà]à€\‹”ò[YOHòÿ[ôY]T[ô[X›[€ú»èÇàù]€Çà\OHòù]€àÇà€\‹”ò[YO^¬àÿ[ôY]KúôX\€€úÀõ[ô›à»úŸX€€ô\ûHÇààúö[X\ûHÇàBà\ÿXõY^¬àÿ]ö[ô»OOHÿ[ôY]T‹⁄][€ãöYà›\úô[ùÀõŸôöX⁄X[⁄YOOHÿ[ôY]KöYàBà€ê€X⁄œ^ 
+HOÇàõ⁄Y\‹⁄Y€ëúõ€Pÿ[ôY]Jàÿ[ôY]T‹⁄][€ãöYàÿ[ôY]KöYà
+BàBàÇàÿ›\úô[ùÀõŸôöX⁄X[⁄YOOHÿ[ôY]KöYà»ê\‹⁄Y€ôYÇààÿ[ôY]KúôX\€€úÀõ[ô›à»ì›ô\úöYHÇààê\‹⁄Y€àüBàÿù]€èÇà‹ô\XŸ[Y[ùôYYY	âÇàX›\úô[ù	âÇàÿ[ôY]KúôX\€€úÀõ[ô›OOH	âà
+àù]€Çà\OHòù]€àÇà€\‹”ò[YOHú›XÿŸ\‹»Çà\ÿXõY^¬àÿ]ö[ô»OOHÿ[ôY]T‹⁄][€ãöYàõ€€X[äô\XŸ[Y[ùXõ\⁄[ô BàBà€ê€X⁄œ^ 
+HOà¬à€€ú›ô^‹⁄][€íYBàô^‹[î‹⁄][€êYù\äàÿ[ôY]T‹⁄][€ãöYà
+OÀöY¬àŸ]ÿ[ôY]T‹⁄][€íY
+àäN¬àŸ][ô[ô‘ô\XŸ[Y[ù
+¬à‹⁄][€íYàÿ[ôY]T‹⁄][€ãöYàŸôöX⁄X[Yàÿ[ôY]KöYàô^‹⁄][€íYàJN¬à_BàÇà\‹⁄Y€à	àõ›YûBàÿù]€èÇà
+_BàŸ]èÇàÿ\ùX€OÇà
+J_Bà»[\›õ[ô›	âà
+à]à€\‹”ò[YOHô[\T›]HèÇàìõ»ŸôöX⁄X[»\ôH]òZ[XõHõ‹à\»‹⁄][€ãè‹ÇàŸ]èÇà
+_BàŸ]èÇà]à€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ—õ€›\àèÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHÇà€ê€X⁄œ^ 
+HOàŸ]ÿ[ôY]T‹⁄][€íY
+àä_BàÇà€‹ŸBàÿù]€èÇàŸ]èÇàŸ]èÇàŸ]èÇà
+N¬àJJ
+_Bà‹⁄›–€›ô\òYŸQõ‹ôXÿ\›	âà
+à]Çà€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ–òX⁄Ÿõ‹Çàõ€OHúô\Ÿ[ù][€àÇà€ì[›\ŸQ›€è^ 
+HOàŸ]⁄›–€›ô\òYŸQõ‹ôXÿ\›
+ò[ŸJ_BàÇà]Çà€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ»€›ô\òYŸQõ‹ôXÿ\›X[Ÿ»Çàõ€OHôX[Ÿ»Çà\öXK[[Ÿ[HùùYHÇà\öXK[Xô[YûOHò€›ô\òYŸQõ‹ôXÿ\›]HÇà€ì[›\ŸQ›€è^ ]ô[ù
+HOà]ô[ùú›‹õ‹Yÿ][€ä
+_BàÇà]à€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ“XYèÇà]èÇà»YHò€›ô\òYŸQõ‹ôXÿ\›]HèåMQ^H€›ô\òYŸHõ‹ôXÿ\›⁄œÇàÇàŸ[X›H]H»‹[à]»ÿ[Y\»[àH\‹⁄Y€õY[ùŸ[ù\ãÇà‹ÇàŸ]èÇàù]€Çà\OHòù]€àÇà\öXK[Xô[Hê€‹ŸHÇà€ê€X⁄œ^ 
+HOàŸ]⁄›–€›ô\òYŸQõ‹ôXÿ\›
+ò[ŸJ_BàÇà0Â¬àÿù]€èÇàŸ]èÇà]à€\‹”ò[YOHò€›ô\òYŸQõ‹ôXÿ\›‹öYèÇàÿ€›ô\òYŸQõ‹ôXÿ\›õX\
+
+^JHOà
+àù]€Çà\OHòù]€àÇàŸ^O^Ÿ^KöŸ^_Bà€\‹”ò[YO^¬à^Kú\òŸ[ùOOHLà»ò€›ô\ôYÇàà^Kú\òŸ[ùèHç¬à»ùÿ]⁄Çààú⁄‹ùÇàBà€ê€X⁄œ^ 
+HOà¬à⁄€‹ŸQ]J^KöŸ^JN¬àŸ]⁄›–€›ô\òYŸQõ‹ôXÿ\›
+ò[ŸJN¬à_BàÇà‹[èÇàŸ^Kô]Kù”ÿÿ[Q]T›ö[ô ◊K»ŸYZŸ^Nàú⁄‹ùàJ_Bà‹‹[èÇàèÇàŸ^Kô]Kù”ÿÿ[Q]T›ö[ô ◊K¬à[€ùàú⁄‹ùãà^Nàõù[Y\öX»ãàJ_BàÿèÇà›õ€ôœûŸ^Kú\òŸ[ùIO‹›õ€ôœÇà€X[ÇàŸ^Kôö[YKﬁŸ^Kú€›ﬂH‹⁄][€ú»8†(àŸ^Kôÿ[Y\ﬂHÿ[YBàŸ^Kôÿ[Y\»OOHH»àààú»üBà‹€X[Çàÿù]€èÇà
+J_BàŸ]èÇà]à€\‹”ò[YOHò€›ô\òYŸSYŸ[ôèÇà‹[èÇàH€\‹”ò[YOHò€›ô\ôYàœÇà€›ô\ôYà‹‹[èÇà‹[èÇàH€\‹”ò[YOHùÿ]⁄àœÇàÿ]⁄à‹‹[èÇà‹[èÇàH€\‹”ò[YOHú⁄‹ùàœÇà⁄‹ùà‹‹[èÇàŸ]èÇà]à€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ—õ€›\àèÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHÇà€ê€X⁄œ^ 
+HOàŸ]⁄›–€›ô\òYŸQõ‹ôXÿ\›
+ò[ŸJ_BàÇà€‹ŸBàÿù]€èÇàŸ]èÇàŸ]èÇàŸ]èÇà
+_Bàÿù[‘ô\›[	âà
+à]Çà€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ–òX⁄Ÿõ‹Çàõ€OHúô\Ÿ[ù][€àÇà€ì[›\ŸQ›€è^ 
+HOàŸ]ù[‘ô\›[
+ù[
+_BàÇà]Çà€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ»ù[‘ô\›[X[Ÿ»Çàõ€OHôX[Ÿ»Çà\öXK[[Ÿ[HùùYHÇà\öXK[Xô[YûOHòù[‘ô\›[]HÇà€ì[›\ŸQ›€è^ ]ô[ù
+HOà]ô[ùú›‹õ‹Yÿ][€ä
+_BàÇà]à€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ“XYèÇà]èÇà»YHòù[‘ô\›[]Hèê\‹⁄Y€õY[ù⁄[ôŸH›[[X\ûO⁄œÇàïHŸ[X›Yò]⁄X›[€à\»ö[ö\⁄Yè‹ÇàŸ]èÇàù]€Çà\OHòù]€àÇà\öXK[Xô[Hê€‹ŸHÇà€ê€X⁄œ^ 
+HOàŸ]ù[‘ô\›[
+ù[
+_BàÇà0Â¬àÿù]€èÇàŸ]èÇà]à€\‹”ò[YOHòù[‘ô\›[›[»èÇà‹[à€\‹”ò[YOHú›XÿŸ\‹»èÇàèûÿù[‘ô\›[ú›XÿŸYYYOÿèà€€\]Yà‹‹[èÇà‹[Çà€\‹”ò[YO^¬àù[‘ô\›[ôòZ[\ô\Àõ[ô›»ôòZ[Yààú›XÿŸ\‹»ÇàBàÇàèûÿù[‘ô\›[ôòZ[\ô\Àõ[ô›Oÿèà\‹›Y\¬à‹‹[èÇàŸ]èÇà€\‹”ò[YOHòù[‘ô\›[X›[€àèêX›[€éàÿù[‘ô\›[òX›[€üO‹Çàÿù[‘ô\›[ôòZ[\ô\Àõ[ô›à	âà
+à]à€\‹”ò[YOHòù[—òZ[\ôS\›èÇàèí][\»ô\]Z\ö[ô»][ù[€èÿèÇàÿù[‘ô\›[ôòZ[\ô\ÀõX\
+
+òZ[\ôK[ô^
+HOà
+àŸ^O^ÿ	ŸòZ[\ô_KI⁄[ô^XOûŸòZ[\ô_O‹Çà
+J_BàŸ]èÇà
+_Bà]à€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ—õ€›\àèÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúö[X\ûHÇà€ê€X⁄œ^ 
+HOàŸ]ù[‘ô\›[
+ù[
+_BàÇà€ôBàÿù]€èÇàŸ]èÇàŸ]èÇàŸ]èÇà
+_Bà‹⁄›‘Xõ\⁄ô]öY]»	âàÿ[YH	âà
+à]Çà€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ–òX⁄Ÿõ‹Çàõ€OHúô\Ÿ[ù][€àÇà€ì[›\ŸQ›€è^ 
+HOà\Xõ\⁄[ô»	âàŸ]⁄›‘Xõ\⁄ô]öY] ò[ŸJ_BàÇà]Çà€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ»\‹⁄Y€õY[ùXõ\⁄ô]öY]»Çàõ€OHôX[Ÿ»Çà\öXK[[Ÿ[HùùYHÇà\öXK[Xô[YûOHúXõ\⁄ô]öY]’]HÇà€ì[›\ŸQ›€è^ ]ô[ù
+HOà]ô[ùú›‹õ‹Yÿ][€ä
+_BàÇà]à€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ“XYèÇà]èÇà»YHúXõ\⁄ô]öY]’]Hèîô]öY]»ôYõ‹ôHXõ\⁄[ôœ⁄œÇàÇàÿ[YHﬁŸÿ[YKôÿ[YW€ù[Xô\üH8†%Ÿÿ[YKö€YOÀõò[YHïëüHúﬁ»àüBàŸÿ[YKò]ÿ^OÀõò[YHïëüBà‹ÇàŸ]èÇàù]€Çà\OHòù]€àÇà\öXK[Xô[Hê€‹ŸHÇà\ÿXõY^‹Xõ\⁄[ôﬂBà€ê€X⁄œ^ 
+HOàŸ]⁄›‘Xõ\⁄ô]öY] ò[ŸJ_BàÇà0Â¬àÿù]€èÇàŸ]èÇà]à€\‹”ò[YOHúXõ\⁄ô]öY]‘›[[X\ûHèÇà‹[èÇàèû›[úXõ\⁄Y€›[ùOÿèàŸôöX⁄X[à›[úXõ\⁄Y€›[ùOOHH»àààú»üH⁄[ôHõ›YöYYà‹‹[èÇà‹[à€\‹”ò[YO^€‹[î‹⁄][€ê€›[ù»ùÿ\õö[ô»ààúôXYHüOÇàèû€‹[î‹⁄][€ê€›[ùOÿèà‹[à‹⁄][€Çà€‹[î‹⁄][€ê€›[ùOOHH»àààú»üBà‹‹[èÇà‹[à€\‹”ò[YO^‹Xõ\⁄Z\‹⁄[ô—[XZ[»»ùÿ\õö[ô»ààúôXYHüOÇàèû‹Xõ\⁄Z\‹⁄[ô—[XZ[ﬂOÿèàZ\‹⁄[ô»[XZ[à‹Xõ\⁄Z\‹⁄[ô—[XZ[»OOHH»àààú»üBà‹‹[èÇà‹[èÇàèû‹Xõ\⁄XÿŸ\[òŸR›\úﬂZÿèàô\‹€úŸH⁄[ô›¬à‹‹[èÇàŸ]èÇà]à€\‹”ò[YOHúXõ\⁄ôX⁄\Y[ù\›èÇà›[úXõ\⁄Y\‹⁄Y€õY[ùÀõX\
+
+\‹⁄Y€õY[ù
+HOà¬à€€ú›ŸôöX⁄X[HŸôöX⁄X[Àôö[ô
+à
+][JHOà][KöYOOH\‹⁄Y€õY[ùõŸôöX⁄X[⁄Yà
+N¬à€€ú›‹⁄][€àH‹⁄][€úÀôö[ô
+à
+][JHOà][KöYOOH\‹⁄Y€õY[ùú‹⁄][€ó⁄Yà
+N¬àô]\õà
+à]àŸ^O^ÿ\‹⁄Y€õY[ùöYOÇà‹[èÇàèÇà€ŸôöX⁄X[à»	€ŸôöX⁄X[ôö\ú›€ò[Y_H	€ŸôöX⁄X[õ\›€ò[Y_Xààï[ö€õ›€àŸôöX⁄X[üBàÿèÇà€X[Çà‹‹⁄][€Çà»⁄‹ù‹⁄][€ìò[YJ‹⁄][€ãõò[YJBààìŸôöX⁄X[üBà‹€X[Çà‹‹[èÇà‹[Çà€\‹”ò[YO^¬àŸôöX⁄X[Àô[XZ[à»úôX⁄\Y[ùôXYHÇààúôX⁄\Y[ùZ\‹⁄[ô»ÇàBàÇà€ŸôöX⁄X[Àô[XZ[ë[XZ[Z\‹⁄[ô»üBà‹‹[èÇàŸ]èÇà
+N¬àJ_BàŸ]èÇà€\‹”ò[YOHúXõ\⁄ô]öY]”õ›HèÇàXõ\⁄[ô»Ÿ[ô»XX⁄\›YŸôöX⁄X[[à\‹⁄Y€õY[ù[XZ[⁄]àHXY›YHô\‹€úŸHXY[ôKà‹[à‹⁄][€ú»\ôHõ›[ò€YYÇà‹Xõ\⁄Z\‹⁄[ô—[XZ[¬à»àYHZ\‹⁄[ô»[XZ[ôYõ‹ôHXõ\⁄[ôÀàÇàààôX⁄\Y[ù⁄X⁄‹»\‹ŸYàüBà‹Çà]à€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ—õ€›\àèÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHÇà\ÿXõY^‹Xõ\⁄[ôﬂBà€ê€X⁄œ^ 
+HOàŸ]⁄›‘Xõ\⁄ô]öY] ò[ŸJ_BàÇà€»òX⁄¬àÿù]€èÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúö[X\ûHÇà\ÿXõY^¬àXõ\⁄[ô»à][úXõ\⁄Y€›[ùàõ€€X[äXõ\⁄Z\‹⁄[ô—[XZ[ BàBà€ê€X⁄œ^ 
+HOàõ⁄YXõ\⁄\‹⁄Y€õY[ù 
+_BàÇà‹Xõ\⁄[ô¬à»îXõ\⁄[ô»	àŸ[ô[ô¯†)àÇààXõ\⁄	›[úXõ\⁄Y€›[ùH\‹⁄Y€õY[ù	›[úXõ\⁄Y€›[ùOOHH»àààú»üXBàÿù]€èÇàŸ]èÇàŸ]èÇàŸ]èÇà
+_Bà‹⁄›–X›]ö]U[Y[[ôH	âàÿ[YH	âà
+à]Çà€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ–òX⁄Ÿõ‹Çàõ€OHúô\Ÿ[ù][€àÇà€ì[›\ŸQ›€è^ 
+HOàŸ]⁄›–X›]ö]U[Y[[ôJò[ŸJ_BàÇà]Çà€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ»\‹⁄Y€õY[ùX›]ö]QX[Ÿ»Çàõ€OHôX[Ÿ»Çà\öXK[[Ÿ[HùùYHÇà\öXK[Xô[YûOHòX›]ö]U[Y[[ôU]HÇà€ì[›\ŸQ›€è^ ]ô[ù
+HOà]ô[ùú›‹õ‹Yÿ][€ä
+_BàÇà]à€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ“XYèÇà]èÇà»YHòX›]ö]U[Y[[ôU]HèêX›]ö]H[Y[[ôO⁄œÇàÇàÿ[YHﬁŸÿ[YKôÿ[YW€ù[Xô\üH8†%ö\⁄XõH€õH⁄[H\»⁄[ô›¬à\»‹[ãÇà‹ÇàŸ]èÇàù]€Çà\OHòù]€àÇà\öXK[Xô[Hê€‹ŸHÇà€ê€X⁄œ^ 
+HOàŸ]⁄›–X›]ö]U[Y[[ôJò[ŸJ_BàÇà0Â¬àÿù]€èÇàŸ]èÇàÿX›]ö]Q\úõ‹à	âà
+à]à€\‹”ò[YOHô\úõ‹êõﬁèûÿX›]ö]Q\úõ‹üOŸ]èÇà
+_BàÿX›]ö]SÿY[ô»»
+àìÿY[ô»X›]ö]x†)è‹Çà
+HàX›]ö]Tõ›‹Àõ[ô›»
+à]à€\‹”ò[YOHôÿ[YPX›]ö]U[Y[[ôHèÇàÿX›]ö]Tõ›‹ÀõX\
+
+õ› HOà
+à\ùX€HŸ^O^‹õ›ÀöYOÇàHœÇà]èÇàèû‹õ›Àú›[[X\û_OÿèÇà‹[èÇà‹õ›ÀòX›‹ó€ò[YHîﬁ\›[HüH8†(û»àüBà€ô]»]Jõ›Àõÿÿ›\úôYÿ]
+Kù”ÿÿ[T›ö[ô 
+_Bà‹‹[èÇàŸ]èÇà[Oû‹õ›ÀòX›[€ãúô\XŸP[
+ó»ãàä_OŸ[OÇàÿ\ùX€OÇà
+J_BàŸ]èÇà
+Hà
+à]à€\‹”ò[YOHô[\T›]HèÇàìõ»ôX€‹ôYX›]ö]Hõ‹à\»ÿ[YHY]è‹ÇàŸ]èÇà
+_Bà]à€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ—õ€›\àèÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHÇà€ê€X⁄œ^ 
+HOàŸ]⁄›–X›]ö]U[Y[[ôJò[ŸJ_BàÇà€‹ŸBàÿù]€èÇàŸ]èÇàŸ]èÇàŸ]èÇà
+_Bà‹⁄›–‹ô]’[\]\»	âÇà‹ô]’[\]U\ôŸ]ÿ[Y\ 
+VÃH	âÇà
+
+
+HOà¬à€€ú›\ôŸ]»H‹ô]’[\]U\ôŸ]ÿ[Y\ 
+N¬à€€ú›[\]\»H]òZ[XõP‹ô]’[\]\ 
+N¬à€€ú›ô]ö[›\—ÿ[Y\»Hô]ö[›\–‹ô]—ÿ[Y\ 
+N¬à€€ú›€›\òŸHH\ôŸ]÷ÃN¬àô]\õà
+à]Çà€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ–òX⁄Ÿõ‹Çàõ€OHúô\Ÿ[ù][€àÇà€ì[›\ŸQ›€è^ 
+HOÇàX‹ô]’[\]U€‹ö⁄[ô»	âàŸ]⁄›–‹ô]’[\]\ ò[ŸJBàBàÇà]Çà€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ»‹ô]’[\]QX[Ÿ»Çàõ€OHôX[Ÿ»Çà\öXK[[Ÿ[HùùYHÇà\öXK[Xô[YûOHò‹ô]’[\]U]HÇà€ì[›\ŸQ›€è^ ]ô[ù
+HOà]ô[ùú›‹õ‹Yÿ][€ä
+_BàÇà]à€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ“XYèÇà]èÇà»YHò‹ô]’[\]U]Hèê‹ô]»[\]\œ⁄œÇàÇà›\ôŸ]Àõ[ô›OOHBà»ÿ[YH…‹€›\òŸKôÿ[YW€ù[Xô\üXàà	›\ôŸ]Àõ[ô›HŸ[X›Yÿ[Y\ÿ^»àüBà8†%\‹⁄Y€õY[ù»ô[XZ[à[úXõ\⁄Y[ù[ô]öY]ŸYÇà‹ÇàŸ]èÇàù]€Çà\OHòù]€àÇà\öXK[Xô[Hê€‹ŸH‹ô]»[\]\»Çà\ÿXõY^ÿ‹ô]’[\]U€‹ö⁄[ôﬂBà€ê€X⁄œ^ 
+HOàŸ]⁄›–‹ô]’[\]\ ò[ŸJ_BàÇà0Â¬àÿù]€èÇàŸ]èÇà]à€\‹”ò[YOHò‹ô]’[\]PõŸHèÇàŸX›[€à€\‹”ò[YOHò‹ô]’[\]P‹ôX]HèÇà]èÇàèîÿ]ôH\»‹ô]œÿèÇà‹[èÇàô]\ŸHHŸôöX⁄X[»›\úô[ùH\‹⁄Y€ôY»\»ÿ[YKÇà‹‹[èÇàŸ]èÇàXô[Çà‹[èï[\]Hò[YO‹‹[èÇà[ú]àò[YO^ÿ‹ô]’[\]Sò[Y_BàX^[ô›^ŒBà\ÿXõY^ÿ‹ô]’[\]U€‹ö⁄[ôﬂBà€ê⁄[ôŸO^ ]ô[ù
+HOÇàŸ]‹ô]’[\]Sò[YJ]ô[ùù\ôŸ]ùò[YJBàBàœÇà€Xô[Çàù]€Çà\OHòù]€àÇà€\‹”ò[YOHú›XÿŸ\‹»Çà\ÿXõY^ÿ‹ô]’[\]U€‹ö⁄[ôﬂBà€ê€X⁄œ^ 
+HOàõ⁄Yÿ]ôP›\úô[ù‹ô]’[\]J
+_BàÇàÿ]ôH›\úô[ù‹ô]¬àÿù]€èÇà‹ŸX›[€èÇàŸX›[€à€\‹”ò[YOHò‹ô]’[\]P€‹HèÇà]èÇàèê€‹Húõ€H[õ›\àÿ[YOÿèÇà‹[èÇà€õH‹[à‹⁄][€ú»\ôHö[Y»^\›[ô»\‹⁄Y€õY[ù¬à\ôHô\Ÿ\ùôYÇà‹‹[èÇàŸ]èÇàŸ[X›àò[YO^ÿ€‹P‹ô]‘€›\òŸQÿ[YRYBà\ÿXõY^¬à‹ô]’[\]U€‹ö⁄[ô»\ô]ö[›\—ÿ[Y\Àõ[ô›àBà€ê⁄[ôŸO^ ]ô[ù
+HOÇàŸ]€‹P‹ô]‘€›\òŸQÿ[YRY
+]ô[ùù\ôŸ]ùò[YJBàBàÇà»\ô]ö[›\—ÿ[Y\Àõ[ô›	âà
+à‹[€àò[YOHàèÇàõ»ÿ[Y\»⁄]‹ô]‹»]òZ[XõBà€‹[€èÇà
+_Bà‹ô]ö[›\—ÿ[Y\ÀõX\
+
+\›Yÿ[YJHOà
+à‹[€àŸ^O^€\›Yÿ[YKöYHò[YO^€\›Yÿ[YKöYOÇàÿ[YHﬁ€\›Yÿ[YKôÿ[YW€ù[Xô\üH8†%»àüBà€\›Yÿ[YKö€YOÀõò[YHïëüHúﬁ»àüBà€\›Yÿ[YKò]ÿ^OÀõò[YHïëüH8†%»àüBà€ô]»]Jà\›Yÿ[YKú›\ù◊ÿ]à
+Kù”ÿÿ[Q]T›ö[ô 
+_Bà€‹[€èÇà
+J_Bà‹Ÿ[X›Çàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúö[X\ûHÇà\ÿXõY^¬à‹ô]’[\]U€‹ö⁄[ô»X€‹P‹ô]‘€›\òŸQÿ[YRYàBà€ê€X⁄œ^ 
+HOàõ⁄Y€‹P‹ô]—úõ€Qÿ[YJ
+_BàÇà€‹H‹ô]¬àÿù]€èÇà‹ŸX›[€èÇàŸX›[€à€\‹”ò[YOHò‹ô]’[\]Tÿ]ôYèÇà]à€\‹”ò[YOHò‹ô]’[\]TŸX›[€íXYèÇà]èÇàèîÿ]ôY‹ô]‹œÿèÇà‹[èÇàXY›YK\‹X⁄YöX»‹ô]‹»\X\àõ‹àX]⁄[ô»ÿ[Y\ÀÇà‹‹[èÇàŸ]èÇà›õ€ôœû›[\]\Àõ[ô›O‹›õ€ôœÇàŸ]èÇà›[\]\Àõ[ô›»
+à]à€\‹”ò[YOHò‹ô]’[\]S\›èÇà›[\]\ÀõX\
+
+[\]JHOà
+à\ùX€HŸ^O^›[\]KöYOÇà]èÇàèû›[\]Kõò[Y_OÿèÇà‹[èÇà›[\]Kò\‹⁄Y€õY[ù›[\]W‹€›Àõ[ô›^»àüBà‹⁄][€Çà›[\]Kò\‹⁄Y€õY[ù›[\]W‹€›¬àõ[ô›OOHBà»àÇààú»ü^»àüBà8†(û»àüBà›[\]KõXY›YW⁄Yà»ìXY›YH‹ô]»Çààê[XY›Y\»üBà‹‹[èÇà€X[Çà›[\]Kò\‹⁄Y€õY[ù›[\]W‹€›¬àõX\
+
+€›
+HOÇàŸôöX⁄X[Àôö[ô
+à
+ŸôöX⁄X[
+HOÇàŸôöX⁄X[öYOOH€›õŸôöX⁄X[⁄Yà
+Kà
+Bàôö[\äõ€€X[äBàõX\
+à
+ŸôöX⁄X[
+HOÇà	€ŸôöX⁄X[Kôö\ú›€ò[Y_H	€ŸôöX⁄X[Kõ\›€ò[Y_Xà
+Bàöõ⁄[äãäHìõ»]òZ[XõHŸôöX⁄X[»üBà‹€X[ÇàŸ]èÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúö[X\ûHÇà\ÿXõY^¬à‹ô]’[\]U€‹ö⁄[ô»à][\]Kò\‹⁄Y€õY[ù›[\]W‹€›Àõ[ô›àBà€ê€X⁄œ^ 
+HOÇàõ⁄Y\P‹ô]‘€› à[\]Kò\‹⁄Y€õY[ù›[\]W‹€›Àà[\]Kõò[YKà
+BàBàÇà\Bàÿù]€èÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûH‹ô]’[\]Q[]HÇà\ÿXõY^ÿ‹ô]’[\]U€‹ö⁄[ôﬂBà€ê€X⁄œ^ 
+HOÇàõ⁄Y[]P‹ô]’[\]J[\]KöY
+BàBàÇà[]Bàÿù]€èÇàÿ\ùX€OÇà
+J_BàŸ]èÇà
+Hà
+à]à€\‹”ò[YOHò‹ô]’[\]Q[\HèÇàõ»ÿ]ôY‹ô]‹»X]⁄\»ÿ[YHY]àÿ]ôHH›\úô[ùà‹ô]»»‹ôX]HHö\ú›€ôKÇàŸ]èÇà
+_Bà‹ŸX›[€èÇàÿ‹ô]’[\]SY\‹ÿYŸH	âà
+à]à€\‹”ò[YOHò‹ô]’[\]SY\‹ÿYŸHàõ€OHú›]\»èÇàÿ‹ô]’[\]SY\‹ÿYŸ_BàŸ]èÇà
+_BàŸ]èÇà]à€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ—õ€›\àèÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHÇà\ÿXõY^ÿ‹ô]’[\]U€‹ö⁄[ôﬂBà€ê€X⁄œ^ 
+HOàŸ]⁄›–‹ô]’[\]\ ò[ŸJ_BàÇà€ôBàÿù]€èÇàŸ]èÇàŸ]èÇàŸ]èÇà
+N¬àJJ
+_Bà‹⁄›‘Ÿ[ê\‹⁄Y€ëX[Ÿ»	âà
+à]Çà€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ–òX⁄Ÿõ‹Çàõ€OHúô\Ÿ[ù][€àÇà€ì[›\ŸQ›€è^ 
+HOÇà\Ÿ[ê\‹⁄Y€îÿ]ö[ô»	âàŸ]⁄›‘Ÿ[ê\‹⁄Y€ëX[Ÿ ò[ŸJBàBàÇà]Çà€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ»Çàõ€OHôX[Ÿ»Çà\öXK[[Ÿ[HùùYHÇà\öXK[Xô[YûOHúŸ[ê\‹⁄Y€ëX[Ÿ’]HÇà€ì[›\ŸQ›€è^ ]ô[ù
+HOà]ô[ùú›‹õ‹Yÿ][€ä
+_BàÇà]à€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ“XYèÇà]èÇà»YHúŸ[ê\‹⁄Y€ëX[Ÿ’]HèÇà‹[à‹⁄][€ú»õ‹àŸ[à\‹⁄Y€Çà⁄œÇàîŸ[X›H‹⁄][€ú»ŸôöX⁄X[»X^H€Z[Kè‹ÇàŸ]èÇàù]€Çà\OHòù]€àÇà\öXK[Xô[Hê€‹ŸHÇà\ÿXõY^‹Ÿ[ê\‹⁄Y€îÿ]ö[ôﬂBà€ê€X⁄œ^ 
+HOàŸ]⁄›‘Ÿ[ê\‹⁄Y€ëX[Ÿ ò[ŸJ_BàÇà0Â¬àÿù]€èÇàŸ]èÇà]à€\‹”ò[YOHúŸ[ê\‹⁄Y€ëX[Ÿ–X›[€ú»èÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHÇà€ê€X⁄œ^ 
+HOà¬à€€ú›ÿ[YRY»H[ö‘Ÿ[X›Yõ[ô›à»[ö‘Ÿ[X›Yààÿ[YBà»Ÿÿ[YKöYBàà◊N¬àŸ]Ÿ[ê\‹⁄Y€îŸ[X›Y
+àŸ[ê\‹⁄Y€ì‹[€ú—õ‹ëÿ[Y\ ÿ[YRY KõX\
+à
+‹[€äHOà‹[€ãöŸ^Kà
+Kà
+N¬à_BàÇàŸ[X›[àÿù]€èÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHÇà€ê€X⁄œ^ 
+HOàŸ]Ÿ[ê\‹⁄Y€îŸ[X›Y
+◊J_BàÇà€X\à[àÿù]€èÇàŸ]èÇà]à€\‹”ò[YOHúŸ[ê\‹⁄Y€î‹⁄][€ì\›èÇà‹Ÿ[ê\‹⁄Y€ì‹[€ú—õ‹ëÿ[Y\ à[ö‘Ÿ[X›Yõ[ô›»[ö‘Ÿ[X›Yàÿ[YH»Ÿÿ[YKöYHà◊Kà
+KõX\
+
+‹[€äHOà
+àXô[Ÿ^O^€‹[€ãöŸ^_OÇà[ú]à\OHò⁄X⁄ÿõﬁÇà⁄X⁄ŸY^‹Ÿ[ê\‹⁄Y€îŸ[X›Yö[ò€Y\ ‹[€ãöŸ^J_Bà\ÿXõY^‹Ÿ[ê\‹⁄Y€îÿ]ö[ôﬂBà€ê⁄[ôŸO^ 
+HOÇàŸŸ€TŸ[ê\‹⁄Y€îŸ[X›[€äà‹[€ãôÿ[YRYà‹[€ãú‹⁄][€íYà
+BàBàœÇà‹[èÇàèû€‹[€ãú‹⁄][€ìò[Y_OÿèÇà€X[Çàÿ[YHﬁ€‹[€ãôÿ[YKôÿ[YW€ù[Xô\üH8†%»àüBà€‹[€ãôÿ[YKö€YOÀõò[YHïëüHúﬁ»àüBà€‹[€ãôÿ[YKò]ÿ^OÀõò[YHïëüBà‹€X[Çà‹‹[èÇà€Xô[Çà
+J_BàŸ]èÇà]à€\‹”ò[YOHò\‹⁄Y€õY[ùX[Ÿ—õ€›\àèÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHÇà\ÿXõY^‹Ÿ[ê\‹⁄Y€îÿ]ö[ôﬂBà€ê€X⁄œ^ 
+HOàŸ]⁄›‘Ÿ[ê\‹⁄Y€ëX[Ÿ ò[ŸJ_BàÇàÿ[òŸ[àÿù]€èÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHú›XÿŸ\‹»Çà\ÿXõY^‹Ÿ[ê\‹⁄Y€îÿ]ö[ô»\Ÿ[ê\‹⁄Y€îŸ[X›Yõ[ô›Bà€ê€X⁄œ^ 
+HOàõ⁄Y‹[îŸ[ê\‹⁄Y€î‹⁄][€ú 
+_BàÇà‹Ÿ[ê\‹⁄Y€îÿ]ö[ô¬à»ì‹[ö[ô¯†)àÇàà‹[à	‹Ÿ[ê\‹⁄Y€îŸ[X›Yõ[ô›H‹⁄][€â‹Ÿ[ê\‹⁄Y€îŸ[X›Yõ[ô›OOHH»àààú»üXBàÿù]€èÇàŸ]èÇàŸ]èÇàŸ]èÇà
+_Bàÿÿ[ìX[òYŸH	âà›ô\ôYQ‹õ›\	âà[›ô\ôYTõ€\€‹ŸY	âà
+à]Çà€\‹”ò[YOHõ›ô\ôYTõ€\Çàõ€OHôX[Ÿ»Çà\öXK[Xô[YûOHõ›ô\ôYTõ€\]HÇàÇà]à€\‹”ò[YOHòÿ\ôXYèÇà]èÇà»YHõ›ô\ôYTõ€\]HèêXÿŸ\[òŸHXY[ôH\‹ŸY⁄œÇàÇà€ŸôöX⁄X[Àôö[ô
+à
+ŸôöX⁄X[
+HOàŸôöX⁄X[öYOOH›ô\ôYQ‹õ›\ÃKà
+OÀôö\ú›€ò[YHï\»ŸôöX⁄X[ü^»àüBà€ŸôöX⁄X[Àôö[ô
+à
+ŸôöX⁄X[
+HOàŸôöX⁄X[öYOOH›ô\ôYQ‹õ›\ÃKà
+OÀõ\›€ò[YHàü^»àüBà\»õ›XÿŸ\YHõ€›⁄[ô»\‹⁄Y€ôYÿ[YBà€›ô\ôYQ‹õ›\ÃWKõ[ô›OOHH»àààú»üKàŸôöX⁄X[Ã_HŸû»àüBà€›ô\ôYQ‹õ›\Àõ[ô›Hô\]Z\ö[ô»ô]öY]ÀÇà‹ÇàŸ]èÇàŸ]èÇà]à€\‹”ò[YOHõ›ô\ôYQÿ[YS\›èÇà€›ô\ôYQ‹õ›\ÃWKõX\
+
+\‹⁄Y€õY[ù
+HOà¬à€€ú››ô\ôYQÿ[YHHÿ[Y\Àôö[ô
+à
+\›Yÿ[YJHOà\›Yÿ[YKöYOOH\‹⁄Y€õY[ùôÿ[YW⁄Yà
+N¬à€€ú›‹⁄][€àH‹⁄][€úÀôö[ô
+à
+][JHOà][KöYOOH\‹⁄Y€õY[ùú‹⁄][€ó⁄Yà
+N¬àYà
+[›ô\ôYQÿ[YJHô]\õàù[¬àô]\õà
+àXô[Ÿ^O^ÿ\‹⁄Y€õY[ùöYOÇà[ú]à\OHò⁄X⁄ÿõﬁÇà⁄X⁄ŸY^€›ô\ôYTŸ[X›Yö[ò€Y\ \‹⁄Y€õY[ùöY
+_Bà\ÿXõY^€›ô\ôYTô\€€ö[ôﬂBà€ê⁄[ôŸO^ 
+HOàŸŸ€S›ô\ôYTŸ[X›[€ä\‹⁄Y€õY[ùöY
+_Bà\öXK[Xô[^ÿŸ[X›ÿ[YH	€›ô\ôYQÿ[YKôÿ[YW€ù[Xô\üXBàœÇà‹[èÇàèÇà€›ô\ôYQÿ[YKôÿ[YW€ù[Xô\üH8†%»àüBà€›ô\ôYQÿ[YKö€YOÀõò[YHïëüHúﬁ»àüBà€›ô\ôYQÿ[YKò]ÿ^OÀõò[YHïëüBàÿèÇà€X[Çà€ô]»]J›ô\ôYQÿ[YKú›\ù◊ÿ]
+Kù”ÿÿ[T›ö[ô ◊K¬à[€ùàú⁄‹ùãà^Nàõù[Y\öX»ãàYX\éàõù[Y\öX»ãà›\éàõù[Y\öX»ãàZ[ù]NàåãYY⁄]ãàJ_Bà»à8†(àüBà‹‹⁄][€Çà»⁄‹ù‹⁄][€ìò[YJ‹⁄][€ãõò[YJBààìŸôöX⁄X[üBà»à8†(àXÿŸ\[òŸHÿ\»YHüBà€ô]»]J\‹⁄Y€õY[ùòXÿŸ\ÿûHJKù”ÿÿ[T›ö[ô ◊K¬à[€ùàú⁄‹ùãà^Nàõù[Y\öX»ãà›\éàõù[Y\öX»ãàZ[ù]NàåãYY⁄]ãàJ_Bà‹€X[Çà‹‹[èÇà€Xô[Çà
+N¬àJ_BàŸ]èÇà€\‹”ò[YOHõ›ô\ôYTõ€\]Y\›[€àèÇàŸ[X›H[òXÿŸ\Yÿ[Y\»»\]KàXÿŸ\Y\‹⁄Y€õY[ù»\ôBàô]ô\à[ò€YY‹àô[[›ôYÇà‹Çà]à€\‹”ò[YOHõ›ô\ôYTõ€\X›[€ú»èÇàù]€Çà€\‹”ò[YOHúŸX€€ô\ûHÇà\ÿXõY^€›ô\ôYTô\€€ö[ô»›ô\ôYTŸ[X›Yõ[ô›OOHBà€ê€X⁄œ^ 
+HOàõ⁄Yô\€€ôS›ô\ôYJöŸY\ä_BàÇàŸY\ŸôöX⁄X[àÿù]€èÇàù]€Çà€\‹”ò[YOHô[ôŸ\êù]€àÇà\ÿXõY^€›ô\ôYTô\€€ö[ô»›ô\ôYTŸ[X›Yõ[ô›OOHBà€ê€X⁄œ^ 
+HOàõ⁄Yô\€€ôS›ô\ôYJúô[[›ôHä_BàÇàô[[›ôH8†%õ»õÿ⁄¬àÿù]€èÇàù]€Çà€\‹”ò[YOHúö[X\ûHÇà\ÿXõY^€›ô\ôYTô\€€ö[ô»›ô\ôYTŸ[X›Yõ[ô›OOHBà€ê€X⁄œ^ 
+HOàõ⁄Yô\€€ôS›ô\ôYJúô[[›ôWÿ[ôÿõÿ⁄»ä_BàÇàô[[›ôH
+»‹ôX]Hõÿ⁄‹¬àÿù]€èÇàù]€Çà€\‹”ò[YOHúŸX€€ô\ûHÇà\ÿXõY^€›ô\ôYTô\€€ö[ôﬂBà€ê€X⁄œ^ 
+HOàŸ]›ô\ôYTõ€\€‹ŸY
+ùYJ_BàÇàô]öY]»]\Çàÿù]€èÇà€›ô\ôYTô\€€ö[ô»	âà‹[èï\][ô¯†)è‹‹[èüBàŸ]èÇàŸ]èÇà
+_Bàÿÿ[ìX[òYŸH	âà
+àŸX›[€Çà€\‹”ò[YOHò\‹⁄Y€õY[ù][ù[€î]Y]YHÇà\öXK[Xô[YûOHò][ù[€î]Y]YU]HÇàÇà]èÇà»YHò][ù[€î]Y]YU]HèìôYY»][ù[€è⁄œÇàì‹[àH€‹ö»]⁄›[ôH[ôYô^è‹ÇàŸ]èÇàù]€Çà\OHòù]€àÇà€ê€X⁄œ^ 
+HOà¬à⁄€‹ŸP€€\][ô\‹ ò][ù[€àäN¬à€€ú›ô\XŸ[Y[ùÿ[YHHò[ôŸQÿ[Y\Àôö[ô
+
+\›Yÿ[YJHOÇà‹⁄][€ú¬àôö[\äà
+‹⁄][€äHOà‹⁄][€ãú‹‹ù⁄YOOH\›Yÿ[YKú‹‹ù⁄Yà
+Bàú€XŸJ\›Yÿ[YKõŸôöX⁄X[◊€ôYYY
+Bàú€€YJ
+‹⁄][€äHOÇà\‘ô\XŸ[Y[ùôYYY
+\›Yÿ[YKöY‹⁄][€ãöY
+Kà
+Kà
+N¬àYà
+ô\XŸ[Y[ùÿ[YJHŸ]Ÿ[X›Y
+ô\XŸ[Y[ùÿ[YKöY
+N¬à_BàÇàèûÿ][ù[€î]Y]YKúô\XŸ[Y[ùﬂOÿèÇà‹[èîô\XŸ[Y[ùôYYY‹‹[èÇàÿù]€èÇàù]€Çà\OHòù]€àÇà€ê€X⁄œ^ 
+HOà⁄€‹ŸP€€\][ô\‹ ù[ò\‹⁄Y€ôYä_BàÇàèûÿ][ù[€î]Y]YKù[ò\‹⁄Y€ôYOÿèÇà‹[èï[ò\‹⁄Y€ôYÿ[Y\œ‹‹[èÇàÿù]€èÇàù]€Çà\OHòù]€àÇà€ê€X⁄œ^ 
+HOà⁄€‹ŸP€€\][ô\‹ ò]ÿZ][ô»ä_BàÇàèûÿ][ù[€î]Y]YKò]ÿZ][ôﬂOÿèÇà‹[èê]ÿZ][ô»ô\‹€úŸO‹‹[èÇàÿù]€èÇàù]€Çà\OHòù]€àÇà€ê€X⁄œ^ 
+HOà¬àŸ][úXõ\⁄Y€õJùYJN¬àŸ]€€\][ô\‹—ö[\äò[äN¬àŸ]Ÿ[X›Y
+àäN¬à_BàÇàèûÿ][ù[€î]Y]YKù[úXõ\⁄YOÿèÇà‹[èìõ›Xõ\⁄Y‹‹[èÇàÿù]€èÇà‹ŸX›[€èÇà
+_Bà]à€\‹”ò[YOHò\‹⁄Y€õY[ùö[\î[ô[\‹⁄Y€õY[ù€€\X›€€ò\àèÇàXô[€\‹”ò[YOHò\‹⁄Y€õY[ù€€ò\ëöY[èÇà‹[èïöY]œ‹‹[èÇàŸ[X›à\öXK[Xô[Hëÿ[YHöY]»Çàò[YO^‹Ÿ[ê\‹⁄Y€ì€õH»úŸ[ê\‹⁄Y€àààò[üBà€ê⁄[ôŸO^ ]ô[ù
+HOà¬à€€ú›ô^H]ô[ùù\ôŸ]ùò[YHOOHúŸ[ê\‹⁄Y€àé¬àŸ]Ÿ[ê\‹⁄Y€ì€õJô^
+N¬àŸ][ö‘Ÿ[X›Y
+◊JN¬àŸ]Ÿ[X›Y
+àäN¬à_BàÇà‹[€àò[YOHò[èê[ÿ[Y\œ€‹[€èÇà‹[€àò[YOHúŸ[ê\‹⁄Y€àèÇà‹[àõ‹àŸ[à\‹⁄Y€à
+‹Ÿ[ê\‹⁄Y€ëÿ[YP€›[ùJBà€‹[€èÇà‹Ÿ[X›Çà€Xô[ÇàXô[€\‹”ò[YOHò\‹⁄Y€õY[ù€€ò\ëöY[èÇà‹[èë]O‹‹[èÇàŸ[X›à\öXK[Xô[Hë]Hò[ôŸHÇàò[YO^‹ò[ôŸ_Bà€ê⁄[ôŸO^ ]ô[ù
+HOà¬à€€ú›ô^H]ô[ùù\ôŸ]ùò[YH\»ò[ôŸN¬àYà
+ô^OOHò›\›€HäH¬àŸ]ò[ôŸJò›\›€HäN¬àŸ]⁄›–ÿ[[ô\äùYJN¬àH[ŸH⁄€‹ŸTò[ôŸJô^
+N¬à_BàÇàŸö[\úÀõX\
+
+⁄Ÿ^KXô[JHOà
+à‹[€àŸ^O^⁄Ÿ^_Hò[YO^⁄Ÿ^_OÇà€Xô[H
+à¬àÿ[Y\Àôö[\äà
+ HOÇà[îò[ôŸJÀŸ^K›\›€Q]JH	âÇàX]⁄\”ŸôöX⁄X[ö[\ä Kà
+Kõ[ô›àBà
+Bà€‹[€èÇà
+J_Bà‹[€àò[YOHò›\›€Hèê⁄€‹ŸHH]O€‹[€èÇà‹Ÿ[X›Çà€Xô[Çàÿÿ[ìX[òYŸH	âà
+àXô[€\‹”ò[YOHò\‹⁄Y€õY[ù€€ò\ëöY[\‹⁄Y€õY[ùÿ]ôYöY]—öY[èÇà‹[èîÿ]ôYöY]œ‹‹[èÇàŸ[X›à\öXK[Xô[Hì‹[àHÿ]ôYöY]»ÇàYò][ò[YOHàÇà€ê⁄[ôŸO^ ]ô[ù
+HOà¬à€€ú›öY]»Hÿ]ôYöY]‹Àôö[ô
+à
+][JHOà][KöYOOH]ô[ùù\ôŸ]ùò[YKà
+N¬àYà
+öY] H\Tÿ]ôYöY] öY] N¬à]ô[ùù\ôŸ]ùò[YHHàé¬à_BàÇà‹[€àò[YOHàèÇà‹ÿ]ôYöY]‹Àõ[ô›à»ê⁄€‹ŸHHÿ]ôYöY]»Çààìõ»ÿ]ôYöY]‹»Y]üBà€‹[€èÇà‹ÿ]ôYöY]‹ÀõX\
+
+öY] HOà
+à‹[€àò[YO^›öY]ÀöYHŸ^O^›öY]ÀöYOÇà›öY]Àõò[Y_Bà€‹[€èÇà
+J_Bà‹Ÿ[X›Çà€Xô[Çà
+_Bàÿÿ[ìX[òYŸH	âà
+àù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûH\‹⁄Y€õY[ù€€ò\êù]€àÇà€ê€X⁄œ^‹ÿ]ôP›\úô[ùöY]ﬂBàÇà
+»ÿ]ôHöY]¬àÿù]€èÇà
+_Bàÿÿ[ìX[òYŸH	âà
+à]Z[»€\‹”ò[YOHò\‹⁄Y€õY[ù[‹ôQö[\ú»èÇà›[[X\ûOì[‹ôHö[\úœ‹›[[X\ûOÇà]à€\‹”ò[YOHò\‹⁄Y€õY[ù\ôX›ö[\ú»èÇà‹[à€\‹”ò[YOHò\‹⁄Y€õY[ùö[\ìXô[èëö[\úœ‹‹[èÇàXô[Çàÿÿ][€ÇàŸ[X›à\öXK[Xô[Hî⁄›»ÿ[Y\»]ÿÿ][€àÇàò[YO^€ÿÿ][€ëö[\üBà€ê⁄[ôŸO^ ]ô[ù
+HOà¬àŸ]ÿÿ][€ëö[\ä]ô[ùù\ôŸ]ùò[YJN¬àŸ][ö‘Ÿ[X›Y
+◊JN¬àŸ]Ÿ[X›Y
+àäN¬à_BàÇà‹[€àò[YOHàèê[ÿÿ][€úœ€‹[€èÇà–\úò^Kôúõ€Jàô]»X\
+àÿ[Y\¬àôö[\ä
+\›Yÿ[YJHOà\›Yÿ[YKõÿÿ][€äBàõX\
+
+\›Yÿ[YJHOà¬à\›Yÿ[YKõÿÿ][€àKöYà\›Yÿ[YKõÿÿ][€àKõò[YKàJKà
+Kô[ùöY\ 
+Kà
+Bàú€‹ù
+
+KäHOàVÃWKõÿÿ[P€€\\ôJñÃWJJBàõX\
+
+⁄Yò[YWJHOà
+à‹[€àŸ^O^⁄YHò[YO^⁄YOÇà€ò[Y_Bà€‹[€èÇà
+J_Bà‹Ÿ[X›Çà€Xô[ÇàXô[ÇàXY›YBàŸ[X›à\öXK[Xô[Hî⁄›»ÿ[Y\»[àXY›YHÇàò[YO^€XY›YQö[\üBà€ê⁄[ôŸO^ ]ô[ù
+HOà¬àŸ]XY›YQö[\ä]ô[ùù\ôŸ]ùò[YJN¬àŸ][ö‘Ÿ[X›Y
+◊JN¬àŸ]Ÿ[X›Y
+àäN¬à_BàÇà‹[€àò[YOHàèê[XY›Y\œ€‹[€èÇà–\úò^Kôúõ€Jàô]»X\
+àÿ[Y\¬àôö[\äà
+\›Yÿ[YJHOÇà\›Yÿ[YKõXY›YW⁄Y	âÇà\›Yÿ[YKõXY›Y\œÀõò[YKà
+BàõX\
+
+\›Yÿ[YJHOà¬à\›Yÿ[YKõXY›YW⁄YKà\›Yÿ[YKõXY›Y\»Kõò[YKàJKà
+Kô[ùöY\ 
+Kà
+Bàú€‹ù
+
+KäHOàVÃWKõÿÿ[P€€\\ôJñÃWJJBàõX\
+
+⁄Yò[YWJHOà
+à‹[€àŸ^O^⁄YHò[YO^⁄YOÇà€ò[Y_Bà€‹[€èÇà
+J_Bà‹Ÿ[X›Çà€Xô[ÇàXô[Çà]ô[àŸ[X›à\öXK[Xô[Hî⁄›»ÿ[Y\»]]ô[Çàò[YO^€]ô[ö[\üBà€ê⁄[ôŸO^ ]ô[ù
+HOà¬àŸ]]ô[ö[\ä]ô[ùù\ôŸ]ùò[YJN¬àŸ][ö‘Ÿ[X›Y
+◊JN¬àŸ]Ÿ[X›Y
+àäN¬à_BàÇà‹[€àò[YOHàèê[]ô[œ€‹[€èÇà–\úò^Kôúõ€Jàô]»X\
+àÿ[Y\¬àôö[\äà
+\›Yÿ[YJHOÇà\›Yÿ[YKõ]ô[⁄Y	âà\›Yÿ[YKõ]ô[œÀõò[YKà
+BàõX\
+
+\›Yÿ[YJHOà¬à\›Yÿ[YKõ]ô[⁄YKà\›Yÿ[YKõ]ô[»Kõò[YKàJKà
+Kô[ùöY\ 
+Kà
+Bàú€‹ù
+
+KäHOàVÃWKõÿÿ[P€€\\ôJñÃWJJBàõX\
+
+⁄Yò[YWJHOà
+à‹[€àŸ^O^⁄YHò[YO^⁄YOÇà€ò[Y_Bà€‹[€èÇà
+J_Bà‹Ÿ[X›Çà€Xô[ÇàXô[ÇàŸôöX⁄X[àŸ[X›à\öXK[Xô[Hî⁄›»ÿ[Y\»\‹⁄Y€ôY»ŸôöX⁄X[Çàò[YO^€ŸôöX⁄X[ö[\üBà€ê⁄[ôŸO^ ]ô[ù
+HOà¬àŸ]ŸôöX⁄X[ö[\ä]ô[ùù\ôŸ]ùò[YJN¬àŸ][ö‘Ÿ[X›Y
+◊JN¬àŸ]Ÿ[X›Y
+àäN¬à_BàÇà‹[€àò[YOHàèê[ŸôöX⁄X[œ€‹[€èÇà€ŸôöX⁄X[¬àôö[\ä
+ŸôöX⁄X[
+HOÇà\‹⁄Y€õY[ùÀú€€YJà
+\‹⁄Y€õY[ù
+HOÇà\‹⁄Y€õY[ùõŸôöX⁄X[⁄YOOHŸôöX⁄X[öY	âÇà\‹⁄Y€õY[ùú›]\»OOHôX€[ôYãà
+Kà
+BàõX\
+
+ŸôöX⁄X[
+HOà
+à‹[€àŸ^O^€ŸôöX⁄X[öYHò[YO^€ŸôöX⁄X[öYOÇà€ŸôöX⁄X[õ\›€ò[Y_K€ŸôöX⁄X[ôö\ú›€ò[Y_Bà€‹[€èÇà
+J_Bà‹Ÿ[X›Çà€Xô[ÇàXô[Çà\‹⁄Y€õY[ù›]\¬àŸ[X›à\öXK[Xô[Hëö[\àûH\‹⁄Y€õY[ù›]\»Çàò[YO^ÿ€€\][ô\‹—ö[\üBà€ê⁄[ôŸO^ ]ô[ù
+HOÇà⁄€‹ŸP€€\][ô\‹ ]ô[ùù\ôŸ]ùò[YH\»€€\][ô\‹ BàBàÇà‹[€àò[YOHò[èÇà[\‹⁄Y€õY[ù›]\Ÿ\»
+‹ò[ôŸQÿ[Y\Àõ[ô›JBà€‹[€èÇà‹[€àò[YOHù[ò\‹⁄Y€ôYèï[ò\‹⁄Y€ôY€‹[€èÇà‹[€àò[YOHú\ùX[èî\ùX[H\‹⁄Y€ôY€‹[€èÇà‹[€àò[YOHôù[èëù[H\‹⁄Y€ôY€‹[€èÇà‹[€àò[YOHò]ÿZ][ô»èê]ÿZ][ô»€€ôö\õX][€è€‹[€èÇà‹[€àò[YOHò€€ôö\õYYèê€€ôö\õYY€‹[€èÇà‹[€àò[YOHò][ù[€àèìôYY»][ù[€è€‹[€èÇà‹Ÿ[X›Çà€Xô[ÇàXô[€\‹”ò[YOHò\‹⁄Y€õY[ù⁄X⁄ÿõﬁö[\àèÇà[ú]à\OHò⁄X⁄ÿõﬁÇà⁄X⁄ŸY^›[úXõ\⁄Y€õ_Bà€ê⁄[ôŸO^›ŸŸ€U[úXõ\⁄YBàœÇà⁄›»õ›Xõ\⁄Y€õH
+à‹ò[ôŸQÿ[Y\Àôö[\ä\’[úXõ\⁄Yÿ[YJKõ[ô›JBà€Xô[Çà⁄\—\ôX›ÿ[YQö[\à	âà
+à‹[èÇà⁄›⁄[ô»X]⁄[ô»ÿ[Y\»X‹õ‹‹»[]\»[ô\‹⁄Y€õY[ùà›]\Ÿ\ÀÇà‹‹[èÇà
+_Bà‹ÿ]ôYöY]‹Àõ[ô›à	âà
+à]à€\‹”ò[YOHò\‹⁄Y€õY[ùX[òYŸTÿ]ôYöY]‹»èÇàèìX[òYŸHÿ]ôYöY]‹œÿèÇà]èÇà‹ÿ]ôYöY]‹ÀõX\
+
+öY] HOà
+àù]€Çà\OHòù]€àÇàŸ^O^›öY]ÀöYBà€ê€X⁄œ^ 
+HOà[]Tÿ]ôYöY] öY]ÀöY
+_BàÇà[]H›öY]Àõò[Y_Bàÿù]€èÇà
+J_BàŸ]èÇàŸ]èÇà
+_BàŸ]èÇàŸ]Z[œÇà
+_Bà‹⁄›–ÿ[[ô\à	âà
+à]à€\‹”ò[YOHò\‹⁄Y€õY[ù›\›€Q]Tõ›»èÇàXô[€\‹”ò[YOHò\‹⁄Y€õY[ù€€ò\ëöY[èÇà‹[èî‹X⁄YöX»]O‹‹[èÇà[ú]à\OHô]HÇàò[YO^ÿ›\›€Q]_Bà€ê⁄[ôŸO^ ]ô[ù
+HOà⁄€‹ŸQ]J]ô[ùù\ôŸ]ùò[YJ_BàœÇà€Xô[Çàÿ›\›€Q]H	âà
+à‹[à€\‹”ò[YOHò\‹⁄Y€õY[ù›\›€Q]Tô\›[èÇà€ô]»]J	ÿ›\›€Q]_Uåå
+Kù”ÿÿ[Q]T›ö[ô 
+_H0≠ﬁ»àüBàŸö[\ôYÿ[Y\Àõ[ô›Hÿ[Y\¬à‹‹[èÇà
+_Bàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHÇà€ê€X⁄œ^ 
+HOàŸ]⁄›–ÿ[[ô\äò[ŸJ_BàÇà€ôBàÿù]€èÇàŸ]èÇà
+_BàŸ]èÇàÿÿ[ìX[òYŸH	âà[ö‘Ÿ[X›Yõ[ô›à	âà
+à]à€\‹”ò[YOHò\‹⁄Y€õY[ùŸ[X›[€êò\àèÇà]à€\‹”ò[YOHò\‹⁄Y€õY[ùŸ[X›[€î›[[X\ûHèÇàèÇàÿ\‹⁄Y€õY[ùŸ[X›[€í\”[öŸYà»åH[öŸY‹õ›\Ÿ[X›YÇàà\‹⁄Y€õY[ùŸ[X›[€ï\ôŸ]à»ÿ[YH…ÿ\‹⁄Y€õY[ùŸ[X›[€ï\ôŸ]ôÿ[YW€ù[Xô\üH8†%	ÿ\‹⁄Y€õY[ùŸ[X›[€ï\ôŸ]ö€YOÀõò[YHïëüHú»	ÿ\‹⁄Y€õY[ùŸ[X›[€ï\ôŸ]ò]ÿ^OÀõò[YHïëüXàà	€[ö‘Ÿ[X›Yõ[ô›Hÿ[Y\»Ÿ[X›YBàÿèÇàÿ\‹⁄Y€õY[ùŸ[X›[€ï\ôŸ]	âà
+à‹[èÇàÿ\‹⁄Y€õY[ùŸ[X›[€ï\ôŸ]õŸôöX⁄X[◊€ôYYYH‹⁄][€ú»8†(û»àüBà¬à\‹⁄Y€õY[ùÀôö[\äà
+][JHOÇà][Kôÿ[YW⁄YOOH\‹⁄Y€õY[ùŸ[X›[€ï\ôŸ]öY	âÇà][Kú›]\»OOHôX€[ôYãà
+Kõ[ô›à^»àüBà\‹⁄Y€ôY8†(û»àüBà”X]õX^
+àà\‹⁄Y€õY[ùŸ[X›[€ï\ôŸ]õŸôöX⁄X[◊€ôYYYBà\‹⁄Y€õY[ùÀôö[\äà
+][JHOÇà][Kôÿ[YW⁄YOOH\‹⁄Y€õY[ùŸ[X›[€ï\ôŸ]öY	âÇà][Kú›]\»OOHôX€[ôYãà
+Kõ[ô›à
+_^»àüBà‹[Çà‹‹[èÇà
+_BàŸ]èÇàù]€Çà€\‹”ò[YOHúö[X\ûHÇà\ÿXõY^ÿù[’€‹ö⁄[ôﬂBà€ê€X⁄œ^‹ô\\ôPù[–\‹⁄Y€õY[ùBàÇà\‹⁄Y€àŸôöX⁄X[àÿù]€èÇàù]€Çà€\‹”ò[YOHúö[X\ûH\‹⁄Y€õY[ù‹ô]–ù]€àÇà\ÿXõY^ÿù[’€‹ö⁄[ôﬂBà€ê€X⁄œ^‹ô\\ôPù[–‹ô]ﬂBàÇà\‹⁄Y€à‹ô]‹¬àÿù]€èÇàù]€Çà€\‹”ò[YOHúŸX€€ô\ûH\‹⁄Y€õY[ù[\]Pù]€àÇà\ÿXõY^ÿù[’€‹ö⁄[ôﬂBà€ê€X⁄œ^€‹[ê‹ô]’[\]U€€ﬂBàÇà‹ô]»[\]\¬àÿù]€èÇàù]€Çà€\‹”ò[YOHú›XÿŸ\‹»Çà\ÿXõY^ÿù[’€‹ö⁄[ô»Ÿ[ê\‹⁄Y€îÿ]ö[ôﬂBà€ê€X⁄œ^‹ô\\ôTŸ[ê\‹⁄Y€î‹⁄][€úﬂBàÇà‹[à‹⁄][€ú»õ‹àŸ[à\‹⁄Y€Çàÿù]€èÇàù]€Çà€\‹”ò[YOHúŸX€€ô\ûHÇà\ÿXõY^ÿù[’€‹ö⁄[ôﬂBà€ê€X⁄œ^ 
+HOàõ⁄Yù[êù[–X›[€äúXõ\⁄ä_BàÇàXõ\⁄àÿù]€èÇàù]€Çà€\‹”ò[YOHúŸX€€ô\ûHÇà\ÿXõY^ÿù[’€‹ö⁄[ôﬂBà€ê€X⁄œ^ 
+HOàõ⁄Yù[êù[–X›[€äò€€ôö\õHä_BàÇà€€ôö\õHŸôöX⁄X[¬àÿù]€èÇà]Z[»€\‹”ò[YOHò\‹⁄Y€õY[ù[‹ôPX›[€ú»èÇà›[[X\ûOì[‹ôHX›[€úœ‹›[[X\ûOÇà]èÇàù]€Çà€\‹”ò[YOHúŸX€€ô\ûHÇà\ÿXõY^ÿù[’€‹ö⁄[ôﬂBà€ê€X⁄œ^ 
+HOàõ⁄Yù[êù[–X›[€äù[ò\‹⁄Y€àä_BàÇà[ò\‹⁄Y€àŸôöX⁄X[¬àÿù]€èÇàù]€Çà€\‹”ò[YOHúŸX€€ô\ûHÇà\ÿXõY^¬àù[’€‹ö⁄[ô»à\Ÿ[ê\‹⁄Y€î€›Àú€€YJ
+€›
+HOÇà[ö‘Ÿ[X›Yö[ò€Y\ €›ôÿ[YW⁄Y
+Kà
+BàBà€ê€X⁄œ^ 
+HOàõ⁄Yù[êù[–X›[€äò€‹ŸTŸ[ê\‹⁄Y€àä_BàÇà€‹ŸHŸ[à\‹⁄Y€Çàÿù]€èÇàXô[Çàÿ[YH›]\¬àŸ[X›à\öXK[Xô[Hêù[»ÿ[YH›]\»Çàò[YO^ÿù[‘›]\ﬂBà\ÿXõY^ÿù[’€‹ö⁄[ôﬂBà€ê⁄[ôŸO^ JHOàŸ]ù[‘›]\ Kù\ôŸ]ùò[YJ_BàÇàŸÿ[YT›]\”‹[€úÀõX\
+
+›ò[YKXô[JHOà
+à‹[€àŸ^O^›ò[Y_Hò[YO^›ò[Y_OÇà€Xô[Bà€‹[€èÇà
+J_Bà‹Ÿ[X›Çà€Xô[Çàù]€Çà€\‹”ò[YOHúŸX€€ô\ûHÇà\ÿXõY^ÿù[’€‹ö⁄[ôﬂBà€ê€X⁄œ^ 
+HOàõ⁄Yù[êù[–X›[€äú›]\»ä_BàÇà\H›]\¬àÿù]€èÇàù]€Çà€\‹”ò[YOHúŸX€€ô\ûHÇà\ÿXõY^€[ö⁄[ô»ù[’€‹ö⁄[ô»[ö‘Ÿ[X›Yõ[ô›üBà€ê€X⁄œ^ 
+HOàõ⁄Y[ö—ÿ[Y\ 
+_BàÇà[ö»Ÿ[X›Yÿ[Y\¬àÿù]€èÇàù]€Çà€\‹”ò[YOHúŸX€€ô\ûHÇà\ÿXõY^ÿù[’€‹ö⁄[ôﬂBà€ê€X⁄œ^ 
+HOàõ⁄Y^‹ù\‹⁄Y€õY[ù [ö‘Ÿ[X›Y
+_BàÇà^‹ùŸ[X›Yàÿù]€èÇàŸ]èÇàŸ]Z[œÇàù]€Çà€\‹”ò[YOHò\‹⁄Y€õY[ù€X\îŸ[X›[€àÇà\ÿXõY^ÿù[’€‹ö⁄[ôﬂBà€ê€X⁄œ^ 
+HOàŸ][ö‘Ÿ[X›Y
+◊J_BàÇà€X\àŸ[X›[€Çàÿù]€èÇàÿù[’€‹ö⁄[ô»	âà‹[èï€‹ö⁄[ô¯†)è‹‹[èüBàŸ]èÇà
+_Bà]Çà€\‹”ò[YOHò\‹⁄Y€õY[ùÿ[YUXõHÇà›[O^ﬁ¬àX\ô⁄[éàåMãàõ‹ô\éàå\€€YÿÿôYLHãàõ‹ô\îòY]\ŒàLà›ô\ôõ›ŒàöY[àãà_BàÇà]Çà›[O^ﬁ¬à\‹^Nàôõ^ãà[Y€í][\ŒàòŸ[ù\àãàù\›YûP€€ù[ùàú‹XŸKXô]ŸY[àãàÿ\àLãàY[ôŒàåLLúãàòX⁄Ÿ‹õ›[ôààŸéòYò»ãàõ‹ô\êõ›€Nàå\€€YŸLôNåãà_BàÇàèÇàÿ[Y\»€X[ûŸö[\ôYÿ[Y\Àõ[ô›Hô\›[œ‹€X[ÇàÿèÇà‹[Çà›[O^ﬁ¬à\‹^Nàôõ^ãàÿ\àÀàõ^‹ò\àù‹ò\ãà[Y€í][\ŒàòŸ[ù\àãàù\›YûP€€ù[ùàôõ^Y[ôãà_BàÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHÇà\ÿXõY^»Yö[\ôYÿ[Y\Àõ[ô›ù[’€‹ö⁄[ôﬂBà€ê€X⁄œ^ 
+HOÇàŸ][ö‘Ÿ[X›Y
+à[ö‘Ÿ[X›Yõ[ô›OOHö[\ôYÿ[Y\Àõ[ô›à»◊Bààö[\ôYÿ[Y\ÀõX\
+
+ HOàÀöY
+Kà
+BàBàÇà€[ö‘Ÿ[X›Yõ[ô›OOHö[\ôYÿ[Y\Àõ[ô›à»ê€X\àŸ[X›[€àÇààîŸ[X›[ÿ[Y\»üBàÿù]€èÇà‹‹[èÇàŸ]èÇà‹X⁄ŸYŸôöX⁄X[	âà
+à]à€\‹”ò[YOHò\‹⁄Y€õY[ùX⁄ŸYŸôöX⁄X[àõ€OHú›]\»èÇà‹[èÇà\‹⁄Y€ö[ôﬁ»àüBàèÇà¬àŸôöX⁄X[Àôö[ô
+à
+ŸôöX⁄X[
+HOàŸôöX⁄X[öYOOHX⁄ŸYŸôöX⁄X[à
+OÀôö\ú›€ò[YBà^»àüBà¬àŸôöX⁄X[Àôö[ô
+à
+ŸôöX⁄X[
+HOàŸôöX⁄X[öYOOHX⁄ŸYŸôöX⁄X[à
+OÀõ\›€ò[YBàBàÿèÇà€X[Çà€X⁄»[ûHÿ[YHò[YHô[›»»ö[]»ô^‹[à‹⁄][€ãÇà‹€X[Çà‹‹[èÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHÇà€ê€X⁄œ^ 
+HOàŸ]X⁄ŸYŸôöX⁄X[
+àä_BàÇàÿ[òŸ[àÿù]€èÇàŸ]èÇà
+_Bà]à€\‹”ò[YOHò\‹⁄Y€õY[ùÿ[YUXõRXY\àèÇà‹[àœÇàù]€Çà\OHòù]€àÇà€ê€X⁄œ^ 
+HOà€‹ùÿ[Y\ ôÿ[YHä_Bà›[O^ﬁ¬àõ‹ô\éààòX⁄Ÿ‹õ›[ôàõõ€ôHãàY[ôŒàà^[Y€éàõYùãàõ€ùàö[ö\ö]ãà€€‹éàö[ö\ö]ãà›\ú€‹éàú⁄[ù\àãà_BàÇàÿ[Y^‹€‹ù\úõ› ôÿ[YHä_Bàÿù]€èÇàù]€Çà\OHòù]€àÇà€ê€X⁄œ^ 
+HOà€‹ùÿ[Y\ õÿÿ][€àä_Bà›[O^ﬁ¬àõ‹ô\éààòX⁄Ÿ‹õ›[ôàõõ€ôHãàY[ôŒàà^[Y€éàõYùãàõ€ùàö[ö\ö]ãà€€‹éàö[ö\ö]ãà›\ú€‹éàú⁄[ù\àãà_BàÇàÿÿ][€û‹€‹ù\úõ› õÿÿ][€àä_Bàÿù]€èÇàù]€Çà\OHòù]€àÇà€ê€X⁄œ^ 
+HOà€‹ùÿ[Y\ ù[YHä_Bà›[O^ﬁ¬àõ‹ô\éààòX⁄Ÿ‹õ›[ôàõõ€ôHãàY[ôŒàà^[Y€éàõYùãàõ€ùàö[ö\ö]ãà€€‹éàö[ö\ö]ãà›\ú€‹éàú⁄[ù\àãà_BàÇà]H	ò[\»[Y^‹€‹ù\úõ› ù[YHä_Bàÿù]€èÇàù]€Çà\OHòù]€àÇà€ê€X⁄œ^ 
+HOà€‹ùÿ[Y\ ú›Ÿ\àä_Bà›[O^ﬁ¬àõ‹ô\éààòX⁄Ÿ‹õ›[ôàõõ€ôHãàY[ôŒàà^[Y€éàõYùãàõ€ùàö[ö\ö]ãà€€‹éàö[ö\ö]ãà›\ú€‹éàú⁄[ù\àãà_BàÇà›Ÿ\û‹€‹ù\úõ› ú›Ÿ\àä_Bàÿù]€èÇàù]€Çà\OHòù]€àÇà€ê€X⁄œ^ 
+HOà€‹ùÿ[Y\ ú›]\»ä_Bà›[O^ﬁ¬àõ‹ô\éààòX⁄Ÿ‹õ›[ôàõõ€ôHãàY[ôŒàà^[Y€éàõYùãàõ€ùàö[ö\ö]ãà€€‹éàö[ö\ö]ãà›\ú€‹éàú⁄[ù\àãà_BàÇàÿ[YH›]\ﬁ‹€‹ù\úõ› ú›]\»ä_Bàÿù]€èÇàù]€Çà\OHòù]€àÇà€ê€X⁄œ^ 
+HOà€‹ùÿ[Y\ ò\‹⁄Y€õY[ù»ä_Bà›[O^ﬁ¬àõ‹ô\éààòX⁄Ÿ‹õ›[ôàõõ€ôHãàY[ôŒàà^[Y€éàúöY⁄ãàõ€ùàö[ö\ö]ãà€€‹éàö[ö\ö]ãà›\ú€‹éàú⁄[ù\àãà_BàÇà\‹⁄Y€õY[ù›]\ﬁ‹€‹ù\úõ› ò\‹⁄Y€õY[ù»ä_Bàÿù]€èÇàŸ]èÇà]Çà€\‹”ò[YOHò\‹⁄Y€õY[ùÿ[YTõ›‹»Çà›[O^ﬁ»X^ZY⁄àå›ô\ôõ›÷Nàò]]»à_BàÇàŸÿ[YU[ö]Àõ[ô›»
+àÿ[YU[ö]ÀõX\
+
+[ö]
+HOà¬à€€ú›ÿ\õö[ô‹»H[ö]ô‹õ›\Yà»[öŸY‹õ›\ÿ\õö[ô‹ [ö]ôÿ[Y\ Bàà◊N¬àô]\õà
+à]àŸ^O^›[ö]öŸ^_OÇà›[ö]ô‹õ›\Y	âà
+àÇà]Çà›[O^ﬁ¬à\‹^Nàôõ^ãàù\›YûP€€ù[ùàú‹XŸKXô]ŸY[àãà[Y€í][\ŒàòŸ[ù\àãàÿ\àLàY[ôŒàéLúãàòX⁄Ÿ‹õ›[ôààŸôXYôHãà€€‹éààÃYLÿNHãàõ‹ô\êõ›€Nàå\€€YŒLÿÕYôãàõ€ùŸZY⁄àLà_BàÇà‹[èÇà<'Â%»[öŸYÿ[Y\ﬁ»àüBà€X[›[O^ﬁ»õ€ùŸZY⁄àå_OÇà8†(àòY»ÿ[Y\»»Ÿ]‹ô]»‹ô\Çà‹€X[Çà‹‹[èÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHÇà\ÿXõY^€[ö⁄[ôﬂBà€ê€X⁄œ^ 
+HOàõ⁄Y[õ[ö—ÿ[Y\ [ö]ô‹õ›\YJ_Bà›[O^ﬁ»Y[ôŒàç\\ãõ€ù⁄^ôNàLH_BàÇà[õ[ö»‹õ›\àÿù]€èÇàŸ]èÇà›ÿ\õö[ô‹ÀõX\
+
+ÿ\õö[ô HOà
+à]ÇàŸ^O^›ÿ\õö[ôﬂBàõ€OHò[\ùÇà›[O^ﬁ¬àY[ôŒàéLúãàòX⁄Ÿ‹õ›[ôààŸôôçŸYãà€€‹éààŒXLÕLàãàõ‹ô\êõ›€Nàå\€€YŸôòMÕãàõ€ù⁄^ôNàLãàõ€ùŸZY⁄àà_BàÇà8¶®;Ó#»›ÿ\õö[ôﬂBàŸ]èÇà
+J_BàœÇà
+_Bà›[ö]ôÿ[Y\ÀõX\
+
+\›Yÿ[YK[ô^
+HOà¬à€€ú›ô]ö[›\»Bà[ô^à»[ö]ôÿ[Y\÷⁄[ô^HWHàù[¬à€€ú›ò]ô[Hô]ö[›\¬à»ò]ô[]Z[ ô]ö[›\À\›Yÿ[YJBààù[¬àô]\õà
+à]ÇàŸ^O^€\›Yÿ[YKöYBàòYŸÿXõO^¬àõ€€X[ä[ö]ô‹õ›\Y
+H	âàÿ[ìX[òYŸH	âà[[ö⁄[ô¬àBà€ëòY‘›\ù^ 
+HOàŸ]òYŸ⁄[ô—ÿ[YJ\›Yÿ[YKöY
+_Bà€ëòY—[ô^ 
+HOàŸ]òYŸ⁄[ô—ÿ[YJàä_Bà€ëòY”›ô\è^ ]ô[ù
+HOà¬àYà
+[ö]ô‹õ›\Y
+H]ô[ùúô]ô[ùYò][
+
+N¬à_Bà€ëõ‹^ ]ô[ù
+HOà¬à]ô[ùúô]ô[ùYò][
+
+N¬àYà
+[ö]ô‹õ›\Y
+Bàõ⁄Yô[‹ô\ì[öŸYÿ[YJà[ö]ô‹õ›\YàòYŸ⁄[ô—ÿ[YKà\›Yÿ[YKöYà
+N¬à_Bà›[O^ﬁ¬à‹X⁄]NàòYŸ⁄[ô—ÿ[YHOOH\›Yÿ[YKöY»ç»àKà‹⁄][€éàúô[]]ôHãà_BàÇà›[ö]ô‹õ›\Y	âàô]ö[›\»	âàò]ô[	âà
+à]Çà›[O^ﬁ¬à\‹^Nàôõ^ãà[Y€í][\ŒàòŸ[ù\àãàÿ\ààY[ôŒàç\Lú\LãàòX⁄Ÿ‹õ›[ôÇàò]ô[ö[\‹‹⁄XõH	âàò]ô[ú⁄\ôYõ[ô›à»àŸôôçŸYÇàààŸéòYò»ãà€€‹éÇàò]ô[ö[\‹‹⁄XõH	âàò]ô[ú⁄\ôYõ[ô›à»àŒXLÕLàÇàààÕÕMMéHãàõ‹ô\êõ›€Nàå\\⁄YÿÿôYLHãàõ€ù⁄^ôNàLKàõ€ùŸZY⁄àÃà_BàÇà‹[è∏°¨œ‹‹[èÇà‹[èÇà›ò]ô[ùò]ô[à»\›[X]Yò]ô[à	›ò]ô[ùò]ô[õZ[ù]\ﬂHZ[à
+	›ò]ô[ùò]ô[õZ[\Àù—ö^Y
+J_HZJXààïò]ô[[YH[ò]òZ[XõH8†%ÿÿ][€à€€‹ô[ò]\»ôYYYüBà‹‹[èÇà‹[èÇà8†(àÿ⁄Y[Hÿ\à›ò]ô[ôÿ\Z[ù]\ﬂHZ[Çà‹‹[èÇàŸ]èÇà
+_Bà›[ö]ô‹õ›\Y	âàÿ[ìX[òYŸH	âà
+à]Çà›[O^ﬁ¬à‹⁄][€éàòXú€€]HãàöY⁄àà‹ààí[ô^àãà\‹^Nàôõ^ãàÿ\àà_BàÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHÇà\öXK[Xô[^ÿ[›ôH	€\›Yÿ[YKôÿ[YW€ù[Xô\üHX\õY\òBà]OHì[›ôHX\õY\àÇà\ÿXõY^€[ö⁄[ô»[ô^OOHBà€ê€X⁄œ^ 
+HOÇàõ⁄Y[›ôS[öŸYÿ[YJà[ö]ô‹õ›\YKà\›Yÿ[YKöYàLKà
+BàBà›[O^ﬁ»Y[ôŒàå‹úãõ€ù⁄^ôNàL_BàÇà8°§Bàÿù]€èÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHÇà\öXK[Xô[^ÿ[›ôH	€\›Yÿ[YKôÿ[YW€ù[Xô\üH]\òBà]OHì[›ôH]\àÇà\ÿXõY^¬à[ö⁄[ô»[ô^OOH[ö]ôÿ[Y\Àõ[ô›HBàBà€ê€X⁄œ^ 
+HOÇàõ⁄Y[›ôS[öŸYÿ[YJà[ö]ô‹õ›\YKà\›Yÿ[YKöYàKà
+BàBà›[O^ﬁ»Y[ôŒàå‹úãõ€ù⁄^ôNàL_BàÇà8°§¬àÿù]€èÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHÇà\öXK[Xô[^ÿ[õ[ö»	€\›Yÿ[YKôÿ[YW€ù[Xô\üXBà]OHï[õ[ö»\»ÿ[YHÇà\ÿXõY^€[ö⁄[ôﬂBà€ê€X⁄œ^ 
+HOÇàõ⁄Y[õ[ö”€ôQÿ[YJà[ö]ô‹õ›\YKà\›Yÿ[YKöYà
+BàBà›[O^ﬁ»Y[ôŒàå‹úãõ€ù⁄^ôNàL_BàÇà[õ[ö¬àÿù]€èÇàŸ]èÇà
+_Bà‹ô[ô\ëÿ[YTõ› à\›Yÿ[YKàõ€€X[ä[ö]ô‹õ›\Y
+Kàõ€€X[ä[ö]ô‹õ›\Y
+H	âà[ô^àà
+_Bà‹Ÿ[X›YOOH\›Yÿ[YKöY	âÇàô[ô\ì[ÿö[R[õ[ôP\‹⁄Y€õY[ù
+
+_BàŸ]èÇà
+N¬àJ_BàŸ]èÇà
+N¬àJBà
+Hà
+à]à€\‹”ò[YOHò\‹⁄Y€õY[ùõ—ÿ[Y\»èÇàèÇà‹Ÿ[ê\‹⁄Y€ì€õBà»ìõ»ÿ[Y\»\ôH‹[àõ‹àŸ[à\‹⁄Y€àÇààìõ»ÿ[Y\»X]⁄\ŸHö[\ú»üBàÿèÇà‹[èÇà⁄[ôŸHHö[\ú»‹àô\Ÿ][H»ŸYH[ÿ[Y\ÀÇà‹‹[èÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHÇà€ê€X⁄œ^ÿ€X\ëÿ[YQö[\úﬂBàÇà€X\à[ö[\ú¬àÿù]€èÇàŸ]èÇà
+_BàŸ]èÇàŸ]èÇà]Çà›[O^ﬁ¬àX\ô⁄[éàåMãàõ‹ô\éàå\€€YŸLôNåãàõ‹ô\îòY]\ŒàLà›ô\ôõ›ŒàöY[àãà\‹^Nàõõ€ôHãà_BàÇà]Çà›[O^ﬁ¬àY[ôŒàåLLúãàòX⁄Ÿ‹õ›[ôààŸéòYò»ãàõ€ùŸZY⁄àà_BàÇà\‹⁄Y€õY[ù›]\»8†%Ÿö[\ôYÿ[Y\Àõ[ô›Hÿ[YBàŸö[\ôYÿ[Y\Àõ[ô›OOHH»àààú»üBàŸ]èÇà]à›[O^ﬁ»X^ZY⁄àÃ›ô\ôõ›Œàò]]»à_OÇàŸö[\ôYÿ[Y\Àõ[ô›»
+àö[\ôYÿ[Y\ÀõX\
+
+ HOà¬à€€ú›Hô]»]JÀú›\ù◊ÿ]
+Kà‹H‹⁄][€ú¬àôö[\ä
+
+HOàú‹‹ù⁄YOOHÀú‹‹ù⁄Y
+Bàú€‹ù
+
+KäHOàKú€‹ù€‹ô\àHãú€‹ù€‹ô\äBàú€XŸJX]õX^
+ÀõŸôöX⁄X[◊€ôYYY
+JN¬àô]\õà
+àù]€ÇàŸ^O^ŸÀöYBà\OHòù]€àÇà€ê€X⁄œ^ 
+HOà¬àŸ]Ÿ[X›Y
+ÀöY
+N¬àŸ]›ô\úöYSŸôöX⁄X[
+àäN¬à_Bà›[O^ﬁ¬à⁄YàåL	Hãà\‹^Nàô‹öYãà‹öY[\]P€€[[úŒÇàõZ[õX^
+ÃYúäHZ[õX^
+ŒL]] Hãàÿ\àLãà[Y€í][\ŒàòŸ[ù\àãà^[Y€éàõYùãàY[ôŒàé\Lúãàõ‹ô\éààõ‹ô\êõ›€Nàå\€€YŸLôNåãàòX⁄Ÿ‹õ›[ôàŸ[X›YOOHÀöY»àŸYôçôôààààŸôôàãà›\ú€‹éàú⁄[ù\àãà_BàÇà‹[à›[O^ﬁ»Z[ï⁄Yà_OÇà‹[Çà›[O^ﬁ¬àõ€ù⁄^ôNàMãàõ€ùŸZY⁄àà[ôRZY⁄àKåMKà_BàÇàŸÀö€YOÀõò[YHïëüHú»ŸÀò]ÿ^OÀõò[YHïëü^»àüBà€X[à›[O^ﬁ¬àõ€ù⁄^ôNàLKà€€‹éààŒMLÿéãàõ€ùŸZY⁄àÃà⁄]T‹XŸNàõõ›‹ò\ãà_BàÇà8†(àŸÀôÿ[YW€ù[Xô\üBà‹€X[Çà‹‹[èÇà€X[à›[O^ﬁ¬à\‹^Nàòõÿ⁄»ãà€€‹éààÕçÕàãàX\ô⁄[ï‹àÀàõ€ù⁄^ôNàLãà[ôRZY⁄àKåMKà_BàÇàŸù”ÿÿ[Q]T›ö[ô 
+_^»àüBàŸù”ÿÿ[U[YT›ö[ô ◊K¬à›\éàõù[Y\öX»ãàZ[ù]NàåãYY⁄]ãàJ_^»àüBà8†(àŸÀõÿÿ][€èÀõò[YHïëüBà‹€X[Çà‹‹[èÇà‹[Çà›[O^ﬁ¬à\‹^Nàôõ^ãàù\›YûP€€ù[ùàôõ^Y[ôãà[Y€í][\ŒàòŸ[ù\àãàÿ\àç\Lúãàõ^‹ò\àù‹ò\ãàõ€ù⁄^ôNàLKà[ôRZY⁄àKåKà_BàÇàŸ‹õX\
+
+‹ HOà¬à€€ú›HH\‹⁄Y€õY[ùÀôö[ô
+à
+
+HOÇàôÿ[YW⁄YOOHÀöY	âÇàú‹⁄][€ó⁄YOOH‹ÀöY	âÇàú›]\»OOHôX€[ôYãà
+Kà»HBà»ŸôöX⁄X[Àôö[ô
+
+
+HOàöYOOHKõŸôöX⁄X[⁄Y
+Bàà[ôYö[ôYà€€‹àHXBà»àŸÃçåçàÇààXKúXõ\⁄Yÿ]à»àÃçMåŸXàÇàà»òXÿŸ\Yãò€€ôö\õYYóKö[ò€Y\ Kú›]\ Bà»àÃMòLÕHÇàààÿÿNLé¬àô]\õà
+à‹[àŸ^O^‹‹ÀöYH›[O^ﬁ»⁄]T‹XŸNàõõ›‹ò\à_OÇà‹[Çà›[O^ﬁ¬àõ€ùŸZY⁄àà€€‹éàH»àÕçÕààààŸÃçåçàãà_BàÇà‹⁄‹ù‹⁄][€ìò[YJ‹Àõò[YJ_Bà‹‹[èÇà€»	âà
+à‹[à›[O^ﬁ»õ€ùŸZY⁄à€€‹à_OÇà»àüBà€Àôö\ú›€ò[Y_H€Àõ\›€ò[Y_Bà‹‹[èÇà
+_Bà‹‹[èÇà
+N¬àJ_Bà‹‹[èÇàÿù]€èÇà
+N¬àJBà
+Hà
+à]à›[O^ﬁ»Y[ôŒàM€€‹éààÕçÕàà_OÇàõ»ÿ[Y\»[à\»Ÿ[X›[€ãÇàŸ]èÇà
+_BàŸ]èÇàŸ]èÇàXô[›[O^ﬁ»\‹^Nàõõ€ôHà_OÇàŸ[X›ÿ[YBàŸ[X›àò[YO^‹Ÿ[X›YBà€ê⁄[ôŸO^ JHOàô\]Y\›Ÿ[X›Yÿ[YJKù\ôŸ]ùò[YJ_BàÇà‹[€àò[YOHàèÇàŸö[\ôYÿ[Y\Àõ[ô›à»îŸ[X›Hÿ[YHÇààìõ»ÿ[Y\»€à\»]HüBà€‹[€èÇà]Çà›[O^ﬁ¬à\‹^Nàô‹öYãà‹öY[\]P€€[[úŒàõZ[õX^
+MLYúäHLåãàÿ\ààY[ôŒàçúLãàõ€ù⁄^ôNàLKàõ€ùŸZY⁄àà€€‹éààÕçÕàãàõ‹ô\êõ›€Nàå\€€YŸLôNåãà_BàÇàù]€Çà\OHòù]€àÇà€ê€X⁄œ^ 
+HOà€‹ùÿ[Y\ õÿÿ][€àä_Bà›[O^ﬁ¬àõ‹ô\éààòX⁄Ÿ‹õ›[ôàõõ€ôHãàY[ôŒàà^[Y€éàõYùãàõ€ùàö[ö\ö]ãàõ€ùŸZY⁄àà€€‹éàö[ö\ö]ãà›\ú€‹éàú⁄[ù\àãà_BàÇàÿÿ][€û‹€‹ù\úõ› õÿÿ][€àä_Bàÿù]€èÇàù]€Çà\OHòù]€àÇà€ê€X⁄œ^ 
+HOà€‹ùÿ[Y\ ù[YHä_Bà›[O^ﬁ¬àõ‹ô\éààòX⁄Ÿ‹õ›[ôàõõ€ôHãàY[ôŒàà^[Y€éàõYùãàõ€ùàö[ö\ö]ãàõ€ùŸZY⁄àà€€‹éàö[ö\ö]ãà›\ú€‹éàú⁄[ù\àãà_BàÇàÿ[YH[Y^‹€‹ù\úõ› ù[YHä_Bàÿù]€èÇàŸ]èÇàŸö[\ôYÿ[Y\ÀõX\
+
+ HOà
+à‹[€àŸ^O^ŸÀöYHò[YO^ŸÀöYOÇàŸÀôÿ[YW€ù[Xô\üH8†%€ô]»]JÀú›\ù◊ÿ]
+Kù”ÿÿ[Q]T›ö[ô 
+_^»àüBà8†%ŸÀö€YOÀõò[YHïëüHú»ŸÀò]ÿ^OÀõò[YHïëüH8†%»àüBàŸÀô\ò][€ó€Z[ù]\»LLHZ[à8†%›Ÿ\û»àüBàŸÿ[YT›Ÿ\ä Kù—ö^Y
+J_Bà€‹[€èÇà
+J_Bà‹Ÿ[X›Çà€Xô[Çà‹ŸX›[€èÇàŸÿ[YH	âàö[\ôYÿ[Y\Àú€€YJ
+ HOàÀöYOOHÿ[YKöY
+H	âà
+à]à€\‹”ò[YOHò\‹⁄Y€õY[ù^[›]Ÿ[X›Yÿ[YQ]Z[›[ô[€ôHèÇàŸX›[€ÇàYHúŸ[X›YYÿ[YKX\‹⁄Y€õY[ùÇà€\‹”ò[YOHòÿ\ô\‹⁄Y€õY[ùXZ[àÇàÇà]à€\‹”ò[YOHòÿ\ôXYŸ[X›Yÿ[YT›X⁄ﬁRXY\àèÇà]èÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHò\‹⁄Y€õY[ùòX⁄’—ÿ[Y\»Çà€ê€X⁄œ^ 
+HOà¬àŸ]Ÿ[X›Y
+àäN¬àŸ][ö‘Ÿ[X›Y
+◊JN¬à_BàÇà8°§òX⁄»»ÿ[Y\¬àÿù]€èÇàèÇàŸÿ[YKö€YOÀõò[YHïëüHú»Ÿÿ[YKò]ÿ^OÀõò[YHïëüBà⁄èÇà]Çà›[O^ﬁ¬àõ€ù⁄^ôNàLãà€€‹éààŒMLÿéãàX\ô⁄[ï‹àãàX\ô⁄[êõ›€NàKà_BàÇàÿ[YHﬁŸÿ[YKôÿ[YW€ù[Xô\üBàŸ]èÇàÇà€ô]»]Jÿ[YKú›\ù◊ÿ]
+Kù”ÿÿ[T›ö[ô 
+_H8†(û»àüBàŸÿ[YKô\ò][€ó€Z[ù]\»LLHZ[à8†(àŸÿ[YKú‹‹ùœÀõò[Y_H8†(û»àüBàŸÿ[YKõXY›Y\œÀõò[YHìõ»XY›YHüH8†(û»àüBàŸÿ[YKõÿÿ][€èÀõò[YHïëüH8†(û»àüBàèûŸÿ[YKõŸôöX⁄X[◊€ôYYYH\‹⁄Y€õY[ù€›œÿèÇà‹Çà]Çà€\‹”ò[YOHúŸ[X›Yÿ[YT›[[X\ûHÇà\öXK[Xô[Hê\‹⁄Y€õY[ù›[[X\ûHÇàÇà‹[èÇàèÇàÿX›]ôP\‹⁄Y€õY[ù€›[ùKﬁŸÿ[YKõŸôöX⁄X[◊€ôYYYBàÿèû»àüBàö[Yà‹‹[èÇà‹[èÇàèû€‹[î‹⁄][€ê€›[ùOÿèà‹[Çà‹‹[èÇà‹[èÇàèÇà¬àÿ[YP\‹⁄Y€õY[ùÀôö[\äà
+][JHOÇà][Kú›]\»OOHúõ‹‹ŸYà	âà][KúXõ\⁄Yÿ]à
+Kõ[ô›àBàÿèû»àüBà]ÿZ][ô¬à‹‹[èÇà‹[èÇàèÇà¬àÿ[YP\‹⁄Y€õY[ùÀôö[\ä
+][JHOÇà»òXÿŸ\Yãò€€ôö\õYYóKö[ò€Y\ ][Kú›]\ Kà
+Kõ[ô›àBàÿèû»àüBà€€ôö\õYYà‹‹[èÇàŸ]èÇà]à€\‹”ò[YOHúŸ[X›Yÿ[YU][]Y\»èÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHò\‹⁄Y€õY[ùX›]ö]S[ö»Çà€ê€X⁄œ^ 
+HOàõ⁄Y‹[êX›]ö]U[Y[[ôJ
+_BàÇàX›]ö]H[Y[[ôBàÿù]€èÇàÿÿ[ìX[òYŸH	âà
+àù]€Çà\OHòù]€àÇà€\‹”ò[YOHò\‹⁄Y€õY[ùX›]ö]S[ö»Çà€ê€X⁄œ^€‹[ê‹ô]’[\]U€€ﬂBàÇà‹ô]»[\]\¬àÿù]€èÇà
+_Bà]Çà€\‹”ò[YOHò\‹⁄Y€õY[ù€€ôö\õSY\‹ÿYŸHÇà\öXK[Xô[Hìõ›YöXÿ][€à\›‹ûHÇàÇàèìõ›YöXÿ][€úŒèÿèû»àüBà÷»òÿ[òŸ[YãúòZ[ôY€›]óKö[ò€Y\ ÿ[YKú›]\ Bà»	ÿÿ[òŸ[][€ë[XZ[‘Ÿ[ùHÿ[òŸ[][€àõ›XŸIÿÿ[òŸ[][€ë[XZ[‘Ÿ[ùOOHH»àààú»üHŸ[ùàà	ÿ\‹⁄Y€õY[ù[XZ[‘Ÿ[ùH\‹⁄Y€õY[ù[XZ[	ÿ\‹⁄Y€õY[ù[XZ[‘Ÿ[ùOOHH»àààú»üHŸ[ùBà ÿ[òŸ[][€ë[XZ[\‹›Y\»\‹⁄Y€õY[ù[XZ[\‹›Y\ HÇà	âà
+àÇà»à8†(àüBàà›[O^ﬁ»€€‹éààÿéLXÃX»à_OÇà÷»òÿ[òŸ[YãúòZ[ôY€›]óKö[ò€Y\ ÿ[YKú›]\ Bà»ÿ[òŸ[][€ë[XZ[\‹›Y\¬àà\‹⁄Y€õY[ù[XZ[\‹›Y\ﬂ^»àüBàôYY][ù[€ÇàÿèÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHÇà\ÿXõY^‹ô]ûZ[ô”õ›YöXÿ][€úﬂBà€ê€X⁄œ^ 
+HOàõ⁄Yô]ûSõ›YöXÿ][€í\‹›Y\ 
+_BàÇà‹ô]ûZ[ô”õ›YöXÿ][€ú»»îô]ûZ[ô¯†)àààîô]ûHüBàÿù]€èÇàœÇà
+_BàŸ]èÇàŸ]èÇàŸ]èÇàŸ]èÇàŸÿ[YT‹⁄][€úÀõ[ô›OOH»
+à]à€\‹”ò[YOHô\úõ‹êõﬁèÇàõ»\‹⁄Y€õY[ù‹⁄][€ú»\ôH€€ôöY›\ôYõ‹à\»‹‹ùÇàŸ]èÇà
+Hà
+àÇà]Çà€\‹”ò[YOHú‹⁄][€ëõÿ›\’ŸŸ€H\⁄›‹‹⁄][€ëõÿ›\»Çàõ€OHô‹õ›\Çà\öXK[Xô[Hî‹⁄][€ú»⁄›€àÇàÇàù]€Çà\OHòù]€àÇà€\‹”ò[YO^»[ôYY–\‹⁄Y€õY[ù€õH»òX›]ôHàààüBà€ê€X⁄œ^ 
+HOÇàŸ]ôYY–\‹⁄Y€õY[ùöY] 
+›\úô[ù
+HOà
+¬àããò›\úô[ùàŸÿ[YKöYNàò[ŸKàJJBàBàÇà[‹⁄][€ú¬àÿù]€èÇàù]€Çà\OHòù]€àÇà€\‹”ò[YO^€ôYY–\‹⁄Y€õY[ù€õH»òX›]ôHàààüBà€ê€X⁄œ^ 
+HOÇàŸ]ôYY–\‹⁄Y€õY[ùöY] 
+›\úô[ù
+HOà
+¬àããò›\úô[ùàŸÿ[YKöYNàùYKàJJBàBàÇàôYY»\‹⁄Y€õY[ù
+€‹[î‹⁄][€ê€›[ùJBàÿù]€èÇàŸ]èÇà›ö\⁄XõQÿ[YT‹⁄][€úÀõ[ô›»
+à]à€\‹”ò[YOHùXõU‹ò\èÇàXõOÇàXYÇàèÇàîŸ[à\‹⁄Y€è›Çàî‹⁄][€è›Çàê\‹⁄Y€ôYŸôöX⁄X[›Çàî›]\œ›Çàê\‹⁄Y€è›Çà›èÇà›XYÇàõŸOÇà›ö\⁄XõQÿ[YT‹⁄][€úÀõX\
+
+‹ HOà¬à€€ú›[ô^Hÿ[YT‹⁄][€úÀôö[ô[ô^
+à
+‹⁄][€äHOà‹⁄][€ãöYOOH‹ÀöYà
+N¬à€€ú››\úô[ùH\‹⁄Y€õY[ùÀôö[ô
+à
+JHOÇàKôÿ[YW⁄YOOHÿ[YKöY	âÇàKú‹⁄][€ó⁄YOOH‹ÀöY	âÇàKú›]\»OOHôX€[ôYãà
+KàX€[ôYH\‹⁄Y€õY[ùÀôö[ô
+à
+JHOÇàKôÿ[YW⁄YOOHÿ[YKöY	âÇàKú‹⁄][€ó⁄YOOH‹ÀöY	âÇàKú›]\»OOHôX€[ôYãà
+Kàô\XŸ[Y[ùôYYYH\‘ô\XŸ[Y[ùôYYY
+àÿ[YKöYà‹ÀöYà
+Kà\›Hÿ[ôY]\ ‹ KàXô[Hò[ö”Xô[
+‹ Kà›]\»H›\úô[ùà»\‹⁄Y€õY[ù›]\ ›\úô[ù
+Bààù[¬àô]\õà
+àÇàŸ^O^‹‹ÀöYBàY^ÿ\‹⁄Y€õY[ù\‹⁄][€ãI‹‹ÀöYXBà›[O^ﬁ¬àòX⁄Ÿ‹õ›[ôÇàX€[ôY	âàX›\úô[ùà»àŸôôåYåàÇàà[ôYö[ôYà_BàÇàÇà»X›\úô[ù	âÇàZ\‘Ÿ[ê\‹⁄Y€ì‹[äÿ[YKöY‹ÀöY
+H»
+à[ú]à\OHò⁄X⁄ÿõﬁÇà⁄X⁄ŸY^‹Ÿ[ê\‹⁄Y€îŸ[X›Yö[ò€Y\ àŸ[ê\‹⁄Y€íŸ^Jÿ[YKöY‹ÀöY
+Kà
+_Bà\ÿXõY^»Xÿ[ìX[òYŸHŸ[ê\‹⁄Y€îÿ]ö[ôﬂBà\öXK[Xô[^ÿŸ[X›	‹‹Àõò[Y_Hõ‹àŸ[à\‹⁄Y€òBà€ê⁄[ôŸO^ 
+HOÇàŸŸ€TŸ[ê\‹⁄Y€îŸ[X›[€äàÿ[YKöYà‹ÀöYà
+BàBàœÇà
+HàX›\úô[ù»
+à]à€\‹”ò[YOHúŸ[ê\‹⁄Y€ì‹[ê€€ùõ€»èÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHŸ[ê\‹⁄Y€ê€‹ŸPù]€àÇà\ÿXõY^¬àXÿ[ìX[òYŸHŸ[ê\‹⁄Y€îÿ]ö[ô¬àBà\öXK[Xô[^ÿ€‹ŸHŸ[à\‹⁄Y€àõ‹à	‹‹Àõò[Y_XBà]OHê€‹ŸHŸ[à\‹⁄Y€àÇà€ê€X⁄œ^ 
+HOÇàõ⁄Y⁄]ò]‘Ÿ[ê\‹⁄Y€î‹⁄][€äàÿ[YKöYà‹ÀöYà
+BàBàÇà‹[à‹[à\öXKZY[èHùùYHè∞Âœ‹‹[èÇàÿù]€èÇàŸ]èÇà
+Hà
+à‹[è∏†%‹‹[èÇà
+_Bà›ÇàÇà]Çà›[O^ﬁ¬à\‹^Nàôõ^ãà[Y€í][\ŒàòŸ[ù\àãàÿ\àà_BàÇàÿ›\úô[ù	âàÿ[ìX[òYŸH	âà
+àù]€Çà€\‹”ò[YOHúö[X\ûHÇà›[O^ﬁ¬àY[ôŒàç\ãàõ€ù⁄^ôNàLKà_Bà\ÿXõY^‹ÿ]ö[ô»OOH‹ÀöYBà€ê€X⁄œ^ 
+HOÇàõ⁄Y[ò\‹⁄Y€ä›\úô[ùöY‹ÀöY
+BàBàÇà[ò\‹⁄Y€Çàÿù]€èÇà
+_Bà]èÇàèû‹⁄‹ù‹⁄][€ìò[YJ‹Àõò[YJ_OÿèÇà€X[Çà€›⁄[ô^
+»_HŸû»àüBàŸÿ[YKõŸôöX⁄X[◊€ôYYYBà‹€X[ÇàŸ]èÇàŸ]èÇà›ÇàÇàÿ›\úô[ù»
+à]èÇà€ŸôöX⁄X[Àôö[ô
+à
+ HOàÀöYOOH›\úô[ùõŸôöX⁄X[⁄Yà
+OÀôö\ú›€ò[YH
+¬ààà
+¬àŸôöX⁄X[Àôö[ô
+à
+ HOàÀöYOOH›\úô[ùõŸôöX⁄X[⁄Yà
+OÀõ\›€ò[Y_BàŸù]\ôPòYŸJ›\úô[ùõŸôöX⁄X[⁄Y
+_Bàÿÿ[ìX[òYŸH	âà
+à‹[Çà€\‹”ò[YOHò\‹⁄Y€õY[ù‹⁄][€ê€€ùõ€»Çà›[O^ﬁ¬à\‹^Nàö[õ[ôKYõ^ãàÿ\ààX\ô⁄[ìYùàà[Y€í][\ŒàòŸ[ù\àãà_BàÇà€X[à›[O^ﬁ¬à€€‹éààÃçMåŸXàãàõ€ùŸZY⁄àLà_BàÇà‹⁄][€Çà‹€X[Çàù]€Çà\OHòù]€àÇà]OHì[›ôH»ô]ö[›\»‹⁄][€é»›ÿ\»ŸôöX⁄X[»⁄[àÿÿ›\YYÇà\öXK[Xô[Hì[›ôHŸôöX⁄X[»ô]ö[›\»‹⁄][€àÇà\ÿXõY^¬à[ô^OOHà[›ö[ô–\‹⁄Y€õY[ùOOH›\úô[ùöYàBà€ê€X⁄œ^ 
+HOÇàõ⁄Y[›ôP\‹⁄Y€õY[ù
+àÿ[YKöYà›\úô[ùöYàLKà
+BàBà›[O^ﬁ¬àY[ôŒàç\\ãàõ‹ô\éàå\€€YÃYYãàõ‹ô\îòY]\ŒàãàòX⁄Ÿ‹õ›[ôÇà[ô^OOHà»àÿÿôYLHÇàààÃçMåŸXàãà€€‹éààŸôôàãàõ€ù⁄^ôNàMàõ€ùŸZY⁄àLà_BàÇà8°§àÿù]€èÇàù]€Çà\OHòù]€àÇà]OHì[›ôH»ô^‹⁄][€é»›ÿ\»ŸôöX⁄X[»⁄[àÿÿ›\YYÇà\öXK[Xô[Hì[›ôHŸôöX⁄X[»ô^‹⁄][€àÇà\ÿXõY^¬à[ô^OOBàÿ[YT‹⁄][€úÀõ[ô›HHà[›ö[ô–\‹⁄Y€õY[ùOOH›\úô[ùöYàBà€ê€X⁄œ^ 
+HOÇàõ⁄Y[›ôP\‹⁄Y€õY[ù
+àÿ[YKöYà›\úô[ùöYàKà
+BàBà›[O^ﬁ¬àY[ôŒàç\\ãàõ‹ô\éàå\€€YÃYYãàõ‹ô\îòY]\ŒàãàòX⁄Ÿ‹õ›[ôÇà[ô^OOBàÿ[YT‹⁄][€úÀõ[ô›HBà»àÿÿôYLHÇàààÃçMåŸXàãà€€‹éààŸôôàãàõ€ù⁄^ôNàMàõ€ùŸZY⁄àLà_BàÇà8°§Çàÿù]€èÇà‹‹[èÇà
+_Bàÿÿ[ìX[òYŸH	âÇà›\úô[ùúXõ\⁄Yÿ]	âÇà›\úô[ùú›]\»OOHôX€[ôYà	âÇà›\úô[ùú›]\»OOHò€€ôö\õYYà	âà
+à]à›[O^ﬁ»X\ô⁄[ï‹àà_OÇàù]€Çà\OHòù]€àÇà\ÿXõY^¬à€€ôö\õZ[ô»OOH›\úô[ùöYàBà€ê€X⁄œ^ 
+HOÇàõ⁄Y€€ôö\õP\‹⁄Y€õY[ù
+›\úô[ù
+BàBà›[O^ﬁ¬àòX⁄Ÿ‹õ›[ôààŸòXÿÃMHãà€€‹éààÕÃLŸåLàãàõ‹ô\éàå\€€YŸXXåÃãàõ‹ô\îòY]\ŒàÀàY[ôŒàçúLãàõ€ù⁄^ôNàLKàõ€ùŸZY⁄àà›\ú€‹éàú⁄[ù\àãà_BàÇàÿ€€ôö\õZ[ô»OOH›\úô[ùöYà»ê€€ôö\õZ[ô¯†)àÇààê€€ôö\õHŸôöX⁄X[üBàÿù]€èÇàŸ]èÇà
+_BàŸ]èÇà
+Hàô\XŸ[Y[ùôYYY»
+à]èÇàà›[O^ﬁ»€€‹éààÿéLXÃX»à_OÇàŸX€[ôYà»ì‹[à8†%ŸôöX⁄X[X€[ôYÇààì‹[à8†%ô\XŸ[Y[ùôYYYüBàÿèÇàŸX€[ôY	âà
+à€X[Çà¬àŸôöX⁄X[Àôö[ô
+à
+ HOÇàÀöYOOHX€[ôYõŸôöX⁄X[⁄Yà
+OÀôö\ú›€ò[YBà^»àüBà¬àŸôöX⁄X[Àôö[ô
+à
+ HOÇàÀöYOOHX€[ôYõŸôöX⁄X[⁄Yà
+OÀõ\›€ò[YBàBàŸX€[ôYôX€[ôW‹ôX\€€Çà»8†(à	ŸX€[ôYôX€[ôW‹ôX\€€üXàààüBàŸX€[ôYúô\‹€ôYÿ]à»8†(à	€ô]»]JX€[ôYúô\‹€ôYÿ]
+Kù”ÿÿ[T›ö[ô 
+_XàààüBà‹€X[Çà
+_BàŸ]èÇà
+Hà
+àì‹[àÇà
+_Bà›ÇàÇàÿ›\úô[ù	âà›]\»»
+àÇà‹[à€\‹”ò[YO^‹›]\Àò€\‹”ò[Y_OÇà‹›]\ÀõXô[Bà‹‹[èÇàÿ›\úô[ùúXõ\⁄Yÿ]	âÇà›\úô[ùú›]\»OOHúõ‹‹ŸYà	âà
+à€X[ÇàXÿŸ\ûNû»àüBàŸõ‹õX]XY[ôJ›\úô[ùòXÿŸ\ÿûJ_Bà‹€X[Çà
+_BàœÇà
+Hàô\XŸ[Y[ùôYYY»
+à‹[à€\‹”ò[YOHòòYŸHôYèÇàô\XŸ[Y[ùôYYYà‹‹[èÇà
+Hà
+à‹[è∏†%‹‹[èÇà
+_Bà›ÇàÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHúö[X\ûHÿ[ôY]T[ô[ù]€àÇà\ÿXõY^‹ÿ]ö[ô»OOH‹ÀöYBà€ê€X⁄œ^ 
+HOÇàŸ]ÿ[ôY]T‹⁄][€íY
+‹ÀöY
+BàBàÇàÿ›\úô[ùà»ê⁄[ôŸHŸôöX⁄X[Çààô\XŸ[Y[ùôYYYà»ëö[ôô\XŸ[Y[ùÇààïöY]»ÿ[ôY]\»üBà€X[Çà¬à\›ôö[\äà
+ÿ[ôY]JHOÇàÿ[ôY]KúôX\€€úÀõ[ô›OOHà
+Kõ[ô›à^»àüBà[Y⁄XõBà‹€X[Çàÿù]€èÇà]Z[»€\‹”ò[YOHõ[ÿö[P\‹⁄Y€õY[ù]Z[»èÇà›[[X\ûOì[‹ôH]Z[œ‹›[[X\ûOÇà]èÇà€X[Çà€›⁄[ô^
+»_HŸû»àüBàŸÿ[YKõŸôöX⁄X[◊€ôYYYH8†(à€Xô[Bà‹€X[Çà€X[ÇàŸ[à\‹⁄Y€éû»àüBà⁄\‘Ÿ[ê\‹⁄Y€ì‹[äÿ[YKöY‹ÀöY
+Bà»ì‹[àÇààê€‹ŸYüBà‹€X[Çà»X›\úô[ù	âÇà\‘Ÿ[ê\‹⁄Y€ì‹[äÿ[YKöY‹ÀöY
+H	âà
+àù]€Çà\OHòù]€àÇà€\‹”ò[YOHúŸX€€ô\ûHÇà\ÿXõY^¬àXÿ[ìX[òYŸHŸ[ê\‹⁄Y€îÿ]ö[ô¬àBà€ê€X⁄œ^ 
+HOÇàõ⁄Y⁄]ò]‘Ÿ[ê\‹⁄Y€î‹⁄][€äàÿ[YKöYà‹ÀöYà
+BàBàÇà€‹ŸHŸ[à\‹⁄Y€Çàÿù]€èÇà
+_Bàÿ›\úô[ù	âàÿ[ìX[òYŸH	âà
+à]à€\‹”ò[YOHõ[ÿö[T‹⁄][€ì[›ôHèÇà‹[èì[›ôHŸôöX⁄X[è‹‹[èÇàù]€Çà\OHòù]€àÇà\öXK[Xô[Hì[›ôHŸôöX⁄X[»ô]ö[›\»‹⁄][€àÇà\ÿXõY^¬à[ô^OOHà[›ö[ô–\‹⁄Y€õY[ùOOH›\úô[ùöYàBà€ê€X⁄œ^ 
+HOÇàõ⁄Y[›ôP\‹⁄Y€õY[ù
+àÿ[YKöYà›\úô[ùöYàLKà
+BàBàÇà8°§àÿù]€èÇàù]€Çà\OHòù]€àÇà\öXK[Xô[Hì[›ôHŸôöX⁄X[»ô^‹⁄][€àÇà\ÿXõY^¬à[ô^OOBàÿ[YT‹⁄][€úÀõ[ô›HHà[›ö[ô–\‹⁄Y€õY[ùOOH›\úô[ùöYàBà€ê€X⁄œ^ 
+HOÇàõ⁄Y[›ôP\‹⁄Y€õY[ù
+àÿ[YKöYà›\úô[ùöYàKà
+BàBàÇà8°§Çàÿù]€èÇàŸ]èÇà
+_BàŸ]èÇàŸ]Z[œÇà›Çà›èÇà
+N¬àJ_Bà›õŸOÇà›XõOÇàŸ]èÇà
+Hà
+à]à€\‹”ò[YOHú‹⁄][€ú—ö[YY\‹ÿYŸHèÇàèë]ô\ûH‹⁄][€à\»ö[YÿèÇà‹[èÇà›⁄]⁄»[‹⁄][€ú»»ô]öY]»‹à⁄[ôŸHH‹ô]ÀÇà‹‹[èÇàŸ]èÇà
+_BàœÇà
+_BàÇà€X[Çàèëù]\ôJœÿèàYX[ú»HŸôöX⁄X[[ôXYH\»H]\Çàõ€ãYX€[ôY\‹⁄Y€õY[ù[ùõ€ö[ô»H€YH‹à]ÿ^HX[H[Çà\»ÿ[YKàè∏¶®’ëTîíQOÿèà‹[€ú»\ôH[ô[Y⁄XõHŸôöX⁄X[¬à][àYZ[ö\›ò]‹à‹à\‹⁄Y€õ‹àX^HX[ùX[H\‹⁄Y€àYù\Çà€€ôö\õZ[ô»Hÿ\õö[ôÀàŸôöX⁄X[»[ôXYH€‹ö⁄[ô»\ö[ô»\¬àÿ[YH[YH\ôHY[à[ôÿ[õõ›ôH›ô\úöY[ãÇà‹€X[Çà‹Çà‹ŸX›[€èÇà\⁄YH€\‹”ò[YOHò]òZ[XõSŸôöX⁄X[‘[ô[èÇà]à€\‹”ò[YOHò]òZ[XõSŸôöX⁄X[“XYèÇàœìŸôöX⁄X[œ⁄œÇà‹[à€\‹”ò[YOHòòYŸHõYHèÇàÿ]òZ[XõSŸôöX⁄X[Àõ[ô›H]òZ[XõBà‹‹[èÇàŸ]èÇàÇàŸ[X›[àŸôöX⁄X[[à⁄€‹ŸHHÿ[YH»ö[]»ô^‹[Çà‹⁄][€ãà[ô[Y⁄XõHŸôöX⁄X[»ô[XZ[àö\⁄XõH[àôY[ôô\]Z\ôBà[à›ô\úöYN»›ô\õ\[ô»\‹⁄Y€õY[ù»ÿ[õõ›ôH›ô\úöY[ãÇà‹Çà]à€\‹”ò[YOHõŸôöX⁄X[\›€€»èÇà[ú]à\OHúŸX\ò⁄Çàò[YO^€ŸôöX⁄X[\›ŸX\ò⁄Bà€ê⁄[ôŸO^ ]ô[ù
+HOÇàŸ]ŸôöX⁄X[\›ŸX\ò⁄
+]ô[ùù\ôŸ]ùò[YJBàBàXŸZ€\èHîŸX\ò⁄ŸôöX⁄X[»Çà\öXK[Xô[HîŸX\ò⁄]òZ[XõHŸôöX⁄X[»ÇàœÇàŸ[X›àò[YO^€ŸôöX⁄X[\›€‹ùBà€ê⁄[ôŸO^ ]ô[ù
+HOÇàŸ]ŸôöX⁄X[\›€‹ù
+à]ô[ùù\ôŸ]ùò[YH\»\[ŸàŸôöX⁄X[\›€‹ùà
+BàBà\öXK[Xô[Hî€‹ù]òZ[XõHŸôöX⁄X[»ÇàÇà‹[€àò[YOHòô\›èêô\›]X[YöYY€‹[€èÇà‹[€àò[YOHô\›[òŸHèê€‹Ÿ\›€‹[€èÇà‹[€àò[YOHúò[ö»èíY⁄\›ò[öœ€‹[€èÇà‹[€àò[YOHõX\›ôXŸ[ùèìX\›ôXŸ[ùH\‹⁄Y€ôY€‹[€èÇà‹[€àò[YOHõò[YHèìò[YO€‹[€èÇà‹Ÿ[X›ÇàŸ]èÇà]à€\‹”ò[YOHò]òZ[XõSŸôöX⁄X[”\›èÇàÿ]òZ[XõSŸôöX⁄X[ÀõX\
+
+ÀJHOà
+à]à€\‹”ò[YOHò]òZ[XõSŸôöX⁄X[àŸ^O^€ÀöYOÇà‹[à€\‹”ò[YOHò]òZ[XõS‹ô\àèû⁄H
+»_O‹‹[èÇà]èÇàèÇà€Àôö\ú›€ò[Y_H€Àõ\›€ò[Y_BàÿèÇàŸù]\ôPòYŸJÀöY
+_Bà€X[ÇàŸ[ô\ò[ò[ö»€Àúò[öÀù—ö^Y
+J_Bà›X[TôXŸ[òﬁSXô[
+ÀöY
+_Bà€Àô\›[òŸHOHù[à»8†(à	€Àô\›[òŸKù—ö^Y
+J_HZXàààüBà‹€X[Çàÿÿ[ìX[òYŸH	âà
+àù]€Çà\OHòù]€àÇà€\‹”ò[YOHúX⁄”ŸôöX⁄X[ù]€àÇà\öXK\ô\‹ŸY^‹X⁄ŸYŸôöX⁄X[OOHÀöYBà€ê€X⁄œ^ 
+HOà⁄€‹ŸSŸôöX⁄X[–\‹⁄Y€äÀöY
+_BàÇà‹X⁄ŸYŸôöX⁄X[OOHÀöYà»îŸ[X›YÇààîŸ[X›»\‹⁄Y€àüBàÿù]€èÇà
+_BàŸ]èÇàŸ]èÇà
+J_Bà⁄[ô[Y⁄XõSŸôöX⁄X[Àõ[ô›à	âà
+à]à€\‹”ò[YOHö[ô[Y⁄XõSŸôöX⁄X[‘ŸX›[€àèÇàù]€Çà\OHòù]€àÇà€\‹”ò[YOHö[ô[Y⁄XõSŸôöX⁄X[’ŸŸ€HÇà\öXKY^[ôY^‹⁄›“[ô[Y⁄XõSŸôöX⁄X[ﬂBà€ê€X⁄œ^ 
+HOÇàŸ]⁄›“[ô[Y⁄XõSŸôöX⁄X[ 
+ö\⁄XõJHOà]ö\⁄XõJBàBàÇà‹[èíSëSQ“PìH
+⁄[ô[Y⁄XõSŸôöX⁄X[Àõ[ô›JO‹‹[èÇà‹[èû‹⁄›“[ô[Y⁄XõSŸôöX⁄X[»»íYHààî⁄›»üO‹‹[èÇàÿù]€èÇà‹⁄›“[ô[Y⁄XõSŸôöX⁄X[»	âà
+àÇà]à€\‹”ò[YOHö[ô[Y⁄XõSŸôöX⁄X[ö[\ú»èÇà[ú]à\OHúŸX\ò⁄Çàò[YO^⁄[ô[Y⁄XõTŸX\ò⁄Bà€ê⁄[ôŸO^ ]ô[ù
+HOÇàŸ][ô[Y⁄XõTŸX\ò⁄
+]ô[ùù\ôŸ]ùò[YJBàBàXŸZ€\èHîŸX\ò⁄ŸôöX⁄X[Çà\öXK[Xô[HîŸX\ò⁄[ô[Y⁄XõHŸôöX⁄X[»ÇàœÇàŸ[X›àò[YO^⁄[ô[Y⁄XõTôX\€€ëö[\üBà€ê⁄[ôŸO^ ]ô[ù
+HOÇàŸ][ô[Y⁄XõTôX\€€ëö[\ä]ô[ùù\ôŸ]ùò[YJBàBà\öXK[Xô[Hëö[\à[ô[Y⁄XõHŸôöX⁄X[»ûHôX\€€àÇàÇà‹[€àò[YOHò[èê[ôX\€€úœ€‹[€èÇà‹[€àò[YOHô[Y⁄Xö[]HèìXY›YH‹à]ô[€‹[€èÇà‹[€àò[YOHò]òZ[Xö[]Hèï[ò]òZ[XõO€‹[€èÇà‹[€àò[YOHò€€ôõX›èÇà\‹⁄Y€õY[ù€€ôõX›à€‹[€èÇà‹Ÿ[X›ÇàŸ]èÇà›ö\⁄XõR[ô[Y⁄XõSŸôöX⁄X[ÀõX\
+
+ HOà
+à]Çà€\‹”ò[YOHò]òZ[XõSŸôöX⁄X[[ô[Y⁄XõSŸôöX⁄X[ÇàŸ^O^€ÀöYBà›[O^ﬁ¬àòX⁄Ÿ‹õ›[ôààŸôYåôåàãàõ‹ô\éàå\€€YŸôXÿXÿHãà€€‹éààÿéLXÃX»ãà_BàÇà‹[Çà€\‹”ò[YOHò]òZ[XõS‹ô\àÇà›[O^ﬁ»òX⁄Ÿ‹õ›[ôààŸÃçåçàã€€‹éààŸôôàà_BàÇàBà‹‹[èÇà]à›[O^ﬁ»õ^àH_OÇàèÇà€Àôö\ú›€ò[Y_H€Àõ\›€ò[Y_BàÿèÇà€X[à›[O^ﬁ»€€‹éààÿéLXÃX»ãõ€ùŸZY⁄àÃ_BàÇà€ÀúôX\€€úÀöõ⁄[äà8†(àä_Bà‹€X[Çàÿÿ[ìX[òYŸH	âà
+àù]€Çà\OHòù]€àÇà€\‹”ò[YOHúX⁄”ŸôöX⁄X[ù]€à[ô[Y⁄XõTX⁄»Çà\öXK\ô\‹ŸY^‹X⁄ŸYŸôöX⁄X[OOHÀöYBà€ê€X⁄œ^ 
+HOà⁄€‹ŸSŸôöX⁄X[–\‹⁄Y€äÀöY
+_BàÇà‹X⁄ŸYŸôöX⁄X[OOHÀöYà»îŸ[X›YÇààîŸ[X›»\‹⁄Y€àüBàÿù]€èÇà
+_Bàÿÿ[ìX[òYŸH	âÇà[ÀúôX\€€úÀú€€YJ
+ôX\€€äHOÇàôX\€€ãú›\ù’⁄]
+ì›ô\õ\»ÿ[YH»äKà
+H	âà
+à]à›[O^ﬁ»X\ô⁄[ï‹àà_OÇàù]€Çà\OHòù]€àÇà€ê€X⁄œ^ 
+HOÇàŸ]›ô\úöYSŸôöX⁄X[
+à›ô\úöYSŸôöX⁄X[OOHÀöY»àààÀöYà
+BàBà›[O^ﬁ¬àòX⁄Ÿ‹õ›[ôààŸôôàãà€€‹éààÿéLXÃX»ãàõ‹ô\éàå\€€YŸÃçåçàãàõ‹ô\îòY]\ŒàãàY[ôŒàçãàõ€ù⁄^ôNàLKàõ€ùŸZY⁄àà›\ú€‹éàú⁄[ù\àãà_BàÇà€›ô\úöYSŸôöX⁄X[OOHÀöYà»êÿ[òŸ[›ô\úöYHÇààì›ô\úöYH[Y⁄Xö[]HüBàÿù]€èÇà€›ô\úöYSŸôöX⁄X[OOHÀöY	âà
+à]à›[O^ﬁ»X\ô⁄[ï‹àà_OÇà€X[à›[O^ﬁ¬à\‹^Nàòõÿ⁄»ãàX\ô⁄[êõ›€Nàà€€‹éààÕŸåYYãà_BàÇà\‹⁄Y€à»‹⁄][€éÇà‹€X[ÇàŸ[X›àò[YOHàÇà€ê⁄[ôŸO^ JHOà¬àYà
+Kù\ôŸ]ùò[YJBàõ⁄Y\‹⁄Y€äKù\ôŸ]ùò[YKÀöY
+N¬à_BàÇà‹[€àò[YOHàèÇàŸ[X›‹⁄][€∏†)Çà€‹[€èÇàŸÿ[YT‹⁄][€úÀõX\
+
+
+HOà
+à‹[€àŸ^O^‹öYHò[YO^‹öYOÇà‹õò[Y_Bà€‹[€èÇà
+J_Bà‹Ÿ[X›ÇàŸ]èÇà
+_BàŸ]èÇà
+_Bà€ÀúôX\€€úÀú€€YJ
+ôX\€€äHOÇàôX\€€ãú›\ù’⁄]
+ì›ô\õ\»ÿ[YH»äKà
+H	âà
+à€X[à›[O^ﬁ»€€‹éààÕŸåYYãõ€ùŸZY⁄àL_BàÇàÿ[õõ››ô\úöYH[à›ô\õ\[ô»\‹⁄Y€õY[ùà‹€X[Çà
+_BàŸ]èÇàŸ]èÇà
+J_Bà»]ö\⁄XõR[ô[Y⁄XõSŸôöX⁄X[Àõ[ô›	âà
+à]à€\‹”ò[YOHô[\T›]HèÇàìõ»[ô[Y⁄XõHŸôöX⁄X[»X]⁄Hö[\úÀè‹ÇàŸ]èÇà
+_BàœÇà
+_BàŸ]èÇà
+_Bà»X]òZ[XõSŸôöX⁄X[Àõ[ô›	âàZ[ô[Y⁄XõSŸôöX⁄X[Àõ[ô›	âà
+à]à€\‹”ò[YOHô[\T›]HèÇàìõ»ŸôöX⁄X[»õ›[ôè‹ÇàŸ]èÇà
+_BàŸ]èÇàÿ\⁄YOÇàŸ]èÇà
+_BàŸ]èÇàœÇà
+N¬üB

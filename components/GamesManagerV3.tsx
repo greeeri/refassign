@@ -228,10 +228,15 @@ function describeGameConflict(
 ) {
   const start = new Date(candidate.starts_at);
   const end = new Date(start.getTime() + candidate.duration_minutes * 60_000);
-  const teamIds = [candidate.home_team_id, candidate.away_team_id].filter(Boolean);
+  const teamIds = [candidate.home_team_id, candidate.away_team_id].filter(
+    Boolean,
+  );
 
   for (const game of games) {
-    if (game.id === editingId || ["cancelled", "canceled"].includes(game.status))
+    if (
+      game.id === editingId ||
+      ["cancelled", "canceled"].includes(game.status)
+    )
       continue;
     const gameStart = new Date(game.starts_at);
     const gameEnd = new Date(
@@ -267,7 +272,9 @@ function describeGameConflict(
     });
     const time = (value: Date) =>
       value.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-    const matchup = [game.home?.name, game.away?.name].filter(Boolean).join(" vs. ");
+    const matchup = [game.home?.name, game.away?.name]
+      .filter(Boolean)
+      .join(" vs. ");
     return `Schedule conflict: ${reasons.join("; ")}. Conflicting game: #${game.game_number || "unassigned"}${matchup ? ` — ${matchup}` : ""}, ${date}, ${time(gameStart)}–${time(gameEnd)}${game.location?.name ? ` at ${game.location.name}` : ""}.`;
   }
   return null;
@@ -360,17 +367,21 @@ export default function GamesManagerV3({
     setStatusBusy(id);
     setError("");
     setMessage("");
-    const response = await fetch("/api/games/status", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ gameId: id, status }),
-    });
+    const response = await fetch(
+      `/api/games/status?organizationId=${encodeURIComponent(organizationId || "")}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gameId: id, status }),
+      },
+    );
     const result = (await response.json().catch(() => ({}))) as {
       error?: string;
       sent?: number;
       failed?: number;
     };
-    if (!response.ok) setError(result.error || "Game status could not be updated.");
+    if (!response.ok)
+      setError(result.error || "Game status could not be updated.");
     else {
       setGames((current) =>
         current.map((game) => (game.id === id ? { ...game, status } : game)),
@@ -440,11 +451,14 @@ export default function GamesManagerV3({
           .filter(Boolean)
           .join(" ");
         const isScheduleConflict =
-          e2.code === "23514" || /double-book|overlap|conflict/i.test(databaseMessage);
+          e2.code === "23514" ||
+          /double-book|overlap|conflict/i.test(databaseMessage);
         const detailedConflict = isScheduleConflict
           ? describeGameConflict(games, payload, editing)
           : null;
-        throw new Error(detailedConflict || databaseMessage || "Unable to save game");
+        throw new Error(
+          detailedConflict || databaseMessage || "Unable to save game",
+        );
       }
       setMessage(editing ? "Game updated." : "Game added.");
       setEditing(null);
@@ -1285,10 +1299,7 @@ export default function GamesManagerV3({
                 className="danger"
                 disabled={Boolean(statusBusy)}
                 onClick={() =>
-                  void changeStatus(
-                    pendingStatus.gameId,
-                    pendingStatus.status,
-                  )
+                  void changeStatus(pendingStatus.gameId, pendingStatus.status)
                 }
               >
                 {statusBusy
