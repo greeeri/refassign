@@ -30,6 +30,7 @@ import OfficialReports from "../../components/OfficialReports";
 import ManagerReports from "../../components/ManagerReports";
 import type { ReportActionTarget } from "../../lib/reportActions";
 const setupNav = ["Leagues", "Levels", "Teams", "Locations"] as const;
+const ALL_ORGANIZATIONS="all";
 type SetupView = (typeof setupNav)[number];
 type Role =
   | "admin"
@@ -80,7 +81,11 @@ export default function Workspace() {
     [testWorkspaces, setTestWorkspaces] = useState<TestWorkspace[]>([]),
     [testWorkspace, setTestWorkspace] = useState<TestWorkspace | null>(null),
     [reportAction, setReportAction] = useState<ReportActionTarget | null>(null),
-    [invitationClaimError, setInvitationClaimError] = useState("");
+    [invitationClaimError, setInvitationClaimError] = useState(""),
+    [officialOrganizationScope,setOfficialOrganizationScope]=useState("");
+  const officialWorkspaces=useMemo(()=>testWorkspaces.filter(item=>item.role==="official"||item.roles?.includes("official")),[testWorkspaces]);
+  const officialOrganizationNames=useMemo(()=>Object.fromEntries(officialWorkspaces.map(item=>[item.organization_id,item.name])),[officialWorkspaces]);
+  const officialScopeIds=useMemo(()=>officialOrganizationScope===ALL_ORGANIZATIONS?officialWorkspaces.map(item=>item.organization_id):officialOrganizationScope?[officialOrganizationScope]:testWorkspace?[testWorkspace.organization_id]:[],[officialOrganizationScope,officialWorkspaces,testWorkspace]);
   useEffect(() => {
     async function load() {
       const {
@@ -146,6 +151,9 @@ export default function Workspace() {
         null;
       setTestWorkspaces(availableWorkspaces);
       setTestWorkspace(selectedWorkspace);
+      const savedOfficialScope=localStorage.getItem("refassign-official-organization-scope");
+      const officialIds=availableWorkspaces.filter(item=>item.role==="official"||item.roles?.includes("official")).map(item=>item.organization_id);
+      setOfficialOrganizationScope(savedOfficialScope===ALL_ORGANIZATIONS&&officialIds.length>1?ALL_ORGANIZATIONS:officialIds.includes(savedOfficialScope||"")?savedOfficialScope!:selectedWorkspace?.organization_id||"");
       if (selectedWorkspace)
         localStorage.setItem(
           "refassign-last-test-workspace",
@@ -275,6 +283,11 @@ export default function Workspace() {
     if (!next) return;
     localStorage.setItem("refassign-last-test-workspace", next.organization_id);
     window.location.assign(`/workspace?organization=${next.organization_id}`);
+  }
+  function switchOfficialWorkspace(value:string){
+    setOfficialOrganizationScope(value);
+    localStorage.setItem("refassign-official-organization-scope",value);
+    if(value!==ALL_ORGANIZATIONS)switchTestWorkspace(value);
   }
   if (!ready)
     return (
@@ -616,11 +629,12 @@ export default function Workspace() {
               <label style={{ fontSize: 12, fontWeight: 800 }}>
                 Organization
                 <select
-                  value={testWorkspace.organization_id}
-                  onChange={(event) => switchTestWorkspace(event.target.value)}
+                  value={viewRole==="official"?officialOrganizationScope:testWorkspace.organization_id}
+                  onChange={(event) => viewRole==="official"?switchOfficialWorkspace(event.target.value):switchTestWorkspace(event.target.value)}
                   style={{ marginLeft: 8, width: "auto", minWidth: 150 }}
                 >
-                  {testWorkspaces.map((item) => (
+                  {viewRole==="official"&&officialWorkspaces.length>1&&<option value={ALL_ORGANIZATIONS}>All organizations</option>}
+                  {(viewRole==="official"?officialWorkspaces:testWorkspaces).map((item) => (
                     <option
                       key={item.organization_id}
                       value={item.organization_id}
@@ -700,32 +714,33 @@ export default function Workspace() {
                   <p className="eyebrow">My organizations</p>
                   <h2>Officiating organizations</h2>
                   <p>
-                    Select an organization to view its games, assignments,
-                    availability, and schedule.
+                    Select one organization or combine every organization’s
+                    upcoming games and calendar.
                   </p>
                 </div>
                 <div className="officialOrganizationChoices">
-                  {testWorkspaces.map((item) => (
+                  {officialWorkspaces.length>1&&<button type="button" className={officialOrganizationScope===ALL_ORGANIZATIONS?"officialOrganizationChoice active":"officialOrganizationChoice"} onClick={()=>switchOfficialWorkspace(ALL_ORGANIZATIONS)}><span>All organizations</span><small>{officialOrganizationScope===ALL_ORGANIZATIONS?"Currently viewing":"Combine schedules"}</small></button>}
+                  {officialWorkspaces.map((item) => (
                     <button
                       type="button"
                       key={item.organization_id}
                       className={
-                        item.organization_id === testWorkspace.organization_id
+                        item.organization_id === officialOrganizationScope
                           ? "officialOrganizationChoice active"
                           : "officialOrganizationChoice"
                       }
-                      onClick={() => switchTestWorkspace(item.organization_id)}
+                      onClick={() => switchOfficialWorkspace(item.organization_id)}
                     >
                       <span>{item.name}</span>
                       <small>
-                        {item.organization_id === testWorkspace.organization_id
+                        {item.organization_id === officialOrganizationScope
                           ? "Currently viewing"
                           : "Open organization"}
                       </small>
                     </button>
                   ))}
                 </div>
-                {testWorkspaces.length === 1 && (
+                {officialWorkspaces.length === 1 && (
                   <p className="officialOrganizationHint">
                     One organization is currently connected. Additional
                     organizations will appear here after you accept their
@@ -736,12 +751,14 @@ export default function Workspace() {
             )}
             <OfficialDashboard
               organizationId={testWorkspace?.organization_id}
+              organizationIds={officialScopeIds}
+              organizationNames={officialOrganizationNames}
               onNavigate={setSection}
             />
           </>
         )}{" "}
         {viewRole === "official" && section === "My Schedule" && (
-          <OfficialSchedule organizationId={testWorkspace?.organization_id} />
+          <OfficialSchedule organizationId={testWorkspace?.organization_id} organizationIds={officialScopeIds} organizationNames={officialOrganizationNames} />
         )}
         {viewRole === "official" && section === "Self Assign" && (
           <SelfAssignBoard organizationId={testWorkspace?.organization_id} />

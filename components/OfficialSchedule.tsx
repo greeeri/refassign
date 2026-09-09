@@ -29,6 +29,7 @@ type Assignment = {
   responded_at: string | null;
   decline_reason: string | null;
   response_token: string;
+  organization_name?: string;
 };
 type Block = {
   id: string;
@@ -59,6 +60,7 @@ type MentorObservation = {
   level_name: string | null;
   request_details: string | null;
   availability_block_id: string | null;
+  organization_name?: string;
 };
 type Choice = { id: string; name: string };
 type Filter =
@@ -78,7 +80,7 @@ const reasons = [
   "Already Assigned",
   "Other",
 ];
-export default function OfficialSchedule({ organizationId }: { organizationId?: string }) {
+export default function OfficialSchedule({ organizationId,organizationIds,organizationNames={} }: { organizationId?: string;organizationIds?:string[];organizationNames?:Record<string,string> }) {
   const sb = useMemo(() => createClient(), []);
   const [assignments, setAssignments] = useState<Assignment[]>([]),
     [blocks, setBlocks] = useState<Block[]>([]),
@@ -101,7 +103,8 @@ export default function OfficialSchedule({ organizationId }: { organizationId?: 
   async function load() {
     setLoading(true);
     setError("");
-    if (!organizationId) {
+    const scopeIds=organizationIds?.length?organizationIds:organizationId?[organizationId]:[];
+    if (!scopeIds.length) {
       setAssignments([]);
       setBlocks([]);
       setObservations([]);
@@ -127,25 +130,25 @@ export default function OfficialSchedule({ organizationId }: { organizationId?: 
       setLoading(false);
       return;
     }
-    const [a, b, locationLinks, t, m] = await Promise.all([
-      sb.rpc("my_official_assignments", { p_organization_id: organizationId }),
+    const [assignmentResults, b, locationLinks, t, observationResults] = await Promise.all([
+      Promise.all(scopeIds.map(async id=>({...await sb.rpc("my_official_assignments",{p_organization_id:id}),organizationId:id}))),
       sb
         .from("official_availability_blocks")
         .select(
           "id,block_type,start_date,end_date,starts_at,ends_at,location_id,team_id,notes,source_assignment_id",
         )
         .eq("official_id", o.id),
-      sb.from("organization_locations").select("location_id,locations(id,name)").eq("organization_id", organizationId).eq("active", true),
-      sb.from("teams").select("id,name").eq("organization_id", organizationId),
-      sb.rpc("list_my_mentor_observations", { p_organization_id: organizationId }),
+      sb.from("organization_locations").select("location_id,locations(id,name)").in("organization_id", scopeIds).eq("active", true),
+      sb.from("teams").select("id,name").in("organization_id", scopeIds),
+      Promise.all(scopeIds.map(async id=>({...await sb.rpc("list_my_mentor_observations",{p_organization_id:id}),organizationId:id}))),
     ]);
-    const e = a.error || b.error || locationLinks.error || t.error || m.error;
+    const e = assignmentResults.find(result=>result.error)?.error || b.error || locationLinks.error || t.error || observationResults.find(result=>result.error)?.error;
     if (e) setError(e.message);
     else {
-      const rows = (a.data || []) as Assignment[];
+      const rows = assignmentResults.flatMap(result=>((result.data||[]) as Assignment[]).map(row=>({...row,organization_name:organizationNames[result.organizationId]})));
       setAssignments(rows);
       setBlocks((b.data || []) as Block[]);
-      setObservations((m.data || []) as MentorObservation[]);
+      setObservations(observationResults.flatMap(result=>((result.data||[]) as MentorObservation[]).map(row=>({...row,organization_name:organizationNames[result.organizationId]}))));
       setLocations((locationLinks.data || []).flatMap((row: any) => {
         const location = Array.isArray(row.locations) ? row.locations[0] : row.locations;
         return location ? [location as Choice] : [];
@@ -166,7 +169,7 @@ export default function OfficialSchedule({ organizationId }: { organizationId?: 
   }
   useEffect(() => {
     void load();
-  }, [organizationId]);
+  }, [organizationId,organizationIds?.join("|"),organizationNames]);
   async function respond(r: Assignment, response: "accepted" | "declined") {
     const why =
       response === "declined"
@@ -403,6 +406,7 @@ export default function OfficialSchedule({ organizationId }: { organizationId?: 
                         <span>TBD</span>
                       )}
                       {e.a.league_name ? ` • ${e.a.league_name}` : ""}
+                      {e.a.organization_name ? ` • ${e.a.organization_name}` : ""}
                     </small>
                   </div>
                   <div className="officialScheduleCrew">
@@ -480,6 +484,7 @@ export default function OfficialSchedule({ organizationId }: { organizationId?: 
                     <b>Mentor Visit — {e.observation.official_name}</b>
                     <small>{e.observation.home_name || "TBD"} vs {e.observation.away_name || "TBD"}</small>
                     <small>{e.observation.game_number ? `Game ${e.observation.game_number} • ` : ""}{e.observation.league_name || ""}{e.observation.level_name ? ` • ${e.observation.level_name}` : ""}</small>
+                    {e.observation.organization_name&&<small>{e.observation.organization_name}</small>}
                     {e.observation.request_details && <p><b>Development focus:</b> {e.observation.request_details}</p>}
                   </div>
                   <div>
@@ -635,7 +640,7 @@ export default function OfficialSchedule({ organizationId }: { organizationId?: 
                           }}
                         >
                           {e.kind === "assignment"
-                            ? `${e.date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} ${crewPositionLabel(e.a.position_name)} — ${e.a.home_team || "TBD"}`
+                            ? `${e.date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} ${crewPositionLabel(e.a.position_name)} — ${e.a.home_team || "TBD"}${e.a.organization_name?` · ${e.a.organization_name}`:""}`
                             : e.kind === "mentor"
                               ? `${e.date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} Mentor — ${e.observation.official_name}`
                               : "Unavailable"}
