@@ -743,7 +743,10 @@ export default function Workspace() {
           <OfficialSchedule organizationId={testWorkspace?.organization_id} organizationIds={officialScopeIds} organizationNames={officialOrganizationNames} />
         )}
         {viewRole === "official" && section === "Self Assign" && (
-          <SelfAssignBoard organizationId={testWorkspace?.organization_id} />
+          <SelfAssignBoard
+            organizationIds={officialScopeIds}
+            organizationNames={officialOrganizationNames}
+          />
         )}
         {viewRole === "official" && section === "My Reports" && (
           <OfficialReports organizationId={testWorkspace?.organization_id} />
