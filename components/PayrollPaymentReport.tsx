@@ -27,6 +27,7 @@ type Row = {
   } | null;
 };
 type Period = "30" | "90" | "year" | "all" | "custom";
+type DetailFocus = "all" | "paid" | "outstanding";
 const money = (value: number) =>
   value.toLocaleString("en-US", { style: "currency", currency: "USD" });
 const officialName = (row: Row) =>
@@ -47,8 +48,18 @@ export default function PayrollPaymentReport({ organizationId }: { organizationI
     [status, setStatus] = useState("all"),
     [startDate, setStartDate] = useState(""),
     [endDate, setEndDate] = useState(""),
+    [detailFocus, setDetailFocus] = useState<DetailFocus>("all"),
     [loading, setLoading] = useState(true),
     [error, setError] = useState("");
+  const drill = (focus: DetailFocus, kind?: "league" | "official", value?: string) => {
+    if (kind === "league" && value) setLeague(value);
+    if (kind === "official" && value) {
+      const match = officials.find(([, name]) => name === value);
+      if (match) setOfficial(match[0]);
+    }
+    setDetailFocus(focus);
+    window.setTimeout(() => document.getElementById("payroll-detail")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+  };
   useEffect(() => {
     void (async () => {
       const response = await fetch(`/api/reports/payroll?organizationId=${encodeURIComponent(organizationId || "")}`, {
@@ -124,6 +135,7 @@ export default function PayrollPaymentReport({ organizationId }: { organizationI
     },
     { fees: 0, mileage: 0, total: 0, paid: 0, outstanding: 0 },
   );
+  const detailRows = visible.filter((row) => detailFocus === "all" || (detailFocus === "paid" ? row.payment_status === "paid" : ["unpaid", "approved"].includes(row.payment_status)));
   const summaries = useMemo(() => {
     const by = (key: (row: Row) => string) => {
       const map = new Map<
@@ -208,9 +220,11 @@ export default function PayrollPaymentReport({ organizationId }: { organizationI
   const SummaryTable = ({
     title,
     data,
+    kind,
   }: {
     title: string;
     data: typeof summaries.leagues;
+    kind: "league" | "official";
   }) => (
     <div>
       <h3>{title}</h3>
@@ -231,7 +245,7 @@ export default function PayrollPaymentReport({ organizationId }: { organizationI
           </thead>
           <tbody>
             {data.map(([label, row]) => (
-              <tr key={label}>
+              <tr key={label} className="drilldownRow" onClick={() => drill("all", kind, label)}>
                 <td>
                   <b>{label}</b>
                 </td>
@@ -355,31 +369,31 @@ export default function PayrollPaymentReport({ organizationId }: { organizationI
             </label>
           </div>
           <ReportSavedViews organizationId={organizationId} reportKey="payroll" filters={{ period, league, official, status, startDate, endDate }} onApply={(saved) => { if (saved.period) setPeriod(saved.period as Period); if (saved.league) setLeague(saved.league); if (saved.official) setOfficial(saved.official); if (saved.status) setStatus(saved.status); setStartDate(saved.startDate || ""); setEndDate(saved.endDate || ""); }} />
-          <div className="reportMetrics">
-            <div>
+          <div className="reportMetrics drilldownMetrics">
+            <button type="button" onClick={() => drill("all")}>
               <span>Assignments</span>
               <b>{visible.length}</b>
-            </div>
-            <div>
+            </button>
+            <button type="button" onClick={() => drill("all")}>
               <span>Game fees</span>
               <b>{money(totals.fees)}</b>
-            </div>
-            <div>
+            </button>
+            <button type="button" onClick={() => drill("all")}>
               <span>Mileage reimbursement</span>
               <b>{money(totals.mileage)}</b>
-            </div>
-            <div>
+            </button>
+            <button type="button" onClick={() => drill("all")}>
               <span>Total expense</span>
               <b>{money(totals.total)}</b>
-            </div>
-            <div>
+            </button>
+            <button type="button" onClick={() => drill("paid")}>
               <span>Paid</span>
               <b>{money(totals.paid)}</b>
-            </div>
-            <div>
+            </button>
+            <button type="button" onClick={() => drill("outstanding")}>
               <span>Outstanding</span>
               <b>{money(totals.outstanding)}</b>
-            </div>
+            </button>
           </div>
           <div className="reportCharts">
             <article className="reportChart">
@@ -441,11 +455,15 @@ export default function PayrollPaymentReport({ organizationId }: { organizationI
           <SummaryTable
             title="Compensation by paying organization"
             data={summaries.leagues}
+            kind="league"
           />
           <SummaryTable
             title="Compensation by official"
             data={summaries.officials}
+            kind="official"
           />
+          <div className="drilldownDetailHead" id="payroll-detail"><h3>Payroll detail{detailFocus !== "all" ? ` — ${detailFocus}` : ""}</h3>{detailFocus !== "all" || league !== "all" || official !== "all" ? <button type="button" className="tableButton" onClick={() => { setDetailFocus("all"); setLeague("all"); setOfficial("all"); }}>Clear drill-down</button> : null}</div>
+          <div className="tableWrap"><table className="officialReportTable"><thead><tr><th>Date</th><th>Game</th><th>Official</th><th>Position</th><th>Organization</th><th>Game fee</th><th>Mileage</th><th>Total</th><th>Status</th></tr></thead><tbody>{detailRows.length ? detailRows.map((row) => <tr key={row.id}><td>{row.games?.starts_at ? new Date(row.games.starts_at).toLocaleDateString() : "—"}</td><td>#{row.games?.game_number || "—"}</td><td>{officialName(row)}</td><td>{row.sport_positions?.name || "—"}</td><td>{row.games?.leagues?.name || "—"}</td><td>{money(fee(row))}</td><td>{money(mileagePay(row))}</td><td><b>{money(fee(row) + mileagePay(row))}</b></td><td>{row.payment_status}</td></tr>) : <tr><td colSpan={9}>No payroll records match this drill-down.</td></tr>}</tbody></table></div>
         </>
       )}
     </section>

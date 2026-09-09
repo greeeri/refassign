@@ -29,6 +29,7 @@ type Assignment = {
 };
 type Period = "30" | "90" | "season" | "all";
 type Coverage = "all" | "unfilled" | "partial" | "filled" | "attention";
+type DetailFocus = "all" | "open" | "awaiting" | "declined" | "attention";
 
 const inactiveStatuses = new Set([
   "canceled",
@@ -48,6 +49,7 @@ export default function AssignmentCoverageReport({ organizationId }: { organizat
   const [period, setPeriod] = useState<Period>("90");
   const [league, setLeague] = useState("all");
   const [coverage, setCoverage] = useState<Coverage>("all");
+  const [detailFocus, setDetailFocus] = useState<DetailFocus>("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -128,6 +130,19 @@ export default function AssignmentCoverageReport({ organizationId }: { organizat
   const activeGames = visible.filter(
     (game) => !inactiveStatuses.has(game.status),
   );
+  const detailGames = visible.filter((game) => {
+    const state = stateOf(game);
+    if (detailFocus === "open") return state.open > 0;
+    if (detailFocus === "awaiting") return state.active > state.confirmed;
+    if (detailFocus === "declined") return state.declined > 0;
+    if (detailFocus === "attention") return state.attention || state.open > 0;
+    return true;
+  });
+  const drill = (focus: DetailFocus, nextLeague?: string) => {
+    if (nextLeague) setLeague(nextLeague);
+    setDetailFocus(focus);
+    window.setTimeout(() => document.getElementById("coverage-detail")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+  };
   const totals = activeGames.reduce(
     (sum, game) => {
       const state = stateOf(game);
@@ -263,35 +278,35 @@ export default function AssignmentCoverageReport({ organizationId }: { organizat
         </label>
       </div>
       <ReportSavedViews organizationId={organizationId} reportKey="coverage" filters={{ period, league, coverage }} onApply={(saved) => { if (saved.period) setPeriod(saved.period as Period); if (saved.league) setLeague(saved.league); if (saved.coverage) setCoverage(saved.coverage as Coverage); }} />
-      <div className="reportMetrics">
-        <div>
+      <div className="reportMetrics drilldownMetrics">
+        <button type="button" onClick={() => drill("all")}>
           <span>Games</span>
           <b>{activeGames.length}</b>
-        </div>
-        <div>
+        </button>
+        <button type="button" onClick={() => drill("all")}>
           <span>Coverage rate</span>
           <b>
             {totals.slots
               ? `${Math.round((totals.filled / totals.slots) * 100)}%`
               : "—"}
           </b>
-        </div>
-        <div>
+        </button>
+        <button type="button" onClick={() => drill("open")}>
           <span>Open positions</span>
           <b>{totals.open}</b>
-        </div>
-        <div>
+        </button>
+        <button type="button" onClick={() => drill("awaiting")}>
           <span>Awaiting confirmation</span>
           <b>{totals.unconfirmed}</b>
-        </div>
-        <div>
+        </button>
+        <button type="button" onClick={() => drill("declined")}>
           <span>Declined</span>
           <b>{totals.declined}</b>
-        </div>
-        <div>
+        </button>
+        <button type="button" onClick={() => drill("attention")}>
           <span>Games needing attention</span>
           <b>{totals.attention}</b>
-        </div>
+        </button>
       </div>
       <h3>Coverage by league</h3>
       <div className="tableWrap">
@@ -308,7 +323,7 @@ export default function AssignmentCoverageReport({ organizationId }: { organizat
           </thead>
           <tbody>
             {leagueSummary.map(([name, row]) => (
-              <tr key={name}>
+              <tr key={name} className="drilldownRow" onClick={() => drill("all", name)}>
                 <td>
                   <b>{name}</b>
                 </td>
@@ -326,7 +341,7 @@ export default function AssignmentCoverageReport({ organizationId }: { organizat
           </tbody>
         </table>
       </div>
-      <h3>Game coverage detail</h3>
+      <div className="drilldownDetailHead" id="coverage-detail"><h3>Game coverage detail{detailFocus !== "all" ? ` — ${detailFocus}` : ""}</h3>{detailFocus !== "all" || league !== "all" ? <button type="button" className="tableButton" onClick={() => { setDetailFocus("all"); setLeague("all"); }}>Clear drill-down</button> : null}</div>
       <div className="tableWrap">
         <table className="officialReportTable">
           <thead>
@@ -341,8 +356,8 @@ export default function AssignmentCoverageReport({ organizationId }: { organizat
             </tr>
           </thead>
           <tbody>
-            {visible.length ? (
-              visible.map((game) => {
+            {detailGames.length ? (
+              detailGames.map((game) => {
                 const state = stateOf(game);
                 return (
                   <tr key={game.id}>

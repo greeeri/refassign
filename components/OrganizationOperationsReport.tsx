@@ -41,6 +41,7 @@ type Audit = {
 };
 type Period = "30" | "90" | "season" | "custom" | "all";
 type Dimension = "organization" | "team" | "level" | "location";
+type DetailFocus = "all" | "staffed" | "open" | "declines" | "changes";
 type Summary = {
   games: Set<string>;
   slots: number;
@@ -85,8 +86,19 @@ export default function OrganizationOperationsReport({ organizationId }: { organ
     [dimension, setDimension] = useState<Dimension>("organization"),
     [startDate, setStartDate] = useState(""),
     [endDate, setEndDate] = useState(""),
+    [detailFocus, setDetailFocus] = useState<DetailFocus>("all"),
     [loading, setLoading] = useState(true),
     [error, setError] = useState("");
+  const drill = (focus: DetailFocus, label?: string) => {
+    if (label) {
+      if (dimension === "organization") setOrganization(label);
+      if (dimension === "team") setTeam(label);
+      if (dimension === "level") setLevel(label);
+      if (dimension === "location") setLocation(label);
+    }
+    setDetailFocus(focus);
+    window.setTimeout(() => document.getElementById("operations-detail")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+  };
 
   useEffect(() => {
     void (async () => {
@@ -222,6 +234,14 @@ export default function OrganizationOperationsReport({ organizationId }: { organ
   const operationalGames = visible.filter(
     (game) => !inactiveStatuses.has(game.status),
   );
+  const detailGames = visible.filter((game) => {
+    const state = gameState(game);
+    if (detailFocus === "staffed") return state.open === 0;
+    if (detailFocus === "open") return state.open > 0;
+    if (detailFocus === "declines") return state.declined.length > 0;
+    if (detailFocus === "changes") return state.changes > 0;
+    return true;
+  });
   const totals = operationalGames.reduce(
     (sum, game) => {
       const state = gameState(game);
@@ -540,15 +560,15 @@ export default function OrganizationOperationsReport({ organizationId }: { organ
           </div>
           <ReportSavedViews organizationId={organizationId} reportKey="operations" filters={{ period, organization, team, level, location, status, dimension, startDate, endDate }} onApply={(saved) => { if (saved.period) setPeriod(saved.period as Period); if (saved.organization) setOrganization(saved.organization); if (saved.team) setTeam(saved.team); if (saved.level) setLevel(saved.level); if (saved.location) setLocation(saved.location); if (saved.status) setStatus(saved.status); if (saved.dimension) setDimension(saved.dimension as Dimension); setStartDate(saved.startDate || ""); setEndDate(saved.endDate || ""); }} />
 
-          <div className="reportMetrics operationsMetrics">
-            <div><span>Games</span><b>{visible.length}</b></div>
-            <div><span>Coverage rate</span><b>{pct(totals.filled, totals.slots)}</b></div>
-            <div><span>Fully staffed</span><b>{totals.fullyStaffed}</b></div>
-            <div><span>Open positions</span><b>{totals.open}</b></div>
-            <div><span>Officials used</span><b>{totals.officials.size}</b></div>
-            <div><span>Declines</span><b>{totals.declines}</b></div>
-            <div><span>Assignment changes</span><b>{totals.changes}</b></div>
-            {premium && <div className="premiumMetric"><span>Total expense</span><b>{money(totalCost)}</b></div>}
+          <div className="reportMetrics operationsMetrics drilldownMetrics">
+            <button type="button" onClick={() => drill("all")}><span>Games</span><b>{visible.length}</b></button>
+            <button type="button" onClick={() => drill("all")}><span>Coverage rate</span><b>{pct(totals.filled, totals.slots)}</b></button>
+            <button type="button" onClick={() => drill("staffed")}><span>Fully staffed</span><b>{totals.fullyStaffed}</b></button>
+            <button type="button" onClick={() => drill("open")}><span>Open positions</span><b>{totals.open}</b></button>
+            <button type="button" onClick={() => drill("all")}><span>Officials used</span><b>{totals.officials.size}</b></button>
+            <button type="button" onClick={() => drill("declines")}><span>Declines</span><b>{totals.declines}</b></button>
+            <button type="button" onClick={() => drill("changes")}><span>Assignment changes</span><b>{totals.changes}</b></button>
+            {premium && <button type="button" className="premiumMetric" onClick={() => drill("all")}><span>Total expense</span><b>{money(totalCost)}</b></button>}
           </div>
 
           {!premium && (
@@ -628,7 +648,7 @@ export default function OrganizationOperationsReport({ organizationId }: { organ
               </tr></thead>
               <tbody>
                 {summaries.length ? summaries.map(([label, row]) => (
-                  <tr key={label}>
+                  <tr key={label} className="drilldownRow" onClick={() => drill("all", label)}>
                     <td><b>{label}</b></td><td>{row.games.size}</td><td>{pct(row.filled, row.slots)}</td>
                     <td>{row.officials.size}</td><td>{row.declines}</td><td>{row.changes}</td>
                     {premium && <><td>{money(row.fees)}</td><td>{money(row.mileage)}</td><td><b>{money(row.fees + row.mileage)}</b></td></>}
@@ -638,7 +658,7 @@ export default function OrganizationOperationsReport({ organizationId }: { organ
             </table>
           </div>
 
-          <h3>Game operations detail</h3>
+          <div className="drilldownDetailHead" id="operations-detail"><h3>Game operations detail{detailFocus !== "all" ? ` — ${detailFocus}` : ""}</h3>{detailFocus !== "all" ? <button type="button" className="tableButton" onClick={() => setDetailFocus("all")}>Clear drill-down</button> : null}</div>
           <div className="tableWrap">
             <table className="officialReportTable operationsDetailTable">
               <thead><tr>
@@ -646,7 +666,7 @@ export default function OrganizationOperationsReport({ organizationId }: { organ
                 <th>Coverage</th><th>Confirmed</th><th>Declines</th><th>Changes</th>{premium && <th>Cost</th>}
               </tr></thead>
               <tbody>
-                {visible.length ? visible.map((game) => {
+                {detailGames.length ? detailGames.map((game) => {
                   const state = gameState(game);
                   return (
                     <tr key={game.id}>
