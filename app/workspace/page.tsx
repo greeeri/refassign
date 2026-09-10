@@ -377,7 +377,7 @@ export default function Workspace() {
             {iowaViews.map((x) => (
               <button
                 key={x.view}
-                className={section === x.view ? "active childActive" : ""}
+                className={`${section === x.view ? "active childActive" : ""} ${x.view === "Development Mentors" ? "mentorsNavItem" : ""}`.trim()}
                 onClick={() => nav(x.view)}
               >
                 {x.label}
