@@ -17,9 +17,14 @@ export async function POST(request:NextRequest){
  const service=createServiceClient();
  const{data:program}=await service.from("registration_programs").select("id,name,registration_fee_cents").eq("slug",programSlug).eq("active",true).eq("registration_open",true).maybeSingle();
  if(!program)return NextResponse.json({error:"This registration page is not open."},{status:409});
+ const registrationYear=new Date().getUTCFullYear();
+ let existingQuery=service.from("official_registrations").select("id").eq("registration_program_id",program.id).eq("registration_year",registrationYear);
+ existingQuery=under13
+  ? existingQuery.ilike("first_name",first).ilike("last_name",last).eq("date_of_birth",dob)
+  : existingQuery.ilike("email",officialEmail).neq("parent_consent_status","pending");
+ const{data:existing}=await existingQuery.limit(1).maybeSingle();
+ if(existing)return NextResponse.json({error:under13?"A registration already exists for this referee and program this year.":"A registration already exists for this email and program this year."},{status:409});
  const email=under13?parentEmail:officialEmail;
- const{data:existing}=await service.from("official_registrations").select("id").eq("registration_program_id",program.id).eq("registration_year",new Date().getUTCFullYear()).ilike("email",email).maybeSingle();
- if(existing)return NextResponse.json({error:"A registration already exists for this email and program this year."},{status:409});
  const status=under13?"parent_consent_pending":"payment_pending";
  const{data:registration,error}=await service.from("official_registrations").insert({first_name:first,last_name:last,email,date_of_birth:dob,parent_name:under13?parentName:null,parent_email:under13?parentEmail:null,parent_consent_status:under13?"pending":"not_required",phone:under13?null:(body.phone||null),home_address:under13?null:(body.home_address||null),home_city:under13?null:(body.home_city||null),home_state:under13?null:(body.home_state||null),home_zip:under13?null:(body.home_zip||null),sport:"Soccer",fee_cents:program.registration_fee_cents,registration_program_id:program.id,status,payment_status:"pending"}).select("id,public_token").single();
  if(error||!registration)return NextResponse.json({error:error?.message||"Registration could not be submitted."},{status:400});
