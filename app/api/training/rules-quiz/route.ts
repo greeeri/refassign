@@ -6,6 +6,18 @@ import {iowaEntryRulesAnswers} from "../../../../lib/server/iowaEntryRulesQuizAn
 
 type QuizRequest={moduleId?:string;answers?:Record<string,string>};
 
+export async function GET(request:NextRequest){
+ const session=await createServerSupabaseClient(),{data:{user}}=await session.auth.getUser();
+ if(!user)return NextResponse.json({error:"Please sign in to view the test."},{status:401});
+ const moduleId=request.nextUrl.searchParams.get("moduleId");
+ if(!moduleId)return NextResponse.json({error:"The training module is missing."},{status:400});
+ const service=createServiceClient(),{data:official}=await service.from("officials").select("id").eq("auth_user_id",user.id).eq("active",true).maybeSingle();
+ if(!official)return NextResponse.json({error:"Your official profile could not be found."},{status:403});
+ const{data:attempt,error}=await service.from("development_quiz_attempts").select("correct_count,total_questions,score_percent,completed_at").eq("module_id",moduleId).eq("official_id",official.id).eq("passed",true).order("completed_at",{ascending:false}).limit(1).maybeSingle();
+ if(error)return NextResponse.json({error:"Your saved test result could not be loaded."},{status:500});
+ return NextResponse.json(attempt?{passed:true,correctCount:attempt.correct_count,totalQuestions:attempt.total_questions,scorePercent:attempt.score_percent,completedAt:attempt.completed_at}:{passed:false});
+}
+
 export async function POST(request:NextRequest){
  const session=await createServerSupabaseClient(),{data:{user}}=await session.auth.getUser();
  if(!user)return NextResponse.json({error:"Please sign in to submit the test."},{status:401});
@@ -25,6 +37,9 @@ export async function POST(request:NextRequest){
  const{error:attemptError}=await service.from("development_quiz_attempts").insert({module_id:module.id,official_id:official.id,quiz_key:IOWA_ENTRY_RULES_QUIZ_KEY,answers,correct_count:correctCount,total_questions:iowaEntryRulesQuestions.length,score_percent:scorePercent,passed,completed_at:completedAt});
  if(attemptError)return NextResponse.json({error:"Your score could not be saved. Please try again."},{status:500});
  const{data:existing}=await service.from("official_development_progress").select("status").eq("module_id",module.id).eq("official_id",official.id).maybeSingle();
- if(passed||existing?.status!=="completed")await service.from("official_development_progress").upsert({module_id:module.id,official_id:official.id,status:passed?"completed":"in_progress",completed_at:passed?completedAt:null,updated_at:completedAt});
+ if(passed||existing?.status!=="completed"){
+  const{error:progressError}=await service.from("official_development_progress").upsert({module_id:module.id,official_id:official.id,status:passed?"completed":"in_progress",completed_at:passed?completedAt:null,updated_at:completedAt});
+  if(progressError)return NextResponse.json({error:"Your score was saved, but your training progress could not be updated. Please submit again."},{status:500});
+ }
  return NextResponse.json({correctCount,totalQuestions:iowaEntryRulesQuestions.length,scorePercent,passed,passPercent:IOWA_ENTRY_RULES_PASS_PERCENT,results});
 }
