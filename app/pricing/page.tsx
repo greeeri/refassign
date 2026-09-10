@@ -67,9 +67,9 @@ export default function PricingPage() {
 
       <header className={styles.hero}>
         <div className={styles.logos}>
-          <Image src="/brand/ref-pro-group-logo.png" alt="Ref Pro Group" width={318} height={262} priority />
+          <Image src="/brand/ref-pro-group-logo-transparent.png" alt="Ref Pro Group" width={1382} height={1138} priority />
           <span aria-hidden="true" />
-          <Image src="/brand/refassign-logo.png" alt="RefAssign — Assign, Develop, Manage" width={378} height={100} priority />
+          <Image src="/brand/refassign-logo-transparent.png" alt="RefAssign — Assign, Develop, Manage" width={2172} height={724} priority />
         </div>
         <h1>A smarter way to manage officials.</h1>
         <p>Built by officials. Designed for assignors. Supporting the future of the game.</p>
