@@ -304,6 +304,18 @@ export default function IowaSoccerDevelopment({
           Review
         </button>
       );
+    if (m.delivery_type === "in_person" && reg?.status === "approved")
+      return (
+        <button
+          className="trainingAction"
+          disabled={!m.registration_url}
+          onClick={() =>
+            m.registration_url && window.open(m.registration_url, "_blank")
+          }
+        >
+          Registration
+        </button>
+      );
     if (reg?.status === "approved")
       return (
         <button
