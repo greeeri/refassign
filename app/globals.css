@@ -1276,6 +1276,48 @@ td small {
 .leagueFee input {
   margin-top: 6px;
 }
+.individualPaymentLinks {
+  margin-top: 24px;
+}
+.individualPaymentLinks > h3 {
+  margin-bottom: 6px;
+}
+.individualPaymentLinks > p {
+  margin-top: 0;
+}
+.individualPaymentGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px;
+}
+.itemPaymentCard {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #dbe3ef;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+.itemPaymentCard label,
+.itemPaymentCard b,
+.itemPaymentCard small {
+  display: block;
+}
+.itemPaymentCard small {
+  margin-top: 4px;
+  color: #64748b;
+}
+.itemPaymentCard input {
+  width: 100%;
+  min-width: 0;
+  margin-top: 10px;
+}
+.itemPaymentActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .selectedRow {
   background: #eaf2ff !important;
   outline: 2px solid #2563eb;
@@ -1547,6 +1589,20 @@ td small {
 @media (max-width: 650px) {
   .registrarMetrics {
     grid-template-columns: 1fr;
+  }
+  .individualPaymentLinks > h3 {
+    font-size: 22px;
+    line-height: 1.2;
+  }
+  .individualPaymentGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .itemPaymentCard {
+    padding: 12px;
+  }
+  .itemPaymentActions > * {
+    flex: 1 1 auto;
+    text-align: center;
   }
 }
 .acceptButton {
