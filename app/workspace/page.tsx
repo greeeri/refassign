@@ -546,12 +546,6 @@ export default function Workspace() {
               <Icon>?</Icon><span>Support Queue</span>
             </button>
           )}
-          <button
-            className={`topNavButton ${section === "Support" ? "active" : ""}`}
-            onClick={() => nav("Support")}
-          >
-            <Icon>?</Icon><span>Report an Issue</span>
-          </button>
           {isSuperAdmin && (
             <button
               className={`topNavButton ${section === "Super Admin" ? "active" : ""}`}
@@ -560,6 +554,14 @@ export default function Workspace() {
               Super Admin
             </button>
           )}
+        </nav>
+        <nav className="asideSupportNav" aria-label="Support">
+          <button
+            className={`topNavButton ${section === "Support" ? "active" : ""}`}
+            onClick={() => nav("Support")}
+          >
+            <Icon>?</Icon><span>Report an Issue</span>
+          </button>
         </nav>
         <div className="asideFoot">
           <span className="workspaceParentBrand">REF PRO GROUP</span>
