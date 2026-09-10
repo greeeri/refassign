@@ -30,6 +30,7 @@ import IowaProgramReferees from "../../components/IowaProgramReferees";
 import IowaDevelopmentMentors from "../../components/IowaDevelopmentMentors";
 import OfficialReports from "../../components/OfficialReports";
 import ManagerReports from "../../components/ManagerReports";
+import SupportCenter from "../../components/SupportCenter";
 import type { ReportActionTarget } from "../../lib/reportActions";
 const setupNav = ["Leagues", "Levels", "Teams", "Locations"] as const;
 const ALL_ORGANIZATIONS="all";
@@ -350,7 +351,7 @@ export default function Workspace() {
   if (viewRole === "mentor" && iowaMentorAccess)
     iowaViews.push(
       { view: "Program Referees", label: "Program Referees" },
-      { view: "Development Mentors", label: "Mentors" },
+      { view: "Development Mentors", label: "🧠 Mentors" },
     );
   if (viewRole === "official" && iowaDevelopmentAccess)
     iowaViews.push(
@@ -377,7 +378,7 @@ export default function Workspace() {
             {iowaViews.map((x) => (
               <button
                 key={x.view}
-                className={`${section === x.view ? "active childActive" : ""} ${x.view === "Development Mentors" ? "mentorsNavItem" : ""}`.trim()}
+                className={section === x.view ? "active childActive" : ""}
                 onClick={() => nav(x.view)}
               >
                 {x.label}
@@ -537,6 +538,20 @@ export default function Workspace() {
             viewRole !== "official" &&
             viewRole !== "contact" &&
             iowaGroup()}
+          {isSuperAdmin && (
+            <button
+              className={`topNavButton ${section === "Support Queue" ? "active" : ""}`}
+              onClick={() => nav("Support Queue")}
+            >
+              <Icon>?</Icon><span>Support Queue</span>
+            </button>
+          )}
+          <button
+            className={`topNavButton ${section === "Support" ? "active" : ""}`}
+            onClick={() => nav("Support")}
+          >
+            <Icon>?</Icon><span>Report an Issue</span>
+          </button>
           {isSuperAdmin && (
             <button
               className={`topNavButton ${section === "Super Admin" ? "active" : ""}`}
@@ -792,6 +807,8 @@ export default function Workspace() {
           iowaMentorAccess &&
           section === "Development Mentors" && <IowaDevelopmentMentors />}
         {isSuperAdmin && section === "Super Admin" && <SuperAdminManager />}
+        {section === "Support" && <SupportCenter organizationId={viewRole==="official"&&officialOrganizationScope===ALL_ORGANIZATIONS?undefined:testWorkspace?.organization_id} />}
+        {isSuperAdmin && section === "Support Queue" && <SupportCenter isSuperAdmin />}
         {manager && <UndoCenter organizationId={testWorkspace?.organization_id} />}
       </main>
       {manager && (
