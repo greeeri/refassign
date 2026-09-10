@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../lib/supabase/client";
 import IowaTrainingSupportActions from "./IowaTrainingSupportActions";
+import TrainingCardQuiz from "./TrainingCardQuiz";
 type Module = {
   id: string;
   title: string;
@@ -18,6 +19,7 @@ type Module = {
   course_end_at: string | null;
   content_type: "resource" | "quiz";
   quiz_key: string | null;
+  quiz_id: string | null;
 };
 type Progress = {
   module_id: string;
@@ -83,7 +85,8 @@ export default function IowaSoccerDevelopment({
     [category, setCategory] = useState("All Categories"),
     [busy, setBusy] = useState(""),
     [error, setError] = useState(""),
-    [activeQuiz, setActiveQuiz] = useState<Module | null>(null);
+    [activeQuiz, setActiveQuiz] = useState<Module | null>(null),
+    [cardQuiz, setCardQuiz] = useState<Module | null>(null);
   async function load() {
     setError("");
     const {
@@ -110,7 +113,7 @@ export default function IowaSoccerDevelopment({
       supabase
         .from("development_modules")
         .select(
-          "id,title,description,category,resource_url,required,sort_order,delivery_type,registration_url,payment_required,payment_url,course_start_at,course_end_at,content_type,quiz_key",
+          "id,title,description,category,resource_url,required,sort_order,delivery_type,registration_url,payment_required,payment_url,course_start_at,course_end_at,content_type,quiz_key,quiz_id",
         )
         .eq("program_id", program.id)
         .eq("active", true)
@@ -277,21 +280,19 @@ export default function IowaSoccerDevelopment({
     return `${start.toLocaleDateString()} • ${start.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}${end ? ` – ${end.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}`;
   }
   function openQuiz(m: Module) {
-    setActiveQuiz(m);
+    if(m.quiz_id)setCardQuiz(m);else setActiveQuiz(m);
     if (progress[m.id]?.status !== "completed")
       void setStatus(m.id, "in_progress");
   }
   function action(m: Module) {
     const reg = registrations[m.id],
       status = progress[m.id]?.status;
-    if (m.content_type === "quiz")
+    if (m.content_type === "quiz" || m.quiz_id)
       return (
-        <button
-          className={`trainingAction ${status === "completed" ? "secondary" : ""}`}
-          onClick={() => openQuiz(m)}
-        >
-          {status === "completed" ? "Review / Retake" : "Start Test"}
-        </button>
+        <div className="trainingCardActions">
+          {m.quiz_id&&m.resource_url&&<button className="trainingAction secondary" onClick={()=>{void setStatus(m.id,"in_progress");window.open(m.resource_url!,"_blank")}}>Watch Video</button>}
+          <button className={`trainingAction ${status === "completed" ? "secondary" : ""}`} onClick={() => openQuiz(m)}>{status === "completed" ? "Review / Retake Quiz" : m.quiz_id?"Take Quiz":"Start Test"}</button>
+        </div>
       );
     if (status === "completed")
       return (
@@ -394,6 +395,7 @@ export default function IowaSoccerDevelopment({
       .from("iowa-training-materials")
       .getPublicUrl(`materials/${name}`).data.publicUrl;
   }
+  if(cardQuiz)return <div className="standaloneQuiz"><TrainingCardQuiz moduleId={cardQuiz.id} onClose={()=>setCardQuiz(null)} onPassed={completedAt=>{setProgress(old=>({...old,[cardQuiz.id]:{module_id:cardQuiz.id,status:"completed",completed_at:completedAt}}));}}/></div>;
   return (
     <div className="iowaTrainingPage">
       <section className="iowaTrainingTitle">
