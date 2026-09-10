@@ -102,10 +102,12 @@ export default function ManagerReports({
             <span aria-hidden="true">◆</span> Premium Reports
           </button>
         </div>
-        <div className="reportDimensionTabs">
+        <div className="reportDimensionTabs" role="tablist" aria-label={`${group === "standard" ? "Standard" : "Premium"} reports`}>
           {visibleReports.map((item) => (
             <button
               type="button"
+              role="tab"
+              aria-selected={report === item.key}
               key={item.key}
               className={report === item.key ? "active" : ""}
               onClick={() => openReport(item.key)}
@@ -114,6 +116,17 @@ export default function ManagerReports({
             </button>
           ))}
         </div>
+        <label className="reportMobileChooser">
+          Choose a {group} report
+          <select
+            value={report}
+            onChange={(event) => openReport(event.target.value as ReportKey)}
+          >
+            {visibleReports.map((item) => (
+              <option key={item.key} value={item.key}>{item.label}</option>
+            ))}
+          </select>
+        </label>
       </section>
       {report === "executive" ? (
         <ExecutiveReportingDashboard key={organizationId} onOpenReport={openReport} organizationId={organizationId} />

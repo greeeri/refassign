@@ -420,8 +420,8 @@ export default function CustomReportBuilder({
           </p>
         </div>
         <div className="headerActions">
-          <button className="secondary" onClick={newReport}>
-            New report
+          <button className="primary" onClick={newReport}>
+            + New report
           </button>
           <button
             className="secondary"
@@ -442,8 +442,11 @@ export default function CustomReportBuilder({
       {error && <div className="errorBox">{error}</div>}
       {message && <div className="successBox">{message}</div>}
       <div className="customBuilderLayout">
-        <aside className="customTemplatePanel">
-          <h3>Saved reports</h3>
+        <div className="customTemplatePanel">
+          <div className="customTemplatePanelHead">
+            <h3>Saved reports</h3>
+            <span>{templates.length}</span>
+          </div>
           {templates.map((template) => (
             <div
               className={
@@ -470,8 +473,13 @@ export default function CustomReportBuilder({
               </button>
             </div>
           ))}
-          {!templates.length && <p>No saved reports yet.</p>}
-        </aside>
+          {!templates.length && (
+            <div className="customTemplateEmpty">
+              <b>No saved reports</b>
+              <p>Saved templates will appear here for quick access.</p>
+            </div>
+          )}
+        </div>
         <div className="customBuilderMain">
           <div className="customBuilderSection">
             <h3>1. Report foundation</h3>
