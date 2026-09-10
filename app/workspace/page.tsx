@@ -321,7 +321,7 @@ export default function Workspace() {
             {views.map((x) => (
               <button
                 key={x.view}
-                className={section === x.view ? "active childActive" : ""}
+                className={`${section === x.view ? "active childActive" : ""} ${x.view === "Development Mentors" ? "mentorsNavItem" : ""}`.trim()}
                 onClick={() => nav(x.view)}
               >
                 {x.label}
@@ -351,7 +351,7 @@ export default function Workspace() {
   if (viewRole === "mentor" && iowaMentorAccess)
     iowaViews.push(
       { view: "Program Referees", label: "Program Referees" },
-      { view: "Development Mentors", label: "🧠 Mentors" },
+      { view: "Development Mentors", label: "Mentors" },
     );
   if (viewRole === "official" && iowaDevelopmentAccess)
     iowaViews.push(
@@ -592,15 +592,15 @@ export default function Workspace() {
       </aside>
       <main className={manager ? "assignorWorkspace" : ""}>
         <header>
-          {manager && (
-            <button
-              className="mobileMenuButton"
-              aria-label="Open navigation"
-              onClick={() => setMobileNavOpen(true)}
-            >
-              ☰
-            </button>
-          )}
+          <button
+            className="mobileMenuButton"
+            aria-label="Open navigation"
+            aria-controls="primary-navigation"
+            aria-expanded={mobileNavOpen}
+            onClick={() => setMobileNavOpen(true)}
+          >
+            ☰
+          </button>
           <div>
             <h1>
               {isSetup
