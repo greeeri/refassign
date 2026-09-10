@@ -10,6 +10,7 @@ type Account = {
   roles: string[];
   program_access: Access[];
   protected: boolean;
+  last_login_at: string | null;
 };
 type Program = { id: string; name: string };
 const roleLabels: Record<string, string> = {
@@ -20,6 +21,13 @@ const roleLabels: Record<string, string> = {
   official: "Official",
   contact: "Contact",
 };
+function formatLastLogin(value: string | null) {
+  if (!value) return "Never";
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
 export default function SuperAdminManager() {
   const [accounts, setAccounts] = useState<Account[]>([]),
     [programs, setPrograms] = useState<Program[]>([]),
@@ -210,6 +218,7 @@ export default function SuperAdminManager() {
                 <th>Account</th>
                 <th>Type</th>
                 <th>Registration Access</th>
+                <th>Last Login</th>
                 <th>Status</th>
               </tr>
             </thead>
@@ -237,6 +246,11 @@ export default function SuperAdminManager() {
                       )
                       .filter(Boolean)
                       .join(", ") || "—"}
+                  </td>
+                  <td>
+                    <time dateTime={a.last_login_at || undefined}>
+                      {formatLastLogin(a.last_login_at)}
+                    </time>
                   </td>
                   <td>{a.active ? "Active" : "Inactive"}</td>
                 </tr>
