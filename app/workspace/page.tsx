@@ -27,6 +27,7 @@ import SuperAdminManager from "../../components/SuperAdminManager";
 import IowaSoccerDevelopment from "../../components/IowaSoccerDevelopment";
 import IowaSoccerDevelopmentAdmin from "../../components/IowaSoccerDevelopmentAdmin";
 import IowaProgramReferees from "../../components/IowaProgramReferees";
+import IowaCommunicationGroups from "../../components/IowaCommunicationGroups";
 import IowaDevelopmentMentors from "../../components/IowaDevelopmentMentors";
 import OfficialReports from "../../components/OfficialReports";
 import ManagerReports from "../../components/ManagerReports";
@@ -800,7 +801,10 @@ export default function Workspace() {
             viewRole === "league_admin") &&
           section === "Development Admin" && <IowaSoccerDevelopmentAdmin />}
         {iowaAdminView && section === "Program Referees" && (
-          <IowaProgramReferees canManage />
+          <>
+            <IowaCommunicationGroups />
+            <IowaProgramReferees canManage />
+          </>
         )}
         {viewRole === "mentor" &&
           iowaMentorAccess &&
