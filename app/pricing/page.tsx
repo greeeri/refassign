@@ -67,7 +67,7 @@ export default function PricingPage() {
 
       <header className={styles.hero}>
         <div className={styles.logos}>
-          <Image src="/brand/ref-pro-group-logo-web.png" alt="Ref Pro Group" width={1383} height={1137} priority unoptimized />
+          <Image src="/brand/ref-pro-group-logo-final.png" alt="Ref Pro Group" width={600} height={493} priority unoptimized />
           <span aria-hidden="true" />
           <Image src="/brand/refassign-logo-transparent.png" alt="RefAssign — Assign, Develop, Manage" width={2172} height={724} priority />
         </div>
