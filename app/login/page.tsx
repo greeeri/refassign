@@ -124,6 +124,22 @@ export default function LoginPage() {
         },
       });
       if (error) return setMessage(error.message);
+      if (data.user && (data.user.identities?.length ?? 0) === 0) {
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (!signInError) {
+          router.replace(nextPath);
+          router.refresh();
+          return;
+        }
+        setOrganizationSignup(false);
+        setMessage(
+          "This email already has a RefAssign account. Sign in with your existing password, or use Forgot password below.",
+        );
+        return;
+      }
       if (data.session) {
         router.replace(nextPath);
         router.refresh();
