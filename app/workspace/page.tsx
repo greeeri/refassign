@@ -350,7 +350,7 @@ export default function Workspace() {
   if (viewRole === "mentor" && iowaMentorAccess)
     iowaViews.push(
       { view: "Program Referees", label: "Program Referees" },
-      { view: "Development Mentors", label: "🧠 Mentors" },
+      { view: "Development Mentors", label: "Mentors" },
     );
   if (viewRole === "official" && iowaDevelopmentAccess)
     iowaViews.push(
