@@ -2,7 +2,9 @@ import {NextRequest,NextResponse} from "next/server";
 import {createServerSupabaseClient} from "../../../../lib/supabase/server";
 import {createServiceClient} from "../../../../lib/supabase/admin";
 
-const PRICES={starter:{id:"price_1UCB4LEeVYrhX6SU6oi3KrCR",limit:50,founding:false},pro:{id:"price_1UCB4SEeVYrhX6SUTdZdUcvt",limit:100,founding:false},pro_founding:{id:"price_1UCB4bEeVYrhX6SU1dql6DyJ",limit:100,founding:true},premier:{id:"price_1UCB4WEeVYrhX6SUE7cvJEQa",limit:250,founding:false}} as const;
+const PRICES={starter:{id:"price_1UEVR3EeVYrhX6SUHxQBlJF0",limit:50,founding:false},pro:{id:"price_1UEVSJEeVYrhX6SUmTGqsUda",limit:100,founding:false},pro_founding:{id:"price_1UEVTSEeVYrhX6SUKDRHOwRm",limit:100,founding:true},premier:{id:"price_1UEVWiEeVYrhX6SU6lFSx8xZ",limit:250,founding:false}} as const;
+const ADDITIONAL_OFFICIAL_BLOCK_PRICE="price_1UEVXQEeVYrhX6SUO84ya68o";
+const TEXT_MESSAGING_PRICE="price_1UEVYHEeVYrhX6SUA5VuwPBG";
 
 type Plan=keyof typeof PRICES;
 
@@ -35,8 +37,8 @@ export async function POST(request:NextRequest){
  form.set("line_items[0][price]",price.id);
  form.set("line_items[0][quantity]","1");
  let lineIndex=1;
- if(additionalBlocks){form.set(`line_items[${lineIndex}][price_data][currency]`,"usd");form.set(`line_items[${lineIndex}][price_data][unit_amount]`,"5000");form.set(`line_items[${lineIndex}][price_data][recurring][interval]`,"year");form.set(`line_items[${lineIndex}][price_data][product_data][name]`,"Additional official capacity (25 officials)");form.set(`line_items[${lineIndex}][quantity]`,String(additionalBlocks));lineIndex++}
- if(textingAddon){form.set(`line_items[${lineIndex}][price_data][currency]`,"usd");form.set(`line_items[${lineIndex}][price_data][unit_amount]`,"18000");form.set(`line_items[${lineIndex}][price_data][recurring][interval]`,"year");form.set(`line_items[${lineIndex}][price_data][product_data][name]`,"RefAssign text messaging");form.set(`line_items[${lineIndex}][quantity]`,"1")}
+ if(additionalBlocks){form.set(`line_items[${lineIndex}][price]`,ADDITIONAL_OFFICIAL_BLOCK_PRICE);form.set(`line_items[${lineIndex}][quantity]`,String(additionalBlocks));lineIndex++}
+ if(textingAddon){form.set(`line_items[${lineIndex}][price]`,TEXT_MESSAGING_PRICE);form.set(`line_items[${lineIndex}][quantity]`,"1")}
  form.set("subscription_data[trial_period_days]","14");
  form.set("subscription_data[metadata][refassign_subscription_id]",pendingId);
  form.set("subscription_data[metadata][user_id]",user.id);
