@@ -40,5 +40,45 @@ export async function requireManagedOrganization(request: NextRequest) {
       ),
     };
 
+  const [{ data: subscription, error: subscriptionError }, { data: superAdmin }] =
+    await Promise.all([
+      service
+        .from("refassign_subscriptions")
+        .select("status,access_override")
+        .eq("organization_id", organizationId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      service
+        .from("protected_accounts")
+        .select("user_id")
+        .eq("user_id", user.id)
+        .maybeSingle(),
+    ]);
+  if (subscriptionError)
+    return {
+      error: NextResponse.json(
+        { error: "Could not verify the organization subscription." },
+        { status: 500 },
+      ),
+    };
+  if (
+    subscription &&
+    !subscription.access_override &&
+    !["active", "trialing"].includes(subscription.status) &&
+    !superAdmin
+  )
+    return {
+      error: NextResponse.json(
+        {
+          error:
+            "This organization needs an active subscription. Open Billing & Tax to restore access.",
+          code: "SUBSCRIPTION_REQUIRED",
+          billing_url: "/billing",
+        },
+        { status: 402 },
+      ),
+    };
+
   return { session, service, user, organizationId };
 }

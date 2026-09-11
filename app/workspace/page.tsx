@@ -138,6 +138,24 @@ export default function Workspace() {
         supabase.rpc("accept_my_organization_invitations"),
         supabase.rpc("accept_my_official_invitations"),
       ]);
+      const checkoutSessionId = new URLSearchParams(window.location.search).get(
+        "checkout_session_id",
+      );
+      if (checkoutSessionId) {
+        const confirmation = await fetch("/api/billing/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ checkout_session_id: checkoutSessionId }),
+        });
+        if (!confirmation.ok) {
+          const result = await confirmation.json().catch(() => ({}));
+          console.error(result.error || "Stripe checkout confirmation is still pending.");
+        } else {
+          const url = new URL(window.location.href);
+          url.searchParams.delete("checkout_session_id");
+          window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+        }
+      }
       const { data: workspaceData, error: workspaceError } = await supabase.rpc(
         "get_my_test_workspaces",
       );
