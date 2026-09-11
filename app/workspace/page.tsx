@@ -87,6 +87,7 @@ export default function Workspace() {
     [reportAction, setReportAction] = useState<ReportActionTarget | null>(null),
     [invitationClaimError, setInvitationClaimError] = useState(""),
     [showOnboarding, setShowOnboarding] = useState(false),
+    [signedInUser, setSignedInUser] = useState({ name: "", email: "" }),
     [officialOrganizationScope,setOfficialOrganizationScope]=useState("");
   const officialWorkspaces=useMemo(()=>testWorkspaces.filter(item=>item.role==="official"||item.roles?.includes("official")),[testWorkspaces]);
   const officialOrganizationNames=useMemo(()=>Object.fromEntries(officialWorkspaces.map(item=>[item.organization_id,item.name])),[officialWorkspaces]);
@@ -100,6 +101,14 @@ export default function Workspace() {
         window.location.replace("/login");
         return;
       }
+      const metadata = user.user_metadata || {};
+      const fullName =
+        metadata.full_name ||
+        metadata.name ||
+        [metadata.first_name, metadata.last_name].filter(Boolean).join(" ") ||
+        user.email?.split("@")[0] ||
+        "RefAssign user";
+      setSignedInUser({ name: String(fullName), email: user.email || "" });
       const tierRuntime = isTierTestRuntime();
       setTestMode(tierRuntime);
       if (tierRuntime) {
@@ -603,7 +612,11 @@ export default function Workspace() {
           >
             Terms &amp; Conditions
           </a>
-          <br />
+          <div className="signedInAside">
+            <span>Currently logged in as</span>
+            <strong>{signedInUser.name}</strong>
+            {signedInUser.email && <small>{signedInUser.email}</small>}
+          </div>
           <button className="signOutButton" onClick={signOut}>
             Sign out
           </button>
@@ -637,6 +650,10 @@ export default function Workspace() {
             </p>
           </div>
           <div className="headerActions">
+            <div className="signedInHeader" title={signedInUser.email || signedInUser.name}>
+              <span>Signed in as</span>
+              <strong>{signedInUser.name}</strong>
+            </div>
             {testMode && (
               <button className="secondary" onClick={signOut}>
                 Sign out / switch account
