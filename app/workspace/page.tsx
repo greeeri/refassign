@@ -86,6 +86,7 @@ export default function Workspace() {
     [testWorkspace, setTestWorkspace] = useState<TestWorkspace | null>(null),
     [reportAction, setReportAction] = useState<ReportActionTarget | null>(null),
     [invitationClaimError, setInvitationClaimError] = useState(""),
+    [showOnboarding, setShowOnboarding] = useState(false),
     [officialOrganizationScope,setOfficialOrganizationScope]=useState("");
   const officialWorkspaces=useMemo(()=>testWorkspaces.filter(item=>item.role==="official"||item.roles?.includes("official")),[testWorkspaces]);
   const officialOrganizationNames=useMemo(()=>Object.fromEntries(officialWorkspaces.map(item=>[item.organization_id,item.name])),[officialWorkspaces]);
@@ -143,9 +144,10 @@ export default function Workspace() {
       );
       if (workspaceError) console.error(workspaceError);
       const availableWorkspaces = (workspaceData || []) as TestWorkspace[];
-      const requested = new URLSearchParams(window.location.search).get(
-        "organization",
-      );
+      const query = new URLSearchParams(window.location.search);
+      const requested = query.get("organization");
+      const onboardingComplete = query.get("onboarding") === "complete";
+      setShowOnboarding(onboardingComplete);
       const stored = localStorage.getItem("refassign-last-test-workspace");
       const selectedWorkspace =
         availableWorkspaces.find(
@@ -195,7 +197,13 @@ export default function Workspace() {
           "official";
         setRoles(workspaceRoles);
         setViewRole(mapped);
-        setSection(mapped === "official" ? "Official Dashboard" : "Dashboard");
+        setSection(
+          onboardingComplete && mapped !== "official"
+            ? "Leagues"
+            : mapped === "official"
+              ? "Official Dashboard"
+              : "Dashboard",
+        );
         setReady(true);
         return;
       }
@@ -232,7 +240,9 @@ export default function Workspace() {
             : available[0] || "official";
       setViewRole(initial);
       setSection(
-        initial === "official"
+        onboardingComplete && (initial === "admin" || initial === "assignor")
+          ? "Leagues"
+          : initial === "official"
           ? "Official Dashboard"
           : initial === "mentor"
             ? "Development Mentors"
@@ -289,6 +299,12 @@ export default function Workspace() {
     setOfficialOrganizationScope(value);
     localStorage.setItem("refassign-official-organization-scope",value);
     if(value!==ALL_ORGANIZATIONS)switchTestWorkspace(value);
+  }
+  function finishOnboarding() {
+    setShowOnboarding(false);
+    const query = new URLSearchParams(window.location.search);
+    query.delete("onboarding");
+    window.history.replaceState(null, "", `${window.location.pathname}${query.size ? `?${query.toString()}` : ""}`);
   }
   if (!ready)
     return (
@@ -662,6 +678,40 @@ export default function Workspace() {
             </label>
           </div>
         </header>
+        {manager && showOnboarding && testWorkspace && (
+          <section className="card organizationOnboarding" aria-label="Organization setup">
+            <div className="organizationOnboardingIntro">
+              <p className="eyebrow">New organization</p>
+              <h2>Welcome to {testWorkspace.name}</h2>
+              <p>
+                Your subscription is active. Complete these setup areas to get
+                your league ready for scheduling.
+              </p>
+            </div>
+            <div className="organizationOnboardingSteps">
+              {[
+                ["Leagues", "1", "Create leagues"],
+                ["Levels", "2", "Add competition levels"],
+                ["Teams", "3", "Create sports teams"],
+                ["Locations", "4", "Add game locations"],
+                ["Team & Roles", "5", "Invite staff and assignors"],
+              ].map(([view, number, label]) => (
+                <button
+                  type="button"
+                  key={view}
+                  className={section === view ? "active" : ""}
+                  onClick={() => nav(view)}
+                >
+                  <span>{number}</span>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <button type="button" className="secondary organizationOnboardingDone" onClick={finishOnboarding}>
+              Finish later
+            </button>
+          </section>
+        )}
         {manager && section === "Dashboard" && (
           <DashboardGames organizationId={testWorkspace?.organization_id} onNavigate={setSection} />
         )}{" "}

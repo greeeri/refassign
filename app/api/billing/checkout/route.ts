@@ -50,7 +50,9 @@ export async function POST(request:NextRequest){
  form.set("metadata[user_id]",user.id);
  form.set("metadata[plan]",plan);
  form.set("payment_method_collection","always");
- form.set("success_url",`${origin}/workspace?onboarding=complete`);
+ const onboardingParams=new URLSearchParams({onboarding:"complete"});
+ if(pending?.organization_id)onboardingParams.set("organization",pending.organization_id);
+ form.set("success_url",`${origin}/workspace?${onboardingParams.toString()}`);
  const stripeResponse=await fetch("https://api.stripe.com/v1/checkout/sessions",{method:"POST",headers:{Authorization:`Bearer ${stripeKey}`,"Content-Type":"application/x-www-form-urlencoded","Stripe-Version":"2026-02-25.clover"},body:form});
  const created=await stripeResponse.json() as {id?:string;url?:string;error?:{message?:string}};
  if(!stripeResponse.ok||!created.id||!created.url){await service.from("refassign_subscriptions").update({status:"checkout_error",updated_at:new Date().toISOString()}).eq("id",pendingId);return NextResponse.json({error:created.error?.message||"Stripe could not create checkout."},{status:502});}
