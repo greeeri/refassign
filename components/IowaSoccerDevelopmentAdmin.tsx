@@ -26,6 +26,7 @@ type Module = {
   course_end_at: string | null;
   quiz_id: string | null;
   level_key: string;
+  sort_order: number;
 };
 type Quiz = { id: string; title: string; active: boolean };
 type TrainingRegistration = {
@@ -81,6 +82,10 @@ export default function IowaSoccerDevelopmentAdmin() {
     [editingId, setEditingId] = useState(""),
     [editDeliveryType, setEditDeliveryType] = useState("self_led"),
     [editPaymentRequired, setEditPaymentRequired] = useState(false),
+    [activeLevel, setActiveLevel] = useState("u8_referee"),
+    [draggedModule, setDraggedModule] = useState(""),
+    [pathBusy, setPathBusy] = useState(false),
+    [previewPath, setPreviewPath] = useState(false),
     [busy, setBusy] = useState(false),
     [uploadBusy, setUploadBusy] = useState(false),
     [selectedMaterialName, setSelectedMaterialName] = useState(""),
@@ -122,7 +127,7 @@ export default function IowaSoccerDevelopmentAdmin() {
       supabase
         .from("development_modules")
         .select(
-          "id,title,description,category,resource_url,required,active,delivery_type,registration_url,payment_required,payment_url,instructor_official_id,course_start_at,course_end_at,quiz_id,level_key",
+          "id,title,description,category,resource_url,required,active,delivery_type,registration_url,payment_required,payment_url,instructor_official_id,course_start_at,course_end_at,quiz_id,level_key,sort_order",
         )
         .eq("program_id", program.id)
         .order("sort_order"),
@@ -239,6 +244,30 @@ export default function IowaSoccerDevelopmentAdmin() {
       await load();
     }
     setBusy(false);
+  }
+  async function savePath(updates: { id: string; level_key: string; sort_order: number }[], success: string) {
+    setPathBusy(true);
+    setError("");
+    setNotice("");
+    const { error: e } = await supabase.rpc("reorder_development_modules", { p_updates: updates });
+    if (e) setError(e.message);
+    else { setNotice(success); await load(); }
+    setPathBusy(false);
+  }
+  async function dropModule(beforeId: string | null) {
+    if (!draggedModule) return;
+    const lane = modules.filter((module) => module.level_key === activeLevel && module.id !== draggedModule);
+    const index = beforeId ? lane.findIndex((module) => module.id === beforeId) : lane.length;
+    lane.splice(index < 0 ? lane.length : index, 0, modules.find((module) => module.id === draggedModule)!);
+    setDraggedModule("");
+    await savePath(lane.map((module, position) => ({ id: module.id, level_key: activeLevel, sort_order: (position + 1) * 10 })), "Course order saved.");
+  }
+  async function moveModule(moduleId: string, levelKey: string) {
+    if (!levelKey) return;
+    const destination = modules.filter((module) => module.level_key === levelKey),
+      nextOrder = destination.length ? Math.max(...destination.map((module) => module.sort_order)) + 10 : 10;
+    setActiveLevel(levelKey);
+    await savePath([{ id: moduleId, level_key: levelKey, sort_order: nextOrder }], "Module moved to its new level.");
   }
   function beginEdit(m: Module) {
     setEditingId(m.id);
@@ -484,6 +513,31 @@ export default function IowaSoccerDevelopmentAdmin() {
         </div>
       </section>
       <section className="card">
+        <div className="courseBuilderHead">
+          <div><span className="courseBuilderEyebrow">COURSE PATH BUILDER</span><h2>Build the Referee Journey</h2><p>Choose a level, drag modules into order, or move them to another level.</p></div>
+          <button className="secondary" onClick={() => setPreviewPath((value) => !value)}>{previewPath ? "Close Preview" : "Preview Referee Path"}</button>
+        </div>
+        <div className="courseLevelTabs" role="tablist" aria-label="Development levels">
+          {developmentLevels.map((level, index) => {
+            const levelModules = modules.filter((module) => module.level_key === level.key);
+            return <button type="button" role="tab" aria-selected={activeLevel === level.key} className={activeLevel === level.key ? "active" : ""} onClick={() => setActiveLevel(level.key)} key={level.key}><span>{index + 1}</span><b>{level.label}</b><small>{levelModules.length} module{levelModules.length === 1 ? "" : "s"}</small></button>;
+          })}
+        </div>
+        {previewPath && <div className="coursePathPreview">
+          {developmentLevels.map((level, index) => <div key={level.key}><span>{index + 1}</span><b>{level.label}</b><small>{modules.filter((module) => module.level_key === level.key).map((module) => module.title).join(" • ") || "No modules yet"}</small></div>)}
+        </div>}
+        <div className="courseLane" onDragOver={(event) => event.preventDefault()} onDrop={() => void dropModule(null)}>
+          <div className="courseLaneHead"><div><span>LEVEL {developmentLevels.findIndex((level) => level.key === activeLevel) + 1}</span><h3>{developmentLevels.find((level) => level.key === activeLevel)?.label}</h3></div><button className="primary" type="button" onClick={() => document.getElementById("new-training-module")?.scrollIntoView({ behavior: "smooth" })}>+ Add Module</button></div>
+          <div className="courseModuleList">
+            {modules.filter((module) => module.level_key === activeLevel).map((module, index) => <article draggable={!pathBusy} onDragStart={() => setDraggedModule(module.id)} onDragEnd={() => setDraggedModule("")} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); void dropModule(module.id); }} className={draggedModule === module.id ? "dragging" : ""} key={module.id}>
+              <span className="courseDrag" aria-label="Drag to reorder">⋮⋮</span><span className="courseOrder">{index + 1}</span><div><b>{module.title}</b><small>{deliveryLabel(module.delivery_type)} • {module.required ? "Required" : "Optional"} • {module.active ? "Published" : "Draft"}</small></div><label>Move to<select aria-label={`Move ${module.title} to another level`} value="" disabled={pathBusy} onChange={(event) => void moveModule(module.id, event.target.value)}><option value="">Move…</option>{developmentLevels.filter((level) => level.key !== activeLevel).map((level) => <option value={level.key} key={level.key}>{level.label}</option>)}</select></label><button className="secondary" onClick={() => beginEdit(module)}>Edit</button>
+            </article>)}
+            {!modules.some((module) => module.level_key === activeLevel) && <div className="courseEmpty"><b>No modules in this level</b><span>Add a module or move one here from another level.</span></div>}
+          </div>
+          <p className="courseDropHint">Drag modules to arrange the order officials will complete them. Changes save automatically.</p>
+        </div>
+      </section>
+      <section className="card" id="new-training-module">
         <h2>Training Content</h2>
         <form className="officialForm" onSubmit={addModule}>
           <label>
@@ -492,7 +546,7 @@ export default function IowaSoccerDevelopmentAdmin() {
           </label>
           <label>
             Development Level
-            <select name="level_key" required defaultValue="u8_referee">
+            <select name="level_key" required value={activeLevel} onChange={(event) => setActiveLevel(event.target.value)}>
               {developmentLevels.map((level) => <option value={level.key} key={level.key}>{level.label}</option>)}
             </select>
           </label>
