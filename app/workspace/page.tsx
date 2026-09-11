@@ -155,8 +155,7 @@ export default function Workspace() {
       const availableWorkspaces = (workspaceData || []) as TestWorkspace[];
       const query = new URLSearchParams(window.location.search);
       const requested = query.get("organization");
-      const onboardingComplete = query.get("onboarding") === "complete";
-      setShowOnboarding(onboardingComplete);
+      const onboardingRequested = query.get("onboarding") === "complete";
       const stored = localStorage.getItem("refassign-last-test-workspace");
       const selectedWorkspace =
         availableWorkspaces.find(
@@ -164,6 +163,18 @@ export default function Workspace() {
         ) ||
         availableWorkspaces[0] ||
         null;
+      const onboardingDismissed = selectedWorkspace
+        ? localStorage.getItem(
+            `refassign-onboarding-dismissed:${selectedWorkspace.organization_id}`,
+          ) === "true"
+        : false;
+      const needsOnboarding = Boolean(
+        selectedWorkspace &&
+          (onboardingRequested ||
+            ((!selectedWorkspace.leagues || selectedWorkspace.leagues.length === 0) &&
+              !onboardingDismissed)),
+      );
+      setShowOnboarding(needsOnboarding);
       setTestWorkspaces(availableWorkspaces);
       setTestWorkspace(selectedWorkspace);
       const savedOfficialScope=localStorage.getItem("refassign-official-organization-scope");
@@ -207,7 +218,7 @@ export default function Workspace() {
         setRoles(workspaceRoles);
         setViewRole(mapped);
         setSection(
-          onboardingComplete && mapped !== "official"
+          needsOnboarding && mapped !== "official"
             ? "Leagues"
             : mapped === "official"
               ? "Official Dashboard"
@@ -249,7 +260,7 @@ export default function Workspace() {
             : available[0] || "official";
       setViewRole(initial);
       setSection(
-        onboardingComplete && (initial === "admin" || initial === "assignor")
+        needsOnboarding && (initial === "admin" || initial === "assignor")
           ? "Leagues"
           : initial === "official"
           ? "Official Dashboard"
@@ -311,6 +322,11 @@ export default function Workspace() {
   }
   function finishOnboarding() {
     setShowOnboarding(false);
+    if (testWorkspace)
+      localStorage.setItem(
+        `refassign-onboarding-dismissed:${testWorkspace.organization_id}`,
+        "true",
+      );
     const query = new URLSearchParams(window.location.search);
     query.delete("onboarding");
     window.history.replaceState(null, "", `${window.location.pathname}${query.size ? `?${query.toString()}` : ""}`);
