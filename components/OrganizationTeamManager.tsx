@@ -17,16 +17,31 @@ const permissions=[
 ] as const;
 
 export default function OrganizationTeamManager({organizationId,organization,canManage,leagues}:{organizationId:string;organization:string;canManage:boolean;leagues:LeagueChoice[]}){
- const validLeagues=leagues.filter(league=>uuidPattern.test(league.id));
+ const [leagueChoices,setLeagueChoices]=useState<LeagueChoice[]>(leagues);
+ const validLeagues=leagueChoices.filter(league=>uuidPattern.test(league.id));
  const allLeagueIds=validLeagues.map(league=>league.id);
  const [team,setTeam]=useState<TeamData>({members:[],invitations:[]}),[email,setEmail]=useState(""),[role,setRole]=useState("assignor"),[viewerPermissions,setViewerPermissions]=useState<string[]>(["overview"]),[leagueIds,setLeagueIds]=useState<string[]>(allLeagueIds),[busy,setBusy]=useState(""),[message,setMessage]=useState("");
- const load=async()=>{const {data,error}=await createClient().rpc("get_organization_team",{p_organization_id:organizationId});if(error){setMessage(error.message);return}setTeam((data||{members:[],invitations:[]}) as TeamData)};
+ const load=async()=>{
+  const supabase=createClient();
+  const [teamResult,setupResult]=await Promise.all([
+   supabase.rpc("get_organization_team",{p_organization_id:organizationId}),
+   supabase.rpc("get_organization_setup_directory",{p_organization_id:organizationId}),
+  ]);
+  if(teamResult.error||setupResult.error){setMessage(teamResult.error?.message||setupResult.error?.message||"Could not load organization access.");return}
+  setTeam((teamResult.data||{members:[],invitations:[]}) as TeamData);
+  const setup=setupResult.data as {leagues?:LeagueChoice[]}|null;
+  setLeagueChoices(setup?.leagues||leagues);
+ };
  useEffect(()=>{if(organizationId)void load()},[organizationId]);
- useEffect(()=>{setLeagueIds(allLeagueIds)},[organizationId,leagues.map(league=>league.id).join("|")]);
+ useEffect(()=>{setLeagueChoices(leagues)},[organizationId,leagues.map(league=>league.id).join("|")]);
+ useEffect(()=>{setLeagueIds(allLeagueIds)},[organizationId,allLeagueIds.join("|")]);
  const needsLeagues=role==="assignor"||role==="viewer";
  const invite=async()=>{
   const validLeagueIds=leagueIds.filter(id=>uuidPattern.test(id));
-  if(!email.includes("@")||!canManage||needsLeagues&&!validLeagueIds.length)return;
+  if(!email.includes("@")){setMessage("Enter a valid email address.");return}
+  if(!canManage){setMessage("Only the organization owner or an administrator can invite team members.");return}
+  if(needsLeagues&&!validLeagueIds.length){setMessage("Select at least one league for this team member.");return}
+  if(role==="viewer"&&!viewerPermissions.length){setMessage("Select at least one area this contact can view.");return}
   setBusy("invite");setMessage("");
   const supabase=createClient();
   const {data,error}=await supabase.functions.invoke("send-organization-invitation",{body:{organizationId,email,role,viewerPermissions:role==="viewer"?viewerPermissions:[],leagueIds:needsLeagues?validLeagueIds:[]}});
@@ -46,8 +61,8 @@ export default function OrganizationTeamManager({organizationId,organization,can
  return <div className={styles.wrap}>
   <section className={styles.heading}><div><p>Organization workspace</p><h2>Team &amp; roles</h2><span>Invite teammates, change their roles, and control read-only access.</span></div></section>
   {!canManage&&<section className={styles.notice}>Only the organization owner or an administrator can change team access.</section>}
-  {canManage&&<section className={styles.invite}><h3>Invite a team member</h3><div className={styles.inviteGrid}><label>Email address<input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="team@example.com"/></label><label>Workspace role<select value={role} onChange={e=>setRole(e.target.value)}>{roles.map(code=><option value={code} key={code}>{labels[code]}</option>)}</select></label></div>{needsLeagues&&<LeaguePicker leagues={validLeagues} selected={leagueIds} onChange={setLeagueIds}/>} {role==="viewer"&&<PermissionPicker selected={viewerPermissions} onChange={setViewerPermissions}/>}<button className="primary" disabled={busy==="invite"||!email.includes("@")||needsLeagues&&!allLeagueIds.length||role==="viewer"&&!viewerPermissions.length} onClick={()=>void invite()}>{busy==="invite"?"Sending…":"Send invitation"}</button></section>}
-  {message&&<p className={styles.message}>{message}</p>}
+  {canManage&&<section className={styles.invite}><h3>Invite a team member</h3><div className={styles.inviteGrid}><label>Email address<input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="team@example.com"/></label><label>Workspace role<select value={role} onChange={e=>setRole(e.target.value)}>{roles.map(code=><option value={code} key={code}>{labels[code]}</option>)}</select></label></div>{needsLeagues&&<LeaguePicker leagues={validLeagues} selected={leagueIds} onChange={setLeagueIds}/>} {role==="viewer"&&<PermissionPicker selected={viewerPermissions} onChange={setViewerPermissions}/>}<button className="primary" disabled={busy==="invite"} onClick={()=>void invite()}>{busy==="invite"?"Sending…":"Send invitation"}</button></section>}
+  {message&&<p className={styles.message} role="status" aria-live="polite">{message}</p>}
   <section className={styles.list}><div className={styles.listHead}><h3>Organization access</h3><b>{team.members.length} active · {team.invitations.length} pending</b></div>{[...team.members,...team.invitations].length===0?<p className={styles.empty}>No additional team members have been added.</p>:[...team.members,...team.invitations].map(item=><MemberCard key={item.id} item={item} leagues={leagues} disabled={!canManage||busy===item.id} onSave={save}/>)}</section>
  </div>
 }
