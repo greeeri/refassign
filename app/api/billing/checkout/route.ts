@@ -15,7 +15,7 @@ export async function POST(request:NextRequest){
  const{data:{user}}=await session.auth.getUser();
  if(!user)return NextResponse.json({error:"Please sign in before starting a subscription."},{status:401});
  const contentType=request.headers.get("content-type")||"";
- let body:{plan?:Plan;organization_name?:string;official_count?:number;texting_addon?:boolean;purchaser_state?:string;iowa_exemption_certified?:boolean}={};
+ let body:{plan?:Plan;organization_name?:string;official_count?:number;texting_addon?:boolean;purchaser_state?:string;iowa_exemption_certified?:boolean;prepared_subscription_id?:string}={};
  let exemptionCertificate:File|null=null;
  if(contentType.includes("multipart/form-data")){
   const formData=await request.formData();
@@ -25,7 +25,8 @@ export async function POST(request:NextRequest){
    official_count:Number(formData.get("official_count")||1),
    texting_addon:formData.get("texting_addon")==="true",
    purchaser_state:String(formData.get("purchaser_state")||""),
-   iowa_exemption_certified:formData.get("iowa_exemption_certified")==="true"
+   iowa_exemption_certified:formData.get("iowa_exemption_certified")==="true",
+   prepared_subscription_id:String(formData.get("prepared_subscription_id")||"")
   };
   const uploaded=formData.get("exemption_certificate");
   exemptionCertificate=uploaded instanceof File&&uploaded.size>0?uploaded:null;
@@ -38,21 +39,29 @@ export async function POST(request:NextRequest){
  if(officialCount>250)return NextResponse.json({error:"Organizations with more than 250 officials require an Enterprise plan. Contact Ref Pro Group to continue."},{status:400});
  const purchaserState=String(body.purchaser_state||"").trim().toUpperCase();
  if(!/^[A-Z]{2}$/.test(purchaserState))return NextResponse.json({error:"Select the organization’s state."},{status:400});
- if(purchaserState==="IA"){
-  if(!body.iowa_exemption_certified)return NextResponse.json({error:"Confirm the Iowa commercial-use certification before continuing."},{status:400});
-  if(!exemptionCertificate)return NextResponse.json({error:"Attach the completed Iowa sales-tax exemption certificate before continuing."},{status:400});
-  if(exemptionCertificate.size>10*1024*1024)return NextResponse.json({error:"The exemption certificate must be 10 MB or smaller."},{status:400});
-  if(!["application/pdf","image/jpeg","image/png"].includes(exemptionCertificate.type))return NextResponse.json({error:"Upload the exemption certificate as a PDF, JPG, or PNG file."},{status:400});
- }
  const service=createServiceClient();
  const price=PRICES[plan];
  const additionalBlocks=Math.max(0,Math.ceil((officialCount-price.limit)/25));
  const textingAddon=Boolean(body.texting_addon);
- const{data:pendingId,error:insertError}=await service.rpc("create_pending_organization_subscription",{p_user_id:user.id,p_organization_name:organizationName,p_plan:plan,p_official_limit:price.limit,p_stripe_price_id:price.id,p_founding_offer:price.founding});
- if(insertError||!pendingId)return NextResponse.json({error:insertError?.message||"Could not prepare subscription."},{status:500});
+ let pendingId=String(body.prepared_subscription_id||"").trim();
+ if(pendingId){
+  const{data:owned}=await service.from("refassign_subscriptions").select("id").eq("id",pendingId).eq("user_id",user.id).maybeSingle();
+  if(!owned)return NextResponse.json({error:"The saved organization billing record could not be found."},{status:404});
+ }else{
+  const{data,error}=await service.rpc("create_pending_organization_subscription",{p_user_id:user.id,p_organization_name:organizationName,p_plan:plan,p_official_limit:price.limit,p_stripe_price_id:price.id,p_founding_offer:price.founding});
+  if(error||!data)return NextResponse.json({error:error?.message||"Could not prepare subscription."},{status:500});
+  pendingId=data;
+ }
  const{data:pending}=await service.from("refassign_subscriptions").update({additional_official_blocks:additionalBlocks,updated_at:new Date().toISOString()}).eq("id",pendingId).select("organization_id").single();
  if(!pending?.organization_id)return NextResponse.json({error:"Could not prepare the organization’s billing record."},{status:500});
- if(purchaserState==="IA"&&exemptionCertificate){
+ const{data:savedExemption}=purchaserState==="IA"?await service.from("organization_tax_exemptions").select("organization_id").eq("organization_id",pending.organization_id).maybeSingle():{data:null};
+ if(purchaserState==="IA"&&!savedExemption){
+  if(!body.iowa_exemption_certified)return NextResponse.json({error:"Confirm the Iowa commercial-use certification before continuing."},{status:400});
+  if(!exemptionCertificate)return NextResponse.json({error:"Attach or save the completed Iowa sales-tax exemption certificate before continuing."},{status:400});
+  if(exemptionCertificate.size>10*1024*1024)return NextResponse.json({error:"The exemption certificate must be 10 MB or smaller."},{status:400});
+  if(!["application/pdf","image/jpeg","image/png"].includes(exemptionCertificate.type))return NextResponse.json({error:"Upload the exemption certificate as a PDF, JPG, or PNG file."},{status:400});
+ }
+ if(purchaserState==="IA"&&!savedExemption&&exemptionCertificate){
   const safeName=exemptionCertificate.name.replace(/[^a-zA-Z0-9._-]/g,"-").slice(-120)||"exemption-certificate.pdf";
   const storagePath=`${pending.organization_id}/${pendingId}/${Date.now()}-${safeName}`;
   const{error:uploadError}=await service.storage.from("tax-exemption-certificates").upload(storagePath,await exemptionCertificate.arrayBuffer(),{contentType:exemptionCertificate.type,upsert:false});
