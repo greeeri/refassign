@@ -76,6 +76,10 @@ export default function IowaSoccerDevelopmentAdmin() {
     [busy, setBusy] = useState(false),
     [uploadBusy, setUploadBusy] = useState(false),
     [selectedMaterialName, setSelectedMaterialName] = useState(""),
+    [attachmentSelections, setAttachmentSelections] = useState<
+      Record<string, string>
+    >({}),
+    [attachingFile, setAttachingFile] = useState(""),
     [uploadError, setUploadError] = useState(""),
     [uploadNotice, setUploadNotice] = useState(""),
     [error, setError] = useState(""),
@@ -312,6 +316,32 @@ export default function IowaSoccerDevelopmentAdmin() {
       .remove([`materials/${name}`]);
     if (e) setError(e.message);
     else await loadFiles();
+  }
+  async function attachMaterial(fileName: string) {
+    const moduleId = attachmentSelections[fileName];
+    if (!moduleId) {
+      setUploadError("Select a training module for this file.");
+      return;
+    }
+    setAttachingFile(fileName);
+    setUploadError("");
+    setUploadNotice("");
+    const { error: e } = await supabase
+      .from("development_modules")
+      .update({
+        resource_url: fileUrl(fileName),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", moduleId);
+    if (e) setUploadError(e.message);
+    else {
+      const module = modules.find((item) => item.id === moduleId);
+      setUploadNotice(
+        `${fileName.replace(/^\d+-/, "")} attached to ${module?.title || "the selected training module"}.`,
+      );
+      await load();
+    }
+    setAttachingFile("");
   }
   async function postAnnouncement(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -830,7 +860,7 @@ export default function IowaSoccerDevelopmentAdmin() {
           {files.length ? (
             files.map((f) => (
               <div key={f.name}>
-                <span>
+                <span className="trainingFileIdentity">
                   <b>{f.name.replace(/^\d+-/, "")}</b>
                   <small>
                     {f.metadata?.size
@@ -838,7 +868,47 @@ export default function IowaSoccerDevelopmentAdmin() {
                       : ""}
                   </small>
                 </span>
-                <span>
+                <div className="trainingFileActions">
+                  <label>
+                    Attach to Training Module
+                    <select
+                      value={
+                        attachmentSelections[f.name] ??
+                        modules.find(
+                          (module) => module.resource_url === fileUrl(f.name),
+                        )?.id ??
+                        ""
+                      }
+                      onChange={(event) =>
+                        setAttachmentSelections((current) => ({
+                          ...current,
+                          [f.name]: event.target.value,
+                        }))
+                      }
+                    >
+                      <option value="">Select a module</option>
+                      {modules.map((module) => (
+                        <option key={module.id} value={module.id}>
+                          {module.title}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    className="primary"
+                    disabled={
+                      attachingFile === f.name ||
+                      !(
+                        attachmentSelections[f.name] ??
+                        modules.find(
+                          (module) => module.resource_url === fileUrl(f.name),
+                        )?.id
+                      )
+                    }
+                    onClick={() => void attachMaterial(f.name)}
+                  >
+                    {attachingFile === f.name ? "Attaching…" : "Attach"}
+                  </button>
                   <a
                     className="secondary"
                     href={fileUrl(f.name)}
@@ -853,7 +923,7 @@ export default function IowaSoccerDevelopmentAdmin() {
                   >
                     Delete
                   </button>
-                </span>
+                </div>
               </div>
             ))
           ) : (
