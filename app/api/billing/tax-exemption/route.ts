@@ -54,7 +54,6 @@ export async function POST(request:NextRequest){
   if(!created?.organization_id)return NextResponse.json({error:"Could not prepare the organization."},{status:500});
   organizationId=created.organization_id;
  }
- const{data:previous}=await service.from("organization_tax_exemptions").select("certificate_storage_path").eq("organization_id",organizationId).maybeSingle();
  const safeName=certificate.name.replace(/[^a-zA-Z0-9._-]/g,"-").slice(-120)||"exemption-certificate.pdf";
  const storagePath=`${organizationId}/${subscriptionId}/${Date.now()}-${safeName}`;
  const{error:uploadError}=await service.storage.from("tax-exemption-certificates").upload(storagePath,await certificate.arrayBuffer(),{contentType:certificate.type,upsert:false});
@@ -62,6 +61,8 @@ export async function POST(request:NextRequest){
  const certifiedAt=new Date().toISOString();
  const{error:saveError}=await service.from("organization_tax_exemptions").upsert({organization_id:organizationId,subscription_id:subscriptionId,purchaser_state:"IA",exemption_basis:"iowa_commercial_enterprise",exclusive_commercial_use_certified:true,certificate_storage_path:storagePath,certificate_original_name:certificate.name,status:"submitted",certified_by:user.id,certified_at:certifiedAt,updated_at:certifiedAt},{onConflict:"organization_id"});
  if(saveError){await service.storage.from("tax-exemption-certificates").remove([storagePath]);return NextResponse.json({error:"The tax-exemption record could not be saved. Please try again."},{status:500});}
- if(previous?.certificate_storage_path&&previous.certificate_storage_path!==storagePath)await service.storage.from("tax-exemption-certificates").remove([previous.certificate_storage_path]);
+ await service.from("organization_tax_exemption_documents").update({status:"superseded",superseded_at:certifiedAt}).eq("organization_id",organizationId).is("superseded_at",null);
+ const{error:historyError}=await service.from("organization_tax_exemption_documents").insert({organization_id:organizationId,subscription_id:subscriptionId,storage_path:storagePath,original_name:certificate.name,mime_type:certificate.type,file_size_bytes:certificate.size,status:"submitted",submitted_by:user.id,submitted_at:certifiedAt});
+ if(historyError)return NextResponse.json({error:"The certificate was saved, but its audit-history record could not be created."},{status:500});
  return NextResponse.json({exemption:{subscription_id:subscriptionId,purchaser_state:"IA",status:"submitted",certificate_original_name:certificate.name,certified_at:certifiedAt,certificate_url:`/api/billing/tax-exemption/document?subscription=${encodeURIComponent(subscriptionId)}`}});
 }
