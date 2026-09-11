@@ -27,11 +27,11 @@ import SuperAdminManager from "../../components/SuperAdminManager";
 import IowaSoccerDevelopment from "../../components/IowaSoccerDevelopment";
 import IowaSoccerDevelopmentAdmin from "../../components/IowaSoccerDevelopmentAdmin";
 import IowaProgramReferees from "../../components/IowaProgramReferees";
-import IowaCommunicationGroups from "../../components/IowaCommunicationGroups";
 import IowaDevelopmentMentors from "../../components/IowaDevelopmentMentors";
 import OfficialReports from "../../components/OfficialReports";
 import ManagerReports from "../../components/ManagerReports";
 import SupportCenter from "../../components/SupportCenter";
+import TaxDocumentsManager from "../../components/TaxDocumentsManager";
 import type { ReportActionTarget } from "../../lib/reportActions";
 const setupNav = ["Leagues", "Levels", "Teams", "Locations"] as const;
 const ALL_ORGANIZATIONS="all";
@@ -86,8 +86,6 @@ export default function Workspace() {
     [testWorkspace, setTestWorkspace] = useState<TestWorkspace | null>(null),
     [reportAction, setReportAction] = useState<ReportActionTarget | null>(null),
     [invitationClaimError, setInvitationClaimError] = useState(""),
-    [showOnboarding, setShowOnboarding] = useState(false),
-    [signedInUser, setSignedInUser] = useState({ name: "", email: "" }),
     [officialOrganizationScope,setOfficialOrganizationScope]=useState("");
   const officialWorkspaces=useMemo(()=>testWorkspaces.filter(item=>item.role==="official"||item.roles?.includes("official")),[testWorkspaces]);
   const officialOrganizationNames=useMemo(()=>Object.fromEntries(officialWorkspaces.map(item=>[item.organization_id,item.name])),[officialWorkspaces]);
@@ -101,20 +99,6 @@ export default function Workspace() {
         window.location.replace("/login");
         return;
       }
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("full_name")
-        .eq("id", user.id)
-        .maybeSingle();
-      const metadata = user.user_metadata || {};
-      const fullName =
-        profile?.full_name ||
-        metadata.full_name ||
-        metadata.name ||
-        [metadata.first_name, metadata.last_name].filter(Boolean).join(" ") ||
-        user.email?.split("@")[0] ||
-        "RefAssign user";
-      setSignedInUser({ name: String(fullName), email: user.email || "" });
       const tierRuntime = isTierTestRuntime();
       setTestMode(tierRuntime);
       if (tierRuntime) {
@@ -159,9 +143,9 @@ export default function Workspace() {
       );
       if (workspaceError) console.error(workspaceError);
       const availableWorkspaces = (workspaceData || []) as TestWorkspace[];
-      const query = new URLSearchParams(window.location.search);
-      const requested = query.get("organization");
-      const onboardingRequested = query.get("onboarding") === "complete";
+      const requested = new URLSearchParams(window.location.search).get(
+        "organization",
+      );
       const stored = localStorage.getItem("refassign-last-test-workspace");
       const selectedWorkspace =
         availableWorkspaces.find(
@@ -169,18 +153,6 @@ export default function Workspace() {
         ) ||
         availableWorkspaces[0] ||
         null;
-      const onboardingDismissed = selectedWorkspace
-        ? localStorage.getItem(
-            `refassign-onboarding-dismissed:${selectedWorkspace.organization_id}`,
-          ) === "true"
-        : false;
-      const needsOnboarding = Boolean(
-        selectedWorkspace &&
-          (onboardingRequested ||
-            ((!selectedWorkspace.leagues || selectedWorkspace.leagues.length === 0) &&
-              !onboardingDismissed)),
-      );
-      setShowOnboarding(needsOnboarding);
       setTestWorkspaces(availableWorkspaces);
       setTestWorkspace(selectedWorkspace);
       const savedOfficialScope=localStorage.getItem("refassign-official-organization-scope");
@@ -223,13 +195,7 @@ export default function Workspace() {
           "official";
         setRoles(workspaceRoles);
         setViewRole(mapped);
-        setSection(
-          needsOnboarding && mapped !== "official"
-            ? "Leagues"
-            : mapped === "official"
-              ? "Official Dashboard"
-              : "Dashboard",
-        );
+        setSection(mapped === "official" ? "Official Dashboard" : "Dashboard");
         setReady(true);
         return;
       }
@@ -266,9 +232,7 @@ export default function Workspace() {
             : available[0] || "official";
       setViewRole(initial);
       setSection(
-        needsOnboarding && (initial === "admin" || initial === "assignor")
-          ? "Leagues"
-          : initial === "official"
+        initial === "official"
           ? "Official Dashboard"
           : initial === "mentor"
             ? "Development Mentors"
@@ -281,6 +245,7 @@ export default function Workspace() {
     void load();
   }, [supabase]);
   const manager = viewRole === "admin" || viewRole === "assignor",
+    organizationTaxAdmin=Boolean(testWorkspace&&(testWorkspace.role==="owner"||testWorkspace.role==="admin"||testWorkspace.roles?.some(role=>role==="owner"||role==="admin"))),
     isSetup = setupNav.includes(section as SetupView),
     isOfficials = ["Officials", "Blocks", "Block Removal Requests"].includes(
       section,
@@ -325,17 +290,6 @@ export default function Workspace() {
     setOfficialOrganizationScope(value);
     localStorage.setItem("refassign-official-organization-scope",value);
     if(value!==ALL_ORGANIZATIONS)switchTestWorkspace(value);
-  }
-  function finishOnboarding() {
-    setShowOnboarding(false);
-    if (testWorkspace)
-      localStorage.setItem(
-        `refassign-onboarding-dismissed:${testWorkspace.organization_id}`,
-        "true",
-      );
-    const query = new URLSearchParams(window.location.search);
-    query.delete("onboarding");
-    window.history.replaceState(null, "", `${window.location.pathname}${query.size ? `?${query.toString()}` : ""}`);
   }
   if (!ready)
     return (
@@ -549,6 +503,13 @@ export default function Workspace() {
                 <Icon>⚙</Icon>
                 <span>Sports & Rules</span>
               </button>
+              {organizationTaxAdmin&&<button
+                className={`topNavButton ${section === "Billing & Tax" ? "active" : ""}`}
+                onClick={() => nav("Billing & Tax")}
+              >
+                <Icon>▤</Icon>
+                <span>Billing &amp; Tax</span>
+              </button>}
             </>
           )}
           {viewRole === "official" && (
@@ -594,6 +555,12 @@ export default function Workspace() {
               <Icon>?</Icon><span>Support Queue</span>
             </button>
           )}
+          <button
+            className={`topNavButton ${section === "Support" ? "active" : ""}`}
+            onClick={() => nav("Support")}
+          >
+            <Icon>?</Icon><span>Report an Issue</span>
+          </button>
           {isSuperAdmin && (
             <button
               className={`topNavButton ${section === "Super Admin" ? "active" : ""}`}
@@ -602,14 +569,6 @@ export default function Workspace() {
               Super Admin
             </button>
           )}
-        </nav>
-        <nav className="asideSupportNav" aria-label="Support">
-          <button
-            className={`topNavButton ${section === "Support" ? "active" : ""}`}
-            onClick={() => nav("Support")}
-          >
-            <Icon>?</Icon><span>Report an Issue</span>
-          </button>
         </nav>
         <div className="asideFoot">
           <span className="workspaceParentBrand">REF PRO GROUP</span>
@@ -634,11 +593,7 @@ export default function Workspace() {
           >
             Terms &amp; Conditions
           </a>
-          <div className="signedInAside">
-            <span>Currently logged in as</span>
-            <strong>{signedInUser.name}</strong>
-            {signedInUser.email && <small>{signedInUser.email}</small>}
-          </div>
+          <br />
           <button className="signOutButton" onClick={signOut}>
             Sign out
           </button>
@@ -672,10 +627,6 @@ export default function Workspace() {
             </p>
           </div>
           <div className="headerActions">
-            <div className="signedInHeader" title={signedInUser.email || signedInUser.name}>
-              <span>Signed in as</span>
-              <strong>{signedInUser.name}</strong>
-            </div>
             {testMode && (
               <button className="secondary" onClick={signOut}>
                 Sign out / switch account
@@ -717,40 +668,6 @@ export default function Workspace() {
             </label>
           </div>
         </header>
-        {manager && showOnboarding && testWorkspace && (
-          <section className="card organizationOnboarding" aria-label="Organization setup">
-            <div className="organizationOnboardingIntro">
-              <p className="eyebrow">New organization</p>
-              <h2>Welcome to {testWorkspace.name}</h2>
-              <p>
-                Your subscription is active. Complete these setup areas to get
-                your league ready for scheduling.
-              </p>
-            </div>
-            <div className="organizationOnboardingSteps">
-              {[
-                ["Leagues", "1", "Create leagues"],
-                ["Levels", "2", "Add competition levels"],
-                ["Teams", "3", "Create sports teams"],
-                ["Locations", "4", "Add game locations"],
-                ["Team & Roles", "5", "Invite staff and assignors"],
-              ].map(([view, number, label]) => (
-                <button
-                  type="button"
-                  key={view}
-                  className={section === view ? "active" : ""}
-                  onClick={() => nav(view)}
-                >
-                  <span>{number}</span>
-                  {label}
-                </button>
-              ))}
-            </div>
-            <button type="button" className="secondary organizationOnboardingDone" onClick={finishOnboarding}>
-              Finish later
-            </button>
-          </section>
-        )}
         {manager && section === "Dashboard" && (
           <DashboardGames organizationId={testWorkspace?.organization_id} onNavigate={setSection} />
         )}{" "}
@@ -890,10 +807,7 @@ export default function Workspace() {
             viewRole === "league_admin") &&
           section === "Development Admin" && <IowaSoccerDevelopmentAdmin />}
         {iowaAdminView && section === "Program Referees" && (
-          <>
-            <IowaCommunicationGroups />
-            <IowaProgramReferees canManage />
-          </>
+          <IowaProgramReferees canManage />
         )}
         {viewRole === "mentor" &&
           iowaMentorAccess &&
@@ -902,6 +816,7 @@ export default function Workspace() {
           iowaMentorAccess &&
           section === "Development Mentors" && <IowaDevelopmentMentors />}
         {isSuperAdmin && section === "Super Admin" && <SuperAdminManager />}
+        {organizationTaxAdmin&&testWorkspace&&section==="Billing & Tax"&&<TaxDocumentsManager organizationId={testWorkspace.organization_id}/>}
         {section === "Support" && <SupportCenter organizationId={viewRole==="official"&&officialOrganizationScope===ALL_ORGANIZATIONS?undefined:testWorkspace?.organization_id} />}
         {isSuperAdmin && section === "Support Queue" && <SupportCenter isSuperAdmin />}
         {manager && <UndoCenter organizationId={testWorkspace?.organization_id} />}
