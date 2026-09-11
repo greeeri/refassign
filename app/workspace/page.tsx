@@ -101,8 +101,14 @@ export default function Workspace() {
         window.location.replace("/login");
         return;
       }
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("full_name")
+        .eq("id", user.id)
+        .maybeSingle();
       const metadata = user.user_metadata || {};
       const fullName =
+        profile?.full_name ||
         metadata.full_name ||
         metadata.name ||
         [metadata.first_name, metadata.last_name].filter(Boolean).join(" ") ||
