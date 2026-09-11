@@ -25,6 +25,7 @@ type Module = {
   course_start_at: string | null;
   course_end_at: string | null;
   quiz_id: string | null;
+  level_key: string;
 };
 type Quiz = { id: string; title: string; active: boolean };
 type TrainingRegistration = {
@@ -47,6 +48,13 @@ const trainingLibraryCategories = [
   "Game Management",
   "Fitness",
   "Professionalism",
+];
+const developmentLevels = [
+  { key: "u8_referee", label: "U8 Referee" },
+  { key: "u10_referee", label: "U10 Referee" },
+  { key: "u11_ar", label: "U11 AR" },
+  { key: "u12_ar", label: "U12 AR" },
+  { key: "u13_referee", label: "U13 Referee" },
 ];
 const localInput = (value: string | null) =>
   value
@@ -114,7 +122,7 @@ export default function IowaSoccerDevelopmentAdmin() {
       supabase
         .from("development_modules")
         .select(
-          "id,title,description,category,resource_url,required,active,delivery_type,registration_url,payment_required,payment_url,instructor_official_id,course_start_at,course_end_at,quiz_id",
+          "id,title,description,category,resource_url,required,active,delivery_type,registration_url,payment_required,payment_url,instructor_official_id,course_start_at,course_end_at,quiz_id,level_key",
         )
         .eq("program_id", program.id)
         .order("sort_order"),
@@ -180,6 +188,7 @@ export default function IowaSoccerDevelopmentAdmin() {
     const scheduled = type !== "self_led";
     return {
       title: form.get("title"),
+      level_key: form.get("level_key"),
       category: form.get("category"),
       description: form.get("description") || "",
       resource_url:
@@ -482,6 +491,12 @@ export default function IowaSoccerDevelopmentAdmin() {
             <input name="title" required />
           </label>
           <label>
+            Development Level
+            <select name="level_key" required defaultValue="u8_referee">
+              {developmentLevels.map((level) => <option value={level.key} key={level.key}>{level.label}</option>)}
+            </select>
+          </label>
+          <label>
             Training Library Section
             <select name="category" required defaultValue="">
               <option value="" disabled>
@@ -587,6 +602,12 @@ export default function IowaSoccerDevelopmentAdmin() {
                   <label>
                     Module Title
                     <input name="title" defaultValue={m.title} required />
+                  </label>
+                  <label>
+                    Development Level
+                    <select name="level_key" defaultValue={m.level_key} required>
+                      {developmentLevels.map((level) => <option value={level.key} key={level.key}>{level.label}</option>)}
+                    </select>
                   </label>
                   <label>
                     Training Library Section
@@ -754,7 +775,7 @@ export default function IowaSoccerDevelopmentAdmin() {
                   <span>
                     <b>{m.title}</b>
                     <small>
-                      Training Library: {m.category} •{" "}
+                      {developmentLevels.find((level) => level.key === m.level_key)?.label || "U8 Referee"} • Training Library: {m.category} •{" "}
                       {deliveryLabel(m.delivery_type)}
                       {m.delivery_type !== "self_led"
                         ? ` • ${schedule(m)} • Instructor: ${instructorName(m.instructor_official_id)}`
