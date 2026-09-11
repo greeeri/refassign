@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import styles from "./pricing.module.css";
+import PricingSessionReset from "./PricingSessionReset";
 
 type Plan = {
   key: string;
@@ -60,6 +61,7 @@ const plans: Plan[] = [
 export default function PricingPage() {
   return (
     <main className={styles.page}>
+      <PricingSessionReset />
       <nav className={styles.nav}>
         <Link href="/">← Ref Pro Group</Link>
         <Link href="/login">Sign in</Link>
