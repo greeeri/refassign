@@ -1,6 +1,7 @@
 "use client";
 import { FormEvent, useEffect, useState } from "react";
 import ReportingAccessManager from "./ReportingAccessManager";
+import SuperAdminTaxDocuments from "./SuperAdminTaxDocuments";
 type Access = { user_id: string; program_id: string; role: string };
 type Account = {
   id: string;
@@ -327,6 +328,7 @@ export default function SuperAdminManager() {
         )}
       </section>
       <ReportingAccessManager />
+      <SuperAdminTaxDocuments />
     </>
   );
 }
