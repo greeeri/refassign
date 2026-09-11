@@ -1,0 +1,40 @@
+.trainingAdminUpload {
+  display: grid;
+  gap: 10px;
+}
+
+.trainingAdminUpload button {
+  justify-self: start;
+}
+
+.trainingUploadSelection {
+  display: block;
+  color: #334155;
+}
+
+.trainingUploadMessage {
+  margin: 2px 0 0;
+}
+
+.trainingLibraryLocation {
+  margin: 12px 0 0;
+  color: #52647a;
+  font-size: 13px;
+}
+
+.trainingUploadedMaterials {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid #dce6f1;
+}
+
+.trainingUploadedMaterials h4 {
+  margin: 0;
+  color: #0a2142;
+}
+
+.trainingUploadedMaterials > p {
+  margin: 4px 0 0;
+  color: #65778c;
+  font-size: 13px;
+}

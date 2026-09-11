@@ -280,18 +280,42 @@ export default function IowaSoccerDevelopment({
     return `${start.toLocaleDateString()} • ${start.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}${end ? ` – ${end.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}`;
   }
   function openQuiz(m: Module) {
-    if(m.quiz_id)setCardQuiz(m);else setActiveQuiz(m);
+    if (m.quiz_id) setCardQuiz(m);
+    else setActiveQuiz(m);
     if (progress[m.id]?.status !== "completed")
       void setStatus(m.id, "in_progress");
   }
   function action(m: Module) {
     const reg = registrations[m.id],
-      status = progress[m.id]?.status;
+      status = progress[m.id]?.status,
+      hasUploadedMaterial = Boolean(
+        m.resource_url?.includes("/iowa-training-materials/"),
+      ),
+      resourceLabel = hasUploadedMaterial ? "Open Material" : "Watch Video";
     if (m.content_type === "quiz" || m.quiz_id)
       return (
         <div className="trainingCardActions">
-          {m.quiz_id&&m.resource_url&&<button className="trainingAction secondary" onClick={()=>{void setStatus(m.id,"in_progress");window.open(m.resource_url!,"_blank")}}>Watch Video</button>}
-          <button className={`trainingAction ${status === "completed" ? "secondary" : ""}`} onClick={() => openQuiz(m)}>{status === "completed" ? "Review / Retake Quiz" : m.quiz_id?"Take Quiz":"Start Test"}</button>
+          {m.quiz_id && m.resource_url && (
+            <button
+              className="trainingAction secondary"
+              onClick={() => {
+                void setStatus(m.id, "in_progress");
+                window.open(m.resource_url!, "_blank");
+              }}
+            >
+              {resourceLabel}
+            </button>
+          )}
+          <button
+            className={`trainingAction ${status === "completed" ? "secondary" : ""}`}
+            onClick={() => openQuiz(m)}
+          >
+            {status === "completed"
+              ? "Review / Retake Quiz"
+              : m.quiz_id
+                ? "Take Quiz"
+                : "Start Test"}
+          </button>
         </div>
       );
     if (status === "completed")
@@ -302,7 +326,7 @@ export default function IowaSoccerDevelopment({
             m.resource_url && window.open(m.resource_url, "_blank")
           }
         >
-          Review
+          {hasUploadedMaterial ? "Open Material" : "Review"}
         </button>
       );
     if (m.delivery_type === "in_person" && reg?.status === "approved")
@@ -326,7 +350,7 @@ export default function IowaSoccerDevelopment({
             if (m.resource_url) window.open(m.resource_url, "_blank");
           }}
         >
-          Start Training
+          {hasUploadedMaterial ? "Open Material" : "Start Training"}
         </button>
       );
     if (reg?.status === "pending")
@@ -352,7 +376,9 @@ export default function IowaSoccerDevelopment({
         onClick={() => void register(m)}
       >
         {m.delivery_type === "self_led"
-          ? "Start Training"
+          ? hasUploadedMaterial
+            ? "Open Material"
+            : "Start Training"
           : m.payment_required
             ? "Register & Pay"
             : "Register"}
@@ -395,7 +421,25 @@ export default function IowaSoccerDevelopment({
       .from("iowa-training-materials")
       .getPublicUrl(`materials/${name}`).data.publicUrl;
   }
-  if(cardQuiz)return <div className="standaloneQuiz"><TrainingCardQuiz moduleId={cardQuiz.id} onClose={()=>setCardQuiz(null)} onPassed={completedAt=>{setProgress(old=>({...old,[cardQuiz.id]:{module_id:cardQuiz.id,status:"completed",completed_at:completedAt}}));}}/></div>;
+  if (cardQuiz)
+    return (
+      <div className="standaloneQuiz">
+        <TrainingCardQuiz
+          moduleId={cardQuiz.id}
+          onClose={() => setCardQuiz(null)}
+          onPassed={(completedAt) => {
+            setProgress((old) => ({
+              ...old,
+              [cardQuiz.id]: {
+                module_id: cardQuiz.id,
+                status: "completed",
+                completed_at: completedAt,
+              },
+            }));
+          }}
+        />
+      </div>
+    );
   return (
     <div className="iowaTrainingPage">
       <section className="iowaTrainingTitle">
@@ -521,22 +565,26 @@ export default function IowaSoccerDevelopment({
           </div>
         ) : null}
         {files.length > 0 && (
-          <div className="trainingAdminFiles">
-            {files.map((f) => (
-              <div key={f.name}>
-                <span>
-                  <b>{f.name.replace(/^\d+-/, "")}</b>
-                </span>
-                <a
-                  className="trainingAction secondary"
-                  href={fileUrl(f.name)}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Open Material
-                </a>
-              </div>
-            ))}
+          <div className="trainingUploadedMaterials">
+            <h4>Uploaded Materials</h4>
+            <p>Files shared by Iowa Soccer for training and reference.</p>
+            <div className="trainingAdminFiles">
+              {files.map((f) => (
+                <div key={f.name}>
+                  <span>
+                    <b>{f.name.replace(/^\d+-/, "")}</b>
+                  </span>
+                  <a
+                    className="trainingAction secondary"
+                    href={fileUrl(f.name)}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open Material
+                  </a>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </section>
