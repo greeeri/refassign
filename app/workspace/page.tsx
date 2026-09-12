@@ -10,6 +10,7 @@ import OrganizationTeamManager from "../../components/OrganizationTeamManager";
 import AvailabilityCalendar from "../../components/AvailabilityCalendar";
 import BlockRemovalRequests from "../../components/BlockRemovalRequests";
 import DashboardGames from "../../components/DashboardGames";
+import ReadOnlyAssignments from "../../components/ReadOnlyAssignments";
 import ContactsManager from "../../components/ContactsManager";
 import AutoAssignManager from "../../components/AutoAssignManager";
 import OfficialDashboard from "../../components/OfficialDashboard";
@@ -559,7 +560,7 @@ export default function Workspace() {
             </>
           )}
           {viewRole === "contact" &&
-            ["Dashboard", "Games"].map((n) => (
+            ["Dashboard", ...(!testWorkspace || testWorkspace.viewer_permissions?.includes("games") ? ["Games"] : []), ...(testWorkspace?.viewer_permissions?.includes("assignments") ? ["Assignments"] : [])].map((n) => (
               <button
                 key={n}
                 className={`topNavButton ${section === n ? "active" : ""}`}
@@ -815,13 +816,15 @@ export default function Workspace() {
         )}
         {viewRole === "contact" && section === "Dashboard" && (
           <section className="card">
-            <h2>Contact Dashboard</h2>
-            <button className="primary" onClick={() => nav("Games")}>
+            <h2>Read-only Dashboard</h2>
+            {testWorkspace?.viewer_permissions?.includes("assignments") && <button className="primary" onClick={() => nav("Assignments")}>View Assignments</button>}
+            {(!testWorkspace || testWorkspace.viewer_permissions?.includes("games")) && <button className="primary" onClick={() => nav("Games")}>
               View Games
-            </button>
+            </button>}
           </section>
         )}
         {viewRole === "contact" && section === "Games" && <DashboardGames />}
+        {viewRole === "contact" && section === "Assignments" && testWorkspace?.viewer_permissions?.includes("assignments") && <ReadOnlyAssignments key={testWorkspace.organization_id} organizationId={testWorkspace.organization_id} />}
         {(viewRole === "registrar" ||
           viewRole === "league_admin" ||
           (viewRole === "admin" && iowaDevelopmentStaff)) &&
