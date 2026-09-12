@@ -85,7 +85,7 @@ type PositionRank = {
   ar1_rank: number;
   ar2_rank: number;
   fourth_rank: number;
-  mentor_rank: number;
+  mentor_certified: boolean;
 };
 type Power = { team_id: string; power: number };
 type EligL = { official_id: string; league_id: string };
@@ -458,11 +458,11 @@ export default function AssignmentsManagerV2({
           .select(
             "id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at,assignment_source,email_sent_at,email_error,resend_email_id,cancellation_notified_at,cancellation_email_error,cancellation_email_id",
           ),
-        supabase.from("assignor_official_rankings").select("official_id,rank"),
+        supabase.from("my_assignment_rankings").select("official_id,rank"),
         supabase
-          .from("assignor_official_rankings")
+          .from("my_assignment_rankings")
           .select(
-            "official_id,ref_rank,ar1_rank,ar2_rank,fourth_rank,mentor_rank",
+            "official_id,ref_rank,ar1_rank,ar2_rank,fourth_rank,mentor_certified",
           ),
         supabase.from("assignor_team_power_rankings").select("team_id,power"),
         supabase
@@ -536,7 +536,7 @@ export default function AssignmentsManagerV2({
           ar1_rank: Number(x.ar1_rank),
           ar2_rank: Number(x.ar2_rank),
           fourth_rank: Number(x.fourth_rank),
-          mentor_rank: Number(x.mentor_rank),
+          mentor_certified: Boolean(x.mentor_certified),
         }),
     );
     ((pw.data || []) as Power[]).forEach(
@@ -1583,6 +1583,10 @@ export default function AssignmentsManagerV2({
     ignorePositionId = "",
   ) {
     const reasons: string[] = [];
+    const targetPosition = positions.find((position) => position.id === ignorePositionId);
+    if (targetPosition && isMentor(targetPosition) && !positionRanks[o.id]?.mentor_certified) {
+      reasons.push("Mentor certification required");
+    }
     for (const a of assignments) {
       if (
         a.official_id !== o.id ||
@@ -1846,7 +1850,7 @@ export default function AssignmentsManagerV2({
   function positionRankFor(officialId: string, pos: Position) {
     const pr = positionRanks[officialId],
       name = pos.name.toLowerCase();
-    if (isMentor(pos)) return pr?.mentor_rank ?? 1;
+    if (isMentor(pos)) return 1;
     if (name.includes("assistant referee 1") || name === "ar1")
       return pr?.ar1_rank ?? ranks[officialId] ?? 1;
     if (name.includes("assistant referee 2") || name === "ar2")
@@ -1860,6 +1864,10 @@ export default function AssignmentsManagerV2({
     )
       return pr?.ref_rank ?? ranks[officialId] ?? 1;
     return ranks[officialId] ?? 1;
+  }
+  function positionRatingText(officialId: string, pos: Position) {
+    if (isMentor(pos)) return positionRanks[officialId]?.mentor_certified ? "Mentor certified" : "Mentor certification required";
+    return `${rankLabel(pos)} ${positionRankFor(officialId, pos).toFixed(1)}`;
   }
   function rankLabel(pos: Position) {
     const name = pos.name.toLowerCase();
@@ -1899,7 +1907,7 @@ export default function AssignmentsManagerV2({
           (eligible(o) || canManage || current?.official_id === o.id) &&
           !used.has(o.id) &&
           (!isMentor(pos) ||
-            positionRankFor(o.id, pos) > 1 ||
+            positionRanks[o.id]?.mentor_certified === true ||
             canManage ||
             current?.official_id === o.id),
       )
@@ -2280,11 +2288,11 @@ export default function AssignmentsManagerV2({
       if (
         position &&
         isMentor(position) &&
-        positionRankFor(official.id, position) <= 1
+        positionRanks[official.id]?.mentor_certified !== true
       )
-        warnings.push({
+        blocking.push({
           gameId: target.id,
-          reason: `Not eligible for ${position.name}`,
+          reason: "Mentor certification required",
         });
     }
     for (let index = 0; index < targets.length; index += 1) {
@@ -2533,8 +2541,8 @@ export default function AssignmentsManagerV2({
             !blocking.includes(reason) &&
             reason !== "Already assigned to this game",
         );
-        if (isMentor(position) && positionRankFor(official.id, position) <= 1)
-          warnings.push(`Not eligible for ${position.name}`);
+        if (isMentor(position) && positionRanks[official.id]?.mentor_certified !== true)
+          blocking.push("Mentor certification required");
         for (const [otherKey, otherOfficialId] of Object.entries(selections)) {
           if (otherKey === key || otherOfficialId !== official.id) continue;
           const [otherGameId] = otherKey.split(":");
@@ -4546,6 +4554,7 @@ export default function AssignmentsManagerV2({
                 .map((position) => ({
                   label: rankLabel(position),
                   rank: positionRankFor(item.id, position),
+                  text: positionRatingText(item.id, position),
                 }));
               const uniqueRoleRatings = [
                 ...new Map(
@@ -4723,7 +4732,7 @@ export default function AssignmentsManagerV2({
                                 {roleRatings
                                   .map(
                                     (rating) =>
-                                      `${rating.label} ${rating.rank.toFixed(1)}`,
+                                      rating.text,
                                   )
                                   .join(" · ")}
                               </em>
@@ -5042,8 +5051,7 @@ export default function AssignmentsManagerV2({
                                     {index === 0 ? "★ " : ""}
                                     {candidate.official.last_name},{" "}
                                     {candidate.official.first_name} —{" "}
-                                    {rankLabel(slot.position)}{" "}
-                                    {candidate.rank.toFixed(1)}
+                                    {positionRatingText(candidate.official.id, slot.position)}
                                     {candidate.distance != null
                                       ? ` — ${candidate.distance.toFixed(1)} mi`
                                       : ""}{" "}
@@ -5083,8 +5091,7 @@ export default function AssignmentsManagerV2({
                           <small className="recommendation">
                             Recommended: {recommendation.official.first_name}{" "}
                             {recommendation.official.last_name} ·{" "}
-                            {rankLabel(slot.position)}{" "}
-                            {recommendation.rank.toFixed(1)}
+                            {positionRatingText(recommendation.official.id, slot.position)}
                             {recommendation.distance != null
                               ? ` · ${recommendation.distance.toFixed(1)} mi`
                               : ""}
@@ -6115,7 +6122,7 @@ export default function AssignmentsManagerV2({
                               <ScheduleLink officialId={candidate.id} />
                             </b>
                             <span>
-                              {label} {candidate.rank.toFixed(1)}
+                              {positionRatingText(candidate.id, candidatePosition)}
                               {candidate.distance != null
                                 ? ` • ${candidate.distance.toFixed(1)} mi`
                                 : ""}{" "}
