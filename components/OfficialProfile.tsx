@@ -1,5 +1,6 @@
 "use client";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import OfficialCcContact from "./OfficialCcContact";
 import { createClient } from "../lib/supabase/client";
 
 type Official = {
@@ -470,6 +471,7 @@ export default function OfficialProfile() {
           </button>
         </form>
       )}
+      {official && <OfficialCcContact key={official.id} officialId={official.id} />}
     </section>
   );
 }
