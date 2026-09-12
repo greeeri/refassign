@@ -3,6 +3,7 @@ import { FormEvent, useEffect, useState } from "react";
 import ReportingAccessManager from "./ReportingAccessManager";
 import SuperAdminTaxDocuments from "./SuperAdminTaxDocuments";
 import SubscriptionAccessManager from "./SubscriptionAccessManager";
+import BillingAlertsManager from "./BillingAlertsManager";
 type Access = { user_id: string; program_id: string; role: string };
 type Account = {
   id: string;
@@ -330,6 +331,7 @@ export default function SuperAdminManager() {
       </section>
       <ReportingAccessManager />
       <SubscriptionAccessManager />
+      <BillingAlertsManager />
       <SuperAdminTaxDocuments />
     </>
   );
