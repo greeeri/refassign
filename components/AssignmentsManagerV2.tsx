@@ -3880,6 +3880,29 @@ export default function AssignmentsManagerV2({
                   </button>
                 </div>
                 {current && canManage && (
+                  <div className="mobileInlinePositionControls" role="group" aria-label={`Move ${official?.first_name || "official"} to another position`}>
+                    <span>Move position</span>
+                    {([-1, 1] as const).map((direction) => {
+                      const target = gamePositions[index + direction];
+                      const label = target
+                        ? shortPositionName(target.name)
+                        : direction === -1 ? "Previous" : "Next";
+                      return (
+                        <button
+                          key={direction}
+                          type="button"
+                          className="secondary"
+                          aria-label={`Move official ${direction === -1 ? "up" : "down"}${target ? ` to ${label}` : ""}; swaps officials when occupied`}
+                          disabled={!target || movingAssignment !== ""}
+                          onClick={() => void moveAssignment(game.id, current.id, direction)}
+                        >
+                          <span aria-hidden="true">{direction === -1 ? "↑" : "↓"}</span>{" "}{label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {current && canManage && (
                   <div className="mobileInlineActions">
                     <button
                       type="button"
