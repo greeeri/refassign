@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { retrieveAndSyncStripeSubscription, syncStripeSubscription } from "../../../../lib/stripe/subscriptions";
+import { sendBillingStatusNotifications } from "../../../../lib/billing/paymentNotifications";
 
 const escapeHtml = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]!);
 
@@ -65,15 +66,29 @@ export async function POST(request: Request) {
       const { error } = await service.from("refassign_subscriptions").update({ stripe_checkout_session_id: object.id, stripe_customer_id: objectId(object.customer) || null, updated_at: now }).eq("id", object.metadata.refassign_subscription_id);
       if (error) throw error;
     } else if (["customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted", "customer.subscription.trial_will_end"].includes(event.type)) {
+      const { data: before } = event.type === "customer.subscription.updated"
+        ? await service.from("refassign_subscriptions").select("status").eq("stripe_subscription_id", objectId(object)).maybeSingle()
+        : { data: null };
       await syncStripeSubscription(service, object as any);
+      if (event.type === "customer.subscription.updated" && before && !["active", "trialing"].includes(before.status) && ["active", "trialing"].includes(String(object.status))) {
+        await sendBillingStatusNotifications(service, { eventId: event.id, subscriptionId: objectId(object), notice: "payment_recovered", origin: new URL(request.url).origin });
+      }
     } else if (["invoice.paid", "invoice.payment_succeeded"].includes(event.type)) {
       const subscriptionId = invoiceSubscriptionId(object);
-      if (subscriptionId) await retrieveAndSyncStripeSubscription(service, subscriptionId, stripeKey);
+      if (subscriptionId) {
+        const { data: before } = await service.from("refassign_subscriptions").select("status").eq("stripe_subscription_id", subscriptionId).maybeSingle();
+        await retrieveAndSyncStripeSubscription(service, subscriptionId, stripeKey);
+        const { data: after } = await service.from("refassign_subscriptions").select("status").eq("stripe_subscription_id", subscriptionId).maybeSingle();
+        if (before && !["active", "trialing"].includes(before.status) && after && ["active", "trialing"].includes(after.status)) {
+          await sendBillingStatusNotifications(service, { eventId: event.id, subscriptionId, notice: "payment_recovered", origin: new URL(request.url).origin });
+        }
+      }
     } else if (["invoice.payment_failed", "invoice.payment_action_required"].includes(event.type)) {
       const subscriptionId = invoiceSubscriptionId(object);
       if (subscriptionId) {
         const { error } = await service.from("refassign_subscriptions").update({ status: "past_due", updated_at: now }).eq("stripe_subscription_id", subscriptionId);
         if (error) throw error;
+        await sendBillingStatusNotifications(service, { eventId: event.id, subscriptionId, notice: "payment_failed", origin: new URL(request.url).origin });
       }
     } else if (event.type === "checkout.session.expired" && object.metadata?.refassign_subscription_id) {
       const { error } = await service.from("refassign_subscriptions").update({ status: "checkout_error", updated_at: now }).eq("id", object.metadata.refassign_subscription_id).eq("status", "pending");
