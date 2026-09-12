@@ -6957,6 +6957,7 @@ export default function AssignmentsManagerV2({
                 </button>
                 <button
                   className="dangerButton"
+                  style={{ backgroundColor: "#b91c1c", borderColor: "#b91c1c", color: "#ffffff" }}
                   disabled={overdueResolving || overdueSelected.length === 0}
                   onClick={() => void resolveOverdue("remove")}
                 >
