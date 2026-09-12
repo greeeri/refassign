@@ -47,7 +47,7 @@ export default function PowerRankingsManager() {
           .from("teams")
           .select("id,name,sport_id,level_id,active")
           .order("name"),
-        supabase.from("team_power_rankings").select("team_id,power"),
+        supabase.from("assignor_team_power_rankings").select("team_id,power"),
         supabase.from("sports").select("id,name").eq("active", true).order("name"),
         supabase.from("levels").select("id,name").eq("active", true).order("name"),
       ]);
@@ -83,12 +83,12 @@ export default function PowerRankingsManager() {
     setSaving(teamId);
     setError("");
     setMessage("");
-    const { error: saveError } = await supabase.rpc("set_team_power", {
+    const { error: saveError } = await supabase.rpc("set_my_team_power", {
       p_team_id: teamId,
       p_power: Math.round(power * 10) / 10,
     });
     if (saveError) setError(saveError.message);
-    else setMessage("Power ranking saved and assignment priority updated.");
+    else setMessage("Your power ranking was saved and your assignment priority updated.");
     setSaving("");
   }
 
@@ -116,8 +116,7 @@ export default function PowerRankingsManager() {
         <div>
           <h2>Power Rankings</h2>
           <p>
-            Rank teams from 1.0–10.0. Higher-powered games receive greater
-            priority when the Assignment Center orders games.
+            My team rankings: rate teams from 1.0–10.0. These ratings are private to your assignor account and determine your game priority.
           </p>
         </div>
         <span className="badge blue">{filtered.length} Teams</span>

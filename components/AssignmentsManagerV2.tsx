@@ -458,13 +458,13 @@ export default function AssignmentsManagerV2({
           .select(
             "id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at,assignment_source,email_sent_at,email_error,resend_email_id,cancellation_notified_at,cancellation_email_error,cancellation_email_id",
           ),
-        supabase.from("official_rankings").select("official_id,rank"),
+        supabase.from("assignor_official_rankings").select("official_id,rank"),
         supabase
-          .from("official_soccer_position_rankings")
+          .from("assignor_official_rankings")
           .select(
             "official_id,ref_rank,ar1_rank,ar2_rank,fourth_rank,mentor_rank",
           ),
-        supabase.from("team_power_rankings").select("team_id,power"),
+        supabase.from("assignor_team_power_rankings").select("team_id,power"),
         supabase
           .from("official_league_eligibility")
           .select("official_id,league_id"),
@@ -4045,7 +4045,7 @@ export default function AssignmentsManagerV2({
         </span>
         <span
           className="assignmentGamePower"
-          title="Average of the home and away team power rankings"
+          title="Average of your personal home and away team power rankings"
           style={{
             color: isRainOut ? "#fff" : "#7c3aed",
             fontSize: 12,
@@ -8731,7 +8731,7 @@ export default function AssignmentsManagerV2({
                       </b>
                       {futureBadge(o.id)}
                       <small>
-                        General Rank {o.rank.toFixed(1)}
+                        My General Rank {o.rank.toFixed(1)}
                         {teamRecencyLabel(o.id)}
                         {o.distance != null
                           ? ` • ${o.distance.toFixed(1)} mi`

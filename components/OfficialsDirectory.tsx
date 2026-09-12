@@ -25,6 +25,7 @@ type Official = {
 
 type PositionRank = {
   official_id: string;
+  rank: number;
   ref_rank: number;
   ar1_rank: number;
   ar2_rank: number;
@@ -46,6 +47,7 @@ type OfficialForm = {
   home_zip: string;
   sports: string[];
   certification_level: string;
+  rank: string;
   ref_rank: string;
   ar1_rank: string;
   ar2_rank: string;
@@ -80,6 +82,7 @@ function newForm(): OfficialForm {
     home_zip: "",
     sports: ["Soccer"],
     certification_level: "",
+    rank: "1.0",
     ref_rank: "1.0",
     ar1_rank: "1.0",
     ar2_rank: "1.0",
@@ -123,6 +126,7 @@ export default function OfficialsDirectory({
   const [showRoster, setShowRoster] = useState(false);
   const [showCommunications, setShowCommunications] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [rankMessage, setRankMessage] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [sportFilter, setSportFilter] = useState("All");
@@ -461,15 +465,16 @@ export default function OfficialsDirectory({
       setCanManage(allowed);
       if (allowed) {
         const { data: pr, error: rankError } = await supabase
-          .from("official_soccer_position_rankings")
+          .from("assignor_official_rankings")
           .select(
-            "official_id,ref_rank,ar1_rank,ar2_rank,fourth_rank,mentor_rank",
+            "official_id,rank,ref_rank,ar1_rank,ar2_rank,fourth_rank,mentor_rank",
           );
         if (rankError) setError(rankError.message);
         const map: Record<string, PositionRank> = {};
         for (const row of (pr || []) as PositionRank[]) {
           map[row.official_id] = {
             official_id: row.official_id,
+            rank: Number(row.rank),
             ref_rank: Number(row.ref_rank),
             ar1_rank: Number(row.ar1_rank),
             ar2_rank: Number(row.ar2_rank),
@@ -533,6 +538,7 @@ export default function OfficialsDirectory({
   }
 
   function startAdd() {
+    setRankMessage("");
     setEditingId(null);
     setForm(newForm());
     setShowForm(true);
@@ -540,6 +546,7 @@ export default function OfficialsDirectory({
   }
 
   async function startEdit(o: Official) {
+    setRankMessage("");
     setEditingId(o.id);
     const [lg, lv] = await Promise.all([
       supabase
@@ -564,6 +571,7 @@ export default function OfficialsDirectory({
       home_zip: o.home_zip || "",
       sports: o.sports,
       certification_level: o.certification_level || "",
+      rank: (pr?.rank ?? 1).toFixed(1),
       ref_rank: (pr?.ref_rank ?? 1).toFixed(1),
       ar1_rank: (pr?.ar1_rank ?? 1).toFixed(1),
       ar2_rank: (pr?.ar2_rank ?? 1).toFixed(1),
@@ -576,6 +584,37 @@ export default function OfficialsDirectory({
     setError("");
   }
 
+  async function saveOnlyMyRankings() {
+    if (!editingId || !canManage || saving) return;
+    const values = [form.rank, form.ref_rank, form.ar1_rank, form.ar2_rank, form.fourth_rank, form.mentor_rank]
+      .map((value) => Math.round(Number(value) * 10) / 10);
+    if (values.some((value) => !Number.isFinite(value) || value < 1 || value > 10)) {
+      setError("All rankings must be between 1.0 and 10.0.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    setRankMessage("");
+    try {
+      const [rank, ref_rank, ar1_rank, ar2_rank, fourth_rank, mentor_rank] = values;
+      const { error: saveError } = await supabase.rpc("set_my_official_rankings", {
+        p_official_id: editingId, p_rank: rank, p_ref_rank: ref_rank,
+        p_ar1_rank: ar1_rank, p_ar2_rank: ar2_rank, p_fourth_rank: fourth_rank,
+        p_mentor_rank: mentor_rank,
+      });
+      if (saveError) throw saveError;
+      setPositionRanks((current) => ({ ...current, [editingId]: {
+        official_id: editingId, rank, ref_rank, ar1_rank, ar2_rank, fourth_rank, mentor_rank,
+      } }));
+      setRankMessage("Your rankings were saved.");
+    } catch (saveError) {
+      setError(saveError && typeof saveError === "object" && "message" in saveError
+        ? String(saveError.message) : "Your rankings could not be saved.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function saveOfficial(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!form.sports.length) {
@@ -583,6 +622,7 @@ export default function OfficialsDirectory({
       return;
     }
     const rankValues = [
+      form.rank,
       form.ref_rank,
       form.ar1_rank,
       form.ar2_rank,
@@ -636,19 +676,16 @@ export default function OfficialsDirectory({
     }
 
     if (canManage && officialId) {
-      const [ref_rank, ar1_rank, ar2_rank, fourth_rank, mentor_rank] =
-        rankValues;
-      const rankResult = await supabase
-        .from("official_soccer_position_rankings")
-        .upsert({
-          official_id: officialId,
-          ref_rank,
-          ar1_rank,
-          ar2_rank,
-          fourth_rank,
-          mentor_rank,
-          updated_at: new Date().toISOString(),
-        });
+      const [rank, ref_rank, ar1_rank, ar2_rank, fourth_rank, mentor_rank] = rankValues;
+      const rankResult = await supabase.rpc("set_my_official_rankings", {
+        p_official_id: officialId,
+        p_rank: rank,
+        p_ref_rank: ref_rank,
+        p_ar1_rank: ar1_rank,
+        p_ar2_rank: ar2_rank,
+        p_fourth_rank: fourth_rank,
+        p_mentor_rank: mentor_rank,
+      });
       if (rankResult.error) {
         setSaving(false);
         setError(rankResult.error.message);
@@ -749,7 +786,7 @@ export default function OfficialsDirectory({
   }
 
   function rankInput(
-    key: "ref_rank" | "ar1_rank" | "ar2_rank" | "fourth_rank" | "mentor_rank",
+    key: "rank" | "ref_rank" | "ar1_rank" | "ar2_rank" | "fourth_rank" | "mentor_rank",
     label: string,
   ) {
     return (
@@ -762,9 +799,11 @@ export default function OfficialsDirectory({
           step="0.1"
           required
           value={form[key]}
-          onChange={(e) =>
-            setForm((current) => ({ ...current, [key]: e.target.value }))
-          }
+          disabled={saving}
+          onChange={(e) => {
+            setRankMessage("");
+            setForm((current) => ({ ...current, [key]: e.target.value }));
+          }}
         />
       </label>
     );
@@ -1204,11 +1243,22 @@ export default function OfficialsDirectory({
               </fieldset>
               {canManage && (
                 <>
-                  {rankInput("ref_rank", "REF Rank")}
-                  {rankInput("ar1_rank", "AR1 Rank")}
-                  {rankInput("ar2_rank", "AR2 Rank")}
-                  {rankInput("fourth_rank", "4th Rank")}
-                  {rankInput("mentor_rank", "Mentor Rank")}
+                  <p style={{ gridColumn: "1 / -1" }}>My rankings — private to your assignor account. These ratings follow you across organizations and are used for your assignments.</p>
+                  {rankInput("rank", "My General Rank")}
+                  {rankInput("ref_rank", "My REF Rank")}
+                  {rankInput("ar1_rank", "My AR1 Rank")}
+                  {rankInput("ar2_rank", "My AR2 Rank")}
+                  {rankInput("fourth_rank", "My 4th Rank")}
+                  {rankInput("mentor_rank", "My Mentor Rank")}
+                  {editingId && (
+                    <div>
+                      <button type="button" className="secondary" disabled={saving}
+                        onClick={() => void saveOnlyMyRankings()}>
+                        {saving ? "Saving…" : "Save My Rankings"}
+                      </button>
+                      {rankMessage && <p role="status">{rankMessage}</p>}
+                    </div>
+                  )}
                   <fieldset>
                     <legend>Eligible Leagues</legend>
                     <div className="sportChecks">
@@ -1314,11 +1364,12 @@ export default function OfficialsDirectory({
                     <th>Home</th>
                     {canManage && (
                       <>
-                        <th>Ref</th>
-                        <th>AR1</th>
-                        <th>AR2</th>
-                        <th>4th</th>
-                        <th>Mentor</th>
+                        <th>My General</th>
+                        <th>My Ref</th>
+                        <th>My AR1</th>
+                        <th>My AR2</th>
+                        <th>My 4th</th>
+                        <th>My Mentor</th>
                       </>
                     )}
                     <th>Status</th>
@@ -1358,6 +1409,9 @@ export default function OfficialsDirectory({
                         </td>
                         {canManage && (
                           <>
+                            <td>
+                              <b>{(pr?.rank ?? 1).toFixed(1)}</b>
+                            </td>
                             <td>
                               <b>{(pr?.ref_rank ?? 1).toFixed(1)}</b>
                             </td>
