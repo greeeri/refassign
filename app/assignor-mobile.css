@@ -1074,7 +1074,15 @@
     display: none;
   }
   .assignmentPositionControls {
-    display: none !important;
+    flex-wrap: wrap;
+    width: 100%;
+    margin-top: 8px;
+    margin-left: 0 !important;
+  }
+  .assignmentPositionControls button {
+    min-width: 44px;
+    min-height: 44px;
+    flex-shrink: 0;
   }
   .assignmentMain tr {
     padding: 10px 12px;
