@@ -58,6 +58,7 @@ export default function AutoAssignManager({
     [saving, setSaving] = useState(false),
     [running, setRunning] = useState(false),
     [publishing, setPublishing] = useState(false),
+    [sameTeamLimit, setSameTeamLimit] = useState(1),
     [startDate, setStartDate] = useState(localDate(today)),
     [endDate, setEndDate] = useState(localDate(weekEnd)),
     [result, setResult] = useState<RunResult | null>(null),
@@ -184,7 +185,7 @@ export default function AutoAssignManager({
     }
     if (
       !window.confirm(
-        `Run AutoAssign for games from ${startDate} through ${endDate}? Existing assignments will not be replaced.`,
+        `Run AutoAssign for games from ${startDate} through ${endDate}? An official may work the same team no more than ${sameTeamLimit} time${sameTeamLimit === 1 ? "" : "s"} in this window. Existing assignments will not be replaced.`,
       )
     )
       return;
@@ -198,6 +199,7 @@ export default function AutoAssignManager({
         p_organization_id: organizationId,
         p_start_date: startDate,
         p_end_date: endDate,
+        p_same_team_limit: sameTeamLimit,
       },
     );
     if (e) setError(e.message);
@@ -333,6 +335,23 @@ export default function AutoAssignManager({
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
             />
+          </label>
+          <label>
+            Same-Team Assignment Limit
+            <select
+              value={sameTeamLimit}
+              onChange={(e) => setSameTeamLimit(Number(e.target.value))}
+            >
+              {[1, 2, 3, 4, 5, 6, 8, 10].map((limit) => (
+                <option key={limit} value={limit}>
+                  {limit} time{limit === 1 ? "" : "s"}
+                </option>
+              ))}
+            </select>
+            <small>
+              Maximum times one official may be assigned to either team during
+              this selected AutoAssign window.
+            </small>
           </label>
         </div>
         <div style={{ margin: "12px 0", fontSize: 13, lineHeight: 1.6 }}>

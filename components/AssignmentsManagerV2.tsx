@@ -402,6 +402,7 @@ export default function AssignmentsManagerV2({
     [deadlineSaving, setDeadlineSaving] = useState(false),
     [showCoverageForecast, setShowCoverageForecast] = useState(false),
     [candidatePositionId, setCandidatePositionId] = useState(""),
+    [scheduleOfficialId, setScheduleOfficialId] = useState(""),
     [replacementPublishing, setReplacementPublishing] = useState(""),
     [unassignedSlotKeys, setUnassignedSlotKeys] = useState<string[]>([]),
     [pendingReplacement, setPendingReplacement] = useState<{
@@ -4126,8 +4127,137 @@ export default function AssignmentsManagerV2({
     );
   }
   const assignmentOfficialId = draggingOfficial || pickedOfficial;
+  const scheduleOfficial = officials.find(
+    (item) => item.id === scheduleOfficialId,
+  );
+  const scheduleRows = scheduleOfficial
+    ? assignments
+        .filter(
+          (assignment) =>
+            assignment.official_id === scheduleOfficial.id &&
+            assignment.status !== "declined",
+        )
+        .map((assignment) => ({
+          assignment,
+          game: games.find((item) => item.id === assignment.game_id),
+          position: positions.find(
+            (item) => item.id === assignment.position_id,
+          ),
+        }))
+        .filter(
+          (row): row is typeof row & { game: Game } => Boolean(row.game),
+        )
+        .sort(
+          (a, b) =>
+            new Date(a.game.starts_at).getTime() -
+            new Date(b.game.starts_at).getTime(),
+        )
+    : [];
+  function ScheduleLink({ officialId }: { officialId: string }) {
+    return (
+      <button
+        type="button"
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setScheduleOfficialId(officialId);
+        }}
+        style={{
+          border: 0,
+          background: "transparent",
+          color: "#2563eb",
+          padding: "0 0 0 6px",
+          fontSize: 10,
+          fontWeight: 800,
+          textDecoration: "underline",
+          cursor: "pointer",
+        }}
+      >
+        Schedule
+      </button>
+    );
+  }
   return (
     <>
+      {scheduleOfficial && (
+        <div
+          className="tapAssignOverlay"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setScheduleOfficialId("");
+          }}
+          style={{ zIndex: 1000 }}
+        >
+          <section
+            className="tapAssignDialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="official-schedule-title"
+            style={{ maxWidth: 760 }}
+          >
+            <header>
+              <div>
+                <small>OFFICIAL SCHEDULE</small>
+                <h3 id="official-schedule-title">
+                  {scheduleOfficial.first_name} {scheduleOfficial.last_name}
+                </h3>
+              </div>
+              <button
+                type="button"
+                aria-label="Close official schedule"
+                onClick={() => setScheduleOfficialId("")}
+              >
+                ×
+              </button>
+            </header>
+            <div className="tableWrap" style={{ margin: 16 }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date / Time</th>
+                    <th>Game</th>
+                    <th>League / Venue</th>
+                    <th>Position</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {scheduleRows.map(({ assignment, game: rowGame, position }) => (
+                    <tr key={assignment.id}>
+                      <td>
+                        {new Date(rowGame.starts_at).toLocaleDateString()}
+                        <small>
+                          {new Date(rowGame.starts_at).toLocaleTimeString([], {
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })}
+                        </small>
+                      </td>
+                      <td>
+                        <b>
+                          {rowGame.home?.name || "TBD"} vs {rowGame.away?.name || "TBD"}
+                        </b>
+                        <small>Game #{rowGame.game_number}</small>
+                      </td>
+                      <td>
+                        {rowGame.leagues?.name || "League not set"}
+                        <small>{rowGame.location?.name || "Venue TBD"}</small>
+                      </td>
+                      <td>{position ? shortPositionName(position.name) : "—"}</td>
+                      <td>{assignment.status.replaceAll("_", " ")}</td>
+                    </tr>
+                  ))}
+                  {!scheduleRows.length && (
+                    <tr>
+                      <td colSpan={5}>No assignments are currently on this official’s schedule.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      )}
       {assignmentOfficialId && canManage && (
         <section
           className="officialDropTray"
@@ -4580,6 +4710,7 @@ export default function AssignmentsManagerV2({
                             <span>
                               <b>
                                 {item.first_name} {item.last_name}
+                                <ScheduleLink officialId={item.id} />
                               </b>
                               <small>
                                 {status === "eligible"
@@ -4940,6 +5071,14 @@ export default function AssignmentsManagerV2({
                             )}
                           </select>
                         </label>
+                        {bulkCrewSelections[slot.key] && (
+                          <small>
+                            Review selected official
+                            <ScheduleLink
+                              officialId={bulkCrewSelections[slot.key]}
+                            />
+                          </small>
+                        )}
                         {recommendation && (
                           <small className="recommendation">
                             Recommended: {recommendation.official.first_name}{" "}
@@ -5973,6 +6112,7 @@ export default function AssignmentsManagerV2({
                             <b>
                               {candidateIndex + 1}. {candidate.first_name}{" "}
                               {candidate.last_name}
+                              <ScheduleLink officialId={candidate.id} />
                             </b>
                             <span>
                               {label} {candidate.rank.toFixed(1)}
@@ -8586,6 +8726,7 @@ export default function AssignmentsManagerV2({
                     <div>
                       <b>
                         {o.first_name} {o.last_name}
+                        <ScheduleLink officialId={o.id} />
                       </b>
                       {futureBadge(o.id)}
                       <small>
@@ -8669,6 +8810,7 @@ export default function AssignmentsManagerV2({
                             <div style={{ flex: 1 }}>
                               <b>
                                 {o.first_name} {o.last_name}
+                                <ScheduleLink officialId={o.id} />
                               </b>
                               <small
                                 style={{ color: "#b91c1c", fontWeight: 700 }}
