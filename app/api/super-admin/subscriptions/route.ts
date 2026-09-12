@@ -10,9 +10,30 @@ function failure(error: unknown) {
 export async function GET() {
   try {
     const { service } = await requireSuperAdmin();
-    const { data, error } = await service.from("refassign_subscriptions").select("id,organization_id,organization_name,plan,status,stripe_subscription_id,current_period_end,cancel_at_period_end,access_override,access_override_reason,access_overridden_at,created_at,organizations(name)").order("created_at", { ascending: false }).limit(500);
+    const { data, error } = await service.from("refassign_subscriptions").select("id,user_id,organization_id,organization_name,plan,status,stripe_subscription_id,current_period_end,cancel_at_period_end,access_override,access_override_reason,access_overridden_at,created_at,organizations(name)").order("created_at", { ascending: false }).limit(500);
     if (error) throw error;
-    return NextResponse.json({ subscriptions: data || [] });
+    const userIds = [...new Set((data || []).map((row) => row.user_id).filter(Boolean))];
+    const accountResults = await Promise.all(
+      userIds.map(async (userId) => {
+        const { data: account } = await service.auth.admin.getUserById(userId);
+        const user = account.user;
+        const metadata = user?.user_metadata || {};
+        const name = String(
+          metadata.full_name ||
+          [metadata.first_name, metadata.last_name].filter(Boolean).join(" ") ||
+          "",
+        ).trim();
+        return [userId, { name, email: user?.email || "" }] as const;
+      }),
+    );
+    const accounts = Object.fromEntries(accountResults);
+    return NextResponse.json({
+      subscriptions: (data || []).map((row) => ({
+        ...row,
+        account_name: accounts[row.user_id]?.name || "Name not provided",
+        account_email: accounts[row.user_id]?.email || "Email unavailable",
+      })),
+    });
   } catch (error) { return failure(error); }
 }
 
