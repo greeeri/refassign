@@ -1,3 +1,4 @@
+import { sendOfficialNotification } from "../../../../lib/communications/officialCc";
 import { NextRequest, NextResponse } from "next/server";
 import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
 function esc(v: unknown) {
@@ -24,7 +25,7 @@ export async function POST(req: NextRequest) {
   const { data: raw, error } = await service
     .from("assignments")
     .select(
-      "id,status,published_at,officials(first_name,last_name,email),sport_positions(name),games!inner(organization_id,game_number,starts_at,duration_minutes,notes,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name,address,city,state),leagues(name),levels(name))",
+      "id,official_id,status,published_at,officials(first_name,last_name,email),sport_positions(name),games!inner(organization_id,game_number,starts_at,duration_minutes,notes,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name,address,city,state),leagues(name),levels(name))",
     )
     .eq("id", body.assignmentId)
     .eq("games.organization_id", context.organizationId)
@@ -82,7 +83,7 @@ export async function POST(req: NextRequest) {
     .filter(Boolean)
     .join(", ");
   const html = `<div style="font-family:Arial,sans-serif;background:#f5f7fb;padding:28px"><div style="max-width:620px;margin:auto;background:white;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden"><div style="background:#14233b;color:white;padding:24px 28px"><div style="font-size:22px;font-weight:800">REF<span style="color:#60a5fa">ASSIGN</span></div><div style="font-size:12px;color:#cbd5e1;margin-top:4px">Confirmed Game Assignment</div></div><div style="padding:28px"><p style="font-size:16px;color:#172033">Hi ${esc(o.first_name)},</p><p style="color:#475569">Your assignment has been <b>confirmed</b> by Ref Pro Group. Please use the information below as your game reminder.</p><h2 style="color:#172033;margin:24px 0 18px">${esc(home)} vs ${esc(away)}</h2><table style="width:100%;border-collapse:collapse;color:#172033;font-size:14px"><tr><td style="padding:9px 0;color:#64748b">Game Number</td><td style="font-weight:700">${esc(g.game_number || "—")}</td></tr><tr><td style="padding:9px 0;color:#64748b">Date & Time</td><td style="font-weight:700">${esc(when)}</td></tr><tr><td style="padding:9px 0;color:#64748b">Position</td><td style="font-weight:700">${esc(pos?.name || "Official")}</td></tr><tr><td style="padding:9px 0;color:#64748b">Location</td><td style="font-weight:700">${esc(loc?.name || "TBD")}${address ? `<br><span style="font-weight:400;color:#64748b">${esc(address)}</span>` : ""}</td></tr><tr><td style="padding:9px 0;color:#64748b">League / Level</td><td style="font-weight:700">${esc(league?.name || "—")}${level?.name ? ` • ${esc(level.name)}` : ""}</td></tr><tr><td style="padding:9px 0;color:#64748b">Game Length</td><td style="font-weight:700">${esc(g.duration_minutes || 110)} minutes</td></tr></table>${g?.notes ? `<div style="margin-top:18px;padding:14px;background:#f8fafc;border-radius:8px"><b>Game Information</b><div style="margin-top:5px;color:#475569">${esc(g.notes)}</div></div>` : ""}<div style="margin-top:22px;padding:14px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;color:#065f46"><b>This assignment is confirmed. No additional acceptance is required.</b></div></div></div><div style="text-align:center;color:#94a3b8;font-size:10px;padding:18px">© 2026 Ref Pro Group, LLC. All rights reserved.</div></div>`;
-  const response = await fetch("https://api.resend.com/emails", {
+  const response = await sendOfficialNotification(service, a.official_id, "https://api.resend.com/emails", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,

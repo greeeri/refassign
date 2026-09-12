@@ -1,3 +1,4 @@
+import { sendOfficialNotification } from "../../../../lib/communications/officialCc";
 import { NextRequest, NextResponse } from "next/server";
 import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
 
@@ -109,7 +110,7 @@ export async function POST(req: NextRequest) {
       if (!apiKey) problem = "RESEND_API_KEY is not configured.";
       else {
         const html = `<div style="font-family:Arial,sans-serif;background:#f5f7fb;padding:28px"><div style="max-width:620px;margin:auto;background:white;border:1px solid #e2e8f0;border-radius:14px;padding:28px"><h2>${esc(labels[messageType])}</h2><p>Hi ${esc(o.first_name)},</p><h3>${esc(home)} vs ${esc(away)}</h3><p><b>${esc(when)}</b><br>${esc(loc?.name || "TBD")}<br>${esc(p?.name || "Official")} • Game #${esc(g.game_number)}</p>${note ? `<p style="padding:12px;background:#f8fafc">${esc(note)}</p>` : ""}<p><a href="${link}" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;font-weight:700;padding:12px 20px;border-radius:8px">View Assignment</a></p></div></div>`;
-        const response = await fetch("https://api.resend.com/emails", {
+        const response = await sendOfficialNotification(supabase, a.official_id, "https://api.resend.com/emails", {
           method: "POST",
           headers: {
             Authorization: `Bearer ${apiKey}`,
@@ -145,7 +146,7 @@ export async function POST(req: NextRequest) {
           Body: plain,
           StatusCallback: `${req.nextUrl.origin}/api/webhooks/twilio`,
         });
-        const response = await fetch(
+        const response = await sendOfficialNotification(supabase, a.official_id,
           `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`,
           {
             method: "POST",

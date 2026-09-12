@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { createClient } from "../lib/supabase/client";
+import OfficialCcContact from "./OfficialCcContact";
 import OfficialsRosterManager from "./OfficialsRosterManager";
 import CommunicationCenter from "./CommunicationCenter";
 import SharedDirectorySearch from "./SharedDirectorySearch";
@@ -1338,6 +1339,7 @@ export default function OfficialsDirectory({
               </div>
             </form>
           )}
+          {showForm && editingId && <OfficialCcContact key={editingId} officialId={editingId} />}
           {error && <div className="errorBox">{error}</div>}
           {loading ? (
             <p>Loading officials…</p>
