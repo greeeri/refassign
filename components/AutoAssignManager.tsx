@@ -194,7 +194,7 @@ export default function AutoAssignManager({
     setNotice("");
     setResult(null);
     const { data, error: e } = await supabase.rpc(
-      "run_organization_auto_assign",
+      "run_my_auto_assign",
       {
         p_organization_id: organizationId,
         p_start_date: startDate,
@@ -359,7 +359,7 @@ export default function AutoAssignManager({
           eligibility, availability blocks, assignment time conflicts using game
           length, prior declines, maximum games per day, rest days by
           level/position, same-team rotation, mentor eligibility, position
-          ranking and workload fairness.
+          ranking and workload fairness. Uses your private official rankings and prioritizes games using your team power ratings.
         </div>
         <button
           disabled={running || !canManage}

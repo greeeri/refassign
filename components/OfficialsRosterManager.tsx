@@ -142,7 +142,7 @@ export default function OfficialsRosterManager({
         p_organization_id: organizationId,
       }),
       supabase
-        .from("official_soccer_position_rankings")
+        .from("assignor_official_rankings")
         .select("official_id,ref_rank,ar1_rank,ar2_rank,fourth_rank"),
       supabase
         .from("leagues")
@@ -440,7 +440,7 @@ export default function OfficialsRosterManager({
                   .id,
             );
           const { data, error } = await supabase.rpc(
-            "upsert_official_roster_row",
+            "upsert_my_official_roster_row",
             {
               p_organization_id: organizationId,
               p_supplied_id: r.supplied_id || null,
@@ -508,8 +508,7 @@ export default function OfficialsRosterManager({
         <div>
           <h2>Officials Roster Import / Export</h2>
           <p>
-            Soccer Ref, AR1, AR2 and 4th rankings are private Admin/Assignor
-            fields and can be bulk updated here.
+            Soccer Ref, AR1, AR2 and 4th rankings belong to your assignor account. Downloads contain your ratings; imported rankings update only your account.
           </p>
         </div>
         <button className="secondary" onClick={downloadCurrent}>

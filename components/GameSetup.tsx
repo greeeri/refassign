@@ -258,7 +258,7 @@ export default function GameSetup({
         .select("id,name,sport_id,level_id,level")
         .order("name"),
       locationRequest,
-      supabase.from("team_power_rankings").select("team_id,power"),
+      supabase.from("assignor_team_power_rankings").select("team_id,power"),
       organizationSetupRequest,
     ]);
     const err =
@@ -426,7 +426,7 @@ export default function GameSetup({
     }
     setSavingPower(teamId);
     setError("");
-    const { error: e } = await supabase.rpc("set_team_power", {
+    const { error: e } = await supabase.rpc("set_my_team_power", {
       p_team_id: teamId,
       p_power: Math.round(power * 10) / 10,
     });
@@ -779,8 +779,7 @@ export default function GameSetup({
             <div>
               <h2>Teams & Power Rankings</h2>
               <p>
-                Manage teams and rank each one from 1.0–10.0. Higher-powered
-                games receive greater assignment priority.
+                My team rankings: rate each team from 1.0–10.0. Your ratings are private to your assignor account and determine your game priority.
               </p>
             </div>
             <button
@@ -884,7 +883,7 @@ export default function GameSetup({
                     </td>
                     <td>
                       <input
-                        aria-label={`Power ranking for ${t.name}`}
+                        aria-label={`My power ranking for ${t.name}`}
                         type="number"
                         min="1"
                         max="10"
