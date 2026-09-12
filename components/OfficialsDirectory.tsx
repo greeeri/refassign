@@ -30,7 +30,7 @@ type PositionRank = {
   ar1_rank: number;
   ar2_rank: number;
   fourth_rank: number;
-  mentor_rank: number;
+  mentor_certified: boolean;
 };
 
 type Choice = { id: string; name: string };
@@ -52,7 +52,7 @@ type OfficialForm = {
   ar1_rank: string;
   ar2_rank: string;
   fourth_rank: string;
-  mentor_rank: string;
+  mentor_certified: boolean;
   league_ids: string[];
   level_ids: string[];
 };
@@ -87,7 +87,7 @@ function newForm(): OfficialForm {
     ar1_rank: "1.0",
     ar2_rank: "1.0",
     fourth_rank: "1.0",
-    mentor_rank: "1.0",
+    mentor_certified: false,
     league_ids: [],
     level_ids: [],
   };
@@ -465,9 +465,9 @@ export default function OfficialsDirectory({
       setCanManage(allowed);
       if (allowed) {
         const { data: pr, error: rankError } = await supabase
-          .from("assignor_official_rankings")
+          .from("my_assignment_rankings")
           .select(
-            "official_id,rank,ref_rank,ar1_rank,ar2_rank,fourth_rank,mentor_rank",
+            "official_id,rank,ref_rank,ar1_rank,ar2_rank,fourth_rank,mentor_certified",
           );
         if (rankError) setError(rankError.message);
         const map: Record<string, PositionRank> = {};
@@ -479,7 +479,7 @@ export default function OfficialsDirectory({
             ar1_rank: Number(row.ar1_rank),
             ar2_rank: Number(row.ar2_rank),
             fourth_rank: Number(row.fourth_rank),
-            mentor_rank: Number(row.mentor_rank),
+            mentor_certified: Boolean(row.mentor_certified),
           };
         }
         setPositionRanks(map);
@@ -576,7 +576,7 @@ export default function OfficialsDirectory({
       ar1_rank: (pr?.ar1_rank ?? 1).toFixed(1),
       ar2_rank: (pr?.ar2_rank ?? 1).toFixed(1),
       fourth_rank: (pr?.fourth_rank ?? 1).toFixed(1),
-      mentor_rank: (pr?.mentor_rank ?? 1).toFixed(1),
+      mentor_certified: pr?.mentor_certified ?? false,
       league_ids: (lg.data || []).map((x) => x.league_id),
       level_ids: (lv.data || []).map((x) => x.level_id),
     });
@@ -586,7 +586,7 @@ export default function OfficialsDirectory({
 
   async function saveOnlyMyRankings() {
     if (!editingId || !canManage || saving) return;
-    const values = [form.rank, form.ref_rank, form.ar1_rank, form.ar2_rank, form.fourth_rank, form.mentor_rank]
+    const values = [form.rank, form.ref_rank, form.ar1_rank, form.ar2_rank, form.fourth_rank]
       .map((value) => Math.round(Number(value) * 10) / 10);
     if (values.some((value) => !Number.isFinite(value) || value < 1 || value > 10)) {
       setError("All rankings must be between 1.0 and 10.0.");
@@ -596,17 +596,17 @@ export default function OfficialsDirectory({
     setError("");
     setRankMessage("");
     try {
-      const [rank, ref_rank, ar1_rank, ar2_rank, fourth_rank, mentor_rank] = values;
-      const { error: saveError } = await supabase.rpc("set_my_official_rankings", {
+      const [rank, ref_rank, ar1_rank, ar2_rank, fourth_rank] = values;
+      const { error: saveError } = await supabase.rpc("set_my_official_assessment", {
         p_official_id: editingId, p_rank: rank, p_ref_rank: ref_rank,
         p_ar1_rank: ar1_rank, p_ar2_rank: ar2_rank, p_fourth_rank: fourth_rank,
-        p_mentor_rank: mentor_rank,
+        p_mentor_certified: form.mentor_certified,
       });
       if (saveError) throw saveError;
       setPositionRanks((current) => ({ ...current, [editingId]: {
-        official_id: editingId, rank, ref_rank, ar1_rank, ar2_rank, fourth_rank, mentor_rank,
+        official_id: editingId, rank, ref_rank, ar1_rank, ar2_rank, fourth_rank, mentor_certified: form.mentor_certified,
       } }));
-      setRankMessage("Your rankings were saved.");
+      setRankMessage("Your rankings and the mentor certification were saved.");
     } catch (saveError) {
       setError(saveError && typeof saveError === "object" && "message" in saveError
         ? String(saveError.message) : "Your rankings could not be saved.");
@@ -627,7 +627,6 @@ export default function OfficialsDirectory({
       form.ar1_rank,
       form.ar2_rank,
       form.fourth_rank,
-      form.mentor_rank,
     ].map((v) => Math.round(Number(v) * 10) / 10);
     if (rankValues.some((v) => !Number.isFinite(v) || v < 1 || v > 10)) {
       setError("All position ranks must be between 1.0 and 10.0.");
@@ -676,15 +675,15 @@ export default function OfficialsDirectory({
     }
 
     if (canManage && officialId) {
-      const [rank, ref_rank, ar1_rank, ar2_rank, fourth_rank, mentor_rank] = rankValues;
-      const rankResult = await supabase.rpc("set_my_official_rankings", {
+      const [rank, ref_rank, ar1_rank, ar2_rank, fourth_rank] = rankValues;
+      const rankResult = await supabase.rpc("set_my_official_assessment", {
         p_official_id: officialId,
         p_rank: rank,
         p_ref_rank: ref_rank,
         p_ar1_rank: ar1_rank,
         p_ar2_rank: ar2_rank,
         p_fourth_rank: fourth_rank,
-        p_mentor_rank: mentor_rank,
+        p_mentor_certified: form.mentor_certified,
       });
       if (rankResult.error) {
         setSaving(false);
@@ -786,7 +785,7 @@ export default function OfficialsDirectory({
   }
 
   function rankInput(
-    key: "rank" | "ref_rank" | "ar1_rank" | "ar2_rank" | "fourth_rank" | "mentor_rank",
+    key: "rank" | "ref_rank" | "ar1_rank" | "ar2_rank" | "fourth_rank",
     label: string,
   ) {
     return (
@@ -1243,18 +1242,22 @@ export default function OfficialsDirectory({
               </fieldset>
               {canManage && (
                 <>
-                  <p style={{ gridColumn: "1 / -1" }}>My rankings — private to your assignor account. These ratings follow you across organizations and are used for your assignments.</p>
+                  <p style={{ gridColumn: "1 / -1" }}>Performance rankings are private to your assignor account. Mentor certification is shared on the official’s record.</p>
                   {rankInput("rank", "My General Rank")}
                   {rankInput("ref_rank", "My REF Rank")}
                   {rankInput("ar1_rank", "My AR1 Rank")}
                   {rankInput("ar2_rank", "My AR2 Rank")}
                   {rankInput("fourth_rank", "My 4th Rank")}
-                  {rankInput("mentor_rank", "My Mentor Rank")}
+                  <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input type="checkbox" style={{ width: "auto" }} checked={form.mentor_certified} disabled={saving}
+                      onChange={(event) => { setRankMessage(""); setForm((current) => ({ ...current, mentor_certified: event.target.checked })); }} />
+                    Mentor certified
+                  </label>
                   {editingId && (
                     <div>
                       <button type="button" className="secondary" disabled={saving}
                         onClick={() => void saveOnlyMyRankings()}>
-                        {saving ? "Saving…" : "Save My Rankings"}
+                        {saving ? "Saving…" : "Save Rankings & Certification"}
                       </button>
                       {rankMessage && <p role="status">{rankMessage}</p>}
                     </div>
@@ -1369,7 +1372,7 @@ export default function OfficialsDirectory({
                         <th>My AR1</th>
                         <th>My AR2</th>
                         <th>My 4th</th>
-                        <th>My Mentor</th>
+                        <th>Mentor Certified</th>
                       </>
                     )}
                     <th>Status</th>
@@ -1425,7 +1428,9 @@ export default function OfficialsDirectory({
                               <b>{(pr?.fourth_rank ?? 1).toFixed(1)}</b>
                             </td>
                             <td>
-                              <b>{(pr?.mentor_rank ?? 1).toFixed(1)}</b>
+                              <input type="checkbox" checked={pr?.mentor_certified ?? false} disabled
+                                aria-label={`Mentor certification for ${o.first_name} ${o.last_name}`}
+                                style={{ width: "auto" }} />
                             </td>
                           </>
                         )}
