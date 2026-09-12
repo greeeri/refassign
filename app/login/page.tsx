@@ -120,12 +120,7 @@ export default function LoginPage() {
         password,
         options: {
           emailRedirectTo: callback,
-          data: {
-            first_name: firstName.trim(),
-            last_name: lastName.trim(),
-            full_name: `${firstName.trim()} ${lastName.trim()}`.trim(),
-            account_type: "organization_owner",
-          },
+          data: { account_type: "organization_owner" },
         },
       });
       if (error) return setMessage(error.message);
@@ -205,7 +200,7 @@ export default function LoginPage() {
         email,
         options: {
           emailRedirectTo: `${window.location.origin}${nextPath}`,
-          shouldCreateUser: true,
+          shouldCreateUser: false,
         },
       });
       setMessage(
@@ -232,7 +227,7 @@ export default function LoginPage() {
         <h1>{creatingOfficial ? "Create official account" : organizationSignup ? "Create organization account" : "Sign in"}</h1>
         <p>{creatingOfficial ? "Use the same email address your organization invited." : organizationSignup ? "Create the owner login for your new RefAssign organization." : "Enter your email address and password."}</p>
         <form onSubmit={creatingOfficial ? createOfficialAccount : organizationSignup ? createOrganizationAccount : signIn}>
-          {(creatingOfficial || organizationSignup) && <>
+          {creatingOfficial && <>
             <label>First name<input required autoComplete="given-name" value={firstName} onChange={(e) => setFirstName(e.target.value)} /></label>
             <label>Last name<input required autoComplete="family-name" value={lastName} onChange={(e) => setLastName(e.target.value)} /></label>
           </>}

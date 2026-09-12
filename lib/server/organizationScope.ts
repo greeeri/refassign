@@ -40,7 +40,10 @@ export async function requireManagedOrganization(request: NextRequest) {
       ),
     };
 
-  const [{ data: subscription, error: subscriptionError }, { data: superAdmin }] =
+  const [
+    { data: subscription, error: subscriptionError },
+    { data: superAdmin },
+  ] =
     await Promise.all([
       service
         .from("refassign_subscriptions")
@@ -63,10 +66,10 @@ export async function requireManagedOrganization(request: NextRequest) {
       ),
     };
   if (
-    subscription &&
-    !subscription.access_override &&
-    !["active", "trialing"].includes(subscription.status) &&
-    !superAdmin
+    !superAdmin &&
+    (!subscription ||
+      (!subscription.access_override &&
+        !["active", "trialing"].includes(subscription.status)))
   )
     return {
       error: NextResponse.json(

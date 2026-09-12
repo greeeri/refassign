@@ -161,6 +161,13 @@ export default function Workspace() {
       );
       if (workspaceError) console.error(workspaceError);
       const availableWorkspaces = (workspaceData || []) as TestWorkspace[];
+      if (
+        !availableWorkspaces.length &&
+        user.user_metadata?.account_type === "organization_owner"
+      ) {
+        window.location.replace("/billing");
+        return;
+      }
       const requested = new URLSearchParams(window.location.search).get(
         "organization",
       );
