@@ -22,6 +22,7 @@ type Game = {
   officials_needed: number;
   notes: string | null;
   bill_to_id: string | null;
+  archived_at: string | null;
   sports: { name: string } | null;
   leagues: { name: string } | null;
   levels: { name: string } | null;
@@ -315,6 +316,9 @@ export default function GamesManagerV3({
     [range, setRange] = useState<Range>("all"),
     [customDate, setCustomDate] = useState(""),
     [showCalendar, setShowCalendar] = useState(false),
+    [showArchived, setShowArchived] = useState(false),
+    [selectedGames, setSelectedGames] = useState<string[]>([]),
+    [managementBusy, setManagementBusy] = useState(false),
     [busy, setBusy] = useState(false),
     [statusBusy, setStatusBusy] = useState(""),
     [pendingStatus, setPendingStatus] = useState<{
@@ -327,9 +331,12 @@ export default function GamesManagerV3({
     const gamesQuery = sb
       .from("games")
       .select(
-        "id,game_number,status,sport_id,league_id,level_id,home_team_id,away_team_id,location_id,bill_to_id,starts_at,duration_minutes,officials_needed,notes,sports(name),leagues(name),levels(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(id,name,city,state)",
+        "id,game_number,status,sport_id,league_id,level_id,home_team_id,away_team_id,location_id,bill_to_id,archived_at,starts_at,duration_minutes,officials_needed,notes,sports(name),leagues(name),levels(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(id,name,city,state)",
       )
       .order("starts_at");
+    const visibleGamesQuery = showArchived
+      ? gamesQuery.not("archived_at", "is", null)
+      : gamesQuery.is("archived_at", null);
     const [s, lg, lv, t, lo, g, billToResponse] = await Promise.all([
       sb
         .from("sports")
@@ -345,8 +352,8 @@ export default function GamesManagerV3({
         .eq("active", true)
         .order("name"),
       organizationId
-        ? gamesQuery.eq("organization_id", organizationId)
-        : gamesQuery,
+        ? visibleGamesQuery.eq("organization_id", organizationId)
+        : visibleGamesQuery,
       organizationId
         ? fetch(
             `/api/bill-tos?organizationId=${encodeURIComponent(organizationId)}`,
@@ -365,6 +372,7 @@ export default function GamesManagerV3({
       setTeams(t.data || []);
       setLocations(lo.data || []);
       setGames((g.data || []) as unknown as Game[]);
+      setSelectedGames([]);
       if (billToResponse?.ok) {
         const billToResult = (await billToResponse.json()) as {
           billTos?: BillTo[];
@@ -377,7 +385,7 @@ export default function GamesManagerV3({
   }
   useEffect(() => {
     void load();
-  }, [organizationId]);
+  }, [organizationId, showArchived]);
   function requestStatusChange(gameId: string, status: string) {
     if (["canceled", "rained_out"].includes(status)) {
       setPendingStatus({ gameId, status });
@@ -416,6 +424,34 @@ export default function GamesManagerV3({
       announceUndoAvailable();
     }
     setStatusBusy("");
+  }
+  async function manageGames(action: "archive" | "restore" | "delete", ids: string[]) {
+    if (!ids.length || !organizationId) return;
+    if (
+      action === "delete" &&
+      !window.confirm(
+        `Permanently delete ${ids.length} game${ids.length === 1 ? "" : "s"}? Assignments, reports, crew messages, updates, and other related records will also be deleted. This cannot be undone.`,
+      )
+    ) return;
+    setManagementBusy(true);
+    setError("");
+    setMessage("");
+    const response = await fetch(
+      `/api/games/manage?organizationId=${encodeURIComponent(organizationId)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, gameIds: ids }),
+      },
+    );
+    const result = (await response.json().catch(() => ({}))) as { error?: string };
+    if (!response.ok) setError(result.error || "Games could not be updated.");
+    else {
+      const past = action === "archive" ? "archived" : action === "restore" ? "restored" : "deleted";
+      setMessage(`${ids.length} game${ids.length === 1 ? "" : "s"} ${past}.`);
+      await load();
+    }
+    setManagementBusy(false);
   }
   const filteredGames = games.filter((g) => inRange(g, range, customDate));
   const eligible = teams.filter(
@@ -945,6 +981,20 @@ export default function GamesManagerV3({
           alignItems: "center",
         }}
       >
+        <button
+          type="button"
+          className={!showArchived ? "primary" : "secondary"}
+          onClick={() => setShowArchived(false)}
+        >
+          Working Schedule
+        </button>
+        <button
+          type="button"
+          className={showArchived ? "primary" : "secondary"}
+          onClick={() => setShowArchived(true)}
+        >
+          Archived Games
+        </button>
         {filters.map(([key, label]) => (
           <button
             key={key}
@@ -991,6 +1041,37 @@ export default function GamesManagerV3({
           </span>
         )}
       </div>
+      {selectedGames.length > 0 && (
+        <div className="noticeBox" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <b>{selectedGames.length} selected</b>
+          <button
+            type="button"
+            className="secondary"
+            disabled={managementBusy}
+            onClick={() => void manageGames(showArchived ? "restore" : "archive", selectedGames)}
+          >
+            {managementBusy ? "Working…" : showArchived ? "Restore selected" : "Archive selected"}
+          </button>
+          {showArchived && (
+            <button
+              type="button"
+              className="danger"
+              disabled={managementBusy}
+              onClick={() => void manageGames("delete", selectedGames)}
+            >
+              Permanently delete selected
+            </button>
+          )}
+          <button type="button" className="secondary" onClick={() => setSelectedGames([])}>
+            Clear selection
+          </button>
+          {showArchived && (
+            <small>
+              Archived games still use database storage. Permanent deletion frees their game and related-record space.
+            </small>
+          )}
+        </div>
+      )}
       {show && (
         <form className="officialForm" onSubmit={save}>
           <label>
@@ -1425,7 +1506,19 @@ export default function GamesManagerV3({
         <table>
           <thead>
             <tr>
-              <th>Game #</th>
+              <th>
+                <input
+                  type="checkbox"
+                  aria-label="Select all visible games"
+                  checked={filteredGames.length > 0 && filteredGames.every((game) => selectedGames.includes(game.id))}
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={(event) =>
+                    setSelectedGames(event.target.checked ? filteredGames.map((game) => game.id) : [])
+                  }
+                  style={{ width: "auto", marginRight: 8 }}
+                />
+                Game #
+              </th>
               <th>Date</th>
               <th>Game</th>
               <th>League / Level</th>
@@ -1448,6 +1541,19 @@ export default function GamesManagerV3({
                   style={{ background: row.background, color: row.color }}
                 >
                   <td>
+                    <input
+                      type="checkbox"
+                      aria-label={`Select game ${g.game_number || "unnumbered"}`}
+                      checked={selectedGames.includes(g.id)}
+                      onChange={(event) =>
+                        setSelectedGames((current) =>
+                          event.target.checked
+                            ? [...current, g.id]
+                            : current.filter((id) => id !== g.id),
+                        )
+                      }
+                      style={{ width: "auto", marginRight: 8 }}
+                    />
                     <b>{g.game_number}</b>
                   </td>
                   <td>
@@ -1480,7 +1586,7 @@ export default function GamesManagerV3({
                   <td>
                     <select
                       aria-label={`Status for ${g.game_number}`}
-                      disabled={statusBusy === g.id}
+                      disabled={showArchived || statusBusy === g.id}
                       value={g.status === "open" ? "active" : g.status}
                       onChange={(e) =>
                         requestStatusChange(g.id, e.target.value)
@@ -1499,9 +1605,17 @@ export default function GamesManagerV3({
                     </select>
                   </td>
                   <td>
-                    <button className="secondary" onClick={() => edit(g)}>
-                      Edit
-                    </button>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      {!showArchived && <button className="secondary" onClick={() => edit(g)}>Edit</button>}
+                      <button
+                        type="button"
+                        className="danger"
+                        disabled={managementBusy}
+                        onClick={() => void manageGames("delete", [g.id])}
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );
