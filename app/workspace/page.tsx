@@ -172,10 +172,15 @@ export default function Workspace() {
           }
         }
       }
-      await Promise.all([
+      const [organizationAcceptance] = await Promise.all([
         supabase.rpc("accept_my_organization_invitations"),
         supabase.rpc("accept_my_official_invitations"),
       ]);
+      if (organizationAcceptance.error) {
+        setInvitationClaimError(
+          `Organization invitation could not be activated: ${organizationAcceptance.error.message}`,
+        );
+      }
       const checkoutSessionId = new URLSearchParams(window.location.search).get(
         "checkout_session_id",
       );
