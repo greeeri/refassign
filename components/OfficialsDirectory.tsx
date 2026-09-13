@@ -332,15 +332,7 @@ export default function OfficialsDirectory({
       .map((item) => item.email);
     let sent = 0;
     if (invitationEmails.length) {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const response = await fetch("/api/tier-test/official-invitations", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${sessionData.session?.access_token || ""}`,
-        },
-        body: JSON.stringify({ organizationId, emails: invitationEmails }),
-      });
+      const response = await postOfficialInvitations(invitationEmails);
       const notification = (await response.json().catch(() => ({}))) as {
         sent?: number;
         error?: string;
@@ -449,15 +441,7 @@ export default function OfficialsDirectory({
 
   async function sendOfficialInvitation(email: string) {
     if (!organizationId) return false;
-    const { data: sessionData } = await supabase.auth.getSession();
-    const response = await fetch("/api/tier-test/official-invitations", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${sessionData.session?.access_token || ""}`,
-      },
-      body: JSON.stringify({ organizationId, emails: [email] }),
-    });
+    const response = await postOfficialInvitations([email]);
     const notification = (await response.json().catch(() => ({}))) as {
       error?: string;
     };
@@ -466,6 +450,35 @@ export default function OfficialsDirectory({
       return false;
     }
     return true;
+  }
+
+  async function postOfficialInvitations(emails: string[]) {
+    const request = async (accessToken: string) =>
+      fetch("/api/tier-test/official-invitations", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ organizationId, emails }),
+      });
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    let session = sessionData.session;
+    const expiresSoon = !session?.expires_at || session.expires_at <= Date.now() / 1000 + 60;
+    if (expiresSoon) {
+      const { data: refreshed } = await supabase.auth.refreshSession();
+      session = refreshed.session;
+    }
+
+    let response = await request(session?.access_token || "");
+    if (response.status === 401) {
+      const { data: refreshed } = await supabase.auth.refreshSession();
+      if (refreshed.session?.access_token) {
+        response = await request(refreshed.session.access_token);
+      }
+    }
+    return response;
   }
 
   async function resendDirectoryInvitation(email: string) {
