@@ -90,7 +90,7 @@ export default function LoginPage() {
         : nextPath;
       const emailRedirectTo = testMode
         ? `${window.location.origin}${destination}`
-        : `${window.location.origin}/auth/callback?next=${encodeURIComponent(destination)}`;
+        : `${window.location.origin}/auth/complete?next=${encodeURIComponent(destination)}`;
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: {
@@ -206,7 +206,7 @@ export default function LoginPage() {
       const supabase = createClient();
       const emailRedirectTo = testMode
         ? `${window.location.origin}${nextPath}`
-        : `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`;
+        : `${window.location.origin}/auth/complete?next=${encodeURIComponent(nextPath)}`;
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: {
