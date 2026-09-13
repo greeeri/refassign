@@ -148,7 +148,9 @@ function normalizeDate(value: string) {
   } else if (/^\d+(\.\d+)?$/.test(input)) {
     const serial = Number(input);
     if (serial < 1 || serial > 2958465) return null;
-    const date = new Date(Date.UTC(1899, 11, 30) + Math.floor(serial) * 86400000);
+    const date = new Date(
+      Date.UTC(1899, 11, 30) + Math.floor(serial) * 86400000,
+    );
     return date.toISOString().slice(0, 10);
   } else {
     const timestamp = Date.parse(input);
@@ -201,11 +203,23 @@ export default function OfficialsRosterManager({
       );
     setAllowed(ok);
     if (!ok) return;
-    const result = await supabase.rpc("get_organization_official_directory", {
-      p_organization_id: organizationId,
-    });
-    if (result.error) setError(result.error.message);
-    else setOfficials((result.data || []) as Official[]);
+    const allOfficials: Official[] = [];
+    const pageSize = 1000;
+    for (let from = 0; ; from += pageSize) {
+      const result = await supabase
+        .rpc("get_organization_official_directory", {
+          p_organization_id: organizationId,
+        })
+        .range(from, from + pageSize - 1);
+      if (result.error) {
+        setError(result.error.message);
+        return;
+      }
+      const page = (result.data || []) as Official[];
+      allOfficials.push(...page);
+      if (page.length < pageSize) break;
+    }
+    setOfficials(allOfficials);
   }
   useEffect(() => {
     void load();
