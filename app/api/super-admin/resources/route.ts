@@ -1,0 +1,152 @@
+import { NextRequest, NextResponse } from "next/server";
+import { requireSuperAdmin } from "../../../../lib/supabase/admin";
+
+function failure(error: unknown) {
+  const message = error instanceof Error ? error.message : "Request failed.";
+  return NextResponse.json(
+    {
+      error:
+        message === "UNAUTHORIZED"
+          ? "Sign in required."
+          : message === "FORBIDDEN"
+            ? "Super-admin access required."
+            : message,
+    },
+    {
+      status:
+        message === "UNAUTHORIZED" ? 401 : message === "FORBIDDEN" ? 403 : 400,
+    },
+  );
+}
+
+export async function GET() {
+  try {
+    const { service } = await requireSuperAdmin();
+    const [
+      { data: organizations, error: organizationError },
+      { data: protectedRows },
+    ] = await Promise.all([
+      service.from("organizations").select("id,name,created_at").order("name"),
+      service.from("protected_accounts").select("user_id"),
+    ]);
+    if (organizationError) throw organizationError;
+
+    const organizationRows = await Promise.all(
+      (organizations || []).map(async (organization) => {
+        const [officials, games, members, subscription] = await Promise.all([
+          service
+            .from("organization_officials")
+            .select("official_id", { count: "exact", head: true })
+            .eq("organization_id", organization.id),
+          service
+            .from("games")
+            .select("id", { count: "exact", head: true })
+            .eq("organization_id", organization.id),
+          service
+            .from("organization_memberships")
+            .select("user_id", { count: "exact", head: true })
+            .eq("organization_id", organization.id),
+          service
+            .from("refassign_subscriptions")
+            .select("status")
+            .eq("organization_id", organization.id)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+        ]);
+        return {
+          ...organization,
+          official_count: officials.count || 0,
+          game_count: games.count || 0,
+          member_count: members.count || 0,
+          subscription_status: subscription.data?.status || null,
+        };
+      }),
+    );
+
+    const officials: Record<string, unknown>[] = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await service
+        .from("officials")
+        .select("id,first_name,last_name,full_name,email,active,auth_user_id")
+        .order("last_name")
+        .order("first_name")
+        .range(from, from + 999);
+      if (error) throw error;
+      officials.push(...(data || []));
+      if ((data || []).length < 1000) break;
+    }
+
+    const protectedIds = new Set(
+      (protectedRows || []).map((row) => row.user_id),
+    );
+    return NextResponse.json({
+      organizations: organizationRows,
+      officials: officials.map((official) => ({
+        ...official,
+        protected: protectedIds.has(String(official.auth_user_id || "")),
+      })),
+    });
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const { user, service } = await requireSuperAdmin();
+    const body = (await request.json()) as {
+      type?: "official" | "organization";
+      id?: string;
+      confirmation?: string;
+    };
+    if (!body.id || !body.type) throw new Error("A resource is required.");
+
+    if (body.type === "official") {
+      const { data: official, error } = await service
+        .from("officials")
+        .select("first_name,last_name,full_name,email")
+        .eq("id", body.id)
+        .maybeSingle();
+      if (error) throw error;
+      if (!official) throw new Error("Official not found.");
+      const name =
+        `${official.first_name || ""} ${official.last_name || ""}`.trim() ||
+        official.full_name ||
+        "Official";
+      const required = official.email || name;
+      if (body.confirmation !== required)
+        throw new Error(`Type ${required} exactly to confirm deletion.`);
+      const { error: deleteError } = await service.rpc(
+        "super_admin_delete_official",
+        {
+          p_actor_user_id: user.id,
+          p_official_id: body.id,
+        },
+      );
+      if (deleteError) throw deleteError;
+      return NextResponse.json({ deleted: true });
+    }
+
+    const { data: organization, error } = await service
+      .from("organizations")
+      .select("name")
+      .eq("id", body.id)
+      .maybeSingle();
+    if (error) throw error;
+    if (!organization) throw new Error("Organization not found.");
+    if (body.confirmation !== organization.name)
+      throw new Error(`Type ${organization.name} exactly to confirm deletion.`);
+    const { error: deleteError } = await service.rpc(
+      "super_admin_delete_organization",
+      {
+        p_actor_user_id: user.id,
+        p_organization_id: body.id,
+      },
+    );
+    if (deleteError) throw deleteError;
+    return NextResponse.json({ deleted: true });
+  } catch (error) {
+    return failure(error);
+  }
+}

@@ -4,6 +4,7 @@ import ReportingAccessManager from "./ReportingAccessManager";
 import SuperAdminTaxDocuments from "./SuperAdminTaxDocuments";
 import SubscriptionAccessManager from "./SubscriptionAccessManager";
 import BillingAlertsManager from "./BillingAlertsManager";
+import SuperAdminResourceManager from "./SuperAdminResourceManager";
 type Access = { user_id: string; program_id: string; role: string };
 type Account = {
   id: string;
@@ -332,6 +333,7 @@ export default function SuperAdminManager() {
       <ReportingAccessManager />
       <SubscriptionAccessManager />
       <BillingAlertsManager />
+      <SuperAdminResourceManager />
       <SuperAdminTaxDocuments />
     </>
   );
