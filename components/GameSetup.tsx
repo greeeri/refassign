@@ -90,6 +90,7 @@ export default function GameSetup({
     ),
     [leagueDrafts, setLeagueDrafts] = useState<Record<string, MileagePlan>>({}),
     [savingLeagueId, setSavingLeagueId] = useState(""),
+    [copyingLeagueId, setCopyingLeagueId] = useState(""),
     [leagueMessage, setLeagueMessage] = useState(""),
     [savingPower, setSavingPower] = useState(""),
     [showTeamImport, setShowTeamImport] = useState(false),
@@ -105,6 +106,35 @@ export default function GameSetup({
     [locationMessage, setLocationMessage] = useState(""),
     [locationSaveMessage, setLocationSaveMessage] = useState(""),
     [locationSource, setLocationSource] = useState<"system" | "all">("system");
+
+  async function copyLeagueConnectionLink(league: League) {
+    if (!organizationId) return;
+    setCopyingLeagueId(league.id);
+    setError("");
+    setLeagueMessage("");
+    const { data, error: linkError } = await supabase.rpc(
+      "get_or_create_league_connection_link",
+      {
+        p_organization_id: organizationId,
+        p_league_id: league.id,
+        p_regenerate: false,
+      },
+    );
+    if (linkError || !data) {
+      setError(linkError?.message || "The league connection link could not be created.");
+      setCopyingLeagueId("");
+      return;
+    }
+    const link = `${window.location.origin}/join/league/${data}`;
+    try {
+      await navigator.clipboard.writeText(link);
+      setLeagueMessage(`${league.name} official connection link copied.`);
+    } catch {
+      window.prompt("Copy this official connection link:", link);
+      setLeagueMessage(`${league.name} official connection link is ready.`);
+    }
+    setCopyingLeagueId("");
+  }
 
   async function searchLocations(e: FormEvent) {
     e.preventDefault();
@@ -620,6 +650,7 @@ export default function GameSetup({
                 <tr>
                   <th>League</th>
                   <th>Mileage Plan</th>
+                  <th>Official Connection</th>
                   <th>Documents &amp; Policies</th>
                   <th></th>
                 </tr>
@@ -674,6 +705,18 @@ export default function GameSetup({
                         <button
                           className="secondary"
                           type="button"
+                          disabled={copyingLeagueId === l.id}
+                          onClick={() => void copyLeagueConnectionLink(l)}
+                        >
+                          {copyingLeagueId === l.id
+                            ? "Preparing…"
+                            : "Copy official link"}
+                        </button>
+                      </td>
+                      <td>
+                        <button
+                          className="secondary"
+                          type="button"
                           onClick={() =>
                             setOpenLeagueDocuments(
                               openLeagueDocuments === l.id ? null : l.id,
@@ -696,7 +739,7 @@ export default function GameSetup({
                     </tr>
                     {openLeagueDocuments === l.id && (
                       <tr className="leagueDocumentsTableRow">
-                        <td colSpan={4}>
+                        <td colSpan={5}>
                           <LeagueDocumentsManager
                             leagueId={l.id}
                             leagueName={l.name}

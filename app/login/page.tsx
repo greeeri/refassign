@@ -33,9 +33,11 @@ export default function LoginPage() {
         : "/workspace",
     );
     setOrganizationSignup(query.get("signup") === "organization");
+    if (query.get("account") === "official") setCreatingOfficial(true);
     const hash = new URLSearchParams(window.location.hash.slice(1));
     const invitedEmail = query.get("official") || hash.get("official");
-    const invitationId = query.get("official_invite") || hash.get("official_invite");
+    const invitationId =
+      query.get("official_invite") || hash.get("official_invite");
     if (invitationId) {
       setOfficialInvitationId(invitationId);
       localStorage.setItem("refassign-official-invitation", invitationId);
@@ -93,7 +95,9 @@ export default function LoginPage() {
             account_type: "official",
             official_invitation_id: officialInvitationId || undefined,
           },
-          emailRedirectTo: `${window.location.origin}/workspace${invitationQuery}`,
+          emailRedirectTo: officialInvitationId
+            ? `${window.location.origin}/workspace${invitationQuery}`
+            : `${window.location.origin}${nextPath}`,
           shouldCreateUser: true,
         },
       });

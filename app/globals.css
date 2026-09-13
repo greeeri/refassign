@@ -642,6 +642,13 @@ td small {
   width: 100%;
   padding: 12px;
 }
+.loginCard a.loginButton {
+  box-sizing: border-box;
+  display: block;
+  margin-top: 10px;
+  text-align: center;
+  text-decoration: none;
+}
 .loginButton:disabled {
   opacity: 0.65;
 }
