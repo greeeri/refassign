@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 type Organization = {
   id: string;
@@ -30,9 +30,10 @@ export default function SuperAdminResourceManager() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
-  async function load() {
+  async function load(officialQuery = "") {
     setError("");
-    const response = await fetch("/api/super-admin/resources", {
+    const suffix = officialQuery.trim().length >= 2 ? `?officialQuery=${encodeURIComponent(officialQuery.trim())}` : "";
+    const response = await fetch(`/api/super-admin/resources${suffix}`, {
       cache: "no-store",
     });
     const result = await response.json();
@@ -46,18 +47,10 @@ export default function SuperAdminResourceManager() {
     void load();
   }, []);
 
-  const visibleOfficials = useMemo(() => {
-    const value = query.trim().toLowerCase();
-    return officials
-      .filter(
-        (official) =>
-          !value ||
-          `${official.first_name || ""} ${official.last_name || ""} ${official.full_name || ""} ${official.email || ""}`
-            .toLowerCase()
-            .includes(value),
-      )
-      .slice(0, 100);
-  }, [officials, query]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(query), 300);
+    return () => window.clearTimeout(timer);
+  }, [query]);
 
   async function remove(
     type: "official" | "organization",
@@ -86,7 +79,7 @@ export default function SuperAdminResourceManager() {
       setNotice(
         `${type === "organization" ? "Organization" : "Official"} deleted.`,
       );
-      await load();
+      await load(query);
     }
     setBusyId("");
   }
@@ -170,12 +163,8 @@ export default function SuperAdminResourceManager() {
         <div className="cardHead">
           <div>
             <h2>Official Record Management</h2>
-            <p>
-              Search the complete master directory. The first 100 matches are
-              shown.
-            </p>
+            <p>Search the master directory by name or email.</p>
           </div>
-          <span className="badge">{officials.length} total</span>
         </div>
         <label>
           Search officials
@@ -185,7 +174,9 @@ export default function SuperAdminResourceManager() {
             placeholder="Name or email"
           />
         </label>
-        <div className="tableWrap">
+        {query.trim().length < 2 ? (
+          <p>Enter at least two characters to find an official.</p>
+        ) : <div className="tableWrap">
           <table>
             <thead>
               <tr>
@@ -196,7 +187,7 @@ export default function SuperAdminResourceManager() {
               </tr>
             </thead>
             <tbody>
-              {visibleOfficials.map((official) => {
+              {officials.map((official) => {
                 const name =
                   `${official.first_name || ""} ${official.last_name || ""}`.trim() ||
                   official.full_name ||
@@ -233,9 +224,10 @@ export default function SuperAdminResourceManager() {
                   </tr>
                 );
               })}
+              {!officials.length && <tr><td colSpan={4}>No matching officials found.</td></tr>}
             </tbody>
           </table>
-        </div>
+        </div>}
       </section>
     </>
   );
