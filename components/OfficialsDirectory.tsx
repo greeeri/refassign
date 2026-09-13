@@ -173,6 +173,8 @@ function newForm(): OfficialForm {
 type LinkOfficialResult = {
   email: string;
   existing_account: boolean;
+  official_id?: string;
+  existing_official?: boolean;
   found?: boolean;
   display_name?: string;
   already_connected?: boolean;
@@ -904,6 +906,43 @@ export default function OfficialsDirectory({
         setSaving(false);
         setError(result.error.message);
         return;
+      }
+    } else if (organizationId && payload.email) {
+      const result = await supabase.rpc("add_organization_official_by_email", {
+        p_organization_id: organizationId,
+        p_email: payload.email,
+      });
+      if (result.error) {
+        setSaving(false);
+        setError(result.error.message);
+        return;
+      }
+
+      const linked = result.data as LinkOfficialResult;
+      officialId = linked.official_id || null;
+      if (!officialId) {
+        setSaving(false);
+        setError("The official could not be connected to this organization.");
+        return;
+      }
+
+      // The email RPC owns identity resolution and organization linking. Only
+      // populate the full record when it created a new canonical official;
+      // connecting an existing official must not overwrite their shared profile.
+      if (!linked.existing_official) {
+        const updateResult = await supabase
+          .from("officials")
+          .update(payload)
+          .eq("id", officialId);
+        if (updateResult.error) {
+          setSaving(false);
+          setError(updateResult.error.message);
+          return;
+        }
+      } else {
+        setLinkMessage(
+          `${linked.email} already had a RefAssign profile and was connected to this organization.`,
+        );
       }
     } else {
       const result = await supabase
