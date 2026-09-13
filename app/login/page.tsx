@@ -85,6 +85,12 @@ export default function LoginPage() {
       const invitationQuery = officialInvitationId
         ? `?official_invite=${encodeURIComponent(officialInvitationId)}`
         : "";
+      const destination = officialInvitationId
+        ? `/workspace${invitationQuery}`
+        : nextPath;
+      const emailRedirectTo = testMode
+        ? `${window.location.origin}${destination}`
+        : `${window.location.origin}/auth/callback?next=${encodeURIComponent(destination)}`;
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: {
@@ -95,9 +101,7 @@ export default function LoginPage() {
             account_type: "official",
             official_invitation_id: officialInvitationId || undefined,
           },
-          emailRedirectTo: officialInvitationId
-            ? `${window.location.origin}/workspace${invitationQuery}`
-            : `${window.location.origin}${nextPath}`,
+          emailRedirectTo,
           shouldCreateUser: true,
         },
       });
@@ -200,10 +204,13 @@ export default function LoginPage() {
     setMessage("");
     try {
       const supabase = createClient();
+      const emailRedirectTo = testMode
+        ? `${window.location.origin}${nextPath}`
+        : `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`;
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: {
-          emailRedirectTo: `${window.location.origin}${nextPath}`,
+          emailRedirectTo,
           shouldCreateUser: false,
         },
       });
