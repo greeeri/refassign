@@ -230,6 +230,9 @@ export default function OrganizationTeamManager({
       return;
     }
     setBusy(item.id);
+    const releaseBusy = window.setTimeout(() => {
+      setBusy((current) => (current === item.id ? "" : current));
+    }, 2000);
     setMessage("");
     try {
       const args = {
@@ -263,6 +266,7 @@ export default function OrganizationTeamManager({
         error instanceof Error ? error.message : "Could not update team access.",
       );
     } finally {
+      window.clearTimeout(releaseBusy);
       setBusy("");
     }
   };
