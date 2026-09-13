@@ -100,8 +100,10 @@ export default function GameSetup({
       [],
     ),
     [searchingLocations, setSearchingLocations] = useState(false),
+    [savingLocation, setSavingLocation] = useState(false),
     [connectingLocation, setConnectingLocation] = useState(""),
     [locationMessage, setLocationMessage] = useState(""),
+    [locationSaveMessage, setLocationSaveMessage] = useState(""),
     [locationSource, setLocationSource] = useState<"system" | "all">("system");
 
   async function searchLocations(e: FormEvent) {
@@ -435,7 +437,11 @@ export default function GameSetup({
   }
   async function saveLocation(e: FormEvent) {
     e.preventDefault();
+    if (savingLocation) return;
+    setSavingLocation(true);
     setError("");
+    setLocationSaveMessage("");
+    let geocodeWarning = "";
     let coordinates: { latitude: number | null; longitude: number | null } = {
       latitude: null,
       longitude: null,
@@ -449,12 +455,10 @@ export default function GameSetup({
           location.name,
         );
       } catch (geocodeError) {
-        setError(
+        geocodeWarning =
           geocodeError instanceof Error
             ? geocodeError.message
-            : "The venue address could not be located.",
-        );
-        return;
+            : "The venue address could not be located.";
       }
     }
     const payload = {
@@ -497,8 +501,9 @@ export default function GameSetup({
             .update(payload)
             .eq("id", editingLocationId)
         : await supabase.from("locations").insert(payload);
-    if (r.error) setError(r.error.message);
-    else {
+    if (r.error) {
+      setError(r.error.message);
+    } else {
       setLocation({
         name: "",
         address: "",
@@ -513,8 +518,16 @@ export default function GameSetup({
         contact_email: "",
       });
       setEditingLocationId(null);
-      load();
+      setLocationSaveMessage(
+        `${editingLocationId ? "Location updated" : "Location added"}.${
+          geocodeWarning
+            ? " Its map coordinates could not be found automatically, but you can edit the address later."
+            : ""
+        }`,
+      );
+      await load();
     }
+    setSavingLocation(false);
   }
   function editLocation(v: Location) {
     setEditingLocationId(v.id);
@@ -779,7 +792,9 @@ export default function GameSetup({
             <div>
               <h2>Teams & Power Rankings</h2>
               <p>
-                My team rankings: rate each team from 1.0–10.0. Your ratings are private to your assignor account and determine your game priority.
+                My team rankings: rate each team from 1.0–10.0. Your ratings are
+                private to your assignor account and determine your game
+                priority.
               </p>
             </div>
             <button
@@ -1040,6 +1055,9 @@ export default function GameSetup({
               </button>
             </div>
             {showLocationImport && <LocationsRosterManager />}
+            {locationSaveMessage && (
+              <div className="successBox">{locationSaveMessage}</div>
+            )}
             <form className="officialForm" onSubmit={saveLocation}>
               <label>
                 Location Name
@@ -1179,8 +1197,14 @@ export default function GameSetup({
                     Cancel Edit
                   </button>
                 )}
-                <button className="primary">
-                  {editingLocationId ? "Save Location Changes" : "Add Location"}
+                <button className="primary" disabled={savingLocation}>
+                  {savingLocation
+                    ? editingLocationId
+                      ? "Saving Changes…"
+                      : "Adding Location…"
+                    : editingLocationId
+                      ? "Save Location Changes"
+                      : "Add Location"}
                 </button>
               </div>
             </form>
