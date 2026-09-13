@@ -338,6 +338,7 @@ export default function OrganizationTeamManager({
             item={item}
             leagues={validLeagues}
             disabled={!canManage || busy === item.id}
+            saving={busy === item.id}
             onSave={save}
           />
         ))}
@@ -449,11 +450,13 @@ function MemberCard({
   item,
   leagues,
   disabled,
+  saving,
   onSave,
 }: {
   item: TeamAccess;
   leagues: LeagueChoice[];
   disabled: boolean;
+  saving: boolean;
   onSave: (
     item: TeamAccess,
     roles: RoleCode[],
@@ -505,7 +508,7 @@ function MemberCard({
         }
         onClick={() => void onSave(item, roles, permissions, leagueIds)}
       >
-        {disabled ? "Saving…" : "Save changes"}
+        {saving ? "Saving…" : "Save changes"}
       </button>
     </article>
   );
