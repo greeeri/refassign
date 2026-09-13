@@ -46,17 +46,23 @@ export async function GET(request: NextRequest) {
     global: { headers: { Authorization: `Bearer ${token}` } },
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  const [{ data: userData }, { data: workspaces, error: workspaceError }] =
-    await Promise.all([
-      supabase.auth.getUser(token),
-      supabase.rpc("get_my_test_workspaces"),
-    ]);
+  const [
+    { data: userData },
+    { data: workspaces, error: workspaceError },
+    { data: isSuperAdmin, error: superAdminError },
+  ] = await Promise.all([
+    supabase.auth.getUser(token),
+    supabase.rpc("get_my_test_workspaces"),
+    supabase.rpc("is_super_admin"),
+  ]);
   if (
     !userData.user ||
     workspaceError ||
-    !(workspaces as Workspace[] | null)?.some(
-      (item) => item.organization_id === organizationId,
-    )
+    superAdminError ||
+    (!isSuperAdmin &&
+      !(workspaces as Workspace[] | null)?.some(
+        (item) => item.organization_id === organizationId,
+      ))
   )
     return NextResponse.json(
       { error: "You do not have access to this organization." },
