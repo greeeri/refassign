@@ -826,7 +826,11 @@ export default function Workspace() {
               name: league.name,
             }))}
             canManage={
-              testWorkspace.role === "owner" || testWorkspace.role === "admin"
+              testWorkspace.role === "owner" ||
+              testWorkspace.role === "admin" ||
+              testWorkspace.roles?.some(
+                (role) => role === "owner" || role === "admin",
+              ) === true
             }
           />
         )}
