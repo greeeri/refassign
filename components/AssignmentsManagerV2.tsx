@@ -8460,8 +8460,8 @@ export default function AssignmentsManagerV2({
                                           </small>
                                           <button
                                             type="button"
-                                            title="Move to previous position; swaps officials when occupied"
-                                            aria-label="Move official to previous position"
+                                            title="Move up one position; swaps officials when occupied"
+                                            aria-label="Move official up one position"
                                             disabled={
                                               index === 0 ||
                                               movingAssignment === current.id
@@ -8486,12 +8486,12 @@ export default function AssignmentsManagerV2({
                                               fontWeight: 900,
                                             }}
                                           >
-                                            ←
+                                            ↑
                                           </button>
                                           <button
                                             type="button"
-                                            title="Move to next position; swaps officials when occupied"
-                                            aria-label="Move official to next position"
+                                            title="Move down one position; swaps officials when occupied"
+                                            aria-label="Move official down one position"
                                             disabled={
                                               index ===
                                                 gamePositions.length - 1 ||
@@ -8518,7 +8518,7 @@ export default function AssignmentsManagerV2({
                                               fontWeight: 900,
                                             }}
                                           >
-                                            →
+                                            ↓
                                           </button>
                                         </span>
                                       )}
@@ -8669,7 +8669,7 @@ export default function AssignmentsManagerV2({
                                           <span>Move official:</span>
                                           <button
                                             type="button"
-                                            aria-label="Move official to previous position"
+                                            aria-label="Move official up one position"
                                             disabled={
                                               index === 0 ||
                                               movingAssignment === current.id
@@ -8682,11 +8682,11 @@ export default function AssignmentsManagerV2({
                                               )
                                             }
                                           >
-                                            ←
+                                            ↑
                                           </button>
                                           <button
                                             type="button"
-                                            aria-label="Move official to next position"
+                                            aria-label="Move official down one position"
                                             disabled={
                                               index ===
                                                 gamePositions.length - 1 ||
@@ -8700,7 +8700,7 @@ export default function AssignmentsManagerV2({
                                               )
                                             }
                                           >
-                                            →
+                                            ↓
                                           </button>
                                         </div>
                                       )}
