@@ -94,6 +94,7 @@ export default function IowaSoccerDevelopmentAdmin() {
     [registrations, setRegistrations] = useState<TrainingRegistration[]>([]),
     [files, setFiles] = useState<StoredFile[]>([]),
     [selectedOfficial, setSelectedOfficial] = useState(""),
+    [officialSearch, setOfficialSearch] = useState(""),
     [deliveryType, setDeliveryType] = useState("self_led"),
     [paymentRequired, setPaymentRequired] = useState(false),
     [editingId, setEditingId] = useState(""),
@@ -179,12 +180,15 @@ export default function IowaSoccerDevelopmentAdmin() {
         body: JSON.stringify({ officialId: selectedOfficial }),
       });
       const result = (await response.json()) as { error?: string };
-      if (!response.ok) throw new Error(result.error || "Unable to add official.");
+      if (!response.ok)
+        throw new Error(result.error || "Unable to add official.");
       setNotice("Official added to Iowa Soccer Development.");
       setSelectedOfficial("");
       await load();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to add official.");
+      setError(
+        caught instanceof Error ? caught.message : "Unable to add official.",
+      );
     } finally {
       setBusy(false);
     }
@@ -258,29 +262,60 @@ export default function IowaSoccerDevelopmentAdmin() {
     }
     setBusy(false);
   }
-  async function savePath(updates: { id: string; level_key: string; sort_order: number }[], success: string) {
+  async function savePath(
+    updates: { id: string; level_key: string; sort_order: number }[],
+    success: string,
+  ) {
     setPathBusy(true);
     setError("");
     setNotice("");
-    const { error: e } = await supabase.rpc("reorder_development_modules", { p_updates: updates });
+    const { error: e } = await supabase.rpc("reorder_development_modules", {
+      p_updates: updates,
+    });
     if (e) setError(e.message);
-    else { setNotice(success); await load(); }
+    else {
+      setNotice(success);
+      await load();
+    }
     setPathBusy(false);
   }
   async function dropModule(beforeId: string | null) {
     if (!draggedModule) return;
-    const lane = modules.filter((module) => module.level_key === activeLevel && module.id !== draggedModule);
-    const index = beforeId ? lane.findIndex((module) => module.id === beforeId) : lane.length;
-    lane.splice(index < 0 ? lane.length : index, 0, modules.find((module) => module.id === draggedModule)!);
+    const lane = modules.filter(
+      (module) =>
+        module.level_key === activeLevel && module.id !== draggedModule,
+    );
+    const index = beforeId
+      ? lane.findIndex((module) => module.id === beforeId)
+      : lane.length;
+    lane.splice(
+      index < 0 ? lane.length : index,
+      0,
+      modules.find((module) => module.id === draggedModule)!,
+    );
     setDraggedModule("");
-    await savePath(lane.map((module, position) => ({ id: module.id, level_key: activeLevel, sort_order: (position + 1) * 10 })), "Course order saved.");
+    await savePath(
+      lane.map((module, position) => ({
+        id: module.id,
+        level_key: activeLevel,
+        sort_order: (position + 1) * 10,
+      })),
+      "Course order saved.",
+    );
   }
   async function moveModule(moduleId: string, levelKey: string) {
     if (!levelKey) return;
-    const destination = modules.filter((module) => module.level_key === levelKey),
-      nextOrder = destination.length ? Math.max(...destination.map((module) => module.sort_order)) + 10 : 10;
+    const destination = modules.filter(
+        (module) => module.level_key === levelKey,
+      ),
+      nextOrder = destination.length
+        ? Math.max(...destination.map((module) => module.sort_order)) + 10
+        : 10;
     setActiveLevel(levelKey);
-    await savePath([{ id: moduleId, level_key: levelKey, sort_order: nextOrder }], "Module moved to its new level.");
+    await savePath(
+      [{ id: moduleId, level_key: levelKey, sort_order: nextOrder }],
+      "Module moved to its new level.",
+    );
   }
   function beginEdit(m: Module) {
     setEditingId(m.id);
@@ -418,6 +453,16 @@ export default function IowaSoccerDevelopmentAdmin() {
   }
   const memberIds = new Set(members.map((m) => m.official_id)),
     available = officials.filter((o) => !memberIds.has(o.id)),
+    officialQuery = officialSearch.trim().toLowerCase(),
+    matchingOfficials = officialQuery
+      ? available
+          .filter((o) =>
+            `${o.first_name} ${o.last_name} ${o.email || ""}`
+              .toLowerCase()
+              .includes(officialQuery),
+          )
+          .slice(0, 100)
+      : [],
     confirmedIds = new Set(
       registrations
         .filter((r) => r.status === "approved" || r.payment_status === "paid")
@@ -503,15 +548,38 @@ export default function IowaSoccerDevelopmentAdmin() {
         )}
         <div className="toolbar">
           <label>
+            Search Officials
+            <input
+              type="search"
+              value={officialSearch}
+              onChange={(e) => {
+                setOfficialSearch(e.target.value);
+                setSelectedOfficial("");
+              }}
+              placeholder="Name or email"
+            />
+            <small>
+              {officialQuery
+                ? `${matchingOfficials.length}${matchingOfficials.length === 100 ? "+" : ""} matches`
+                : `${available.length} available`}
+            </small>
+          </label>
+          <label>
             Add Existing Official
             <select
               value={selectedOfficial}
               onChange={(e) => setSelectedOfficial(e.target.value)}
+              disabled={!officialQuery}
             >
-              <option value="">Select an official</option>
-              {available.map((o) => (
+              <option value="">
+                {officialQuery
+                  ? "Select an official"
+                  : "Search by name or email first"}
+              </option>
+              {matchingOfficials.map((o) => (
                 <option value={o.id} key={o.id}>
                   {o.last_name}, {o.first_name}
+                  {o.email ? ` — ${o.email}` : ""}
                 </option>
               ))}
             </select>
@@ -527,27 +595,164 @@ export default function IowaSoccerDevelopmentAdmin() {
       </section>
       <section className="card">
         <div className="courseBuilderHead">
-          <div><span className="courseBuilderEyebrow">COURSE PATH BUILDER</span><h2>Build the Referee Journey</h2><p>Choose a level, drag modules into order, or move them to another level.</p></div>
-          <button className="secondary" onClick={() => setPreviewPath((value) => !value)}>{previewPath ? "Close Preview" : "Preview Referee Path"}</button>
+          <div>
+            <span className="courseBuilderEyebrow">COURSE PATH BUILDER</span>
+            <h2>Build the Referee Journey</h2>
+            <p>
+              Choose a level, drag modules into order, or move them to another
+              level.
+            </p>
+          </div>
+          <button
+            className="secondary"
+            onClick={() => setPreviewPath((value) => !value)}
+          >
+            {previewPath ? "Close Preview" : "Preview Referee Path"}
+          </button>
         </div>
-        <div className="courseLevelTabs" role="tablist" aria-label="Development levels">
+        <div
+          className="courseLevelTabs"
+          role="tablist"
+          aria-label="Development levels"
+        >
           {developmentLevels.map((level, index) => {
-            const levelModules = modules.filter((module) => module.level_key === level.key);
-            return <button type="button" role="tab" aria-selected={activeLevel === level.key} className={activeLevel === level.key ? "active" : ""} onClick={() => setActiveLevel(level.key)} key={level.key}><span>{index + 1}</span><b>{level.label}</b><small>{levelModules.length} module{levelModules.length === 1 ? "" : "s"}</small></button>;
+            const levelModules = modules.filter(
+              (module) => module.level_key === level.key,
+            );
+            return (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeLevel === level.key}
+                className={activeLevel === level.key ? "active" : ""}
+                onClick={() => setActiveLevel(level.key)}
+                key={level.key}
+              >
+                <span>{index + 1}</span>
+                <b>{level.label}</b>
+                <small>
+                  {levelModules.length} module
+                  {levelModules.length === 1 ? "" : "s"}
+                </small>
+              </button>
+            );
           })}
         </div>
-        {previewPath && <div className="coursePathPreview">
-          {developmentLevels.map((level, index) => <div key={level.key}><span>{index + 1}</span><b>{level.label}</b><small>{modules.filter((module) => module.level_key === level.key).map((module) => module.title).join(" • ") || "No modules yet"}</small></div>)}
-        </div>}
-        <div className="courseLane" onDragOver={(event) => event.preventDefault()} onDrop={() => void dropModule(null)}>
-          <div className="courseLaneHead"><div><span>LEVEL {developmentLevels.findIndex((level) => level.key === activeLevel) + 1}</span><h3>{developmentLevels.find((level) => level.key === activeLevel)?.label}</h3></div><button className="primary" type="button" onClick={() => document.getElementById("new-training-module")?.scrollIntoView({ behavior: "smooth" })}>+ Add Module</button></div>
-          <div className="courseModuleList">
-            {modules.filter((module) => module.level_key === activeLevel).map((module, index) => <article draggable={!pathBusy} onDragStart={() => setDraggedModule(module.id)} onDragEnd={() => setDraggedModule("")} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); void dropModule(module.id); }} className={draggedModule === module.id ? "dragging" : ""} key={module.id}>
-              <span className="courseDrag" aria-label="Drag to reorder">⋮⋮</span><span className="courseOrder">{index + 1}</span><div><b>{module.title}</b><small>{deliveryLabel(module.delivery_type)} • {module.required ? "Required" : "Optional"} • {module.active ? "Published" : "Draft"}</small></div><label>Move to<select aria-label={`Move ${module.title} to another level`} value="" disabled={pathBusy} onChange={(event) => void moveModule(module.id, event.target.value)}><option value="">Move…</option>{developmentLevels.filter((level) => level.key !== activeLevel).map((level) => <option value={level.key} key={level.key}>{level.label}</option>)}</select></label><button className="secondary" onClick={() => beginEdit(module)}>Edit</button>
-            </article>)}
-            {!modules.some((module) => module.level_key === activeLevel) && <div className="courseEmpty"><b>No modules in this level</b><span>Add a module or move one here from another level.</span></div>}
+        {previewPath && (
+          <div className="coursePathPreview">
+            {developmentLevels.map((level, index) => (
+              <div key={level.key}>
+                <span>{index + 1}</span>
+                <b>{level.label}</b>
+                <small>
+                  {modules
+                    .filter((module) => module.level_key === level.key)
+                    .map((module) => module.title)
+                    .join(" • ") || "No modules yet"}
+                </small>
+              </div>
+            ))}
           </div>
-          <p className="courseDropHint">Drag modules to arrange the order officials will complete them. Changes save automatically.</p>
+        )}
+        <div
+          className="courseLane"
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={() => void dropModule(null)}
+        >
+          <div className="courseLaneHead">
+            <div>
+              <span>
+                LEVEL{" "}
+                {developmentLevels.findIndex(
+                  (level) => level.key === activeLevel,
+                ) + 1}
+              </span>
+              <h3>
+                {
+                  developmentLevels.find((level) => level.key === activeLevel)
+                    ?.label
+                }
+              </h3>
+            </div>
+            <button
+              className="primary"
+              type="button"
+              onClick={() =>
+                document
+                  .getElementById("new-training-module")
+                  ?.scrollIntoView({ behavior: "smooth" })
+              }
+            >
+              + Add Module
+            </button>
+          </div>
+          <div className="courseModuleList">
+            {modules
+              .filter((module) => module.level_key === activeLevel)
+              .map((module, index) => (
+                <article
+                  draggable={!pathBusy}
+                  onDragStart={() => setDraggedModule(module.id)}
+                  onDragEnd={() => setDraggedModule("")}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => {
+                    event.stopPropagation();
+                    void dropModule(module.id);
+                  }}
+                  className={draggedModule === module.id ? "dragging" : ""}
+                  key={module.id}
+                >
+                  <span className="courseDrag" aria-label="Drag to reorder">
+                    ⋮⋮
+                  </span>
+                  <span className="courseOrder">{index + 1}</span>
+                  <div>
+                    <b>{module.title}</b>
+                    <small>
+                      {deliveryLabel(module.delivery_type)} •{" "}
+                      {module.required ? "Required" : "Optional"} •{" "}
+                      {module.active ? "Published" : "Draft"}
+                    </small>
+                  </div>
+                  <label>
+                    Move to
+                    <select
+                      aria-label={`Move ${module.title} to another level`}
+                      value=""
+                      disabled={pathBusy}
+                      onChange={(event) =>
+                        void moveModule(module.id, event.target.value)
+                      }
+                    >
+                      <option value="">Move…</option>
+                      {developmentLevels
+                        .filter((level) => level.key !== activeLevel)
+                        .map((level) => (
+                          <option value={level.key} key={level.key}>
+                            {level.label}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  <button
+                    className="secondary"
+                    onClick={() => beginEdit(module)}
+                  >
+                    Edit
+                  </button>
+                </article>
+              ))}
+            {!modules.some((module) => module.level_key === activeLevel) && (
+              <div className="courseEmpty">
+                <b>No modules in this level</b>
+                <span>Add a module or move one here from another level.</span>
+              </div>
+            )}
+          </div>
+          <p className="courseDropHint">
+            Drag modules to arrange the order officials will complete them.
+            Changes save automatically.
+          </p>
         </div>
       </section>
       <section className="card" id="new-training-module">
@@ -559,8 +764,17 @@ export default function IowaSoccerDevelopmentAdmin() {
           </label>
           <label>
             Development Level
-            <select name="level_key" required value={activeLevel} onChange={(event) => setActiveLevel(event.target.value)}>
-              {developmentLevels.map((level) => <option value={level.key} key={level.key}>{level.label}</option>)}
+            <select
+              name="level_key"
+              required
+              value={activeLevel}
+              onChange={(event) => setActiveLevel(event.target.value)}
+            >
+              {developmentLevels.map((level) => (
+                <option value={level.key} key={level.key}>
+                  {level.label}
+                </option>
+              ))}
             </select>
           </label>
           <label>
@@ -672,8 +886,16 @@ export default function IowaSoccerDevelopmentAdmin() {
                   </label>
                   <label>
                     Development Level
-                    <select name="level_key" defaultValue={m.level_key} required>
-                      {developmentLevels.map((level) => <option value={level.key} key={level.key}>{level.label}</option>)}
+                    <select
+                      name="level_key"
+                      defaultValue={m.level_key}
+                      required
+                    >
+                      {developmentLevels.map((level) => (
+                        <option value={level.key} key={level.key}>
+                          {level.label}
+                        </option>
+                      ))}
                     </select>
                   </label>
                   <label>
@@ -842,7 +1064,10 @@ export default function IowaSoccerDevelopmentAdmin() {
                   <span>
                     <b>{m.title}</b>
                     <small>
-                      {developmentLevels.find((level) => level.key === m.level_key)?.label || "U8 Referee"} • Training Library: {m.category} •{" "}
+                      {developmentLevels.find(
+                        (level) => level.key === m.level_key,
+                      )?.label || "U8 Referee"}{" "}
+                      • Training Library: {m.category} •{" "}
                       {deliveryLabel(m.delivery_type)}
                       {m.delivery_type !== "self_led"
                         ? ` • ${schedule(m)} • Instructor: ${instructorName(m.instructor_official_id)}`

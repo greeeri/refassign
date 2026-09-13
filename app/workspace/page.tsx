@@ -28,6 +28,7 @@ import SuperAdminManager from "../../components/SuperAdminManager";
 import IowaSoccerDevelopment from "../../components/IowaSoccerDevelopment";
 import IowaSoccerDevelopmentAdmin from "../../components/IowaSoccerDevelopmentAdmin";
 import IowaProgramReferees from "../../components/IowaProgramReferees";
+import IowaCommunicationGroups from "../../components/IowaCommunicationGroups";
 import IowaDevelopmentMentors from "../../components/IowaDevelopmentMentors";
 import OfficialReports from "../../components/OfficialReports";
 import ManagerReports from "../../components/ManagerReports";
@@ -143,7 +144,7 @@ export default function Workspace() {
         setTestOfficialAccount(
           Boolean(
             user.user_metadata?.account_type === "official" ||
-            user.user_metadata?.first_name,
+              user.user_metadata?.first_name,
           ),
         );
         const hashInvitation = new URLSearchParams(
@@ -338,11 +339,11 @@ export default function Workspace() {
   const manager = viewRole === "admin" || viewRole === "assignor",
     organizationTaxAdmin = Boolean(
       testWorkspace &&
-      (testWorkspace.role === "owner" ||
-        testWorkspace.role === "admin" ||
-        testWorkspace.roles?.some(
-          (role) => role === "owner" || role === "admin",
-        )),
+        (testWorkspace.role === "owner" ||
+          testWorkspace.role === "admin" ||
+          testWorkspace.roles?.some(
+            (role) => role === "owner" || role === "admin",
+          )),
     ),
     isSetup = setupNav.includes(section as SetupView),
     isOfficials = ["Officials", "Blocks", "Block Removal Requests"].includes(
@@ -1023,7 +1024,10 @@ export default function Workspace() {
             viewRole === "league_admin") &&
           section === "Development Admin" && <IowaSoccerDevelopmentAdmin />}
         {iowaAdminView && section === "Program Referees" && (
-          <IowaProgramReferees canManage />
+          <>
+            <IowaProgramReferees canManage />
+            <IowaCommunicationGroups />
+          </>
         )}
         {viewRole === "mentor" &&
           iowaMentorAccess &&
