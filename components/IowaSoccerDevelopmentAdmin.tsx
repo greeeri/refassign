@@ -67,6 +67,23 @@ const localInput = (value: string | null) =>
     : "";
 const iso = (value: FormDataEntryValue | null) =>
   value ? new Date(String(value)).toISOString() : null;
+async function listAllProgramOfficials(
+  supabase: ReturnType<typeof createClient>,
+  programId: string,
+) {
+  const pageSize = 1000;
+  const officials: Official[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .rpc("list_development_program_officials", { p_program_id: programId })
+      .range(from, from + pageSize - 1);
+    if (error) return { data: null, error };
+    const page = (data || []) as Official[];
+    officials.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return { data: officials, error: null };
+}
 export default function IowaSoccerDevelopmentAdmin() {
   const supabase = useMemo(() => createClient(), []),
     [programId, setProgramId] = useState(""),
@@ -117,9 +134,7 @@ export default function IowaSoccerDevelopmentAdmin() {
     if (pe) return setError(pe.message);
     setProgramId(program.id);
     const [o, m, t, r, q] = await Promise.all([
-      supabase.rpc("list_development_program_officials", {
-        p_program_id: program.id,
-      }),
+      listAllProgramOfficials(supabase, program.id),
       supabase
         .from("registration_program_officials")
         .select("official_id")
