@@ -34,8 +34,8 @@ export default function LoginPage() {
     );
     setOrganizationSignup(query.get("signup") === "organization");
     const hash = new URLSearchParams(window.location.hash.slice(1));
-    const invitedEmail = hash.get("official");
-    const invitationId = hash.get("official_invite");
+    const invitedEmail = query.get("official") || hash.get("official");
+    const invitationId = query.get("official_invite") || hash.get("official_invite");
     if (invitationId) {
       setOfficialInvitationId(invitationId);
       localStorage.setItem("refassign-official-invitation", invitationId);
@@ -239,7 +239,7 @@ export default function LoginPage() {
               autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              readOnly={creatingOfficial && window.location.hash.includes("official=")}
+              readOnly={creatingOfficial && Boolean(officialInvitationId)}
               placeholder="you@example.com"
             />
           </label>
