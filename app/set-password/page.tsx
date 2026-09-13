@@ -37,8 +37,15 @@ export default function SetPasswordPage(){
   if(password!==confirm){setMessage('Passwords do not match.');return}
   setLoading(true)
   const {error}=await supabase.auth.updateUser({password})
+  if(error){setLoading(false);setMessage(error.message);return}
+  const {error:acceptanceError}=await supabase.rpc('accept_my_organization_invitations')
+  if(acceptanceError){
+   setLoading(false)
+   setMessage(`Your password was created, but organization access could not be activated: ${acceptanceError.message}`)
+   return
+  }
+  await supabase.rpc('accept_my_official_invitations')
   setLoading(false)
-  if(error){setMessage(error.message);return}
   const requested=new URLSearchParams(window.location.search).get('next')||'/workspace'
   const destination=requested.startsWith('/')&&!requested.startsWith('//')?requested:'/workspace'
   setMessage('Password created. Taking you to RefAssign…')
