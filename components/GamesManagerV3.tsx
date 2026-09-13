@@ -3,6 +3,7 @@ import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import { createClient } from "../lib/supabase/client";
 import { announceUndoAvailable } from "./UndoCenter";
 type Named = { id: string; name: string };
+type BillTo = Named;
 type Sport = Named & { default_officials: number };
 type Team = Named & { level_id: string | null; sport_id: string | null };
 type Location = Named & { city: string | null; state: string | null };
@@ -20,6 +21,7 @@ type Game = {
   duration_minutes: number;
   officials_needed: number;
   notes: string | null;
+  bill_to_id: string | null;
   sports: { name: string } | null;
   leagues: { name: string } | null;
   levels: { name: string } | null;
@@ -41,6 +43,7 @@ type Row = {
   duration_minutes: number;
   officials_needed: number;
   notes: string;
+  bill_to: string;
   valid: boolean;
   issue: string;
   action: "add" | "update" | "skip" | "error";
@@ -74,6 +77,7 @@ const blank = {
   duration_minutes: 110,
   officials_needed: 3,
   notes: "",
+  bill_to_id: "",
 };
 const req = [
   "game_number",
@@ -296,6 +300,9 @@ export default function GamesManagerV3({
     [levels, setLevels] = useState<Named[]>([]),
     [teams, setTeams] = useState<Team[]>([]),
     [locations, setLocations] = useState<Location[]>([]),
+    [billTos, setBillTos] = useState<BillTo[]>([]),
+    [canManageBillTos, setCanManageBillTos] = useState(false),
+    [newBillToName, setNewBillToName] = useState(""),
     [form, setForm] = useState(blank),
     [editing, setEditing] = useState<string | null>(null),
     [show, setShow] = useState(false),
@@ -320,10 +327,10 @@ export default function GamesManagerV3({
     const gamesQuery = sb
       .from("games")
       .select(
-        "id,game_number,status,sport_id,league_id,level_id,home_team_id,away_team_id,location_id,starts_at,duration_minutes,officials_needed,notes,sports(name),leagues(name),levels(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(id,name,city,state)",
+        "id,game_number,status,sport_id,league_id,level_id,home_team_id,away_team_id,location_id,bill_to_id,starts_at,duration_minutes,officials_needed,notes,sports(name),leagues(name),levels(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(id,name,city,state)",
       )
       .order("starts_at");
-    const [s, lg, lv, t, lo, g] = await Promise.all([
+    const [s, lg, lv, t, lo, g, billToResponse] = await Promise.all([
       sb
         .from("sports")
         .select("id,name,default_officials")
@@ -340,6 +347,14 @@ export default function GamesManagerV3({
       organizationId
         ? gamesQuery.eq("organization_id", organizationId)
         : gamesQuery,
+      organizationId
+        ? fetch(
+            `/api/bill-tos?organizationId=${encodeURIComponent(organizationId)}`,
+            {
+              cache: "no-store",
+            },
+          )
+        : Promise.resolve(null),
     ]);
     const e = s.error || lg.error || lv.error || t.error || lo.error || g.error;
     if (e) setError(e.message);
@@ -350,6 +365,14 @@ export default function GamesManagerV3({
       setTeams(t.data || []);
       setLocations(lo.data || []);
       setGames((g.data || []) as unknown as Game[]);
+      if (billToResponse?.ok) {
+        const billToResult = (await billToResponse.json()) as {
+          billTos?: BillTo[];
+          canManageBillTos?: boolean;
+        };
+        setBillTos(billToResult.billTos || []);
+        setCanManageBillTos(Boolean(billToResult.canManageBillTos));
+      }
     }
   }
   useEffect(() => {
@@ -409,6 +432,7 @@ export default function GamesManagerV3({
       home_team_id: g.home_team_id || "",
       away_team_id: g.away_team_id || "",
       location_id: g.location_id || "",
+      bill_to_id: g.bill_to_id || "",
       date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
       time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
       duration_minutes: g.duration_minutes || 110,
@@ -437,6 +461,7 @@ export default function GamesManagerV3({
         home_team_id: form.home_team_id,
         away_team_id: form.away_team_id,
         location_id: form.location_id,
+        bill_to_id: form.bill_to_id || null,
         starts_at: new Date(`${form.date}T${form.time}:00`).toISOString(),
         duration_minutes: +form.duration_minutes || 110,
         officials_needed: +form.officials_needed,
@@ -489,6 +514,8 @@ export default function GamesManagerV3({
         Location: g.location?.name || "",
         Duration_Minutes: g.duration_minutes || 110,
         Officials_Needed: g.officials_needed,
+        Bill_To:
+          billTos.find((billTo) => billTo.id === g.bill_to_id)?.name || "",
         Notes: g.notes || "",
       };
     });
@@ -511,6 +538,7 @@ export default function GamesManagerV3({
         home = get("home_team"),
         away = get("away_team"),
         location = get("location"),
+        billTo = get("bill_to"),
         date = dateVal(cell("date")),
         time = timeVal(cell("time")),
         duration = Number(get("duration_minutes") || 110),
@@ -524,6 +552,8 @@ export default function GamesManagerV3({
       if (!levelMatch) issues.push("Level not found");
       if (!locations.some((x) => norm(x.name) === norm(location)))
         issues.push("Location not found");
+      if (billTo && !billTos.some((x) => norm(x.name) === norm(billTo)))
+        issues.push("Bill To not found");
       if (!date) issues.push("Invalid date");
       if (!time) issues.push("Invalid time");
       if (
@@ -570,6 +600,7 @@ export default function GamesManagerV3({
         duration_minutes: duration,
         officials_needed: officials,
         notes: get("notes"),
+        bill_to: billTo,
         valid: !issues.length,
         issue: issues.join("; "),
         action: issues.length ? "error" : "add",
@@ -655,6 +686,11 @@ export default function GamesManagerV3({
       compare("Date", currentDateValue, row.date);
       compare("Time", currentTimeValue, row.time);
       compare("Location", existing.location?.name || "", row.location);
+      compare(
+        "Bill To",
+        billTos.find((billTo) => billTo.id === existing.bill_to_id)?.name || "",
+        row.bill_to,
+      );
       compare("Length", existing.duration_minutes || 110, row.duration_minutes);
       compare("Officials", existing.officials_needed, row.officials_needed);
       compare("Notes", existing.notes || "", row.notes);
@@ -742,6 +778,7 @@ export default function GamesManagerV3({
             x.level_id === lv?.id,
         ),
         loc = locations.find((x) => norm(x.name) === norm(r.location)),
+        billTo = billTos.find((x) => norm(x.name) === norm(r.bill_to)),
         existing = r.game_number
           ? games.find((g) => norm(g.game_number) === norm(r.game_number))
           : undefined;
@@ -762,6 +799,7 @@ export default function GamesManagerV3({
         home_team_id: home?.id || null,
         away_team_id: away?.id || null,
         location_id: loc?.id || null,
+        bill_to_id: billTo?.id || null,
         starts_at: new Date(`${r.date}T${r.time}:00`).toISOString(),
         duration_minutes: r.duration_minutes,
         officials_needed: r.officials_needed,
@@ -812,11 +850,42 @@ export default function GamesManagerV3({
   }
   function template() {
     const csv =
-      "game_number,sport,league,level,home_team,away_team,date,time,location,duration_minutes,officials_needed,notes\n,Soccer,Approved League,U19,Approved Home Team,Approved Away Team,29-Aug-26,7:00 PM,Approved Location,110,3,Conference game\n";
+      "game_number,sport,league,level,home_team,away_team,date,time,location,duration_minutes,officials_needed,bill_to,notes\n,Soccer,Approved League,U19,Approved Home Team,Approved Away Team,29-Aug-26,7:00 PM,Approved Location,110,3,Approved Bill To,Conference game\n";
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     a.download = "refassign-game-import-template.csv";
     a.click();
+  }
+  async function addBillTo() {
+    const name = newBillToName.trim();
+    if (!name || !organizationId) return;
+    setBusy(true);
+    setError("");
+    const response = await fetch(
+      `/api/bill-tos?organizationId=${encodeURIComponent(organizationId)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      },
+    );
+    const result = (await response.json()) as {
+      billTo?: BillTo;
+      error?: string;
+    };
+    if (!response.ok || !result.billTo)
+      setError(result.error || "Bill To could not be added.");
+    else {
+      setBillTos((current) =>
+        [...current, result.billTo!].sort((a, b) =>
+          a.name.localeCompare(b.name),
+        ),
+      );
+      setForm((current) => ({ ...current, bill_to_id: result.billTo!.id }));
+      setNewBillToName("");
+      setMessage(`${result.billTo.name} added to Bill To options.`);
+    }
+    setBusy(false);
   }
   const filters: [Range, string][] = [
     ["all", "All Games"],
@@ -1075,6 +1144,40 @@ export default function GamesManagerV3({
             </select>
           </label>
           <label>
+            Bill To <small>Optional</small>
+            <select
+              value={form.bill_to_id}
+              onChange={(e) => setForm({ ...form, bill_to_id: e.target.value })}
+            >
+              <option value="">Not selected</option>
+              {billTos.map((billTo) => (
+                <option key={billTo.id} value={billTo.id}>
+                  {billTo.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {canManageBillTos && (
+            <label>
+              Add a new Bill To
+              <span style={{ display: "flex", gap: 8 }}>
+                <input
+                  value={newBillToName}
+                  placeholder="Organization or customer name"
+                  onChange={(e) => setNewBillToName(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={busy || !newBillToName.trim()}
+                  onClick={() => void addBillTo()}
+                >
+                  Add
+                </button>
+              </span>
+            </label>
+          )}
+          <label>
             Officials Needed
             <input
               type="number"
@@ -1167,6 +1270,7 @@ export default function GamesManagerV3({
                       <th>Game</th>
                       <th>Date / Time</th>
                       <th>Length</th>
+                      <th>Bill To</th>
                       <th>Action</th>
                       <th>Proposed Changes</th>
                       <th>Validation</th>
@@ -1185,6 +1289,7 @@ export default function GamesManagerV3({
                           <small>{r.time}</small>
                         </td>
                         <td>{r.duration_minutes} min</td>
+                        <td>{r.bill_to || "Not selected"}</td>
                         <td>
                           <b
                             style={{
@@ -1325,6 +1430,7 @@ export default function GamesManagerV3({
               <th>Game</th>
               <th>League / Level</th>
               <th>Location</th>
+              <th>Bill To</th>
               <th>Length</th>
               <th>Officials</th>
               <th>Status</th>
@@ -1365,6 +1471,10 @@ export default function GamesManagerV3({
                     </small>
                   </td>
                   <td>{g.location?.name || "TBD"}</td>
+                  <td>
+                    {billTos.find((billTo) => billTo.id === g.bill_to_id)
+                      ?.name || "—"}
+                  </td>
                   <td>{g.duration_minutes || 110} min</td>
                   <td>{g.officials_needed}</td>
                   <td>
