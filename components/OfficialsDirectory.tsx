@@ -22,6 +22,13 @@ type Official = {
   sports: string[];
   certification_level: string | null;
   active: boolean;
+  date_of_birth:string|null;is_minor:boolean;gender:string|null;ethnicity:string|null;
+  secondary_email:string|null;address_unit:string|null;country:string|null;mobile_phone:string|null;
+  license:string|null;license_status:string|null;license_issue_date:string|null;license_expiration_date:string|null;
+  license_issuer:string|null;curriculum:string|null;background_screening:string|null;
+  background_screening_expiration_date:string|null;safesport:string|null;safesport_expiration_date:string|null;
+  intro_player_safety:string|null;intro_player_safety_expiration_date:string|null;safe_soccer:string|null;
+  safe_soccer_expiration_date:string|null;provisional_status:string|null;referee_years_experience:number|null;
 };
 
 type PositionRank = {
@@ -56,6 +63,12 @@ type OfficialForm = {
   mentor_certified: boolean;
   league_ids: string[];
   level_ids: string[];
+  date_of_birth:string;is_minor:boolean;gender:string;ethnicity:string;secondary_email:string;
+  address_unit:string;country:string;mobile_phone:string;license:string;license_status:string;
+  license_issue_date:string;license_expiration_date:string;license_issuer:string;curriculum:string;
+  background_screening:string;background_screening_expiration_date:string;safesport:string;
+  safesport_expiration_date:string;intro_player_safety:string;intro_player_safety_expiration_date:string;
+  safe_soccer:string;safe_soccer_expiration_date:string;provisional_status:string;referee_years_experience:string;
 };
 
 const SPORTS = [
@@ -91,6 +104,11 @@ function newForm(): OfficialForm {
     mentor_certified: false,
     league_ids: [],
     level_ids: [],
+    date_of_birth:"",is_minor:false,gender:"",ethnicity:"",secondary_email:"",address_unit:"",country:"United States",
+    mobile_phone:"",license:"",license_status:"",license_issue_date:"",license_expiration_date:"",license_issuer:"",
+    curriculum:"",background_screening:"",background_screening_expiration_date:"",safesport:"",safesport_expiration_date:"",
+    intro_player_safety:"",intro_player_safety_expiration_date:"",safe_soccer:"",safe_soccer_expiration_date:"",
+    provisional_status:"",referee_years_experience:"",
   };
 }
 
@@ -415,7 +433,7 @@ export default function OfficialsDirectory({
       : supabase
           .from("officials")
           .select(
-            "id,first_name,last_name,email,phone,home_area,home_address,home_city,home_state,home_zip,sports,certification_level,active",
+            "id,first_name,last_name,email,phone,home_area,home_address,home_city,home_state,home_zip,sports,certification_level,active,date_of_birth,is_minor,gender,ethnicity,secondary_email,address_unit,country,mobile_phone,license,license_status,license_issue_date,license_expiration_date,license_issuer,curriculum,background_screening,background_screening_expiration_date,safesport,safesport_expiration_date,intro_player_safety,intro_player_safety_expiration_date,safe_soccer,safe_soccer_expiration_date,provisional_status,referee_years_experience",
           )
           .order("last_name")
           .order("first_name");
@@ -580,6 +598,16 @@ export default function OfficialsDirectory({
       mentor_certified: pr?.mentor_certified ?? false,
       league_ids: (lg.data || []).map((x) => x.league_id),
       level_ids: (lv.data || []).map((x) => x.level_id),
+      date_of_birth:o.date_of_birth||"",is_minor:o.is_minor,gender:o.gender||"",ethnicity:o.ethnicity||"",
+      secondary_email:o.secondary_email||"",address_unit:o.address_unit||"",country:o.country||"",
+      mobile_phone:o.mobile_phone||"",license:o.license||"",license_status:o.license_status||"",
+      license_issue_date:o.license_issue_date||"",license_expiration_date:o.license_expiration_date||"",
+      license_issuer:o.license_issuer||"",curriculum:o.curriculum||"",background_screening:o.background_screening||"",
+      background_screening_expiration_date:o.background_screening_expiration_date||"",safesport:o.safesport||"",
+      safesport_expiration_date:o.safesport_expiration_date||"",intro_player_safety:o.intro_player_safety||"",
+      intro_player_safety_expiration_date:o.intro_player_safety_expiration_date||"",safe_soccer:o.safe_soccer||"",
+      safe_soccer_expiration_date:o.safe_soccer_expiration_date||"",provisional_status:o.provisional_status||"",
+      referee_years_experience:o.referee_years_experience==null?"":String(o.referee_years_experience),
     });
     setShowForm(true);
     setError("");
@@ -648,6 +676,20 @@ export default function OfficialsDirectory({
       home_zip: form.home_zip.trim() || null,
       sports: form.sports,
       certification_level: form.certification_level.trim() || null,
+      date_of_birth:form.date_of_birth||null,is_minor:form.is_minor,gender:form.gender.trim()||null,
+      ethnicity:form.ethnicity.trim()||null,secondary_email:form.secondary_email.trim()||null,
+      address_unit:form.address_unit.trim()||null,country:form.country.trim()||null,mobile_phone:form.mobile_phone.trim()||null,
+      license:form.license.trim()||null,license_status:form.license_status.trim()||null,
+      license_issue_date:form.license_issue_date||null,license_expiration_date:form.license_expiration_date||null,
+      license_issuer:form.license_issuer.trim()||null,curriculum:form.curriculum.trim()||null,
+      background_screening:form.background_screening.trim()||null,
+      background_screening_expiration_date:form.background_screening_expiration_date||null,
+      safesport:form.safesport.trim()||null,safesport_expiration_date:form.safesport_expiration_date||null,
+      intro_player_safety:form.intro_player_safety.trim()||null,
+      intro_player_safety_expiration_date:form.intro_player_safety_expiration_date||null,
+      safe_soccer:form.safe_soccer.trim()||null,safe_soccer_expiration_date:form.safe_soccer_expiration_date||null,
+      provisional_status:form.provisional_status.trim()||null,
+      referee_years_experience:form.referee_years_experience===""?null:Number(form.referee_years_experience),
     };
 
     let officialId = editingId;
@@ -1226,6 +1268,36 @@ export default function OfficialsDirectory({
                   }
                 />
               </label>
+              <fieldset style={{gridColumn:"1 / -1"}}>
+                <legend>Referee Profile &amp; Compliance</legend>
+                <div className="officialForm">
+                  <label>USSF-ID<input value={editingId||"Assigned when saved"} disabled /></label>
+                  <label>DOB<input type="date" value={form.date_of_birth} onChange={(e)=>setForm(c=>({...c,date_of_birth:e.target.value}))}/></label>
+                  <label style={{display:"flex",alignItems:"center",gap:8}}><input type="checkbox" style={{width:"auto"}} checked={form.is_minor} onChange={(e)=>setForm(c=>({...c,is_minor:e.target.checked}))}/> Is a minor</label>
+                  <label>Gender<input value={form.gender} onChange={(e)=>setForm(c=>({...c,gender:e.target.value}))}/></label>
+                  <label>Ethnicity<input value={form.ethnicity} onChange={(e)=>setForm(c=>({...c,ethnicity:e.target.value}))}/></label>
+                  <label>Secondary Email<input type="email" value={form.secondary_email} onChange={(e)=>setForm(c=>({...c,secondary_email:e.target.value}))}/></label>
+                  <label>Apt/Suite/Unit<input value={form.address_unit} onChange={(e)=>setForm(c=>({...c,address_unit:e.target.value}))}/></label>
+                  <label>Country<input value={form.country} onChange={(e)=>setForm(c=>({...c,country:e.target.value}))}/></label>
+                  <label>Mobile Phone<input value={form.mobile_phone} onChange={(e)=>setForm(c=>({...c,mobile_phone:e.target.value}))}/></label>
+                  <label>License<input value={form.license} onChange={(e)=>setForm(c=>({...c,license:e.target.value}))}/></label>
+                  <label>Status<input value={form.license_status} onChange={(e)=>setForm(c=>({...c,license_status:e.target.value}))}/></label>
+                  <label>Issue Date<input type="date" value={form.license_issue_date} onChange={(e)=>setForm(c=>({...c,license_issue_date:e.target.value}))}/></label>
+                  <label>Expiration Date<input type="date" value={form.license_expiration_date} onChange={(e)=>setForm(c=>({...c,license_expiration_date:e.target.value}))}/></label>
+                  <label>Issuer<input value={form.license_issuer} onChange={(e)=>setForm(c=>({...c,license_issuer:e.target.value}))}/></label>
+                  <label>Curriculum<input value={form.curriculum} onChange={(e)=>setForm(c=>({...c,curriculum:e.target.value}))}/></label>
+                  <label>Background Screening<input value={form.background_screening} onChange={(e)=>setForm(c=>({...c,background_screening:e.target.value}))}/></label>
+                  <label>Background Screening Expiration Date<input type="date" value={form.background_screening_expiration_date} onChange={(e)=>setForm(c=>({...c,background_screening_expiration_date:e.target.value}))}/></label>
+                  <label>SafeSport<input value={form.safesport} onChange={(e)=>setForm(c=>({...c,safesport:e.target.value}))}/></label>
+                  <label>SafeSport Expiration Date<input type="date" value={form.safesport_expiration_date} onChange={(e)=>setForm(c=>({...c,safesport_expiration_date:e.target.value}))}/></label>
+                  <label>Intro to Player Safety<input value={form.intro_player_safety} onChange={(e)=>setForm(c=>({...c,intro_player_safety:e.target.value}))}/></label>
+                  <label>Intro to Player Safety Expiration Date<input type="date" value={form.intro_player_safety_expiration_date} onChange={(e)=>setForm(c=>({...c,intro_player_safety_expiration_date:e.target.value}))}/></label>
+                  <label>Safe Soccer<input value={form.safe_soccer} onChange={(e)=>setForm(c=>({...c,safe_soccer:e.target.value}))}/></label>
+                  <label>Safe Soccer Expiration Date<input type="date" value={form.safe_soccer_expiration_date} onChange={(e)=>setForm(c=>({...c,safe_soccer_expiration_date:e.target.value}))}/></label>
+                  <label>Provisional Status<input value={form.provisional_status} onChange={(e)=>setForm(c=>({...c,provisional_status:e.target.value}))}/></label>
+                  <label>Referee Years Experience<input type="number" min="0" step="1" value={form.referee_years_experience} onChange={(e)=>setForm(c=>({...c,referee_years_experience:e.target.value}))}/></label>
+                </div>
+              </fieldset>
               <fieldset>
                 <legend>Sports</legend>
                 <div className="sportChecks">
