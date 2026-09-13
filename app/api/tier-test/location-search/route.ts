@@ -3,6 +3,10 @@ import { createClient } from "@supabase/supabase-js";
 
 const testUrl = "https://slenztuopbfxqzjyrtzp.supabase.co";
 const testKey = "sb_publishable_Hz_2BH4cYmrogX3O15x2PQ_fU-0uSKZ";
+const testHosts = new Set([
+  "test.ref-assign.com",
+  "refassign-git-integration-league-workspace-safe-ref-pro.vercel.app",
+]);
 
 type Workspace = { organization_id: string };
 type NominatimPlace = {
@@ -42,12 +46,31 @@ export async function GET(request: NextRequest) {
       { status: 400 },
     );
 
-  const supabase = createClient(testUrl, testKey, {
+  const hostname = request.nextUrl.hostname;
+  const useTestProject = testHosts.has(hostname);
+  const supabaseUrl = useTestProject
+    ? testUrl
+    : process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = useTestProject
+    ? testKey
+    : process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseKey) {
+    console.error("[location-search] Supabase configuration is missing", {
+      hostname,
+      useTestProject,
+    });
+    return NextResponse.json(
+      { error: "Location search is not configured for this workspace." },
+      { status: 503 },
+    );
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseKey, {
     global: { headers: { Authorization: `Bearer ${token}` } },
     auth: { persistSession: false, autoRefreshToken: false },
   });
   const [
-    { data: userData },
+    { data: userData, error: userError },
     { data: workspaces, error: workspaceError },
     { data: isSuperAdmin, error: superAdminError },
   ] = await Promise.all([
@@ -55,19 +78,40 @@ export async function GET(request: NextRequest) {
     supabase.rpc("get_my_test_workspaces"),
     supabase.rpc("is_super_admin"),
   ]);
+  const hasWorkspaceAccess = (workspaces as Workspace[] | null)?.some(
+    (item) => item.organization_id === organizationId,
+  );
+  if (userError || !userData.user) {
+    console.warn("[location-search] Session validation failed", {
+      hostname,
+      useTestProject,
+      error: userError?.message || "No authenticated user",
+    });
+    return NextResponse.json(
+      { error: "Your session expired. Please sign in again." },
+      { status: 401 },
+    );
+  }
   if (
-    !userData.user ||
     workspaceError ||
     superAdminError ||
-    (!isSuperAdmin &&
-      !(workspaces as Workspace[] | null)?.some(
-        (item) => item.organization_id === organizationId,
-      ))
-  )
+    (!isSuperAdmin && !hasWorkspaceAccess)
+  ) {
+    console.warn("[location-search] Organization access denied", {
+      userId: userData.user.id,
+      organizationId,
+      hostname,
+      useTestProject,
+      isSuperAdmin: Boolean(isSuperAdmin),
+      hasWorkspaceAccess: Boolean(hasWorkspaceAccess),
+      workspaceError: workspaceError?.message || null,
+      superAdminError: superAdminError?.message || null,
+    });
     return NextResponse.json(
       { error: "You do not have access to this organization." },
       { status: 403 },
     );
+  }
 
   const endpoint = new URL("https://nominatim.openstreetmap.org/search");
   endpoint.searchParams.set("q", query);
