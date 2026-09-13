@@ -48,6 +48,10 @@ type Official = {
   referee_years_experience: number | null;
 };
 
+type OrganizationOfficialRow = Omit<Official, "active"> & {
+  organization_active: boolean;
+};
+
 type PositionRank = {
   official_id: string;
   rank: number;
@@ -513,7 +517,12 @@ export default function OfficialsDirectory({
               .range(from, from + pageSize - 1);
         const page = await request;
         if (page.error) return { data: null, error: page.error };
-        const rows = (page.data || []) as Official[];
+        const rows = organizationId
+          ? ((page.data || []) as OrganizationOfficialRow[]).map((row) => ({
+              ...row,
+              active: Boolean(row.organization_active),
+            }))
+          : ((page.data || []) as Official[]);
         data.push(...rows);
         if (rows.length < pageSize) break;
       }
@@ -914,10 +923,14 @@ export default function OfficialsDirectory({
   }
 
   async function toggleActive(o: Official) {
-    const { error: updateError } = await supabase
-      .from("officials")
-      .update({ active: !o.active })
-      .eq("id", o.id);
+    const request = organizationId
+      ? supabase
+          .from("organization_officials")
+          .update({ active: !o.active })
+          .eq("organization_id", organizationId)
+          .eq("official_id", o.id)
+      : supabase.from("officials").update({ active: !o.active }).eq("id", o.id);
+    const { error: updateError } = await request;
     if (updateError) setError(updateError.message);
     else await load();
   }
