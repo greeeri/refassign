@@ -5,6 +5,7 @@ import SuperAdminTaxDocuments from "./SuperAdminTaxDocuments";
 import SubscriptionAccessManager from "./SubscriptionAccessManager";
 import BillingAlertsManager from "./BillingAlertsManager";
 import SuperAdminResourceManager from "./SuperAdminResourceManager";
+import LeaguePayrollSettingsManager from "./LeaguePayrollSettingsManager";
 type Access = { user_id: string; program_id: string; role: string };
 type Account = {
   id: string;
@@ -331,6 +332,7 @@ export default function SuperAdminManager() {
         )}
       </section>
       <ReportingAccessManager />
+      <LeaguePayrollSettingsManager />
       <SubscriptionAccessManager />
       <BillingAlertsManager />
       <SuperAdminResourceManager />
