@@ -17,6 +17,30 @@ type Official = {
   home_longitude: number | null;
   certification_level: string | null;
   profile_picture_url: string | null;
+  date_of_birth: string | null;
+  is_minor: boolean;
+  gender: string | null;
+  ethnicity: string | null;
+  secondary_email: string | null;
+  address_unit: string | null;
+  country: string | null;
+  mobile_phone: string | null;
+  license: string | null;
+  license_status: string | null;
+  license_issue_date: string | null;
+  license_expiration_date: string | null;
+  license_issuer: string | null;
+  curriculum: string | null;
+  background_screening: string | null;
+  background_screening_expiration_date: string | null;
+  safesport: string | null;
+  safesport_expiration_date: string | null;
+  intro_player_safety: string | null;
+  intro_player_safety_expiration_date: string | null;
+  safe_soccer: string | null;
+  safe_soccer_expiration_date: string | null;
+  provisional_status: string | null;
+  referee_years_experience: number | null;
 };
 type Origin = {
   official_id: string;
@@ -90,7 +114,7 @@ export default function OfficialProfile() {
       const { data, error: e } = await supabase
         .from("officials")
         .select(
-          "id,first_name,last_name,email,phone,home_address,home_city,home_state,home_zip,home_latitude,home_longitude,certification_level,profile_picture_url",
+          "id,first_name,last_name,email,phone,home_address,home_city,home_state,home_zip,home_latitude,home_longitude,certification_level,profile_picture_url,date_of_birth,is_minor,gender,ethnicity,secondary_email,address_unit,country,mobile_phone,license,license_status,license_issue_date,license_expiration_date,license_issuer,curriculum,background_screening,background_screening_expiration_date,safesport,safesport_expiration_date,intro_player_safety,intro_player_safety_expiration_date,safe_soccer,safe_soccer_expiration_date,provisional_status,referee_years_experience",
         )
         .eq("auth_user_id", u.user.id)
         .maybeSingle();
@@ -231,6 +255,30 @@ export default function OfficialProfile() {
           home_city: official.home_city,
           home_state: official.home_state,
           home_zip: official.home_zip,
+          date_of_birth: official.date_of_birth,
+          is_minor: official.is_minor,
+          gender: official.gender,
+          ethnicity: official.ethnicity,
+          secondary_email: official.secondary_email,
+          address_unit: official.address_unit,
+          country: official.country,
+          mobile_phone: official.mobile_phone,
+          license: official.license,
+          license_status: official.license_status,
+          license_issue_date: official.license_issue_date,
+          license_expiration_date: official.license_expiration_date,
+          license_issuer: official.license_issuer,
+          curriculum: official.curriculum,
+          background_screening: official.background_screening,
+          background_screening_expiration_date: official.background_screening_expiration_date,
+          safesport: official.safesport,
+          safesport_expiration_date: official.safesport_expiration_date,
+          intro_player_safety: official.intro_player_safety,
+          intro_player_safety_expiration_date: official.intro_player_safety_expiration_date,
+          safe_soccer: official.safe_soccer,
+          safe_soccer_expiration_date: official.safe_soccer_expiration_date,
+          provisional_status: official.provisional_status,
+          referee_years_experience: official.referee_years_experience,
           home_latitude: home.latitude,
           home_longitude: home.longitude,
         })
@@ -323,6 +371,11 @@ export default function OfficialProfile() {
             />
           </label>
           <label>
+            USSF-ID
+            <input value={official.id} disabled />
+            <small>This is the current RefAssign referee ID.</small>
+          </label>
+          <label>
             Last Name
             <input
               value={official.last_name || ""}
@@ -334,6 +387,11 @@ export default function OfficialProfile() {
             <input value={official.email || ""} disabled />
             <small>Email changes must be made by an administrator.</small>
           </label>
+          <label>Secondary Email<input type="email" value={official.secondary_email||""} onChange={(e)=>set("secondary_email",e.target.value||null)}/></label>
+          <label>Date of Birth<input type="date" value={official.date_of_birth||""} onChange={(e)=>set("date_of_birth",e.target.value||null)}/></label>
+          <label style={{display:"flex",alignItems:"center",gap:8}}><input type="checkbox" style={{width:"auto"}} checked={official.is_minor} onChange={(e)=>set("is_minor",e.target.checked)}/> Is a minor</label>
+          <label>Gender<input value={official.gender||""} onChange={(e)=>set("gender",e.target.value||null)}/></label>
+          <label>Ethnicity<input value={official.ethnicity||""} onChange={(e)=>set("ethnicity",e.target.value||null)}/></label>
           <label>
             Phone
             <input
@@ -341,6 +399,7 @@ export default function OfficialProfile() {
               onChange={(e) => set("phone", e.target.value || null)}
             />
           </label>
+          <label>Mobile Phone<input value={official.mobile_phone||""} onChange={(e)=>set("mobile_phone",e.target.value||null)}/></label>
           <label>
             Home Address
             <input
@@ -348,6 +407,7 @@ export default function OfficialProfile() {
               onChange={(e) => set("home_address", e.target.value || null)}
             />
           </label>
+          <label>Apt/Suite/Unit<input value={official.address_unit||""} onChange={(e)=>set("address_unit",e.target.value||null)}/></label>
           <label>
             City
             <input
@@ -369,6 +429,23 @@ export default function OfficialProfile() {
               onChange={(e) => set("home_zip", e.target.value || null)}
             />
           </label>
+          <label>Country<input value={official.country||""} onChange={(e)=>set("country",e.target.value||null)}/></label>
+          <label>License<input value={official.license||""} onChange={(e)=>set("license",e.target.value||null)}/></label>
+          <label>License Status<input value={official.license_status||""} onChange={(e)=>set("license_status",e.target.value||null)}/></label>
+          <label>Issue Date<input type="date" value={official.license_issue_date||""} onChange={(e)=>set("license_issue_date",e.target.value||null)}/></label>
+          <label>Expiration Date<input type="date" value={official.license_expiration_date||""} onChange={(e)=>set("license_expiration_date",e.target.value||null)}/></label>
+          <label>Issuer<input value={official.license_issuer||""} onChange={(e)=>set("license_issuer",e.target.value||null)}/></label>
+          <label>Curriculum<input value={official.curriculum||""} onChange={(e)=>set("curriculum",e.target.value||null)}/></label>
+          <label>Background Screening<input value={official.background_screening||""} onChange={(e)=>set("background_screening",e.target.value||null)}/></label>
+          <label>Background Screening Expiration Date<input type="date" value={official.background_screening_expiration_date||""} onChange={(e)=>set("background_screening_expiration_date",e.target.value||null)}/></label>
+          <label>SafeSport<input value={official.safesport||""} onChange={(e)=>set("safesport",e.target.value||null)}/></label>
+          <label>SafeSport Expiration Date<input type="date" value={official.safesport_expiration_date||""} onChange={(e)=>set("safesport_expiration_date",e.target.value||null)}/></label>
+          <label>Intro to Player Safety<input value={official.intro_player_safety||""} onChange={(e)=>set("intro_player_safety",e.target.value||null)}/></label>
+          <label>Intro to Player Safety Expiration Date<input type="date" value={official.intro_player_safety_expiration_date||""} onChange={(e)=>set("intro_player_safety_expiration_date",e.target.value||null)}/></label>
+          <label>Safe Soccer<input value={official.safe_soccer||""} onChange={(e)=>set("safe_soccer",e.target.value||null)}/></label>
+          <label>Safe Soccer Expiration Date<input type="date" value={official.safe_soccer_expiration_date||""} onChange={(e)=>set("safe_soccer_expiration_date",e.target.value||null)}/></label>
+          <label>Provisional Status<input value={official.provisional_status||""} onChange={(e)=>set("provisional_status",e.target.value||null)}/></label>
+          <label>Referee Years Experience<input type="number" min="0" step="1" value={official.referee_years_experience??""} onChange={(e)=>set("referee_years_experience",e.target.value===""?null:Number(e.target.value))}/></label>
           <label>
             Certification
             <input value={official.certification_level || ""} disabled />
