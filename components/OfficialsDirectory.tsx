@@ -528,21 +528,64 @@ export default function OfficialsDirectory({
       }
       return { data, error: null };
     };
-    const [o, lg, lv] = await Promise.all([
+    const [o, leagueLinks, levelLinks] = await Promise.all([
       loadAllOfficials(),
-      supabase
-        .from("leagues")
-        .select("id,name")
-        .eq("active", true)
-        .order("name"),
-      supabase
-        .from("levels")
-        .select("id,name")
-        .eq("active", true)
-        .order("name"),
+      organizationId
+        ? supabase
+            .from("organization_league_coverage")
+            .select("league_id")
+            .eq("organization_id", organizationId)
+            .eq("active", true)
+        : Promise.resolve({ data: null, error: null }),
+      organizationId
+        ? supabase
+            .from("organization_levels")
+            .select("level_id")
+            .eq("organization_id", organizationId)
+            .eq("active", true)
+        : Promise.resolve({ data: null, error: null }),
     ]);
     if (o.error) {
       setError(o.error.message);
+      setLoading(false);
+      return;
+    }
+    const leagueIds = (leagueLinks.data || []).map((row) => row.league_id);
+    const levelIds = (levelLinks.data || []).map((row) => row.level_id);
+    const [lg, lv] = await Promise.all([
+      organizationId
+        ? leagueIds.length
+          ? supabase
+              .from("leagues")
+              .select("id,name")
+              .in("id", leagueIds)
+              .eq("active", true)
+              .order("name")
+          : Promise.resolve({ data: [], error: null })
+        : supabase
+            .from("leagues")
+            .select("id,name")
+            .eq("active", true)
+            .order("name"),
+      organizationId
+        ? levelIds.length
+          ? supabase
+              .from("levels")
+              .select("id,name")
+              .in("id", levelIds)
+              .eq("active", true)
+              .order("name")
+          : Promise.resolve({ data: [], error: null })
+        : supabase
+            .from("levels")
+            .select("id,name")
+            .eq("active", true)
+            .order("name"),
+    ]);
+    const eligibilityChoiceError =
+      leagueLinks.error || levelLinks.error || lg.error || lv.error;
+    if (eligibilityChoiceError) {
+      setError(eligibilityChoiceError.message);
       setLoading(false);
       return;
     }
@@ -691,8 +734,12 @@ export default function OfficialsDirectory({
       ar2_rank: (pr?.ar2_rank ?? 1).toFixed(1),
       fourth_rank: (pr?.fourth_rank ?? 1).toFixed(1),
       mentor_certified: pr?.mentor_certified ?? false,
-      league_ids: (lg.data || []).map((x) => x.league_id),
-      level_ids: (lv.data || []).map((x) => x.level_id),
+      league_ids: (lg.data || [])
+        .map((x) => x.league_id)
+        .filter((id) => leagues.some((league) => league.id === id)),
+      level_ids: (lv.data || [])
+        .map((x) => x.level_id)
+        .filter((id) => levels.some((level) => level.id === id)),
       date_of_birth: o.date_of_birth || "",
       is_minor: o.is_minor,
       gender: o.gender || "",
@@ -889,32 +936,63 @@ export default function OfficialsDirectory({
         return;
       }
 
-      await Promise.all([
-        supabase
-          .from("official_league_eligibility")
-          .delete()
-          .eq("official_id", officialId),
-        supabase
-          .from("official_level_eligibility")
-          .delete()
-          .eq("official_id", officialId),
+      const [leagueDelete, levelDelete] = await Promise.all([
+        leagues.length
+          ? supabase
+              .from("official_league_eligibility")
+              .delete()
+              .eq("official_id", officialId)
+              .in(
+                "league_id",
+                leagues.map((league) => league.id),
+              )
+          : Promise.resolve({ error: null }),
+        levels.length
+          ? supabase
+              .from("official_level_eligibility")
+              .delete()
+              .eq("official_id", officialId)
+              .in(
+                "level_id",
+                levels.map((level) => level.id),
+              )
+          : Promise.resolve({ error: null }),
       ]);
-      if (form.league_ids.length)
-        await supabase.from("official_league_eligibility").insert(
+      const eligibilityDeleteError = leagueDelete.error || levelDelete.error;
+      if (eligibilityDeleteError) {
+        setSaving(false);
+        setError(eligibilityDeleteError.message);
+        return;
+      }
+      const leagueInsert = form.league_ids.length
+        ? await supabase.from("official_league_eligibility").insert(
           form.league_ids.map((league_id) => ({
             official_id: officialId!,
             league_id,
           })),
-        );
-      if (form.level_ids.length)
-        await supabase.from("official_level_eligibility").insert(
+        )
+        : { error: null };
+      if (leagueInsert.error) {
+        setSaving(false);
+        setError(leagueInsert.error.message);
+        return;
+      }
+      const levelInsert = form.level_ids.length
+        ? await supabase.from("official_level_eligibility").insert(
           form.level_ids.map((level_id) => ({
             official_id: officialId!,
             level_id,
           })),
-        );
+        )
+        : { error: null };
+      if (levelInsert.error) {
+        setSaving(false);
+        setError(levelInsert.error.message);
+        return;
+      }
     }
 
+    setRankMessage("Official profile and eligibility settings saved.");
     setSaving(false);
     setShowForm(false);
     setEditingId(null);
