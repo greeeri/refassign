@@ -1798,3 +1798,185 @@ export default function OfficialsDirectory({
                       {levels.map((x) => (
                         <label key={x.id}>
                           <input
+                            type="checkbox"
+                            checked={form.level_ids.includes(x.id)}
+                            onChange={() => toggleChoice("level_ids", x.id)}
+                          />
+                          {x.name}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                </>
+              )}
+              <div className="formActions">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setShowForm(false)}
+                >
+                  Cancel
+                </button>
+                <button className="primary" disabled={saving}>
+                  {saving
+                    ? "Saving…"
+                    : editingId
+                      ? "Save Changes"
+                      : "Save Official"}
+                </button>
+              </div>
+            </form>
+          )}
+          {showForm && editingId && (
+            <OfficialCcContact key={editingId} officialId={editingId} />
+          )}
+          {error && <div className="errorBox">{error}</div>}
+          {loading ? (
+            <p>Loading officials…</p>
+          ) : (
+            <div className="tableWrap">
+              <table>
+                <thead>
+                  <tr>
+                    {canManage && (
+                      <th>
+                        <input
+                          type="checkbox"
+                          aria-label="Select visible officials"
+                          checked={
+                            visible.filter((o) => o.email || o.phone).length >
+                              0 &&
+                            visible
+                              .filter((o) => o.email || o.phone)
+                              .every((o) => selectedIds.includes(o.id))
+                          }
+                          onChange={toggleAllVisible}
+                        />
+                      </th>
+                    )}
+                    <th>Official</th>
+                    <th>Sports</th>
+                    <th>Home</th>
+                    {canManage && (
+                      <>
+                        <th>My General</th>
+                        <th>My Ref</th>
+                        <th>My AR1</th>
+                        <th>My AR2</th>
+                        <th>My 4th</th>
+                        <th>Mentor Certified</th>
+                      </>
+                    )}
+                    <th>Status</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visible.map((o) => {
+                    const pr = positionRanks[o.id];
+                    return (
+                      <tr key={o.id}>
+                        {canManage && (
+                          <td>
+                            <input
+                              type="checkbox"
+                              aria-label={`Select ${o.first_name} ${o.last_name}`}
+                              checked={selectedIds.includes(o.id)}
+                              disabled={!o.email && !o.phone}
+                              onChange={() => toggleSelected(o.id)}
+                            />
+                          </td>
+                        )}
+                        <td>
+                          <b>
+                            {o.first_name} {o.last_name}
+                          </b>
+                          <small>{o.email || "No email"}</small>
+                          <small>{o.phone || "No phone"}</small>
+                        </td>
+                        <td>{o.sports.join(", ")}</td>
+                        <td>
+                          {[o.home_city, o.home_state]
+                            .filter(Boolean)
+                            .join(", ") ||
+                            o.home_area ||
+                            "—"}
+                        </td>
+                        {canManage && (
+                          <>
+                            <td>
+                              <b>{(pr?.rank ?? 1).toFixed(1)}</b>
+                            </td>
+                            <td>
+                              <b>{(pr?.ref_rank ?? 1).toFixed(1)}</b>
+                            </td>
+                            <td>
+                              <b>{(pr?.ar1_rank ?? 1).toFixed(1)}</b>
+                            </td>
+                            <td>
+                              <b>{(pr?.ar2_rank ?? 1).toFixed(1)}</b>
+                            </td>
+                            <td>
+                              <b>{(pr?.fourth_rank ?? 1).toFixed(1)}</b>
+                            </td>
+                            <td>
+                              <input
+                                type="checkbox"
+                                checked={pr?.mentor_certified ?? false}
+                                disabled
+                                aria-label={`Mentor certification for ${o.first_name} ${o.last_name}`}
+                                style={{ width: "auto" }}
+                              />
+                            </td>
+                          </>
+                        )}
+                        <td>
+                          <span
+                            className={o.active ? "badge green" : "badge red"}
+                          >
+                            {o.active ? "Active" : "Inactive"}
+                          </span>
+                        </td>
+                        <td>
+                          {organizationId && o.email && (
+                            <button
+                              className="tableButton"
+                              disabled={sendingInvitationEmail === o.email}
+                              onClick={() =>
+                                void resendDirectoryInvitation(o.email!)
+                              }
+                            >
+                              {sendingInvitationEmail === o.email
+                                ? "Sending…"
+                                : pendingInvitationEmails.includes(
+                                      o.email.toLowerCase(),
+                                    )
+                                  ? "Resend invitation"
+                                  : "Send invitation"}
+                            </button>
+                          )}{" "}
+                          <button
+                            className="tableButton"
+                            onClick={() => void startEdit(o)}
+                          >
+                            Edit
+                          </button>{" "}
+                          <button
+                            className="tableButton"
+                            onClick={() => void toggleActive(o)}
+                          >
+                            {o.active ? "Deactivate" : "Activate"}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+    </>
+  );
+}
