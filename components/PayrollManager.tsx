@@ -36,8 +36,11 @@ type PayrollRow = {
   } | null;
   sport_positions: { name: string } | null;
   games: {
+    id: string;
     game_number: string;
     starts_at: string;
+    bill_to_id: string | null;
+    bill_to: { name: string } | null;
     leagues: { name: string; mileage_plan: MileagePlan } | null;
     home: { name: string } | null;
     away: { name: string } | null;
@@ -66,6 +69,7 @@ type ImportRow = {
   paymentStatus: PaymentStatus;
   notes: string;
 };
+type BillTo = { id: string; name: string };
 
 const statuses: ReadonlyArray<[PaymentStatus, string]> = [
   ["unpaid", "Unpaid"],
@@ -117,7 +121,8 @@ function calculatedMileage(row: PayrollRow, origins: WeekdayOrigin[]) {
   if (plan === "actual") return null;
   const weekday = new Date(row.games?.starts_at || 0).getDay();
   const origin = origins.find(
-    (item) => item.official_id === row.officials?.id && item.weekday === weekday,
+    (item) =>
+      item.official_id === row.officials?.id && item.weekday === weekday,
   );
   const useAlternate = Boolean(origin && !origin.use_home);
   const oneWay = milesBetween(
@@ -152,12 +157,21 @@ function normalizedRecord(record: Record<string, unknown>) {
   );
 }
 
-export default function PayrollManager({ organizationId, focusAssignmentId }: { organizationId?: string; focusAssignmentId?: string }) {
+export default function PayrollManager({
+  organizationId,
+  focusAssignmentId,
+}: {
+  organizationId?: string;
+  focusAssignmentId?: string;
+}) {
   const supabase = useMemo(() => createClient(), []);
   const fileInput = useRef<HTMLInputElement>(null);
   const geocodeBackfillOrganization = useRef("");
   const handledReportFocus = useRef("");
   const [rows, setRows] = useState<PayrollRow[]>([]);
+  const [billTos, setBillTos] = useState<BillTo[]>([]);
+  const [canManageBillTos, setCanManageBillTos] = useState(false);
+  const [newBillToName, setNewBillToName] = useState("");
   const [weekdayOrigins, setWeekdayOrigins] = useState<WeekdayOrigin[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [period, setPeriod] = useState<Period>("all");
@@ -176,8 +190,13 @@ export default function PayrollManager({ organizationId, focusAssignmentId }: { 
     setLoading(true);
     setError("");
     try {
-      const query = organizationId ? `?organizationId=${encodeURIComponent(organizationId)}` : "";
-      const response = await fetch(`/api/payroll${query}`, { cache: "no-store" });
+      const query = organizationId
+        ? `?organizationId=${encodeURIComponent(organizationId)}`
+        : "";
+      const [response, billToResponse] = await Promise.all([
+        fetch(`/api/payroll${query}`, { cache: "no-store" }),
+        fetch(`/api/bill-tos${query}`, { cache: "no-store" }),
+      ]);
       const result = (await response.json()) as {
         assignments?: PayrollRow[];
         weekdayOrigins?: WeekdayOrigin[];
@@ -196,6 +215,14 @@ export default function PayrollManager({ organizationId, focusAssignmentId }: { 
         }),
       );
       setWeekdayOrigins(origins);
+      if (billToResponse.ok) {
+        const billToResult = (await billToResponse.json()) as {
+          billTos?: BillTo[];
+          canManageBillTos?: boolean;
+        };
+        setBillTos(billToResult.billTos || []);
+        setCanManageBillTos(Boolean(billToResult.canManageBillTos));
+      }
     } catch (loadError) {
       setError(
         loadError instanceof Error
@@ -206,20 +233,28 @@ export default function PayrollManager({ organizationId, focusAssignmentId }: { 
     setLoading(false);
   }
   useEffect(() => {
-    if (!organizationId || geocodeBackfillOrganization.current === organizationId)
+    if (
+      !organizationId ||
+      geocodeBackfillOrganization.current === organizationId
+    )
       return;
     geocodeBackfillOrganization.current = organizationId;
     void (async () => {
       await load();
       try {
-        const query = organizationId ? `?organizationId=${encodeURIComponent(organizationId)}` : "";
-        const response = await fetch(`/api/geocode/backfill${query}`, { method: "POST" });
+        const query = organizationId
+          ? `?organizationId=${encodeURIComponent(organizationId)}`
+          : "";
+        const response = await fetch(`/api/geocode/backfill${query}`, {
+          method: "POST",
+        });
         const result = (await response.json()) as {
           updated?: number;
           failed?: number;
           error?: string;
         };
-        if (!response.ok) throw new Error(result.error || "Address backfill failed.");
+        if (!response.ok)
+          throw new Error(result.error || "Address backfill failed.");
         if (result.updated) {
           setNotice(
             `${result.updated} saved address${result.updated === 1 ? " was" : "es were"} located automatically. Mileage has been recalculated.`,
@@ -240,13 +275,21 @@ export default function PayrollManager({ organizationId, focusAssignmentId }: { 
     })();
   }, [organizationId]);
   useEffect(() => {
-    if (!focusAssignmentId || handledReportFocus.current === focusAssignmentId || !rows.some((row) => row.id === focusAssignmentId)) return;
+    if (
+      !focusAssignmentId ||
+      handledReportFocus.current === focusAssignmentId ||
+      !rows.some((row) => row.id === focusAssignmentId)
+    )
+      return;
     handledReportFocus.current = focusAssignmentId;
     setPeriod("all");
     setStatusFilter("all");
     setSelected([focusAssignmentId]);
     window.setTimeout(
-      () => document.getElementById(`payroll-row-${focusAssignmentId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }),
+      () =>
+        document
+          .getElementById(`payroll-row-${focusAssignmentId}`)
+          ?.scrollIntoView({ behavior: "smooth", block: "center" }),
       0,
     );
   }, [focusAssignmentId, rows]);
@@ -348,27 +391,82 @@ export default function PayrollManager({ organizationId, focusAssignmentId }: { 
     setSaving(row.id);
     setError("");
     setNotice("");
-    const { data: userData } = await supabase.auth.getUser();
-    const { error: saveError } = await supabase
-      .from("assignments")
-      .update({
-        game_fee: Number(row.game_fee || 0),
-        mileage_miles: Number(row.mileage_miles || 0),
-        mileage_rate: Number(row.mileage_rate || 0),
-        payment_status: row.payment_status,
-        paid_at:
-          row.payment_status === "paid"
-            ? row.paid_at || new Date().toISOString()
-            : null,
-        payroll_notes: row.payroll_notes?.trim() || null,
-        payroll_updated_at: new Date().toISOString(),
-        payroll_updated_by: userData.user?.id || null,
-      })
-      .eq("id", row.id);
-    if (saveError) setError(saveError.message);
+    const response = await fetch(
+      `/api/payroll?organizationId=${encodeURIComponent(organizationId || "")}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          assignmentId: row.id,
+          billToId: row.games?.bill_to_id || null,
+          gameFee: Number(row.game_fee || 0),
+          mileageMiles: Number(row.mileage_miles || 0),
+          mileageRate: Number(row.mileage_rate || 0),
+          paymentStatus: row.payment_status,
+          payrollNotes: row.payroll_notes?.trim() || null,
+        }),
+      },
+    );
+    const result = (await response.json()) as { error?: string };
+    if (!response.ok)
+      setError(result.error || "Payroll record could not be saved.");
     else {
       setNotice("Payroll record saved.");
       await load();
+    }
+    setSaving("");
+  }
+
+  function patchGameBillTo(gameId: string, billToId: string) {
+    setRows((current) =>
+      current.map((row) =>
+        row.games?.id === gameId
+          ? {
+              ...row,
+              games: {
+                ...row.games,
+                bill_to_id: billToId || null,
+                bill_to: billToId
+                  ? {
+                      name:
+                        billTos.find((billTo) => billTo.id === billToId)
+                          ?.name || "",
+                    }
+                  : null,
+              },
+            }
+          : row,
+      ),
+    );
+  }
+
+  async function addBillTo() {
+    const name = newBillToName.trim();
+    if (!name || !organizationId) return;
+    setSaving("bill-to");
+    setError("");
+    const response = await fetch(
+      `/api/bill-tos?organizationId=${encodeURIComponent(organizationId)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      },
+    );
+    const result = (await response.json()) as {
+      billTo?: BillTo;
+      error?: string;
+    };
+    if (!response.ok || !result.billTo)
+      setError(result.error || "Bill To could not be added.");
+    else {
+      setBillTos((current) =>
+        [...current, result.billTo!].sort((a, b) =>
+          a.name.localeCompare(b.name),
+        ),
+      );
+      setNewBillToName("");
+      setNotice(`${result.billTo.name} added to Bill To options.`);
     }
     setSaving("");
   }
@@ -411,6 +509,7 @@ export default function PayrollManager({ organizationId, focusAssignmentId }: { 
       League: row.games?.leagues?.name || "",
       Game: gameName(row),
       Location: row.games?.location?.name || "",
+      "Bill To": row.games?.bill_to?.name || "",
       Official: officialName(row),
       Position: row.sport_positions?.name || "Official",
       "Game Fee": Number(row.game_fee || 0),
@@ -605,6 +704,28 @@ export default function PayrollManager({ organizationId, focusAssignmentId }: { 
       </div>
       {error && <div className="errorBox">{error}</div>}
       {notice && <div className="loginMessage">{notice}</div>}
+      {canManageBillTos && (
+        <div className="formGrid payrollFilters">
+          <label>
+            Add Bill To
+            <span style={{ display: "flex", gap: 8 }}>
+              <input
+                value={newBillToName}
+                placeholder="Organization or customer name"
+                onChange={(event) => setNewBillToName(event.target.value)}
+              />
+              <button
+                type="button"
+                className="secondary"
+                disabled={saving === "bill-to" || !newBillToName.trim()}
+                onClick={() => void addBillTo()}
+              >
+                {saving === "bill-to" ? "Adding…" : "Add"}
+              </button>
+            </span>
+          </label>
+        </div>
+      )}
       <div className="payrollSlicers" aria-label="Game date filters">
         {(["all", "past", "week", "future"] as Period[]).map((value) => (
           <button
@@ -750,6 +871,7 @@ export default function PayrollManager({ organizationId, focusAssignmentId }: { 
               <col className="payrollDateCol" />
               <col className="payrollGameCol" />
               <col className="payrollLocationCol" />
+              <col className="payrollLocationCol" />
               <col className="payrollOfficialCol" />
               <col className="payrollPositionCol" />
               <col className="payrollFeeCol" />
@@ -807,6 +929,7 @@ export default function PayrollManager({ organizationId, focusAssignmentId }: { 
                     </button>
                   </th>
                 ))}
+                <th>Bill To</th>
                 <th>Mileage Pay</th>
                 <th>
                   <button onClick={() => changeSort("total")}>
@@ -827,7 +950,15 @@ export default function PayrollManager({ organizationId, focusAssignmentId }: { 
                 visible.map((row) => {
                   const suggestedMiles = defaultMileage(row);
                   return (
-                    <tr id={`payroll-row-${row.id}`} className={focusAssignmentId === row.id ? "reportActionFocus" : undefined} key={row.id}>
+                    <tr
+                      id={`payroll-row-${row.id}`}
+                      className={
+                        focusAssignmentId === row.id
+                          ? "reportActionFocus"
+                          : undefined
+                      }
+                      key={row.id}
+                    >
                       <td>
                         <input
                           type="checkbox"
@@ -942,6 +1073,23 @@ export default function PayrollManager({ organizationId, focusAssignmentId }: { 
                           }
                         />
                       </td>
+                      <td>
+                        <select
+                          aria-label={`Bill To for game ${row.games?.game_number || ""}`}
+                          value={row.games?.bill_to_id || ""}
+                          onChange={(event) =>
+                            row.games &&
+                            patchGameBillTo(row.games.id, event.target.value)
+                          }
+                        >
+                          <option value="">Not selected</option>
+                          {billTos.map((billTo) => (
+                            <option key={billTo.id} value={billTo.id}>
+                              {billTo.name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
                       <td>{money(mileagePay(row))}</td>
                       <td>
                         <b>{money(total(row))}</b>
@@ -987,7 +1135,7 @@ export default function PayrollManager({ organizationId, focusAssignmentId }: { 
                 })
               ) : (
                 <tr>
-                  <td colSpan={15}>
+                  <td colSpan={16}>
                     No accepted payroll records match these filters.
                   </td>
                 </tr>
