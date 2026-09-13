@@ -441,14 +441,16 @@ export default function AssignmentsManagerV2({
               .eq("organization_id", organizationId)
               .eq("active", true)
           : Promise.resolve({ data: null, error: null }),
-        supabase
-          .from("officials")
-          .select(
-            "id,first_name,last_name,email,phone,sports,active,home_city,home_state,home_latitude,home_longitude",
-          )
-          .eq("active", true)
-          .order("last_name")
-          .order("first_name"),
+        organizationId
+          ? Promise.resolve({ data: [], error: null })
+          : supabase
+              .from("officials")
+              .select(
+                "id,first_name,last_name,email,phone,sports,active,home_city,home_state,home_latitude,home_longitude",
+              )
+              .eq("active", true)
+              .order("last_name")
+              .order("first_name"),
         supabase
           .from("sport_positions")
           .select("id,sport_id,name,required,sort_order")
@@ -545,15 +547,35 @@ export default function AssignmentsManagerV2({
     setRanks(rm);
     setPositionRanks(prm);
     setPowers(pm);
-    const organizationOfficialIds = organizationId
-      ? new Set((oo.data || []).map((link) => link.official_id))
-      : null;
-    setOfficials(
-      ((o.data || []) as Official[]).filter(
-        (official) =>
-          !organizationOfficialIds || organizationOfficialIds.has(official.id),
-      ),
-    );
+    let officialRows = (o.data || []) as Official[];
+    if (organizationId) {
+      const organizationOfficialIds = (oo.data || []).map(
+        (link) => link.official_id,
+      );
+      officialRows = [];
+      for (let index = 0; index < organizationOfficialIds.length; index += 200) {
+        const { data: page, error: pageError } = await supabase
+          .from("officials")
+          .select(
+            "id,first_name,last_name,email,phone,sports,active,home_city,home_state,home_latitude,home_longitude",
+          )
+          .in("id", organizationOfficialIds.slice(index, index + 200))
+          .eq("active", true)
+          .order("last_name")
+          .order("first_name");
+        if (pageError) {
+          setError(pageError.message);
+          return;
+        }
+        officialRows.push(...((page || []) as Official[]));
+      }
+      officialRows.sort(
+        (a, b) =>
+          a.last_name.localeCompare(b.last_name) ||
+          a.first_name.localeCompare(b.first_name),
+      );
+    }
+    setOfficials(officialRows);
     setPositions((p.data || []) as Position[]);
     const scopedGames = (g.data || []) as unknown as Game[];
     const scopedGameIds = new Set(scopedGames.map((game) => game.id));
