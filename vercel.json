@@ -15,6 +15,10 @@
     {
       "path": "/api/cron/saved-report-views",
       "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/cron/history-retention",
+      "schedule": "30 13 * * *"
     }
   ],
   "redirects": [
