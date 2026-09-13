@@ -18,6 +18,8 @@ type Game = {
   away_team_id: string | null;
   location_id: string | null;
   starts_at: string;
+  time_tbd: boolean;
+  field_tbd: boolean;
   duration_minutes: number;
   officials_needed: number;
   notes: string | null;
@@ -75,6 +77,8 @@ const blank = {
   location_id: "",
   date: "",
   time: "",
+  time_tbd: false,
+  field_tbd: false,
   duration_minutes: 110,
   officials_needed: 3,
   notes: "",
@@ -331,7 +335,7 @@ export default function GamesManagerV3({
     const gamesQuery = sb
       .from("games")
       .select(
-        "id,game_number,status,sport_id,league_id,level_id,home_team_id,away_team_id,location_id,bill_to_id,archived_at,starts_at,duration_minutes,officials_needed,notes,sports(name),leagues(name),levels(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(id,name,city,state)",
+        "id,game_number,status,sport_id,league_id,level_id,home_team_id,away_team_id,location_id,bill_to_id,archived_at,starts_at,time_tbd,field_tbd,duration_minutes,officials_needed,notes,sports(name),leagues(name),levels(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(id,name,city,state)",
       )
       .order("starts_at");
     const visibleGamesQuery = showArchived
@@ -471,6 +475,8 @@ export default function GamesManagerV3({
       bill_to_id: g.bill_to_id || "",
       date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
       time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+      time_tbd: g.time_tbd,
+      field_tbd: g.field_tbd,
       duration_minutes: g.duration_minutes || 110,
       officials_needed: g.officials_needed,
       notes: g.notes || "",
@@ -498,7 +504,9 @@ export default function GamesManagerV3({
         away_team_id: form.away_team_id,
         location_id: form.location_id,
         bill_to_id: form.bill_to_id || null,
-        starts_at: new Date(`${form.date}T${form.time}:00`).toISOString(),
+        starts_at: new Date(`${form.date}T${form.time_tbd ? "00:00" : form.time}:00`).toISOString(),
+        time_tbd: form.time_tbd,
+        field_tbd: form.field_tbd,
         duration_minutes: +form.duration_minutes || 110,
         officials_needed: +form.officials_needed,
         notes: form.notes.trim() || null,
@@ -543,11 +551,11 @@ export default function GamesManagerV3({
         Home_Team: g.home?.name || "",
         Away_Team: g.away?.name || "",
         Date: d.toLocaleDateString("en-US"),
-        Time: d.toLocaleTimeString("en-US", {
+        Time: g.time_tbd ? "TBD" : d.toLocaleTimeString("en-US", {
           hour: "numeric",
           minute: "2-digit",
         }),
-        Location: g.location?.name || "",
+        Location: g.field_tbd ? "Field TBD" : g.location?.name || "",
         Duration_Minutes: g.duration_minutes || 110,
         Officials_Needed: g.officials_needed,
         Bill_To:
@@ -837,6 +845,8 @@ export default function GamesManagerV3({
         location_id: loc?.id || null,
         bill_to_id: billTo?.id || null,
         starts_at: new Date(`${r.date}T${r.time}:00`).toISOString(),
+        time_tbd: false,
+        field_tbd: false,
         duration_minutes: r.duration_minutes,
         officials_needed: r.officials_needed,
         notes: r.notes,
@@ -1189,10 +1199,12 @@ export default function GamesManagerV3({
             Time
             <input
               type="time"
-              required
+              required={!form.time_tbd}
+              disabled={form.time_tbd}
               value={form.time}
               onChange={(e) => setForm({ ...form, time: e.target.value })}
             />
+            <small><input type="checkbox" checked={form.time_tbd} onChange={(e) => setForm({ ...form, time_tbd: e.target.checked })} /> Time TBD</small>
           </label>
           <label>
             Game Length (minutes)
@@ -1223,6 +1235,7 @@ export default function GamesManagerV3({
                 </option>
               ))}
             </select>
+            <small><input type="checkbox" checked={form.field_tbd} onChange={(e) => setForm({ ...form, field_tbd: e.target.checked })} /> Field TBD</small>
           </label>
           <label>
             Bill To <small>Optional</small>
@@ -1559,7 +1572,7 @@ export default function GamesManagerV3({
                   <td>
                     {d.toLocaleDateString()}
                     <small style={{ color: rainOut ? "#dbeafe" : undefined }}>
-                      {d.toLocaleTimeString([], {
+                      {g.time_tbd ? "Time TBD" : d.toLocaleTimeString([], {
                         hour: "numeric",
                         minute: "2-digit",
                       })}
@@ -1576,7 +1589,7 @@ export default function GamesManagerV3({
                       {g.levels?.name || ""}
                     </small>
                   </td>
-                  <td>{g.location?.name || "TBD"}</td>
+                  <td>{g.field_tbd ? "Hy-Vee Multiplex — Field TBD" : g.location?.name || "TBD"}</td>
                   <td>
                     {billTos.find((billTo) => billTo.id === g.bill_to_id)
                       ?.name || "—"}

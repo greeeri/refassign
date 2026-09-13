@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Game is required." }, { status: 400 });
   const { data: ownedGame, error: ownedGameError } = await service
     .from("games")
-    .select("id")
+    .select("id,time_tbd")
     .eq("id", body.gameId)
     .eq("organization_id", organizationId)
     .maybeSingle();
@@ -34,6 +34,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { error: "This game does not belong to the selected organization." },
       { status: 403 },
+    );
+  if (ownedGame.time_tbd)
+    return NextResponse.json(
+      { error: "Enter the game time before publishing assignments." },
+      { status: 400 },
     );
   const { error: publishError } = await supabase.rpc(
     "publish_game_assignments",
