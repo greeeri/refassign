@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
   const { data: registration, error } = await supabase
     .from("official_registrations")
     .select(
-      "id,public_token,first_name,last_name,email,payment_status,fee_cents,registration_program_id,registration_programs(name,registration_fee_cents)",
+      "id,public_token,first_name,last_name,email,payment_status,parent_consent_status,fee_cents,registration_program_id,registration_programs(name,registration_fee_cents)",
     )
     .eq("public_token", token)
     .maybeSingle();
@@ -37,6 +37,11 @@ export async function POST(request: NextRequest) {
   if (registration.payment_status === "paid")
     return NextResponse.json(
       { error: "This registration is already paid." },
+      { status: 409 },
+    );
+  if (registration.parent_consent_status === "pending")
+    return NextResponse.json(
+      { error: "Parent consent must be signed before payment." },
       { status: 409 },
     );
   const program = registration.registration_programs as unknown as { name?: string; registration_fee_cents?: number | null } | null,

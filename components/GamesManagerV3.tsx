@@ -3,6 +3,7 @@ import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import { createClient } from "../lib/supabase/client";
 import { announceUndoAvailable } from "./UndoCenter";
 type Named = { id: string; name: string };
+type BillTo = Named;
 type Sport = Named & { default_officials: number };
 type Team = Named & { level_id: string | null; sport_id: string | null };
 type Location = Named & { city: string | null; state: string | null };
@@ -20,6 +21,7 @@ type Game = {
   duration_minutes: number;
   officials_needed: number;
   notes: string | null;
+  bill_to_id: string | null;
   sports: { name: string } | null;
   leagues: { name: string } | null;
   levels: { name: string } | null;
@@ -41,6 +43,7 @@ type Row = {
   duration_minutes: number;
   officials_needed: number;
   notes: string;
+  bill_to: string;
   valid: boolean;
   issue: string;
   action: "add" | "update" | "skip" | "error";
@@ -74,6 +77,7 @@ const blank = {
   duration_minutes: 110,
   officials_needed: 3,
   notes: "",
+  bill_to_id: "",
 };
 const req = [
   "game_number",
@@ -215,6 +219,75 @@ function inRange(g: Game, r: Range, customDate = "") {
   if (r === "thisWeek") return t >= week && t < next;
   return t >= next && t < afterNext;
 }
+function describeGameConflict(
+  games: Game[],
+  candidate: {
+    home_team_id: string;
+    away_team_id: string;
+    location_id: string;
+    starts_at: string;
+    duration_minutes: number;
+  },
+  editingId: string | null,
+) {
+  const start = new Date(candidate.starts_at);
+  const end = new Date(start.getTime() + candidate.duration_minutes * 60_000);
+  const teamIds = [candidate.home_team_id, candidate.away_team_id].filter(
+    Boolean,
+  );
+
+  for (const game of games) {
+    if (
+      game.id === editingId ||
+      ["cancelled", "canceled"].includes(game.status)
+    )
+      continue;
+    const gameStart = new Date(game.starts_at);
+    const gameEnd = new Date(
+      gameStart.getTime() + (game.duration_minutes || 110) * 60_000,
+    );
+    if (gameStart >= end || gameEnd <= start) continue;
+
+    const conflictingTeams = [game.home_team_id, game.away_team_id].filter(
+      (id): id is string => Boolean(id && teamIds.includes(id)),
+    );
+    const sameLocation = Boolean(
+      candidate.location_id && game.location_id === candidate.location_id,
+    );
+    if (!conflictingTeams.length && !sameLocation) continue;
+
+    const teamNames = conflictingTeams.map(
+      (id) =>
+        teamsForConflict(game, id) ||
+        (id === candidate.home_team_id ? "home team" : "away team"),
+    );
+    const reasons = [
+      teamNames.length
+        ? `${teamNames.join(" and ")} ${teamNames.length === 1 ? "is" : "are"} already scheduled`
+        : "",
+      sameLocation
+        ? `${game.location?.name || "This location"} is already in use`
+        : "",
+    ].filter(Boolean);
+    const date = gameStart.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+    const time = (value: Date) =>
+      value.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    const matchup = [game.home?.name, game.away?.name]
+      .filter(Boolean)
+      .join(" vs. ");
+    return `Schedule conflict: ${reasons.join("; ")}. Conflicting game: #${game.game_number || "unassigned"}${matchup ? ` — ${matchup}` : ""}, ${date}, ${time(gameStart)}–${time(gameEnd)}${game.location?.name ? ` at ${game.location.name}` : ""}.`;
+  }
+  return null;
+}
+function teamsForConflict(game: Game, teamId: string) {
+  if (game.home_team_id === teamId) return game.home?.name || null;
+  if (game.away_team_id === teamId) return game.away?.name || null;
+  return null;
+}
 export default function GamesManagerV3({
   organizationId,
 }: {
@@ -227,6 +300,9 @@ export default function GamesManagerV3({
     [levels, setLevels] = useState<Named[]>([]),
     [teams, setTeams] = useState<Team[]>([]),
     [locations, setLocations] = useState<Location[]>([]),
+    [billTos, setBillTos] = useState<BillTo[]>([]),
+    [canManageBillTos, setCanManageBillTos] = useState(false),
+    [newBillToName, setNewBillToName] = useState(""),
     [form, setForm] = useState(blank),
     [editing, setEditing] = useState<string | null>(null),
     [show, setShow] = useState(false),
@@ -241,10 +317,20 @@ export default function GamesManagerV3({
     [showCalendar, setShowCalendar] = useState(false),
     [busy, setBusy] = useState(false),
     [statusBusy, setStatusBusy] = useState(""),
+    [pendingStatus, setPendingStatus] = useState<{
+      gameId: string;
+      status: string;
+    } | null>(null),
     [error, setError] = useState(""),
     [message, setMessage] = useState("");
   async function load() {
-    const [s, lg, lv, t, lo, g] = await Promise.all([
+    const gamesQuery = sb
+      .from("games")
+      .select(
+        "id,game_number,status,sport_id,league_id,level_id,home_team_id,away_team_id,location_id,bill_to_id,starts_at,duration_minutes,officials_needed,notes,sports(name),leagues(name),levels(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(id,name,city,state)",
+      )
+      .order("starts_at");
+    const [s, lg, lv, t, lo, g, billToResponse] = await Promise.all([
       sb
         .from("sports")
         .select("id,name,default_officials")
@@ -258,12 +344,17 @@ export default function GamesManagerV3({
         .select("id,name,city,state")
         .eq("active", true)
         .order("name"),
-      sb
-        .from("games")
-        .select(
-          "id,game_number,status,sport_id,league_id,level_id,home_team_id,away_team_id,location_id,starts_at,duration_minutes,officials_needed,notes,sports(name),leagues(name),levels(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(id,name,city,state)",
-        )
-        .order("starts_at"),
+      organizationId
+        ? gamesQuery.eq("organization_id", organizationId)
+        : gamesQuery,
+      organizationId
+        ? fetch(
+            `/api/bill-tos?organizationId=${encodeURIComponent(organizationId)}`,
+            {
+              cache: "no-store",
+            },
+          )
+        : Promise.resolve(null),
     ]);
     const e = s.error || lg.error || lv.error || t.error || lo.error || g.error;
     if (e) setError(e.message);
@@ -274,25 +365,54 @@ export default function GamesManagerV3({
       setTeams(t.data || []);
       setLocations(lo.data || []);
       setGames((g.data || []) as unknown as Game[]);
+      if (billToResponse?.ok) {
+        const billToResult = (await billToResponse.json()) as {
+          billTos?: BillTo[];
+          canManageBillTos?: boolean;
+        };
+        setBillTos(billToResult.billTos || []);
+        setCanManageBillTos(Boolean(billToResult.canManageBillTos));
+      }
     }
   }
   useEffect(() => {
     void load();
   }, [organizationId]);
+  function requestStatusChange(gameId: string, status: string) {
+    if (["canceled", "rained_out"].includes(status)) {
+      setPendingStatus({ gameId, status });
+      return;
+    }
+    void changeStatus(gameId, status);
+  }
   async function changeStatus(id: string, status: string) {
+    setPendingStatus(null);
     setStatusBusy(id);
     setError("");
     setMessage("");
-    const { error: statusError } = await sb.rpc("set_game_status", {
-      p_game_id: id,
-      p_status: status,
-    });
-    if (statusError) setError(statusError.message);
+    const response = await fetch(
+      `/api/games/status?organizationId=${encodeURIComponent(organizationId || "")}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gameId: id, status }),
+      },
+    );
+    const result = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      sent?: number;
+      failed?: number;
+    };
+    if (!response.ok)
+      setError(result.error || "Game status could not be updated.");
     else {
       setGames((current) =>
         current.map((game) => (game.id === id ? { ...game, status } : game)),
       );
-      setMessage("Game status updated.");
+      const notification = ["canceled", "rained_out"].includes(status)
+        ? ` ${result.sent || 0} official notification${result.sent === 1 ? "" : "s"} sent${result.failed ? `; ${result.failed} failed` : ""}.`
+        : "";
+      setMessage(`Game status updated.${notification}`);
       announceUndoAvailable();
     }
     setStatusBusy("");
@@ -312,6 +432,7 @@ export default function GamesManagerV3({
       home_team_id: g.home_team_id || "",
       away_team_id: g.away_team_id || "",
       location_id: g.location_id || "",
+      bill_to_id: g.bill_to_id || "",
       date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
       time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
       duration_minutes: g.duration_minutes || 110,
@@ -340,6 +461,7 @@ export default function GamesManagerV3({
         home_team_id: form.home_team_id,
         away_team_id: form.away_team_id,
         location_id: form.location_id,
+        bill_to_id: form.bill_to_id || null,
         starts_at: new Date(`${form.date}T${form.time}:00`).toISOString(),
         duration_minutes: +form.duration_minutes || 110,
         officials_needed: +form.officials_needed,
@@ -347,9 +469,22 @@ export default function GamesManagerV3({
       };
       const q = editing
         ? sb.from("games").update(payload).eq("id", editing)
-        : sb.from("games").insert({ ...payload, status: "open" });
+        : sb.from("games").insert({ ...payload, status: "active" });
       const { error: e2 } = await q;
-      if (e2) throw e2;
+      if (e2) {
+        const databaseMessage = [e2.message, e2.details, e2.hint]
+          .filter(Boolean)
+          .join(" ");
+        const isScheduleConflict =
+          e2.code === "23514" ||
+          /double-book|overlap|conflict/i.test(databaseMessage);
+        const detailedConflict = isScheduleConflict
+          ? describeGameConflict(games, payload, editing)
+          : null;
+        throw new Error(
+          detailedConflict || databaseMessage || "Unable to save game",
+        );
+      }
       setMessage(editing ? "Game updated." : "Game added.");
       setEditing(null);
       setForm(blank);
@@ -379,6 +514,8 @@ export default function GamesManagerV3({
         Location: g.location?.name || "",
         Duration_Minutes: g.duration_minutes || 110,
         Officials_Needed: g.officials_needed,
+        Bill_To:
+          billTos.find((billTo) => billTo.id === g.bill_to_id)?.name || "",
         Notes: g.notes || "",
       };
     });
@@ -401,6 +538,7 @@ export default function GamesManagerV3({
         home = get("home_team"),
         away = get("away_team"),
         location = get("location"),
+        billTo = get("bill_to"),
         date = dateVal(cell("date")),
         time = timeVal(cell("time")),
         duration = Number(get("duration_minutes") || 110),
@@ -414,6 +552,8 @@ export default function GamesManagerV3({
       if (!levelMatch) issues.push("Level not found");
       if (!locations.some((x) => norm(x.name) === norm(location)))
         issues.push("Location not found");
+      if (billTo && !billTos.some((x) => norm(x.name) === norm(billTo)))
+        issues.push("Bill To not found");
       if (!date) issues.push("Invalid date");
       if (!time) issues.push("Invalid time");
       if (
@@ -460,6 +600,7 @@ export default function GamesManagerV3({
         duration_minutes: duration,
         officials_needed: officials,
         notes: get("notes"),
+        bill_to: billTo,
         valid: !issues.length,
         issue: issues.join("; "),
         action: issues.length ? "error" : "add",
@@ -545,6 +686,11 @@ export default function GamesManagerV3({
       compare("Date", currentDateValue, row.date);
       compare("Time", currentTimeValue, row.time);
       compare("Location", existing.location?.name || "", row.location);
+      compare(
+        "Bill To",
+        billTos.find((billTo) => billTo.id === existing.bill_to_id)?.name || "",
+        row.bill_to,
+      );
       compare("Length", existing.duration_minutes || 110, row.duration_minutes);
       compare("Officials", existing.officials_needed, row.officials_needed);
       compare("Notes", existing.notes || "", row.notes);
@@ -632,6 +778,7 @@ export default function GamesManagerV3({
             x.level_id === lv?.id,
         ),
         loc = locations.find((x) => norm(x.name) === norm(r.location)),
+        billTo = billTos.find((x) => norm(x.name) === norm(r.bill_to)),
         existing = r.game_number
           ? games.find((g) => norm(g.game_number) === norm(r.game_number))
           : undefined;
@@ -642,6 +789,7 @@ export default function GamesManagerV3({
       return {
         row: r.row,
         action: r.valid ? r.action : "skip",
+        organization_id: organizationId,
         game_id: existing?.id || null,
         game_number: r.game_number,
         sport_id: s?.id || null,
@@ -651,6 +799,7 @@ export default function GamesManagerV3({
         home_team_id: home?.id || null,
         away_team_id: away?.id || null,
         location_id: loc?.id || null,
+        bill_to_id: billTo?.id || null,
         starts_at: new Date(`${r.date}T${r.time}:00`).toISOString(),
         duration_minutes: r.duration_minutes,
         officials_needed: r.officials_needed,
@@ -690,6 +839,7 @@ export default function GamesManagerV3({
         Number(importError.match(/spreadsheet row (\d+)/i)?.[1] || 0) || null;
       const { data: userData } = await sb.auth.getUser();
       await sb.from("import_error_log").insert({
+        organization_id: organizationId || null,
         import_type: "games",
         error_message: importError,
         row_number: rowNumber,
@@ -700,11 +850,42 @@ export default function GamesManagerV3({
   }
   function template() {
     const csv =
-      "game_number,sport,league,level,home_team,away_team,date,time,location,duration_minutes,officials_needed,notes\n,Soccer,Approved League,U19,Approved Home Team,Approved Away Team,29-Aug-26,7:00 PM,Approved Location,110,3,Conference game\n";
+      "game_number,sport,league,level,home_team,away_team,date,time,location,duration_minutes,officials_needed,bill_to,notes\n,Soccer,Approved League,U19,Approved Home Team,Approved Away Team,29-Aug-26,7:00 PM,Approved Location,110,3,Approved Bill To,Conference game\n";
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     a.download = "refassign-game-import-template.csv";
     a.click();
+  }
+  async function addBillTo() {
+    const name = newBillToName.trim();
+    if (!name || !organizationId) return;
+    setBusy(true);
+    setError("");
+    const response = await fetch(
+      `/api/bill-tos?organizationId=${encodeURIComponent(organizationId)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      },
+    );
+    const result = (await response.json()) as {
+      billTo?: BillTo;
+      error?: string;
+    };
+    if (!response.ok || !result.billTo)
+      setError(result.error || "Bill To could not be added.");
+    else {
+      setBillTos((current) =>
+        [...current, result.billTo!].sort((a, b) =>
+          a.name.localeCompare(b.name),
+        ),
+      );
+      setForm((current) => ({ ...current, bill_to_id: result.billTo!.id }));
+      setNewBillToName("");
+      setMessage(`${result.billTo.name} added to Bill To options.`);
+    }
+    setBusy(false);
   }
   const filters: [Range, string][] = [
     ["all", "All Games"],
@@ -963,6 +1144,40 @@ export default function GamesManagerV3({
             </select>
           </label>
           <label>
+            Bill To <small>Optional</small>
+            <select
+              value={form.bill_to_id}
+              onChange={(e) => setForm({ ...form, bill_to_id: e.target.value })}
+            >
+              <option value="">Not selected</option>
+              {billTos.map((billTo) => (
+                <option key={billTo.id} value={billTo.id}>
+                  {billTo.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {canManageBillTos && (
+            <label>
+              Add a new Bill To
+              <span style={{ display: "flex", gap: 8 }}>
+                <input
+                  value={newBillToName}
+                  placeholder="Organization or customer name"
+                  onChange={(e) => setNewBillToName(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={busy || !newBillToName.trim()}
+                  onClick={() => void addBillTo()}
+                >
+                  Add
+                </button>
+              </span>
+            </label>
+          )}
+          <label>
             Officials Needed
             <input
               type="number"
@@ -1055,6 +1270,7 @@ export default function GamesManagerV3({
                       <th>Game</th>
                       <th>Date / Time</th>
                       <th>Length</th>
+                      <th>Bill To</th>
                       <th>Action</th>
                       <th>Proposed Changes</th>
                       <th>Validation</th>
@@ -1073,6 +1289,7 @@ export default function GamesManagerV3({
                           <small>{r.time}</small>
                         </td>
                         <td>{r.duration_minutes} min</td>
+                        <td>{r.bill_to || "Not selected"}</td>
                         <td>
                           <b
                             style={{
@@ -1136,6 +1353,74 @@ export default function GamesManagerV3({
       )}
       {error && <div className="errorBox">{error}</div>}
       {message && <div className="loginMessage">{message}</div>}
+      {pendingStatus && (
+        <div
+          className="assignmentDialogBackdrop"
+          role="presentation"
+          onMouseDown={() => !statusBusy && setPendingStatus(null)}
+        >
+          <div
+            className="assignmentDialog assignmentConfirmDialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="gamesStatusConfirmTitle"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="assignmentDialogHead">
+              <div>
+                <h3 id="gamesStatusConfirmTitle">Confirm Game Status</h3>
+                <p>
+                  Change Game #
+                  {games.find((game) => game.id === pendingStatus.gameId)
+                    ?.game_number || ""}{" "}
+                  to{" "}
+                  {statusOptions.find(
+                    ([value]) => value === pendingStatus.status,
+                  )?.[1] || pendingStatus.status}
+                  ?
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label="Close"
+                disabled={Boolean(statusBusy)}
+                onClick={() => setPendingStatus(null)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="assignmentConfirmMessage">
+              Assigned officials will be notified of this change.
+            </div>
+            <div className="assignmentDialogFooter">
+              <button
+                type="button"
+                className="secondary"
+                disabled={Boolean(statusBusy)}
+                onClick={() => setPendingStatus(null)}
+              >
+                Keep Current Status
+              </button>
+              <button
+                type="button"
+                className="danger"
+                disabled={Boolean(statusBusy)}
+                onClick={() =>
+                  void changeStatus(pendingStatus.gameId, pendingStatus.status)
+                }
+              >
+                {statusBusy
+                  ? "Updating…"
+                  : `Confirm ${
+                      statusOptions.find(
+                        ([value]) => value === pendingStatus.status,
+                      )?.[1] || "Change"
+                    }`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="tableWrap">
         <table>
           <thead>
@@ -1145,6 +1430,7 @@ export default function GamesManagerV3({
               <th>Game</th>
               <th>League / Level</th>
               <th>Location</th>
+              <th>Bill To</th>
               <th>Length</th>
               <th>Officials</th>
               <th>Status</th>
@@ -1185,6 +1471,10 @@ export default function GamesManagerV3({
                     </small>
                   </td>
                   <td>{g.location?.name || "TBD"}</td>
+                  <td>
+                    {billTos.find((billTo) => billTo.id === g.bill_to_id)
+                      ?.name || "—"}
+                  </td>
                   <td>{g.duration_minutes || 110} min</td>
                   <td>{g.officials_needed}</td>
                   <td>
@@ -1192,7 +1482,9 @@ export default function GamesManagerV3({
                       aria-label={`Status for ${g.game_number}`}
                       disabled={statusBusy === g.id}
                       value={g.status === "open" ? "active" : g.status}
-                      onChange={(e) => void changeStatus(g.id, e.target.value)}
+                      onChange={(e) =>
+                        requestStatusChange(g.id, e.target.value)
+                      }
                       style={{
                         minWidth: 120,
                         background: rainOut ? "#eff6ff" : "#fff",

@@ -20,12 +20,24 @@ export default function LoginPage() {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [officialInvitationId, setOfficialInvitationId] = useState("");
+  const [organizationSignup, setOrganizationSignup] = useState(false);
+  const [nextPath, setNextPath] = useState("/workspace");
 
   useEffect(() => {
     setTestMode(window.location.hostname === "test.ref-assign.com");
+    const query = new URLSearchParams(window.location.search);
+    const requestedNext = query.get("next") || "/workspace";
+    setNextPath(
+      requestedNext.startsWith("/") && !requestedNext.startsWith("//")
+        ? requestedNext
+        : "/workspace",
+    );
+    setOrganizationSignup(query.get("signup") === "organization");
+    if (query.get("account") === "official") setCreatingOfficial(true);
     const hash = new URLSearchParams(window.location.hash.slice(1));
-    const invitedEmail = hash.get("official");
-    const invitationId = hash.get("official_invite");
+    const invitedEmail = query.get("official") || hash.get("official");
+    const invitationId =
+      query.get("official_invite") || hash.get("official_invite");
     if (invitationId) {
       setOfficialInvitationId(invitationId);
       localStorage.setItem("refassign-official-invitation", invitationId);
@@ -51,7 +63,7 @@ export default function LoginPage() {
         setMessage(error.message);
         return;
       }
-      router.replace("/workspace");
+      router.replace(nextPath);
       router.refresh();
     } catch (err) {
       setMessage(
@@ -83,7 +95,9 @@ export default function LoginPage() {
             account_type: "official",
             official_invitation_id: officialInvitationId || undefined,
           },
-          emailRedirectTo: `${window.location.origin}/workspace${invitationQuery}`,
+          emailRedirectTo: officialInvitationId
+            ? `${window.location.origin}/workspace${invitationQuery}`
+            : `${window.location.origin}${nextPath}`,
           shouldCreateUser: true,
         },
       });
@@ -93,6 +107,57 @@ export default function LoginPage() {
       );
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Unable to create the official account.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function createOrganizationAccount(event: FormEvent) {
+    event.preventDefault();
+    setLoading(true);
+    setMessage("");
+    try {
+      const supabase = createClient();
+      const callback = `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`;
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: callback,
+          data: { account_type: "organization_owner" },
+        },
+      });
+      if (error) return setMessage(error.message);
+      if (data.user && (data.user.identities?.length ?? 0) === 0) {
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (!signInError) {
+          router.replace(nextPath);
+          router.refresh();
+          return;
+        }
+        setOrganizationSignup(false);
+        setMessage(
+          "This email already has a RefAssign account. Sign in with your existing password, or use Forgot password below.",
+        );
+        return;
+      }
+      if (data.session) {
+        router.replace(nextPath);
+        router.refresh();
+      } else {
+        setMessage(
+          "Account created. Confirm your email to continue organization setup.",
+        );
+      }
+    } catch (err) {
+      setMessage(
+        err instanceof Error
+          ? err.message
+          : "Unable to create the organization account.",
+      );
     } finally {
       setLoading(false);
     }
@@ -138,8 +203,8 @@ export default function LoginPage() {
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: {
-          emailRedirectTo: `${window.location.origin}/workspace`,
-          shouldCreateUser: true,
+          emailRedirectTo: `${window.location.origin}${nextPath}`,
+          shouldCreateUser: false,
         },
       });
       setMessage(
@@ -163,9 +228,9 @@ export default function LoginPage() {
           Ref<span>Assign</span>
         </div>
         <p>Sports Officials Management</p>
-        <h1>{creatingOfficial ? "Create official account" : "Sign in"}</h1>
-        <p>{creatingOfficial ? "Use the same email address your organization invited." : "Enter your email address and password."}</p>
-        <form onSubmit={creatingOfficial ? createOfficialAccount : signIn}>
+        <h1>{creatingOfficial ? "Create official account" : organizationSignup ? "Create organization account" : "Sign in"}</h1>
+        <p>{creatingOfficial ? "Use the same email address your organization invited." : organizationSignup ? "Create the owner login for your new RefAssign organization." : "Enter your email address and password."}</p>
+        <form onSubmit={creatingOfficial ? createOfficialAccount : organizationSignup ? createOrganizationAccount : signIn}>
           {creatingOfficial && <>
             <label>First name<input required autoComplete="given-name" value={firstName} onChange={(e) => setFirstName(e.target.value)} /></label>
             <label>Last name<input required autoComplete="family-name" value={lastName} onChange={(e) => setLastName(e.target.value)} /></label>
@@ -178,7 +243,7 @@ export default function LoginPage() {
               autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              readOnly={creatingOfficial && window.location.hash.includes("official=")}
+              readOnly={creatingOfficial && Boolean(officialInvitationId)}
               placeholder="you@example.com"
             />
           </label>
@@ -187,24 +252,25 @@ export default function LoginPage() {
             <input
               type="password"
               required
-            autoComplete={creatingOfficial ? "new-password" : "current-password"}
-            minLength={creatingOfficial ? 8 : undefined}
+            autoComplete={organizationSignup ? "new-password" : "current-password"}
+            minLength={organizationSignup ? 8 : undefined}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Password"
             />
           </label>}
           <button className="primary loginButton" disabled={loading}>
-            {loading ? "Please wait…" : creatingOfficial ? "Email my secure account link" : "Sign in"}
+            {loading ? "Please wait…" : creatingOfficial ? "Email my secure account link" : organizationSignup ? "Create account and continue" : "Sign in"}
           </button>
         </form>
+        {organizationSignup && <button type="button" className="secondary" style={{marginTop:10,width:"100%"}} onClick={()=>{setOrganizationSignup(false);setMessage("")}}>Already have an account? Sign in</button>}
         {testMode && <button type="button" className="secondary" style={{ marginTop: 10, width: "100%" }} onClick={() => { setCreatingOfficial((value) => !value); setMessage(""); }}>
           {creatingOfficial ? "Back to sign in" : "Invited official? Create test account"}
         </button>}
         <p style={{ textAlign: "center", marginTop: 16 }}>
           <a href="/register">New official? Start registration</a>
         </p>
-        {!creatingOfficial && <button
+        {!creatingOfficial && !organizationSignup && <button
           type="button"
           className="secondary"
           style={{ marginTop: 10, width: "100%" }}
@@ -213,7 +279,7 @@ export default function LoginPage() {
         >
           {sendingLink ? "Sending…" : "Email me a secure sign-in link"}
         </button>}
-        {!creatingOfficial && <button
+        {!creatingOfficial && !organizationSignup && <button
           type="button"
           className="secondary"
           style={{ marginTop: 10, width: "100%" }}

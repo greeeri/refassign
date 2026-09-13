@@ -15,7 +15,9 @@ async function loadDatabasePlans():Promise<DatabasePlan[]>{
 export default async function TierTestPage(){
  const enabled=process.env.REFASSIGN_TIER_TEST_MODE==="true"||(
   process.env.VERCEL_ENV==="preview"&&
-  process.env.VERCEL_GIT_COMMIT_REF==="feature/league-tier-foundation"
+  ["feature/league-tier-foundation","integration/league-workspace-safe"].includes(
+   process.env.VERCEL_GIT_COMMIT_REF||""
+  )
  );
  if(!enabled)notFound();
  const databasePlans=await loadDatabasePlans();

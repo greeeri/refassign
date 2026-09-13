@@ -30,14 +30,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ skipped: true, reason: "DST guard: not a requested Central Time run hour" });
   }
 
-  const { data: run, error: runError } = await supabase.from("schedule_sync_runs").insert({ source_system: SOURCE, source_event_id: EVENT_ID }).select("id").single();
+  const { data: targetLeague } = await supabase.from("leagues").select("id").eq("name", "N1").maybeSingle();
+  const { data: coverage } = targetLeague ? await supabase.from("organization_league_coverage").select("organization_id").eq("league_id", targetLeague.id).eq("active", true).order("created_at").limit(1).maybeSingle() : { data: null };
+  const organizationId = coverage?.organization_id || null;
+  const { data: run, error: runError } = await supabase.from("schedule_sync_runs").insert({ source_system: SOURCE, source_event_id: EVENT_ID, organization_id: organizationId }).select("id").single();
   if (runError) return NextResponse.json({ error: runError.message }, { status: 500 });
   const counts = { groups_checked: 0, games_found: 0, games_added: 0, games_updated: 0, games_cancelled: 0, games_skipped: 0 };
 
   try {
     const [{ data: sport }, { data: league }, { data: levels }, { data: cachedVenues }, groupIds, venueIndex] = await Promise.all([
       supabase.from("sports").select("id").eq("name", "Soccer").single(),
-      supabase.from("leagues").select("id").eq("name", "N1").single(),
+      targetLeague ? Promise.resolve({ data: targetLeague, error: null }) : supabase.from("leagues").select("id").eq("name", "N1").single(),
       supabase.from("levels").select("id,name,officials_needed").eq("active", true),
       supabase.from("schedule_sync_venues").select("source_venue_id,venue_name,address,city,state").eq("source_system", SOURCE).eq("source_event_id", EVENT_ID),
       fetchEventIndex(EVENT_ID),
@@ -120,7 +123,7 @@ export async function GET(req: NextRequest) {
         teamId(match.awayTeamId, match.awayTeam, level.id, level.name),
         locationId(match, venue),
       ]);
-      const payload = { game_number: match.number, sport_id: sport.id, league_id: league.id, level_id: level.id, level: level.name, home_team_id: home, away_team_id: away, location_id: location, starts_at: match.startsAt, duration_minutes: match.durationMinutes, officials_needed: level.officials_needed, status: match.cancelled ? "canceled" : "active", notes: `Synced from GotSport event ${EVENT_ID}, ${match.division}`, source_synced_at: new Date().toISOString() };
+      const payload = { game_number: match.number, organization_id: organizationId, sport_id: sport.id, league_id: league.id, level_id: level.id, level: level.name, home_team_id: home, away_team_id: away, location_id: location, starts_at: match.startsAt, duration_minutes: match.durationMinutes, officials_needed: level.officials_needed, status: match.cancelled ? "canceled" : "active", notes: `Synced from GotSport event ${EVENT_ID}, ${match.division}`, source_synced_at: new Date().toISOString() };
       const existing = gameBySource.get(match.id);
       if (existing) {
         const { error } = await supabase.from("games").update(payload).eq("id", existing.id);

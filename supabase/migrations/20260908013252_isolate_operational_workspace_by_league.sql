@@ -165,6 +165,14 @@ language sql stable security definer set search_path='' as $$
 $$;
 
 alter table public.games enable row level security;
+-- Retire the legacy role/contact policies before enabling organization and
+-- league scoped access. Leaving any permissive policy in place would bypass
+-- the isolation policies below.
+drop policy if exists "Contacts read allowed games" on public.games;
+drop policy if exists "Staff delete games" on public.games;
+drop policy if exists "Staff insert games" on public.games;
+drop policy if exists "Staff read games" on public.games;
+drop policy if exists "Staff update games" on public.games;
 drop policy if exists "Organization league users read games" on public.games;
 create policy "Organization league users read games"
 on public.games for select to authenticated
@@ -199,6 +207,11 @@ using (
 );
 
 alter table public.assignments enable row level security;
+drop policy if exists "Admin contacts read game assignments" on public.assignments;
+drop policy if exists "Managers create assignments" on public.assignments;
+drop policy if exists "Managers delete assignments" on public.assignments;
+drop policy if exists "Managers update assignments" on public.assignments;
+drop policy if exists "Managers view assignments" on public.assignments;
 drop policy if exists "Officials view own assignments" on public.assignments;
 drop policy if exists "Organization users read assignments" on public.assignments;
 create policy "Organization users read assignments"

@@ -27,6 +27,7 @@ type Assignment = {
   responded_at: string | null;
   decline_reason: string | null;
   response_token: string;
+  organization_name?: string;
 };
 type Crew = {
   assignment_id: string;
@@ -67,8 +68,14 @@ function icsDate(value: Date) {
     .replace(/\.\d{3}Z$/, "Z");
 }
 export default function OfficialDashboard({
+  organizationId,
+  organizationIds,
+  organizationNames = {},
   onNavigate,
 }: {
+  organizationId?: string;
+  organizationIds?: string[];
+  organizationNames?: Record<string,string>;
   onNavigate: (section: string) => void;
 }) {
   const supabase = useMemo(() => createClient(), []),
@@ -113,13 +120,21 @@ export default function OfficialDashboard({
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
-    const { data, error: loadError } = await supabase.rpc(
-      "my_official_assignments",
-    );
+    const scopeIds=organizationIds?.length?organizationIds:organizationId?[organizationId]:[];
+    if (!scopeIds.length) {
+      setRows([]);
+      setLoading(false);
+      return;
+    }
+    const results=await Promise.all(scopeIds.map(async id=>{
+      const result=await supabase.rpc("my_official_assignments",{p_organization_id:id});
+      return {...result,organizationId:id};
+    }));
+    const loadError=results.find(result=>result.error)?.error;
     if (loadError) setError(loadError.message);
-    else setRows((data || []) as Assignment[]);
+    else setRows(results.flatMap(result=>((result.data||[]) as Assignment[]).map(row=>({...row,organization_name:organizationNames[result.organizationId]}))));
     setLoading(false);
-  }, [supabase]);
+  }, [organizationId, organizationIds?.join("|"), organizationNames, supabase]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -261,7 +276,7 @@ export default function OfficialDashboard({
               <h2>
                 {next.home_team || "TBD"} vs {next.away_team || "TBD"}
               </h2>
-              <p>{next.game_number || "Game number pending"}</p>
+              <p>{next.game_number || "Game number pending"}{next.organization_name?` • ${next.organization_name}`:""}</p>
             </div>
             <span
               className={`badge ${next.status === "proposed" ? "yellow" : "green"}`}

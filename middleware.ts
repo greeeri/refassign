@@ -9,12 +9,17 @@ export function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
   if (
     hostname === "test.ref-assign.com" &&
-    (path === "/workspace" || path === "/login")
+    (path === "/workspace" ||
+      path === "/login" ||
+      path.startsWith("/join/league/"))
   )
     return NextResponse.next();
   const isTierPreview =
     process.env.VERCEL_ENV === "preview" &&
-    process.env.VERCEL_GIT_COMMIT_REF === "feature/league-tier-foundation";
+    [
+      "feature/league-tier-foundation",
+      "integration/league-workspace-safe",
+    ].includes(process.env.VERCEL_GIT_COMMIT_REF || "");
   if (!isTierPreview) return NextResponse.next();
   if (
     path.startsWith("/tier-test") ||

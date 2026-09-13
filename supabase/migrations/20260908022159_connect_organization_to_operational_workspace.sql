@@ -288,8 +288,11 @@ returns setof text language sql stable security definer set search_path='' as $$
 $$;
 
 create or replace function public.current_user_roles()
-returns setof text language sql stable set search_path='' as $$
-  select * from private.current_user_roles_impl()
+returns text[] language sql stable set search_path='' as $$
+  select coalesce(array_agg(role order by case role
+    when 'admin' then 1 when 'assignor' then 2 when 'league_admin' then 3
+    when 'registrar' then 4 when 'official' then 5 else 6 end),array[]::text[])
+  from private.current_user_roles_impl() role
 $$;
 
 revoke all on function private.valid_organization_league_ids(uuid,uuid[]) from public,anon,authenticated;

@@ -318,4 +318,255 @@ end $$;
 revoke all on function public.set_team_power(uuid,numeric) from public,anon;
 grant execute on function public.set_team_power(uuid,numeric) to authenticated;
 
+-- Replace the legacy global staff policies with organization-scoped access.
+-- Officials always retain access to their own availability data. Contacts only
+-- receive the sections explicitly selected by the organization owner/admin.
+drop policy if exists "Admins assignors manage soccer position ranks" on public.official_soccer_position_rankings;
+drop policy if exists "Admins assignors view soccer position ranks" on public.official_soccer_position_rankings;
+drop policy if exists "Organization members view position rankings" on public.official_soccer_position_rankings;
+drop policy if exists "Organization managers manage position rankings" on public.official_soccer_position_rankings;
+create policy "Organization users view position rankings"
+on public.official_soccer_position_rankings for select to authenticated
+using (exists (
+  select 1 from public.organization_officials oo
+  join public.organization_memberships m on m.organization_id=oo.organization_id
+  where oo.official_id=official_soccer_position_rankings.official_id and oo.active
+    and m.user_id=(select auth.uid())
+    and (m.role in ('owner','admin','assignor') or (m.role='viewer' and 'officials'=any(m.viewer_permissions)))
+));
+create policy "Organization managers insert position rankings"
+on public.official_soccer_position_rankings for insert to authenticated
+with check (exists (
+  select 1 from public.organization_officials oo join public.organization_memberships m on m.organization_id=oo.organization_id
+  where oo.official_id=official_soccer_position_rankings.official_id and oo.active
+    and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')
+));
+create policy "Organization managers update position rankings"
+on public.official_soccer_position_rankings for update to authenticated
+using (exists (
+  select 1 from public.organization_officials oo join public.organization_memberships m on m.organization_id=oo.organization_id
+  where oo.official_id=official_soccer_position_rankings.official_id and oo.active
+    and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')
+)) with check (exists (
+  select 1 from public.organization_officials oo join public.organization_memberships m on m.organization_id=oo.organization_id
+  where oo.official_id=official_soccer_position_rankings.official_id and oo.active
+    and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')
+));
+create policy "Organization managers delete position rankings"
+on public.official_soccer_position_rankings for delete to authenticated
+using (exists (
+  select 1 from public.organization_officials oo join public.organization_memberships m on m.organization_id=oo.organization_id
+  where oo.official_id=official_soccer_position_rankings.official_id and oo.active
+    and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')
+));
+
+drop policy if exists "Admins assignors manage official league eligibility" on public.official_league_eligibility;
+drop policy if exists "Staff read official league eligibility" on public.official_league_eligibility;
+drop policy if exists "Organization members view league eligibility" on public.official_league_eligibility;
+drop policy if exists "Organization managers manage league eligibility" on public.official_league_eligibility;
+create policy "Organization users view league eligibility"
+on public.official_league_eligibility for select to authenticated
+using (exists (
+  select 1 from public.organization_officials oo
+  join public.organization_league_coverage c on c.organization_id=oo.organization_id and c.league_id=official_league_eligibility.league_id and c.active
+  join public.organization_memberships m on m.organization_id=oo.organization_id
+  where oo.official_id=official_league_eligibility.official_id and oo.active and m.user_id=(select auth.uid())
+    and (m.role in ('owner','admin','assignor') or (m.role='viewer' and 'officials'=any(m.viewer_permissions)))
+));
+create policy "Organization managers insert league eligibility"
+on public.official_league_eligibility for insert to authenticated
+with check (exists (
+  select 1 from public.organization_officials oo
+  join public.organization_league_coverage c on c.organization_id=oo.organization_id and c.league_id=official_league_eligibility.league_id and c.active
+  join public.organization_memberships m on m.organization_id=oo.organization_id
+  where oo.official_id=official_league_eligibility.official_id and oo.active and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')
+));
+create policy "Organization managers update league eligibility"
+on public.official_league_eligibility for update to authenticated
+using (exists (
+  select 1 from public.organization_officials oo join public.organization_league_coverage c on c.organization_id=oo.organization_id and c.league_id=official_league_eligibility.league_id and c.active
+  join public.organization_memberships m on m.organization_id=oo.organization_id
+  where oo.official_id=official_league_eligibility.official_id and oo.active and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')
+)) with check (exists (
+  select 1 from public.organization_officials oo join public.organization_league_coverage c on c.organization_id=oo.organization_id and c.league_id=official_league_eligibility.league_id and c.active
+  join public.organization_memberships m on m.organization_id=oo.organization_id
+  where oo.official_id=official_league_eligibility.official_id and oo.active and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')
+));
+create policy "Organization managers delete league eligibility"
+on public.official_league_eligibility for delete to authenticated
+using (exists (
+  select 1 from public.organization_officials oo join public.organization_league_coverage c on c.organization_id=oo.organization_id and c.league_id=official_league_eligibility.league_id and c.active
+  join public.organization_memberships m on m.organization_id=oo.organization_id
+  where oo.official_id=official_league_eligibility.official_id and oo.active and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')
+));
+
+drop policy if exists "Admins assignors manage official level eligibility" on public.official_level_eligibility;
+drop policy if exists "Staff read official level eligibility" on public.official_level_eligibility;
+drop policy if exists "Organization members view level eligibility" on public.official_level_eligibility;
+drop policy if exists "Organization managers manage level eligibility" on public.official_level_eligibility;
+create policy "Organization users view level eligibility"
+on public.official_level_eligibility for select to authenticated
+using (exists (
+  select 1 from public.organization_officials oo join public.organization_memberships m on m.organization_id=oo.organization_id
+  where oo.official_id=official_level_eligibility.official_id and oo.active and m.user_id=(select auth.uid())
+    and (m.role in ('owner','admin','assignor') or (m.role='viewer' and 'officials'=any(m.viewer_permissions)))
+));
+create policy "Organization managers insert level eligibility"
+on public.official_level_eligibility for insert to authenticated
+with check (exists (
+  select 1 from public.organization_officials oo join public.organization_memberships m on m.organization_id=oo.organization_id
+  where oo.official_id=official_level_eligibility.official_id and oo.active and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')
+));
+create policy "Organization managers update level eligibility"
+on public.official_level_eligibility for update to authenticated
+using (exists (
+  select 1 from public.organization_officials oo join public.organization_memberships m on m.organization_id=oo.organization_id
+  where oo.official_id=official_level_eligibility.official_id and oo.active and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')
+)) with check (exists (
+  select 1 from public.organization_officials oo join public.organization_memberships m on m.organization_id=oo.organization_id
+  where oo.official_id=official_level_eligibility.official_id and oo.active and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')
+));
+create policy "Organization managers delete level eligibility"
+on public.official_level_eligibility for delete to authenticated
+using (exists (
+  select 1 from public.organization_officials oo join public.organization_memberships m on m.organization_id=oo.organization_id
+  where oo.official_id=official_level_eligibility.official_id and oo.active and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')
+));
+
+drop policy if exists "Admins assignors manage team power" on public.team_power_rankings;
+drop policy if exists "Admins assignors view team power" on public.team_power_rankings;
+drop policy if exists "Organization members view team power" on public.team_power_rankings;
+drop policy if exists "Organization managers manage team power" on public.team_power_rankings;
+create policy "Organization users view team power"
+on public.team_power_rankings for select to authenticated
+using (exists (
+  select 1 from public.organization_teams ot join public.organization_memberships m on m.organization_id=ot.organization_id
+  where ot.team_id=team_power_rankings.team_id and ot.active and m.user_id=(select auth.uid())
+    and (m.role in ('owner','admin','assignor') or (m.role='viewer' and 'games'=any(m.viewer_permissions)))
+));
+create policy "Organization managers insert team power"
+on public.team_power_rankings for insert to authenticated
+with check (exists (
+  select 1 from public.organization_teams ot join public.organization_memberships m on m.organization_id=ot.organization_id
+  where ot.team_id=team_power_rankings.team_id and ot.active and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')
+));
+create policy "Organization managers update team power"
+on public.team_power_rankings for update to authenticated
+using (exists (
+  select 1 from public.organization_teams ot join public.organization_memberships m on m.organization_id=ot.organization_id
+  where ot.team_id=team_power_rankings.team_id and ot.active and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')
+)) with check (exists (
+  select 1 from public.organization_teams ot join public.organization_memberships m on m.organization_id=ot.organization_id
+  where ot.team_id=team_power_rankings.team_id and ot.active and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')
+));
+create policy "Organization managers delete team power"
+on public.team_power_rankings for delete to authenticated
+using (exists (
+  select 1 from public.organization_teams ot join public.organization_memberships m on m.organization_id=ot.organization_id
+  where ot.team_id=team_power_rankings.team_id and ot.active and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')
+));
+
+drop policy if exists "Managers delete availability blocks" on public.official_availability_blocks;
+drop policy if exists "Officials create own blocks or managers create all" on public.official_availability_blocks;
+drop policy if exists "Officials update own blocks or managers update all" on public.official_availability_blocks;
+drop policy if exists "Officials view own blocks or managers view all" on public.official_availability_blocks;
+drop policy if exists "Officials and organization members view blocks" on public.official_availability_blocks;
+drop policy if exists "Officials and organization managers create blocks" on public.official_availability_blocks;
+drop policy if exists "Organization managers remove blocks" on public.official_availability_blocks;
+create policy "Officials and authorized organizations view blocks"
+on public.official_availability_blocks for select to authenticated
+using (
+  exists (select 1 from public.officials o where o.id=official_availability_blocks.official_id and o.auth_user_id=(select auth.uid()))
+  or exists (select 1 from public.organization_officials oo join public.organization_memberships m on m.organization_id=oo.organization_id
+    where oo.official_id=official_availability_blocks.official_id and oo.active and m.user_id=(select auth.uid())
+      and (m.role in ('owner','admin','assignor') or (m.role='viewer' and 'officials'=any(m.viewer_permissions))))
+);
+create policy "Officials and organization managers create blocks"
+on public.official_availability_blocks for insert to authenticated
+with check (
+  exists (select 1 from public.officials o where o.id=official_availability_blocks.official_id and o.auth_user_id=(select auth.uid()))
+  or exists (select 1 from public.organization_officials oo join public.organization_memberships m on m.organization_id=oo.organization_id
+    where oo.official_id=official_availability_blocks.official_id and oo.active and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor'))
+);
+create policy "Officials and organization managers update blocks"
+on public.official_availability_blocks for update to authenticated
+using (
+  exists (select 1 from public.officials o where o.id=official_availability_blocks.official_id and o.auth_user_id=(select auth.uid()))
+  or exists (select 1 from public.organization_officials oo join public.organization_memberships m on m.organization_id=oo.organization_id
+    where oo.official_id=official_availability_blocks.official_id and oo.active and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor'))
+) with check (
+  exists (select 1 from public.officials o where o.id=official_availability_blocks.official_id and o.auth_user_id=(select auth.uid()))
+  or exists (select 1 from public.organization_officials oo join public.organization_memberships m on m.organization_id=oo.organization_id
+    where oo.official_id=official_availability_blocks.official_id and oo.active and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor'))
+);
+create policy "Organization managers delete blocks"
+on public.official_availability_blocks for delete to authenticated
+using (exists (
+  select 1 from public.organization_officials oo join public.organization_memberships m on m.organization_id=oo.organization_id
+  where oo.official_id=official_availability_blocks.official_id and oo.active and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')
+));
+
+drop policy if exists "Managers review removal requests" on public.block_removal_requests;
+drop policy if exists "Officials request removal of own blocks" on public.block_removal_requests;
+drop policy if exists "Officials view own removal requests or managers view all" on public.block_removal_requests;
+drop policy if exists "Officials and organization members view removal requests" on public.block_removal_requests;
+drop policy if exists "Officials request block removal" on public.block_removal_requests;
+drop policy if exists "Organization managers review block removal" on public.block_removal_requests;
+create policy "Officials and authorized organizations view removal requests"
+on public.block_removal_requests for select to authenticated
+using (
+  exists (select 1 from public.officials o where o.id=block_removal_requests.official_id and o.auth_user_id=(select auth.uid()))
+  or exists (select 1 from public.organization_officials oo join public.organization_memberships m on m.organization_id=oo.organization_id
+    where oo.official_id=block_removal_requests.official_id and oo.active and m.user_id=(select auth.uid())
+      and (m.role in ('owner','admin','assignor') or (m.role='viewer' and 'officials'=any(m.viewer_permissions))))
+);
+create policy "Officials request own block removal"
+on public.block_removal_requests for insert to authenticated
+with check (exists (
+  select 1 from public.officials o where o.id=block_removal_requests.official_id and o.auth_user_id=(select auth.uid())
+));
+create policy "Organization managers review block removal"
+on public.block_removal_requests for update to authenticated
+using (exists (
+  select 1 from public.organization_officials oo join public.organization_memberships m on m.organization_id=oo.organization_id
+  where oo.official_id=block_removal_requests.official_id and oo.active and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')
+)) with check (exists (
+  select 1 from public.organization_officials oo join public.organization_memberships m on m.organization_id=oo.organization_id
+  where oo.official_id=block_removal_requests.official_id and oo.active and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')
+));
+
+drop policy if exists "Managers delete auto assign rules" on public.auto_assign_rules;
+drop policy if exists "Managers insert auto assign rules" on public.auto_assign_rules;
+drop policy if exists "Managers read auto assign rules" on public.auto_assign_rules;
+drop policy if exists "Managers update auto assign rules" on public.auto_assign_rules;
+drop policy if exists "Organization members view auto assign rules" on public.auto_assign_rules;
+drop policy if exists "Organization managers manage auto assign rules" on public.auto_assign_rules;
+create policy "Organization managers view auto assign rules" on public.auto_assign_rules for select to authenticated
+using (exists (select 1 from public.organization_memberships m where m.organization_id=auto_assign_rules.organization_id and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')));
+create policy "Organization managers insert auto assign rules" on public.auto_assign_rules for insert to authenticated
+with check (exists (select 1 from public.organization_memberships m where m.organization_id=auto_assign_rules.organization_id and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')));
+create policy "Organization managers update auto assign rules" on public.auto_assign_rules for update to authenticated
+using (exists (select 1 from public.organization_memberships m where m.organization_id=auto_assign_rules.organization_id and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')))
+with check (exists (select 1 from public.organization_memberships m where m.organization_id=auto_assign_rules.organization_id and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')));
+create policy "Organization managers delete auto assign rules" on public.auto_assign_rules for delete to authenticated
+using (exists (select 1 from public.organization_memberships m where m.organization_id=auto_assign_rules.organization_id and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')));
+
+drop policy if exists "Managers manage import errors" on public.import_error_log;
+drop policy if exists "Organization managers manage import errors" on public.import_error_log;
+create policy "Organization managers view import errors" on public.import_error_log for select to authenticated
+using (exists (select 1 from public.organization_memberships m where m.organization_id=import_error_log.organization_id and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')));
+create policy "Organization managers insert import errors" on public.import_error_log for insert to authenticated
+with check (exists (select 1 from public.organization_memberships m where m.organization_id=import_error_log.organization_id and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')));
+create policy "Organization managers update import errors" on public.import_error_log for update to authenticated
+using (exists (select 1 from public.organization_memberships m where m.organization_id=import_error_log.organization_id and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')))
+with check (exists (select 1 from public.organization_memberships m where m.organization_id=import_error_log.organization_id and m.user_id=(select auth.uid()) and m.role in ('owner','admin','assignor')));
+
+drop policy if exists "Managers view audit history" on public.audit_history;
+drop policy if exists "Organization members view audit history" on public.audit_history;
+create policy "Organization users view audit history" on public.audit_history for select to authenticated
+using (exists (
+  select 1 from public.organization_memberships m where m.organization_id=audit_history.organization_id and m.user_id=(select auth.uid())
+    and (m.role in ('owner','admin','assignor') or (m.role='viewer' and 'reporting'=any(m.viewer_permissions)))
+));
+
 notify pgrst, 'reload schema';

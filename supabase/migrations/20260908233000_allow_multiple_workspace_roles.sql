@@ -16,7 +16,7 @@ returns jsonb language sql stable security definer set search_path='' as $$
   ), access as (
     select organization_id,
       (array_agg(role order by priority))[1] role,
-      (array_agg(viewer_permissions order by priority))[1] viewer_permissions,
+      jsonb_agg(to_jsonb(viewer_permissions) order by priority)->0 viewer_permissions,
       array_agg(role order by priority) roles
     from access_candidates
     group by organization_id
@@ -37,4 +37,3 @@ returns jsonb language sql stable security definer set search_path='' as $$
     left join lateral (select * from public.refassign_subscriptions rs where rs.organization_id=o.id order by rs.created_at desc limit 1) s on true
   ) rows;
 $$;
-

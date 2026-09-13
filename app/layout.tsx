@@ -5,8 +5,10 @@ import "./brand-concept2.css";
 import "./officials-whistle.css";
 import "./iowa-approved-icon.css";
 import "./iowa-training.css";
+import "./iowa-training-upload.css";
 import "./iowa-quiz.css";
 import "./iowa-support.css";
+import "./assignment-center-upgrades.css";
 
 export const metadata = {
   title: "Ref Pro Group | Better Officiating, Connected",

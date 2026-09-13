@@ -1,7 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { geocodeVenue } from "../../../../lib/geocode";
-import { createServiceClient } from "../../../../lib/supabase/admin";
-import { createServerSupabaseClient } from "../../../../lib/supabase/server";
+import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
 
 type AddressRow = {
   id: string;
@@ -15,45 +14,53 @@ type AddressRow = {
 const addressText = (row: AddressRow) =>
   [row.address, row.city, row.state, row.zip].filter(Boolean).join(", ");
 
-export async function POST() {
-  const session = await createServerSupabaseClient();
-  const {
-    data: { user },
-  } = await session.auth.getUser();
-  if (!user)
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const { data: canManage } = await session.rpc("can_manage_game_setup");
-  if (!canManage)
-    return NextResponse.json(
-      { error: "Administrator or Assignor access is required." },
-      { status: 403 },
-    );
-
-  const service = createServiceClient();
-  const [locationsResult, officialsResult, originsResult] = await Promise.all([
+export async function POST(request: NextRequest) {
+  const context = await requireManagedOrganization(request);
+  if (context.error) return context.error;
+  const { service, organizationId } = context;
+  const [locationLinks, officialLinks] = await Promise.all([
     service
+      .from("organization_locations")
+      .select("location_id")
+      .eq("organization_id", organizationId)
+      .eq("active", true),
+    service
+      .from("organization_officials")
+      .select("official_id")
+      .eq("organization_id", organizationId)
+      .eq("active", true),
+  ]);
+  const linkError = locationLinks.error || officialLinks.error;
+  if (linkError)
+    return NextResponse.json({ error: linkError.message }, { status: 400 });
+  const locationIds = (locationLinks.data || []).map((row) => row.location_id);
+  const officialIds = (officialLinks.data || []).map((row) => row.official_id);
+  const [locationsResult, officialsResult, originsResult] = await Promise.all([
+    locationIds.length ? service
       .from("locations")
       .select("id,name,address,city,state")
+      .in("id", locationIds)
       .or("latitude.is.null,longitude.is.null")
-      .limit(100),
-    service
+      .limit(100) : Promise.resolve({ data: [], error: null }),
+    officialIds.length ? service
       .from("officials")
       .select(
         "id,address:home_address,city:home_city,state:home_state,zip:home_zip",
       )
+      .in("id", officialIds)
       .not("home_address", "is", null)
       .or("home_latitude.is.null,home_longitude.is.null")
-      .limit(100),
-    service
+      .limit(100) : Promise.resolve({ data: [], error: null }),
+    officialIds.length ? service
       .from("official_weekday_origins")
       .select(
         "id:official_id,weekday,address:alternate_address,city:alternate_city,state:alternate_state,zip:alternate_zip",
       )
+      .in("official_id", officialIds)
       .eq("use_home", false)
       .not("alternate_address", "is", null)
       .or("alternate_latitude.is.null,alternate_longitude.is.null")
-      .limit(100),
+      .limit(100) : Promise.resolve({ data: [], error: null }),
   ]);
 
   const queryError =

@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../lib/supabase/client";
 
 type Slot = {
+  organization_id: string;
+  organization_name: string;
   slot_id: string;
   game_id: string;
   game_number: string;
@@ -21,7 +23,15 @@ type Slot = {
   location_state: string | null;
 };
 
-export default function SelfAssignBoard() {
+type Props = {
+  organizationIds: string[];
+  organizationNames: Record<string, string>;
+};
+
+export default function SelfAssignBoard({
+  organizationIds,
+  organizationNames,
+}: Props) {
   const supabase = useMemo(() => createClient(), []);
   const [slots, setSlots] = useState<Slot[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,17 +42,47 @@ export default function SelfAssignBoard() {
   async function load() {
     setLoading(true);
     setError("");
-    const { data, error: loadError } = await supabase.rpc(
-      "list_my_self_assign_positions",
+    if (!organizationIds.length) {
+      setSlots([]);
+      setLoading(false);
+      return;
+    }
+    const results = await Promise.all(
+      organizationIds.map(async (organizationId) => {
+        const result = await supabase.rpc("list_my_self_assign_positions", {
+          p_organization_id: organizationId,
+        });
+        return { organizationId, ...result };
+      }),
     );
-    if (loadError) setError(loadError.message);
-    else setSlots((data || []) as Slot[]);
+    const failed = results.find((result) => result.error);
+    if (failed?.error) {
+      setSlots([]);
+      setError(failed.error.message);
+    } else
+      setSlots(
+        results
+          .flatMap((result) =>
+            ((result.data || []) as Omit<Slot, "organization_id" | "organization_name">[]).map(
+              (slot) => ({
+                ...slot,
+                organization_id: result.organizationId,
+                organization_name:
+                  organizationNames[result.organizationId] || "Organization",
+              }),
+            ),
+          )
+          .sort(
+            (a, b) =>
+              new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime(),
+          ),
+      );
     setLoading(false);
   }
 
   useEffect(() => {
     void load();
-  }, [supabase]);
+  }, [organizationIds, organizationNames, supabase]);
 
   async function claim(slot: Slot) {
     if (
@@ -56,7 +96,10 @@ export default function SelfAssignBoard() {
     setNotice("");
     const { error: claimError } = await supabase.rpc(
       "claim_self_assign_position",
-      { p_slot_id: slot.slot_id },
+      {
+        p_slot_id: slot.slot_id,
+        p_organization_id: slot.organization_id,
+      },
     );
     if (claimError) setError(claimError.message);
     else setNotice("The game has been added to My Schedule as an accepted assignment.");
@@ -83,13 +126,37 @@ export default function SelfAssignBoard() {
       {notice && <div className="loginMessage">{notice}</div>}
       {loading ? (
         <p>Loading open positions…</p>
-      ) : slots.length ? (
-        <div className="tableWrap">
+      ) : (
+        <>
+          <div className="selfAssignOrganizationSummary">
+            {organizationIds.map((organizationId) => {
+              const available = slots.filter(
+                (slot) => slot.organization_id === organizationId,
+              ).length;
+              return (
+                <div className="selfAssignOrganizationStatus" key={organizationId}>
+                  <b>{organizationNames[organizationId] || "Organization"}</b>
+                  <span className={available ? "badge green" : "badge gray"}>
+                    {available} available to you
+                  </span>
+                  {!available && (
+                    <small>
+                      No qualified, conflict-free Self Assign positions are
+                      currently available for your account.
+                    </small>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {slots.length ? (
+            <div className="tableWrap">
           <table>
             <thead>
               <tr>
                 <th>Date &amp; Time</th>
                 <th>Game</th>
+                {organizationIds.length > 1 && <th>Organization</th>}
                 <th>League / Level</th>
                 <th>Location</th>
                 <th>Position</th>
@@ -116,6 +183,9 @@ export default function SelfAssignBoard() {
                       </b>
                       <small>{slot.game_number}</small>
                     </td>
+                    {organizationIds.length > 1 && (
+                      <td>{slot.organization_name}</td>
+                    )}
                     <td>
                       {slot.league_name || "Any league"}
                       <small>{slot.level_name || "Any level"}</small>
@@ -147,12 +217,18 @@ export default function SelfAssignBoard() {
               })}
             </tbody>
           </table>
-        </div>
-      ) : (
-        <div className="emptyState">
-          <h3>No Self Assign positions are open</h3>
-          <p>New qualified positions will appear here when an assignor opens them.</p>
-        </div>
+            </div>
+          ) : (
+            <div className="emptyState">
+              <h3>No Self Assign positions are available to you</h3>
+              <p>
+                A position can be open to other officials but hidden from your
+                account when you do not match its qualifications or already
+                have an overlapping game.
+              </p>
+            </div>
+          )}
+        </>
       )}
     </section>
   );

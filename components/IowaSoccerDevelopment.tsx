@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../lib/supabase/client";
 import IowaTrainingSupportActions from "./IowaTrainingSupportActions";
+import TrainingCardQuiz from "./TrainingCardQuiz";
 type Module = {
   id: string;
   title: string;
@@ -18,6 +19,8 @@ type Module = {
   course_end_at: string | null;
   content_type: "resource" | "quiz";
   quiz_key: string | null;
+  quiz_id: string | null;
+  level_key: string;
 };
 type Progress = {
   module_id: string;
@@ -49,6 +52,13 @@ const categories = [
   "Fitness",
   "Professionalism",
 ];
+const developmentLevels = [
+  { key: "u8_referee", label: "U8 Referee", short: "U8", icon: "1" },
+  { key: "u10_referee", label: "U10 Referee", short: "U10", icon: "2" },
+  { key: "u11_ar", label: "U11 AR", short: "U11", icon: "3" },
+  { key: "u12_ar", label: "U12 AR", short: "U12", icon: "4" },
+  { key: "u13_referee", label: "U13 Referee", short: "U13", icon: "5" },
+];
 const categoryIcon = (c: string) =>
   c.includes("Law")
     ? "▣"
@@ -65,7 +75,13 @@ const categoryIcon = (c: string) =>
               : c.includes("Fitness")
                 ? "✚"
                 : "★";
-export default function IowaSoccerDevelopment() {
+const lockedLabel = (done: boolean, unlocked: boolean, completed: number, total: number) =>
+  done ? "Level complete" : unlocked ? `${completed} of ${total} modules` : "Not approved";
+export default function IowaSoccerDevelopment({
+  onBack,
+}: {
+  onBack: () => void;
+}) {
   const supabase = useMemo(() => createClient(), []),
     [officialId, setOfficialId] = useState(""),
     [modules, setModules] = useState<Module[]>([]),
@@ -79,7 +95,8 @@ export default function IowaSoccerDevelopment() {
     [category, setCategory] = useState("All Categories"),
     [busy, setBusy] = useState(""),
     [error, setError] = useState(""),
-    [activeQuiz, setActiveQuiz] = useState<Module | null>(null);
+    [activeQuiz, setActiveQuiz] = useState<Module | null>(null),
+    [cardQuiz, setCardQuiz] = useState<Module | null>(null);
   async function load() {
     setError("");
     const {
@@ -106,7 +123,7 @@ export default function IowaSoccerDevelopment() {
       supabase
         .from("development_modules")
         .select(
-          "id,title,description,category,resource_url,required,sort_order,delivery_type,registration_url,payment_required,payment_url,course_start_at,course_end_at,content_type,quiz_key",
+          "id,title,description,category,resource_url,required,sort_order,delivery_type,registration_url,payment_required,payment_url,course_start_at,course_end_at,content_type,quiz_key,quiz_id,level_key",
         )
         .eq("program_id", program.id)
         .eq("active", true)
@@ -239,16 +256,27 @@ export default function IowaSoccerDevelopment() {
   const completed = modules.filter(
       (m) => progress[m.id]?.status === "completed",
     ),
-    required = modules.filter((m) => m.required),
     remaining = modules.length - completed.length,
     percent = modules.length
       ? Math.round((completed.length / modules.length) * 100)
       : 0,
-    next =
-      required.find((m) => progress[m.id]?.status !== "completed") ||
-      modules.find((m) => progress[m.id]?.status !== "completed"),
+    levelComplete = (levelIndex: number) => {
+      const levelModules = modules.filter((m) => m.level_key === developmentLevels[levelIndex].key);
+      return levelModules.length > 0 && levelModules.every((m) => progress[m.id]?.status === "completed");
+    },
+    levelUnlocked = (levelIndex: number) => levelIndex === 0 || developmentLevels
+      .slice(0, levelIndex)
+      .every((_, index) => levelComplete(index)),
+    currentLevelIndex = developmentLevels.findIndex((_, index) => levelUnlocked(index) && !levelComplete(index)),
+    next = modules.find((m) => {
+      const levelIndex = developmentLevels.findIndex((level) => level.key === m.level_key);
+      return levelUnlocked(levelIndex) && progress[m.id]?.status !== "completed";
+    }),
     recommended = modules
-      .filter((m) => !m.required && progress[m.id]?.status !== "completed")
+      .filter((m) => {
+        const levelIndex = developmentLevels.findIndex((level) => level.key === m.level_key);
+        return !m.required && levelUnlocked(levelIndex) && progress[m.id]?.status !== "completed";
+      })
       .slice(0, 3),
     filtered = modules.filter(
       (m) =>
@@ -273,21 +301,44 @@ export default function IowaSoccerDevelopment() {
     return `${start.toLocaleDateString()} • ${start.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}${end ? ` – ${end.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}`;
   }
   function openQuiz(m: Module) {
-    setActiveQuiz(m);
+    if (m.quiz_id) setCardQuiz(m);
+    else setActiveQuiz(m);
     if (progress[m.id]?.status !== "completed")
       void setStatus(m.id, "in_progress");
   }
-  function action(m: Module) {
+  function action(m: Module, locked = false) {
+    if (locked) return <button className="trainingAction locked" disabled>Not Approved</button>;
     const reg = registrations[m.id],
-      status = progress[m.id]?.status;
-    if (m.content_type === "quiz")
+      status = progress[m.id]?.status,
+      hasUploadedMaterial = Boolean(
+        m.resource_url?.includes("/iowa-training-materials/"),
+      ),
+      resourceLabel = hasUploadedMaterial ? "Open Material" : "Watch Video";
+    if (m.content_type === "quiz" || m.quiz_id)
       return (
-        <button
-          className={`trainingAction ${status === "completed" ? "secondary" : ""}`}
-          onClick={() => openQuiz(m)}
-        >
-          {status === "completed" ? "Review / Retake" : "Start Test"}
-        </button>
+        <div className="trainingCardActions">
+          {m.quiz_id && m.resource_url && (
+            <button
+              className="trainingAction secondary"
+              onClick={() => {
+                void setStatus(m.id, "in_progress");
+                window.open(m.resource_url!, "_blank");
+              }}
+            >
+              {resourceLabel}
+            </button>
+          )}
+          <button
+            className={`trainingAction ${status === "completed" ? "secondary" : ""}`}
+            onClick={() => openQuiz(m)}
+          >
+            {status === "completed"
+              ? "Review / Retake Quiz"
+              : m.quiz_id
+                ? "Take Quiz"
+                : "Start Test"}
+          </button>
+        </div>
       );
     if (status === "completed")
       return (
@@ -297,7 +348,19 @@ export default function IowaSoccerDevelopment() {
             m.resource_url && window.open(m.resource_url, "_blank")
           }
         >
-          Review
+          {hasUploadedMaterial ? "Open Material" : "Review"}
+        </button>
+      );
+    if (m.delivery_type === "in_person" && reg?.status === "approved")
+      return (
+        <button
+          className="trainingAction"
+          disabled={!m.registration_url}
+          onClick={() =>
+            m.registration_url && window.open(m.registration_url, "_blank")
+          }
+        >
+          Registration
         </button>
       );
     if (reg?.status === "approved")
@@ -309,7 +372,7 @@ export default function IowaSoccerDevelopment() {
             if (m.resource_url) window.open(m.resource_url, "_blank");
           }}
         >
-          Start Training
+          {hasUploadedMaterial ? "Open Material" : "Start Training"}
         </button>
       );
     if (reg?.status === "pending")
@@ -335,22 +398,26 @@ export default function IowaSoccerDevelopment() {
         onClick={() => void register(m)}
       >
         {m.delivery_type === "self_led"
-          ? "Start Training"
+          ? hasUploadedMaterial
+            ? "Open Material"
+            : "Start Training"
           : m.payment_required
             ? "Register & Pay"
             : "Register"}
       </button>
     );
   }
-  function moduleCard(m: Module) {
+  function moduleCard(m: Module, locked = false) {
     const status = progress[m.id]?.status || "not_started",
       when = schedule(m);
     return (
-      <article className="trainingModule" key={m.id}>
+      <article className={`trainingModule ${locked ? "locked" : ""}`} key={m.id}>
         <div
           className={`trainingStatus ${status === "completed" ? "complete" : ""}`}
         >
-          {status === "completed"
+          {locked
+            ? "🔒 Not Approved"
+            : status === "completed"
             ? "✓ Completed"
             : status === "in_progress"
               ? "▶ In Progress"
@@ -369,7 +436,7 @@ export default function IowaSoccerDevelopment() {
           </div>
         )}
         <p>{m.description}</p>
-        {action(m)}
+        {action(m, locked)}
       </article>
     );
   }
@@ -378,10 +445,37 @@ export default function IowaSoccerDevelopment() {
       .from("iowa-training-materials")
       .getPublicUrl(`materials/${name}`).data.publicUrl;
   }
+  if (cardQuiz)
+    return (
+      <div className="standaloneQuiz">
+        <TrainingCardQuiz
+          moduleId={cardQuiz.id}
+          onClose={() => setCardQuiz(null)}
+          onPassed={(completedAt) => {
+            setProgress((old) => ({
+              ...old,
+              [cardQuiz.id]: {
+                module_id: cardQuiz.id,
+                status: "completed",
+                completed_at: completedAt,
+              },
+            }));
+          }}
+        />
+      </div>
+    );
   return (
     <div className="iowaTrainingPage">
       <section className="iowaTrainingTitle">
         <div>
+          <button
+            type="button"
+            className="trainingAction secondary"
+            style={{ marginBottom: 12 }}
+            onClick={onBack}
+          >
+            ← Back to Official Dashboard
+          </button>
           <h2>Training</h2>
           <p>
             <b style={{ color: "#0878f9" }}>
@@ -433,20 +527,44 @@ export default function IowaSoccerDevelopment() {
           )}
         </article>
       </section>
+      <section className="trainingJourney" aria-label="Referee development level progression">
+        <div className="trainingJourneyHead">
+          <div><span className="journeyEyebrow">YOUR REFEREE PATH</span><h3>Level up as your skills grow</h3></div>
+          <strong>{currentLevelIndex < 0 ? "Path complete!" : `Current level: ${developmentLevels[currentLevelIndex].label}`}</strong>
+        </div>
+        <div className="levelTrail">
+          {developmentLevels.map((level, index) => {
+            const unlocked = levelUnlocked(index), done = levelComplete(index), levelModules = modules.filter((m) => m.level_key === level.key), levelDone = levelModules.filter((m) => progress[m.id]?.status === "completed").length;
+            return <div className={`levelStop ${done ? "complete" : unlocked ? "current" : "locked"}`} key={level.key}>
+              <div className="levelMedal">{done ? "✓" : unlocked ? level.icon : "🔒"}</div>
+              <div><b>{level.label}</b><span>{lockedLabel(done, unlocked, levelDone, levelModules.length)}</span></div>
+            </div>;
+          })}
+        </div>
+      </section>
       <section className="trainingSection">
         <div className="trainingSectionHead">
           <div>
-            <h3>▣ &nbsp; Required Training</h3>
-            <p>Complete all required training modules for Iowa Soccer.</p>
+            <h3>⚽ &nbsp; Development Levels</h3>
+            <p>Complete every module in a level to earn approval for the next one.</p>
           </div>
         </div>
-        <div className="trainingGrid">{required.map(moduleCard)}</div>
+        <div className="developmentLevelSections">
+          {developmentLevels.map((level, index) => {
+            const levelModules = modules.filter((m) => m.level_key === level.key), unlocked = levelUnlocked(index), done = levelComplete(index);
+            return <section className={`developmentLevel ${unlocked ? "unlocked" : "locked"}`} key={level.key}>
+              <div className="developmentLevelHead"><div><span>LEVEL {index + 1}</span><h4>{level.label}</h4></div><span className={`levelPill ${done ? "complete" : unlocked ? "current" : "locked"}`}>{done ? "✓ Complete" : unlocked ? "Approved" : "🔒 Not Approved"}</span></div>
+              {!unlocked && <p className="levelLockMessage">Complete all modules in {developmentLevels[index - 1].label} to unlock this level.</p>}
+              <div className="trainingGrid">{levelModules.length ? levelModules.map((m) => moduleCard(m, !unlocked)) : <p className="emptyLevel">Modules will appear here when assigned by Iowa Soccer.</p>}</div>
+            </section>;
+          })}
+        </div>
       </section>
       {recommended.length > 0 && (
         <section className="trainingSection">
           <h3>◎ &nbsp; Recommended for You</h3>
           <div className="trainingRecommended">
-            {recommended.map(moduleCard)}
+            {recommended.map((module) => moduleCard(module))}
           </div>
         </section>
       )}
@@ -491,26 +609,33 @@ export default function IowaSoccerDevelopment() {
         </div>
         {search || category !== "All Categories" ? (
           <div className="trainingGrid" style={{ marginTop: 14 }}>
-            {filtered.map(moduleCard)}
+            {filtered.map((module) => {
+              const levelIndex = developmentLevels.findIndex((level) => level.key === module.level_key);
+              return moduleCard(module, !levelUnlocked(levelIndex));
+            })}
           </div>
         ) : null}
         {files.length > 0 && (
-          <div className="trainingAdminFiles">
-            {files.map((f) => (
-              <div key={f.name}>
-                <span>
-                  <b>{f.name.replace(/^\d+-/, "")}</b>
-                </span>
-                <a
-                  className="trainingAction secondary"
-                  href={fileUrl(f.name)}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Open Material
-                </a>
-              </div>
-            ))}
+          <div className="trainingUploadedMaterials">
+            <h4>Uploaded Materials</h4>
+            <p>Files shared by Iowa Soccer for training and reference.</p>
+            <div className="trainingAdminFiles">
+              {files.map((f) => (
+                <div key={f.name}>
+                  <span>
+                    <b>{f.name.replace(/^\d+-/, "")}</b>
+                  </span>
+                  <a
+                    className="trainingAction secondary"
+                    href={fileUrl(f.name)}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open Material
+                  </a>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </section>

@@ -10,6 +10,7 @@ let tierTestBrowserClient: ReturnType<typeof createBrowserClient> | undefined
 export function isTierTestRuntime() {
   if (typeof window === 'undefined') return false
   return window.location.hostname === 'test.ref-assign.com' ||
+    window.location.hostname === 'refassign-git-integration-league-workspace-safe-ref-pro.vercel.app' ||
     process.env.NEXT_PUBLIC_SUPABASE_URL === testUrl
 }
 

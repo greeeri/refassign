@@ -5,6 +5,7 @@ import { coordinatesForVenue } from "../lib/client-geocode";
 import TeamsRosterManager from "./TeamsRosterManager";
 import LocationsRosterManager from "./LocationsRosterManager";
 import LeagueDocumentsManager from "./LeagueDocumentsManager";
+import SharedDirectorySearch from "./SharedDirectorySearch";
 type Sport = { id: string; name: string };
 type Level = { id: string; name: string; officials_needed: number };
 type MileagePlan = "one_way" | "round_trip" | "actual" | "none";
@@ -89,6 +90,7 @@ export default function GameSetup({
     ),
     [leagueDrafts, setLeagueDrafts] = useState<Record<string, MileagePlan>>({}),
     [savingLeagueId, setSavingLeagueId] = useState(""),
+    [copyingLeagueId, setCopyingLeagueId] = useState(""),
     [leagueMessage, setLeagueMessage] = useState(""),
     [savingPower, setSavingPower] = useState(""),
     [showTeamImport, setShowTeamImport] = useState(false),
@@ -99,9 +101,40 @@ export default function GameSetup({
       [],
     ),
     [searchingLocations, setSearchingLocations] = useState(false),
+    [savingLocation, setSavingLocation] = useState(false),
     [connectingLocation, setConnectingLocation] = useState(""),
     [locationMessage, setLocationMessage] = useState(""),
+    [locationSaveMessage, setLocationSaveMessage] = useState(""),
     [locationSource, setLocationSource] = useState<"system" | "all">("system");
+
+  async function copyLeagueConnectionLink(league: League) {
+    if (!organizationId) return;
+    setCopyingLeagueId(league.id);
+    setError("");
+    setLeagueMessage("");
+    const { data, error: linkError } = await supabase.rpc(
+      "get_or_create_league_connection_link",
+      {
+        p_organization_id: organizationId,
+        p_league_id: league.id,
+        p_regenerate: false,
+      },
+    );
+    if (linkError || !data) {
+      setError(linkError?.message || "The league connection link could not be created.");
+      setCopyingLeagueId("");
+      return;
+    }
+    const link = `${window.location.origin}/join/league/${data}`;
+    try {
+      await navigator.clipboard.writeText(link);
+      setLeagueMessage(`${league.name} official connection link copied.`);
+    } catch {
+      window.prompt("Copy this official connection link:", link);
+      setLeagueMessage(`${league.name} official connection link is ready.`);
+    }
+    setCopyingLeagueId("");
+  }
 
   async function searchLocations(e: FormEvent) {
     e.preventDefault();
@@ -231,7 +264,12 @@ export default function GameSetup({
           )
           .eq("active", true)
           .order("name");
-    const [s, l, lg, t, loc, pw] = await Promise.all([
+    const organizationSetupRequest = organizationId
+      ? supabase.rpc("get_organization_setup_directory", {
+          p_organization_id: organizationId,
+        })
+      : Promise.resolve({ data: null, error: null });
+    const [s, l, lg, t, loc, pw, organizationSetup] = await Promise.all([
       supabase
         .from("sports")
         .select("id,name")
@@ -252,10 +290,17 @@ export default function GameSetup({
         .select("id,name,sport_id,level_id,level")
         .order("name"),
       locationRequest,
-      supabase.from("team_power_rankings").select("team_id,power"),
+      supabase.from("assignor_team_power_rankings").select("team_id,power"),
+      organizationSetupRequest,
     ]);
     const err =
-      s.error || l.error || lg.error || t.error || loc.error || pw.error;
+      s.error ||
+      l.error ||
+      lg.error ||
+      t.error ||
+      loc.error ||
+      pw.error ||
+      organizationSetup.error;
     if (err) setError(err.message);
     else {
       const powerMap: Record<string, number> = {};
@@ -263,17 +308,28 @@ export default function GameSetup({
         powerMap[item.team_id] = Number(item.power);
       });
       setSports(s.data || []);
-      setLevels((l.data || []) as Level[]);
-      setLeagues(lg.data || []);
+      const scoped = organizationSetup.data as {
+        leagues: League[];
+        levels: Level[];
+        teams: Team[];
+      } | null;
+      const visibleLevels = organizationId
+        ? scoped?.levels || []
+        : ((l.data || []) as Level[]);
+      const visibleLeagues = organizationId
+        ? scoped?.leagues || []
+        : ((lg.data || []) as League[]);
+      const visibleTeams = organizationId
+        ? scoped?.teams || []
+        : ((t.data || []) as Team[]);
+      setLevels(visibleLevels);
+      setLeagues(visibleLeagues);
       setLeagueDrafts(
         Object.fromEntries(
-          ((lg.data || []) as League[]).map((league) => [
-            league.id,
-            league.mileage_plan,
-          ]),
+          visibleLeagues.map((league) => [league.id, league.mileage_plan]),
         ),
       );
-      setTeams(t.data || []);
+      setTeams(visibleTeams);
       setPowers(powerMap);
       setLocations((loc.data || []) as Location[]);
     }
@@ -288,9 +344,15 @@ export default function GameSetup({
       setError("Officials Needed must be a whole number from 1-20.");
       return;
     }
-    const r = await supabase
-      .from("levels")
-      .insert({ name: levelName.trim(), officials_needed: n });
+    const r = organizationId
+      ? await supabase.rpc("create_or_connect_organization_level", {
+          p_organization_id: organizationId,
+          p_name: levelName.trim(),
+          p_officials_needed: n,
+        })
+      : await supabase
+          .from("levels")
+          .insert({ name: levelName.trim(), officials_needed: n });
     if (r.error) setError(r.error.message);
     else {
       setLevelName("");
@@ -365,7 +427,14 @@ export default function GameSetup({
     };
     const r = editingTeamId
       ? await supabase.from("teams").update(payload).eq("id", editingTeamId)
-      : await supabase.from("teams").insert(payload);
+      : organizationId
+        ? await supabase.rpc("create_or_connect_organization_team", {
+            p_organization_id: organizationId,
+            p_name: payload.name,
+            p_sport_id: payload.sport_id,
+            p_level_id: payload.level_id,
+          })
+        : await supabase.from("teams").insert(payload);
     if (r.error) setError(r.error.message);
     else {
       setTeam({ name: "", sport_id: "", level_id: "" });
@@ -389,7 +458,7 @@ export default function GameSetup({
     }
     setSavingPower(teamId);
     setError("");
-    const { error: e } = await supabase.rpc("set_team_power", {
+    const { error: e } = await supabase.rpc("set_my_team_power", {
       p_team_id: teamId,
       p_power: Math.round(power * 10) / 10,
     });
@@ -398,7 +467,11 @@ export default function GameSetup({
   }
   async function saveLocation(e: FormEvent) {
     e.preventDefault();
+    if (savingLocation) return;
+    setSavingLocation(true);
     setError("");
+    setLocationSaveMessage("");
+    let geocodeWarning = "";
     let coordinates: { latitude: number | null; longitude: number | null } = {
       latitude: null,
       longitude: null,
@@ -412,12 +485,10 @@ export default function GameSetup({
           location.name,
         );
       } catch (geocodeError) {
-        setError(
+        geocodeWarning =
           geocodeError instanceof Error
             ? geocodeError.message
-            : "The venue address could not be located.",
-        );
-        return;
+            : "The venue address could not be located.";
       }
     }
     const payload = {
@@ -460,8 +531,9 @@ export default function GameSetup({
             .update(payload)
             .eq("id", editingLocationId)
         : await supabase.from("locations").insert(payload);
-    if (r.error) setError(r.error.message);
-    else {
+    if (r.error) {
+      setError(r.error.message);
+    } else {
       setLocation({
         name: "",
         address: "",
@@ -476,8 +548,16 @@ export default function GameSetup({
         contact_email: "",
       });
       setEditingLocationId(null);
-      load();
+      setLocationSaveMessage(
+        `${editingLocationId ? "Location updated" : "Location added"}.${
+          geocodeWarning
+            ? " Its map coordinates could not be found automatically, but you can edit the address later."
+            : ""
+        }`,
+      );
+      await load();
     }
+    setSavingLocation(false);
   }
   function editLocation(v: Location) {
     setEditingLocationId(v.id);
@@ -505,7 +585,15 @@ export default function GameSetup({
       )
     )
       return;
-    const r = await supabase.from(table).delete().eq("id", id);
+    const entity = table.slice(0, -1);
+    const r =
+      organizationId && table !== "locations"
+        ? await supabase.rpc("disconnect_shared_directory_record", {
+            p_organization_id: organizationId,
+            p_entity: entity,
+            p_record_id: id,
+          })
+        : await supabase.from(table).delete().eq("id", id);
     if (r.error) setError(r.error.message);
     else load();
   }
@@ -527,6 +615,13 @@ export default function GameSetup({
         <section className="card">
           <h2>Leagues</h2>
           {leagueMessage && <div className="loginMessage">{leagueMessage}</div>}
+          {organizationId && (
+            <SharedDirectorySearch
+              organizationId={organizationId}
+              entity="league"
+              onConnected={load}
+            />
+          )}
           <form className="toolbar" onSubmit={addLeague}>
             <input
               required
@@ -555,6 +650,7 @@ export default function GameSetup({
                 <tr>
                   <th>League</th>
                   <th>Mileage Plan</th>
+                  <th>Official Connection</th>
                   <th>Documents &amp; Policies</th>
                   <th></th>
                 </tr>
@@ -609,6 +705,18 @@ export default function GameSetup({
                         <button
                           className="secondary"
                           type="button"
+                          disabled={copyingLeagueId === l.id}
+                          onClick={() => void copyLeagueConnectionLink(l)}
+                        >
+                          {copyingLeagueId === l.id
+                            ? "Preparing…"
+                            : "Copy official link"}
+                        </button>
+                      </td>
+                      <td>
+                        <button
+                          className="secondary"
+                          type="button"
                           onClick={() =>
                             setOpenLeagueDocuments(
                               openLeagueDocuments === l.id ? null : l.id,
@@ -631,7 +739,7 @@ export default function GameSetup({
                     </tr>
                     {openLeagueDocuments === l.id && (
                       <tr className="leagueDocumentsTableRow">
-                        <td colSpan={4}>
+                        <td colSpan={5}>
                           <LeagueDocumentsManager
                             leagueId={l.id}
                             leagueName={l.name}
@@ -653,6 +761,13 @@ export default function GameSetup({
             Set the required number of officials independently for each game
             level.
           </p>
+          {organizationId && (
+            <SharedDirectorySearch
+              organizationId={organizationId}
+              entity="level"
+              onConnected={load}
+            />
+          )}
           <form className="toolbar" onSubmit={addLevel}>
             <input
               required
@@ -720,8 +835,9 @@ export default function GameSetup({
             <div>
               <h2>Teams & Power Rankings</h2>
               <p>
-                Manage teams and rank each one from 1.0–10.0. Higher-powered
-                games receive greater assignment priority.
+                My team rankings: rate each team from 1.0–10.0. Your ratings are
+                private to your assignor account and determine your game
+                priority.
               </p>
             </div>
             <button
@@ -732,6 +848,13 @@ export default function GameSetup({
             </button>
           </div>
           {showTeamImport && <TeamsRosterManager />}
+          {organizationId && (
+            <SharedDirectorySearch
+              organizationId={organizationId}
+              entity="team"
+              onConnected={load}
+            />
+          )}
           <form className="officialForm" onSubmit={saveTeam}>
             <label>
               Team Name
@@ -818,7 +941,7 @@ export default function GameSetup({
                     </td>
                     <td>
                       <input
-                        aria-label={`Power ranking for ${t.name}`}
+                        aria-label={`My power ranking for ${t.name}`}
                         type="number"
                         min="1"
                         max="10"
@@ -975,6 +1098,9 @@ export default function GameSetup({
               </button>
             </div>
             {showLocationImport && <LocationsRosterManager />}
+            {locationSaveMessage && (
+              <div className="successBox">{locationSaveMessage}</div>
+            )}
             <form className="officialForm" onSubmit={saveLocation}>
               <label>
                 Location Name
@@ -1114,8 +1240,14 @@ export default function GameSetup({
                     Cancel Edit
                   </button>
                 )}
-                <button className="primary">
-                  {editingLocationId ? "Save Location Changes" : "Add Location"}
+                <button className="primary" disabled={savingLocation}>
+                  {savingLocation
+                    ? editingLocationId
+                      ? "Saving Changes…"
+                      : "Adding Location…"
+                    : editingLocationId
+                      ? "Save Location Changes"
+                      : "Add Location"}
                 </button>
               </div>
             </form>

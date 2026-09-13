@@ -1,6 +1,5 @@
--- DRAFT ONLY. This file is intentionally outside supabase/migrations.
--- It must not be applied until the organization-to-league ownership model is reviewed.
--- It only creates new objects and does not alter Iowa Soccer data or behavior.
+-- Additive organization tier foundation, reviewed against the production schema.
+-- Existing operational records are preserved; access is added through organization links.
 
 create table if not exists public.saas_plan_definitions (
   code text primary key check (code in ('starter','pro','pro_founding','premier','enterprise')),
@@ -178,6 +177,37 @@ grant insert, update, delete on public.organization_memberships,
   public.league_assignment_templates, public.league_assignment_template_positions
   to authenticated;
 
+drop policy if exists "Authenticated users read plan definitions" on public.saas_plan_definitions;
+drop policy if exists "Authenticated users read plan entitlements" on public.saas_plan_entitlements;
+drop policy if exists "Public users read plan definitions" on public.saas_plan_definitions;
+drop policy if exists "Public users read plan entitlements" on public.saas_plan_entitlements;
+drop policy if exists "Members read organizations" on public.organizations;
+drop policy if exists "Members read organization memberships" on public.organization_memberships;
+drop policy if exists "Managers add organization memberships" on public.organization_memberships;
+drop policy if exists "Managers update organization memberships" on public.organization_memberships;
+drop policy if exists "Managers remove organization memberships" on public.organization_memberships;
+drop policy if exists "Members read organization subscriptions" on public.refassign_subscriptions;
+drop policy if exists "Members read entitlement overrides" on public.organization_entitlement_overrides;
+drop policy if exists "Members read coverage" on public.organization_league_coverage;
+drop policy if exists "Managers add coverage" on public.organization_league_coverage;
+drop policy if exists "Managers update coverage" on public.organization_league_coverage;
+drop policy if exists "Managers remove coverage" on public.organization_league_coverage;
+drop policy if exists "Assigned users read coverage roles" on public.organization_assignor_coverage;
+drop policy if exists "Managers add coverage roles" on public.organization_assignor_coverage;
+drop policy if exists "Managers update coverage roles" on public.organization_assignor_coverage;
+drop policy if exists "Managers remove coverage roles" on public.organization_assignor_coverage;
+drop policy if exists "Coverage users read templates" on public.league_assignment_templates;
+drop policy if exists "Coverage users manage templates" on public.league_assignment_templates;
+drop policy if exists "Coverage users add templates" on public.league_assignment_templates;
+drop policy if exists "Coverage users update templates" on public.league_assignment_templates;
+drop policy if exists "Coverage users remove templates" on public.league_assignment_templates;
+drop policy if exists "Coverage users read template positions" on public.league_assignment_template_positions;
+drop policy if exists "Coverage users manage template positions" on public.league_assignment_template_positions;
+drop policy if exists "Coverage users add template positions" on public.league_assignment_template_positions;
+drop policy if exists "Coverage users update template positions" on public.league_assignment_template_positions;
+drop policy if exists "Coverage users remove template positions" on public.league_assignment_template_positions;
+drop policy if exists "Members read usage" on public.organization_usage_snapshots;
+
 create policy "Authenticated users read plan definitions" on public.saas_plan_definitions
 for select to authenticated using (true);
 create policy "Authenticated users read plan entitlements" on public.saas_plan_entitlements
@@ -259,14 +289,30 @@ for select to authenticated using (exists (
   where coverage.id = coverage_id
     and (access.user_id is not null or private.can_access_organization(coverage.organization_id))
 ));
-create policy "Coverage users manage templates" on public.league_assignment_templates
-for all to authenticated using (exists (
+create policy "Coverage users add templates" on public.league_assignment_templates
+for insert to authenticated with check (exists (
+  select 1 from public.organization_league_coverage coverage
+  left join public.organization_assignor_coverage access
+    on access.coverage_id = coverage.id and access.user_id = (select auth.uid())
+  where coverage.id = coverage_id
+  and (access.role in ('owner','admin','assignor') or private.can_manage_organization(coverage.organization_id))
+));
+create policy "Coverage users update templates" on public.league_assignment_templates
+for update to authenticated using (exists (
+  select 1 from public.organization_league_coverage coverage
+  left join public.organization_assignor_coverage access
+    on access.coverage_id = coverage.id and access.user_id = (select auth.uid())
+  where coverage.id = coverage_id
+  and (access.role in ('owner','admin','assignor') or private.can_manage_organization(coverage.organization_id))
+)) with check (exists (
   select 1 from public.organization_league_coverage coverage
   left join public.organization_assignor_coverage access
     on access.coverage_id = coverage.id and access.user_id = (select auth.uid())
   where coverage.id = coverage_id
     and (access.role in ('owner','admin','assignor') or private.can_manage_organization(coverage.organization_id))
-)) with check (exists (
+));
+create policy "Coverage users remove templates" on public.league_assignment_templates
+for delete to authenticated using (exists (
   select 1 from public.organization_league_coverage coverage
   left join public.organization_assignor_coverage access
     on access.coverage_id = coverage.id and access.user_id = (select auth.uid())
@@ -279,13 +325,39 @@ for select to authenticated using (exists (
   select 1 from public.league_assignment_templates template
   where template.id = template_id
 ));
-create policy "Coverage users manage template positions" on public.league_assignment_template_positions
-for all to authenticated using (exists (
+create policy "Coverage users add template positions" on public.league_assignment_template_positions
+for insert to authenticated with check (exists (
   select 1 from public.league_assignment_templates template
-  where template.id = template_id
+  join public.organization_league_coverage coverage on coverage.id=template.coverage_id
+  left join public.organization_assignor_coverage access
+    on access.coverage_id=coverage.id and access.user_id=(select auth.uid())
+  where template.id=template_id
+    and (access.role in ('owner','admin','assignor') or private.can_manage_organization(coverage.organization_id))
+));
+create policy "Coverage users update template positions" on public.league_assignment_template_positions
+for update to authenticated using (exists (
+  select 1 from public.league_assignment_templates template
+  join public.organization_league_coverage coverage on coverage.id=template.coverage_id
+  left join public.organization_assignor_coverage access
+    on access.coverage_id=coverage.id and access.user_id=(select auth.uid())
+  where template.id=template_id
+    and (access.role in ('owner','admin','assignor') or private.can_manage_organization(coverage.organization_id))
 )) with check (exists (
   select 1 from public.league_assignment_templates template
-  where template.id = template_id
+  join public.organization_league_coverage coverage on coverage.id=template.coverage_id
+  left join public.organization_assignor_coverage access
+    on access.coverage_id=coverage.id and access.user_id=(select auth.uid())
+  where template.id=template_id
+    and (access.role in ('owner','admin','assignor') or private.can_manage_organization(coverage.organization_id))
+));
+create policy "Coverage users remove template positions" on public.league_assignment_template_positions
+for delete to authenticated using (exists (
+  select 1 from public.league_assignment_templates template
+  join public.organization_league_coverage coverage on coverage.id=template.coverage_id
+  left join public.organization_assignor_coverage access
+    on access.coverage_id=coverage.id and access.user_id=(select auth.uid())
+  where template.id=template_id
+    and (access.role in ('owner','admin','assignor') or private.can_manage_organization(coverage.organization_id))
 ));
 
 create policy "Members read usage" on public.organization_usage_snapshots
