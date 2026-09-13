@@ -215,12 +215,13 @@ export default function OrganizationTeamManager({
     }
     setBusy(item.id);
     setMessage("");
-    const args = {
+    try {
+      const args = {
         p_roles: r,
         p_viewer_permissions: r.includes("viewer") ? p : [],
         p_league_ids: needsLeagues(r) ? l : [],
-      },
-      { error } =
+      };
+      const { error } =
         item.status === "pending"
           ? await supabase.rpc("set_organization_invitation_roles", {
               p_invitation_id: item.id,
@@ -231,9 +232,20 @@ export default function OrganizationTeamManager({
               p_user_id: item.user_id,
               ...args,
             });
-    setMessage(error ? error.message : "Team access updated.");
-    await load();
-    setBusy("");
+      if (error) {
+        setMessage(error.message);
+        return;
+      }
+      setMessage("Team access updated.");
+      setBusy("");
+      await load();
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Could not update team access.",
+      );
+    } finally {
+      setBusy("");
+    }
   };
   return (
     <div className={styles.wrap}>
