@@ -130,12 +130,39 @@ function parseCSV(text: string) {
   if (row.some((v) => v.trim())) rows.push(row);
   return rows;
 }
-function validDate(value: string) {
-  return (
-    !value ||
-    (/^\d{4}-\d{2}-\d{2}$/.test(value) &&
-      !Number.isNaN(Date.parse(`${value}T00:00:00Z`)))
-  );
+function normalizeDate(value: string) {
+  const input = value.trim();
+  if (!input) return "";
+  const isoMatch = input.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  const usMatch = input.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2}|\d{4})$/);
+  let year: number;
+  let month: number;
+  let day: number;
+  if (isoMatch) {
+    [, year, month, day] = isoMatch.map(Number);
+  } else if (usMatch) {
+    month = Number(usMatch[1]);
+    day = Number(usMatch[2]);
+    year = Number(usMatch[3]);
+    if (year < 100) year += year >= 50 ? 1900 : 2000;
+  } else if (/^\d+(\.\d+)?$/.test(input)) {
+    const serial = Number(input);
+    if (serial < 1 || serial > 2958465) return null;
+    const date = new Date(Date.UTC(1899, 11, 30) + Math.floor(serial) * 86400000);
+    return date.toISOString().slice(0, 10);
+  } else {
+    const timestamp = Date.parse(input);
+    if (Number.isNaN(timestamp)) return null;
+    return new Date(timestamp).toISOString().slice(0, 10);
+  }
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  )
+    return null;
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 export default function OfficialsRosterManager({
@@ -256,10 +283,12 @@ export default function OfficialsRosterManager({
       for (const [, key] of COLUMNS.filter(
         ([, key]) => key === "date_of_birth" || key.includes("date"),
       )) {
-        if (!validDate(record[key]))
+        const normalizedDate = normalizeDate(record[key]);
+        if (normalizedDate === null)
           issues.push(
-            `${COLUMNS.find(([, k]) => k === key)?.[0]} must use YYYY-MM-DD`,
+            `${COLUMNS.find(([, k]) => k === key)?.[0]} is not a valid date`,
           );
+        else record[key] = normalizedDate;
       }
       if (
         record.referee_years_experience &&
@@ -467,7 +496,8 @@ export default function OfficialsRosterManager({
           USSF-ID is the existing RefAssign referee ID. Keep it when updating an
           official; leave it blank when adding a new official. All{" "}
           {COLUMNS.length} columns must remain in the exported order. Dates use
-          YYYY-MM-DD. Rankings belong only to the signed-in assignor.
+          YYYY-MM-DD, MM/DD/YYYY, M/D/YYYY, and Excel date values are accepted.
+          Rankings belong only to the signed-in assignor.
         </small>
       </p>
       {error && <div className="errorBox">{error}</div>}
