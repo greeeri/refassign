@@ -4,7 +4,10 @@ import { createServerSupabaseClient } from "../supabase/server";
 
 const managerRoles = ["owner", "admin", "assignor"];
 
-export async function requireManagedOrganization(request: NextRequest) {
+export async function requireManagedOrganization(
+  request: NextRequest,
+  allowedRoles: string[] = managerRoles,
+) {
   const session = await createServerSupabaseClient();
   const {
     data: { user },
@@ -24,32 +27,14 @@ export async function requireManagedOrganization(request: NextRequest) {
     };
 
   const service = createServiceClient();
-  const { data: membership, error: membershipError } = await service
-    .from("organization_memberships")
-    .select("role")
-    .eq("organization_id", organizationId)
-    .eq("user_id", user.id)
-    .in("role", managerRoles)
-    .limit(1)
-    .maybeSingle();
-  if (membershipError || !membership)
-    return {
-      error: NextResponse.json(
-        { error: "You do not manage this organization." },
-        { status: 403 },
-      ),
-    };
-
-  const [
-    { data: subscription, error: subscriptionError },
-    { data: superAdmin },
-  ] =
+  const [{ data: membership, error: membershipError }, { data: superAdmin }] =
     await Promise.all([
       service
-        .from("refassign_subscriptions")
-        .select("status,access_override")
+        .from("organization_memberships")
+        .select("role")
         .eq("organization_id", organizationId)
-        .order("created_at", { ascending: false })
+        .eq("user_id", user.id)
+        .in("role", allowedRoles)
         .limit(1)
         .maybeSingle(),
       service
@@ -58,6 +43,21 @@ export async function requireManagedOrganization(request: NextRequest) {
         .eq("user_id", user.id)
         .maybeSingle(),
     ]);
+  if (membershipError || (!membership && !superAdmin))
+    return {
+      error: NextResponse.json(
+        { error: "You do not manage this organization." },
+        { status: 403 },
+      ),
+    };
+
+  const { data: subscription, error: subscriptionError } = await service
+    .from("refassign_subscriptions")
+    .select("status,access_override")
+    .eq("organization_id", organizationId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
   if (subscriptionError)
     return {
       error: NextResponse.json(
