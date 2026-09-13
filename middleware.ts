@@ -9,7 +9,9 @@ export function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
   if (
     hostname === "test.ref-assign.com" &&
-    (path === "/workspace" || path === "/login")
+    (path === "/workspace" ||
+      path === "/login" ||
+      path.startsWith("/join/league/"))
   )
     return NextResponse.next();
   const isTierPreview =
