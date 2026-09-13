@@ -3,6 +3,21 @@ import { createClient } from "@supabase/supabase-js";
 
 const testUrl = "https://slenztuopbfxqzjyrtzp.supabase.co";
 const testKey = "sb_publishable_Hz_2BH4cYmrogX3O15x2PQ_fU-0uSKZ";
+const productionUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+const productionKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+
+function projectForToken(token: string) {
+  try {
+    const payload = JSON.parse(
+      Buffer.from(token.split(".")[1] || "", "base64url").toString("utf8"),
+    ) as { iss?: string };
+    const issuer = String(payload.iss || "").replace(/\/auth\/v1\/?$/, "");
+    if (issuer === testUrl) return { url: testUrl, key: testKey };
+    if (productionUrl && productionKey && issuer === productionUrl.replace(/\/$/, ""))
+      return { url: productionUrl, key: productionKey };
+  } catch {}
+  return null;
+}
 
 function esc(value: string) {
   return value.replace(
@@ -38,11 +53,17 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
 
-  const supabase = createClient(testUrl, testKey, {
+  const token = authorization.replace(/^Bearer\s+/i, "");
+  const project = projectForToken(token);
+  if (!project)
+    return NextResponse.json(
+      { error: "Your session expired." },
+      { status: 401 },
+    );
+  const supabase = createClient(project.url, project.key, {
     global: { headers: { Authorization: authorization } },
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  const token = authorization.replace(/^Bearer\s+/i, "");
   const { data: userData } = await supabase.auth.getUser(token);
   if (!userData.user)
     return NextResponse.json(
