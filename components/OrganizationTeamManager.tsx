@@ -50,6 +50,22 @@ const permissions = [
 const leagueRoles: RoleCode[] = ["assignor", "mentor", "registrar", "viewer"];
 const needsLeagues = (roles: RoleCode[]) =>
   roles.some((role) => leagueRoles.includes(role));
+const withTimeout = async <T,>(request: PromiseLike<T>, milliseconds = 12000) => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      Promise.resolve(request),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("The save request timed out. Please try again.")),
+          milliseconds,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
 
 export default function OrganizationTeamManager({
   organizationId,
@@ -221,17 +237,20 @@ export default function OrganizationTeamManager({
         p_viewer_permissions: r.includes("viewer") ? p : [],
         p_league_ids: needsLeagues(r) ? l : [],
       };
-      const { error } =
+      const request =
         item.status === "pending"
-          ? await supabase.rpc("set_organization_invitation_roles", {
+          ? supabase.rpc("set_organization_invitation_roles", {
               p_invitation_id: item.id,
               ...args,
             })
-          : await supabase.rpc("set_organization_user_roles", {
+          : supabase.rpc("set_organization_user_roles", {
               p_organization_id: organizationId,
               p_user_id: item.user_id,
               ...args,
             });
+      const { error } = await withTimeout(
+        request as PromiseLike<{ error: { message: string } | null }>,
+      );
       if (error) {
         setMessage(error.message);
         return;
