@@ -22,7 +22,7 @@ const plans: Plan[] = [
     audience: "Perfect for small leagues & clubs",
     price: "$299",
     cadence: "per year",
-    href: "/billing?plan=starter",
+    href: "/billing?new=1&plan=starter",
     action: "Ready to Get Started",
     features: ["Up to 50 officials", "Game management", "Official assignments", "Basic reporting", "Email support"],
   },
@@ -33,7 +33,7 @@ const plans: Plan[] = [
     price: "$599",
     cadence: "per year",
     popular: true,
-    href: "/billing?plan=pro",
+    href: "/billing?new=1&plan=pro",
     action: "Ready to Get Started",
     features: ["Up to 100 officials", "Game management", "Official assignments", "Payroll processing", "Advanced reporting", "Custom rules & settings", "Priority support"],
   },
@@ -43,7 +43,7 @@ const plans: Plan[] = [
     audience: "Built for larger assigning organizations",
     price: "$999",
     cadence: "per year",
-    href: "/billing?plan=premier",
+    href: "/billing?new=1&plan=premier",
     action: "Ready to Get Started",
     features: ["Up to 250 officials", "All Pro features", "Multi-sport support", "Advanced analytics", "Custom integrations where available", "Priority support"],
   },
@@ -100,7 +100,7 @@ export default function PricingPage() {
           <strong>Founding Organization Special</strong>
           <h2>Get Pro for $499/year</h2>
           <p>Introductory discounted rate. Lock in founding-member pricing for a limited time.</p>
-          <Link href="/billing?plan=pro_founding">Claim founding pricing →</Link>
+          <Link href="/billing?new=1&plan=pro_founding">Claim founding pricing →</Link>
         </article>
         <article><strong>Need more officials?</strong><p>Add officials in blocks of 25 for <b>$50 per block, per year.</b></p></article>
         <article><strong>Officials are free</strong><p>Officials can create and use their accounts at no cost. Referee payroll is separate from the RefAssign subscription.</p></article>
@@ -108,7 +108,7 @@ export default function PricingPage() {
 
       <section className={styles.trial}>
         <div><h2>Try RefAssign free for 14 days</h2><p>See how easy official management can be.</p></div>
-        <Link href="/billing?plan=pro">Get started today →</Link>
+        <Link href="/billing?new=1&plan=pro">Get started today →</Link>
       </section>
 
       <footer>© 2026 Ref Pro Group, LLC. All rights reserved.</footer>
