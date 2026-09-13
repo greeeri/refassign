@@ -19,15 +19,13 @@ function failure(error: unknown) {
   );
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const { service } = await requireSuperAdmin();
     const [
       { data: organizations, error: organizationError },
-      { data: protectedRows },
     ] = await Promise.all([
       service.from("organizations").select("id,name,created_at").order("name"),
-      service.from("protected_accounts").select("user_id"),
     ]);
     if (organizationError) throw organizationError;
 
@@ -64,17 +62,24 @@ export async function GET() {
       }),
     );
 
-    const officials: Record<string, unknown>[] = [];
-    for (let from = 0; ; from += 1000) {
-      const { data, error } = await service
+    const search = (request.nextUrl.searchParams.get("officialQuery") || "").trim();
+    let officials: Record<string, unknown>[] = [];
+    let protectedRows: { user_id: string }[] = [];
+    if (search.length >= 2) {
+      const safeSearch = search.replace(/[%_(),]/g, " ").trim();
+      const [{ data, error }, protectedResult] = await Promise.all([
+        service
         .from("officials")
         .select("id,first_name,last_name,full_name,email,active,auth_user_id")
+        .or(`first_name.ilike.%${safeSearch}%,last_name.ilike.%${safeSearch}%,full_name.ilike.%${safeSearch}%,email.ilike.%${safeSearch}%`)
         .order("last_name")
         .order("first_name")
-        .range(from, from + 999);
+        .limit(100),
+        service.from("protected_accounts").select("user_id"),
+      ]);
       if (error) throw error;
-      officials.push(...(data || []));
-      if ((data || []).length < 1000) break;
+      officials = data || [];
+      protectedRows = protectedResult.data || [];
     }
 
     const protectedIds = new Set(
@@ -82,6 +87,7 @@ export async function GET() {
     );
     return NextResponse.json({
       organizations: organizationRows,
+      official_search_active: search.length >= 2,
       officials: officials.map((official) => ({
         ...official,
         protected: protectedIds.has(String(official.auth_user_id || "")),
