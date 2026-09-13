@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { retrieveAndSyncStripeSubscription, syncStripeSubscription } from "../../../../lib/stripe/subscriptions";
 import { sendBillingStatusNotifications } from "../../../../lib/billing/paymentNotifications";
+import { connectedAccountState, StripeConnectedAccount } from "../../../../lib/stripe/connect";
 
 const escapeHtml = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]!);
 
@@ -59,7 +60,15 @@ export async function POST(request: Request) {
 
   const object = event.data?.object || {};
   try {
-    if (event.type === "checkout.session.completed" && object.metadata?.refassign_subscription_id) {
+    if (event.type === "account.updated") {
+      const account = object as StripeConnectedAccount;
+      const officialId = String(object.metadata?.refassign_official_id || "");
+      const values = { stripe_account_id: account.id, ...connectedAccountState(account) };
+      const result = officialId
+        ? await service.from("official_stripe_accounts").upsert({ official_id: officialId, ...values })
+        : await service.from("official_stripe_accounts").update(values).eq("stripe_account_id", account.id);
+      if (result.error) throw result.error;
+    } else if (event.type === "checkout.session.completed" && object.metadata?.refassign_subscription_id) {
       const subscriptionId = objectId(object.subscription);
       if (!subscriptionId) throw new Error("Completed subscription checkout has no Stripe subscription ID.");
       await retrieveAndSyncStripeSubscription(service, subscriptionId, stripeKey);

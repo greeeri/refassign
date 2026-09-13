@@ -1,0 +1,11 @@
+"use client";
+import { useEffect, useState } from "react";
+type Account = { connected: boolean; onboarding_status: string; transfers_status: string; payouts_status: string; requirements_due?: string[]; last_synced_at?: string | null };
+export default function OfficialPaymentSetup() {
+  const [account,setAccount]=useState<Account|null>(null),[busy,setBusy]=useState(false),[message,setMessage]=useState("");
+  async function load(){const response=await fetch("/api/stripe/connect",{cache:"no-store"}),result=await response.json();if(response.ok)setAccount(result.account);else setMessage(result.error||"Unable to load payment setup.");}
+  useEffect(()=>{void load();},[]);
+  async function act(action:"onboard"|"dashboard"|"refresh"){setBusy(true);setMessage("");const response=await fetch("/api/stripe/connect",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action})}),result=await response.json();if(!response.ok)setMessage(result.error||"Unable to open Stripe.");else if(result.url)window.location.assign(result.url);else await load();setBusy(false);}
+  const ready=account?.onboarding_status==="ready";
+  return <section className="card"><div className="cardHead"><div><h2>Payments</h2><p>Connect with Stripe to receive league payroll deposits.</p></div><span className={`badge ${ready?"green":""}`}>{ready?"Ready for payroll":account?.onboarding_status?.replaceAll("_"," ")||"Loading"}</span></div>{message&&<div className="errorBox">{message}</div>}<div className="toolbar"><button className="primary" disabled={busy} onClick={()=>void act("onboard")}>{account?.connected?"Continue Stripe setup":"Set Up Payments"}</button>{account?.connected&&<button className="secondary" disabled={busy} onClick={()=>void act("refresh")}>Refresh status</button>}{ready&&<button className="secondary" disabled={busy} onClick={()=>void act("dashboard")}>Open Stripe Express</button>}</div>{account?.requirements_due?.length?<p>Stripe still needs: {account.requirements_due.join(", ").replaceAll("_"," ")}</p>:null}<p><small>Bank and identity information is entered directly with Stripe and is not stored by RefAssign.</small></p></section>;
+}

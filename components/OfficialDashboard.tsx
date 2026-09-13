@@ -5,6 +5,7 @@ import { crewPositionLabel, orderedCrew } from "../lib/crewDisplay";
 import CrewChatButton from "./CrewChatButton";
 import CalendarSync from "./CalendarSync";
 import VenueDetailsButton from "./VenueDetailsButton";
+import OfficialPaymentSetup from "./OfficialPaymentSetup";
 type Assignment = {
   assignment_id: string;
   game_id: string;
@@ -239,6 +240,8 @@ export default function OfficialDashboard({
       </section>
     );
   return (
+    <>
+      <OfficialPaymentSetup />
     <div className="officialMobileExperience">
       {error && <div className="errorBox">{error}</div>}
       {notice && <div className="loginMessage">{notice}</div>}
@@ -447,5 +450,6 @@ export default function OfficialDashboard({
       </button>
       <CalendarSync />
     </div>
+    </>
   );
 }

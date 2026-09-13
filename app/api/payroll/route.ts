@@ -38,8 +38,11 @@ export async function GET(request: NextRequest) {
         )
         .in("official_id", officialIds)
     : { data: [], error: null };
+  const readinessResult = officialIds.length
+    ? await service.from("official_stripe_accounts").select("official_id,onboarding_status,transfers_status,payouts_status").in("official_id", officialIds)
+    : { data: [], error: null };
 
-  const loadError = assignmentResult.error || originResult.error;
+  const loadError = assignmentResult.error || originResult.error || readinessResult.error;
   if (loadError) {
     console.error("[api/payroll] manager payroll load failed", {
       userId: user.id,
@@ -55,7 +58,12 @@ export async function GET(request: NextRequest) {
     assignments: assignmentResult.data?.length || 0,
   });
   return NextResponse.json({
-    assignments: assignmentResult.data || [],
+    assignments: (assignmentResult.data || []).map((row) => {
+      const official = row.officials as unknown as { id: string } | Array<{ id: string }> | null;
+      const officialId = Array.isArray(official) ? official[0]?.id : official?.id;
+      const readiness = (readinessResult.data || []).find((item) => item.official_id === officialId);
+      return { ...row, stripe_payment_status: readiness?.onboarding_status || "not_started", stripe_payment_ready: readiness?.onboarding_status === "ready" && readiness.transfers_status === "active" && readiness.payouts_status === "active" };
+    }),
     weekdayOrigins: originResult.data || [],
   });
 }

@@ -27,6 +27,8 @@ type PayrollRow = {
   payment_status: PaymentStatus;
   paid_at: string | null;
   payroll_notes: string | null;
+  stripe_payment_status: string;
+  stripe_payment_ready: boolean;
   officials: {
     id: string;
     first_name: string;
@@ -891,19 +893,19 @@ export default function PayrollManager({
                     type="checkbox"
                     aria-label="Select all visible payroll records"
                     checked={
-                      visible.length > 0 &&
-                      visible.every((row) => selected.includes(row.id))
+                      visible.some((row) => row.stripe_payment_ready) &&
+                      visible.filter((row) => row.stripe_payment_ready).every((row) => selected.includes(row.id))
                     }
                     onChange={() =>
                       setSelected(
-                        visible.every((row) => selected.includes(row.id))
+                        visible.filter((row) => row.stripe_payment_ready).every((row) => selected.includes(row.id))
                           ? selected.filter(
                               (id) => !visible.some((row) => row.id === id),
                             )
                           : Array.from(
                               new Set([
                                 ...selected,
-                                ...visible.map((row) => row.id),
+                                ...visible.filter((row) => row.stripe_payment_ready).map((row) => row.id),
                               ]),
                             ),
                       )
@@ -964,6 +966,8 @@ export default function PayrollManager({
                           type="checkbox"
                           aria-label={`Select payroll record for ${officialName(row)}`}
                           checked={selected.includes(row.id)}
+                          disabled={!row.stripe_payment_ready}
+                          title={!row.stripe_payment_ready ? "Official must complete Stripe payment setup before payroll." : undefined}
                           onChange={() =>
                             setSelected((current) =>
                               current.includes(row.id)
@@ -992,6 +996,7 @@ export default function PayrollManager({
                             ? "Confirmed"
                             : "Accepted"}
                         </small>
+                        <small>{row.stripe_payment_ready ? "Stripe ready" : `Stripe: ${row.stripe_payment_status.replaceAll("_", " ")}`}</small>
                       </td>
                       <td>{row.sport_positions?.name || "Official"}</td>
                       <td>
