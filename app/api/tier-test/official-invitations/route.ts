@@ -12,9 +12,10 @@ function projectForToken(token: string) {
       Buffer.from(token.split(".")[1] || "", "base64url").toString("utf8"),
     ) as { iss?: string };
     const issuer = String(payload.iss || "").replace(/\/auth\/v1\/?$/, "");
-    if (issuer === testUrl) return { url: testUrl, key: testKey };
+    if (issuer === testUrl)
+      return { url: testUrl, key: testKey, loginOrigin: "https://test.ref-assign.com" };
     if (productionUrl && productionKey && issuer === productionUrl.replace(/\/$/, ""))
-      return { url: productionUrl, key: productionKey };
+      return { url: productionUrl, key: productionKey, loginOrigin: "https://ref-assign.com" };
   } catch {}
   return null;
 }
@@ -156,7 +157,7 @@ export async function POST(request: NextRequest) {
     to: [email],
     reply_to: "assignments@ref-assign.com",
     subject: `Invitation to officiate with ${workspace.name} in RefAssign`,
-    html: `<div style="font-family:Arial,sans-serif;background:#eef4f9;padding:28px"><div style="max-width:620px;margin:auto;background:#fff;border:1px solid #dbe5ed;border-radius:16px;overflow:hidden"><div style="background:#0b2748;color:#fff;padding:24px 28px"><div style="font-size:24px;font-weight:800">REF<span style="color:#4ba3e3">ASSIGN</span></div><div style="font-size:12px;color:#b9cbe0;margin-top:4px">Assign · Develop · Manage</div></div><div style="padding:30px"><h2 style="color:#102f57;margin-top:0">You’re invited to officiate with ${esc(workspace.name)}</h2><p style="color:#52677d;line-height:1.6">Your email was added to this organization’s official roster. Open this secure invitation, then sign in or create your free RefAssign official account.</p><p style="margin:26px 0"><a href="https://test.ref-assign.com/login#official_invite=${invitationIds.get(email)}&official=${encodeURIComponent(email)}" style="display:inline-block;background:#75dc43;color:#0b2748;text-decoration:none;font-weight:800;padding:14px 22px;border-radius:9px">Open my RefAssign workspace</a></p></div></div></div>`,
+    html: `<div style="font-family:Arial,sans-serif;background:#eef4f9;padding:28px"><div style="max-width:620px;margin:auto;background:#fff;border:1px solid #dbe5ed;border-radius:16px;overflow:hidden"><div style="background:#0b2748;color:#fff;padding:24px 28px"><div style="font-size:24px;font-weight:800">REF<span style="color:#4ba3e3">ASSIGN</span></div><div style="font-size:12px;color:#b9cbe0;margin-top:4px">Assign · Develop · Manage</div></div><div style="padding:30px"><h2 style="color:#102f57;margin-top:0">You’re invited to officiate with ${esc(workspace.name)}</h2><p style="color:#52677d;line-height:1.6">Your email was added to this organization’s official roster. Open this secure invitation, then sign in or create your free RefAssign official account.</p><p style="margin:26px 0"><a href="${project.loginOrigin}/login#official_invite=${invitationIds.get(email)}&official=${encodeURIComponent(email)}" style="display:inline-block;background:#75dc43;color:#0b2748;text-decoration:none;font-weight:800;padding:14px 22px;border-radius:9px">Open my RefAssign workspace</a></p></div></div></div>`,
   }));
   let sent = 0;
   for (let index = 0; index < messages.length; index += 100) {
