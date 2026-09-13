@@ -257,7 +257,7 @@ export default function OrganizationTeamManager({
       }
       setMessage("Team access updated.");
       setBusy("");
-      await load();
+      void load();
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : "Could not update team access.",
