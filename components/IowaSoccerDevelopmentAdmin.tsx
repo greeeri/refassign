@@ -157,24 +157,22 @@ export default function IowaSoccerDevelopmentAdmin() {
     setBusy(true);
     setError("");
     setNotice("");
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    const { error: e } = await supabase
-      .from("registration_program_officials")
-      .insert({
-        program_id: programId,
-        official_id: selectedOfficial,
-        source: "registrar",
-        added_by: user?.id || null,
+    try {
+      const response = await fetch("/api/development/officials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ officialId: selectedOfficial }),
       });
-    if (e) setError(e.message);
-    else {
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error || "Unable to add official.");
       setNotice("Official added to Iowa Soccer Development.");
       setSelectedOfficial("");
       await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to add official.");
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
   }
   async function removeOfficial(id: string) {
     if (
