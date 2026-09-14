@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cron/payroll-reconciliation",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 14 * * *"
     },
     {
       "path": "/api/cron/assignment-reminders",
