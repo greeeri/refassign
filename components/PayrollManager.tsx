@@ -72,7 +72,7 @@ type ImportRow = {
   notes: string;
 };
 type BillTo = { id: string; name: string };
-type PayrollBatch = { id:string;batch_number:number;status:string;payroll_subtotal_cents:number;stripe_processing_cost_cents:number;stripe_processing_cost_actual_cents:number|null;refassign_fee_cents:number;total_funding_cents:number;funding_method:string|null;funding_failure_message:string|null;created_at:string;paid_at:string|null;leagues:{name:string}|null;items:Array<{id:string;official_name_snapshot:string;total_cents:number;transfer:{status:string;stripe_transfer_id:string|null;failure_message:string|null;paid_at:string|null}|null}> };
+type PayrollBatch = { id:string;batch_number:number;status:string;payroll_subtotal_cents:number;stripe_processing_cost_cents:number;stripe_processing_cost_actual_cents:number|null;refassign_fee_cents:number;total_funding_cents:number;funding_method:string|null;stripe_checkout_session_id:string|null;funding_failure_message:string|null;created_at:string;paid_at:string|null;leagues:{name:string}|null;items:Array<{id:string;official_name_snapshot:string;total_cents:number;transfer:{status:string;stripe_transfer_id:string|null;failure_message:string|null;paid_at:string|null}|null}> };
 
 const statuses: ReadonlyArray<[PaymentStatus, string]> = [
   ["unpaid", "Unpaid"],
@@ -230,7 +230,10 @@ export default function PayrollManager({
       }
       if (batchResponse.ok) {
         const batchResult = await batchResponse.json() as { batches?: PayrollBatch[] };
-        setBatches(batchResult.batches || []);
+        const loadedBatches=batchResult.batches||[];
+        setBatches(loadedBatches);
+        const pending=loadedBatches.find(batch=>batch.status==="funding"&&batch.stripe_checkout_session_id);
+        if(pending?.stripe_checkout_session_id){const confirmation=await fetch(`/api/payroll/confirm${query}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId:pending.stripe_checkout_session_id})}),confirmed=await confirmation.json() as {settled?:boolean;paidCount?:number;error?:string};if(confirmation.ok&&confirmed.settled){setNotice(`Batch ${pending.batch_number} settled and ${confirmed.paidCount||0} official${confirmed.paidCount===1?" was":"s were"} paid.`);window.setTimeout(()=>void load(),0);}else if(!confirmation.ok)setError(confirmed.error||"Payroll funding could not be confirmed.");}
       }
     } catch (loadError) {
       setError(
