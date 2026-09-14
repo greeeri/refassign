@@ -87,47 +87,59 @@ export async function POST(request: NextRequest) {
   const batchKey = `payroll-${fingerprint}`;
   const now = new Date().toISOString();
 
-  const { data: existing } = await service.from("payroll_batches").select("id,status").eq("idempotency_key", batchKey).maybeSingle();
+  const { data: existing } = await service.from("payroll_batches").select("id,status,batch_number").eq("idempotency_key", batchKey).maybeSingle();
   if (existing?.status === "paid") return NextResponse.json({ paid: true, duplicate: true, batchId: existing.id });
-  if (existing) return NextResponse.json({ error: "This payroll batch already exists and requires review before retrying." }, { status: 409 });
+  if (existing && !["funding_failed", "partially_paid"].includes(existing.status)) return NextResponse.json({ error: "This payroll batch is already processing." }, { status: 409 });
 
-  const { data: batch, error: batchError } = await service.from("payroll_batches").insert({
-    organization_id: organizationId,
-    league_id: leagueId,
-    status: "approved",
-    payroll_subtotal_cents: subtotal,
-    stripe_processing_cost_cents: 0,
-    refassign_fee_cents: refassignFee,
-    total_funding_cents: subtotal + refassignFee,
-    fee_type_snapshot: rule?.fee_type || "none",
-    fee_value_snapshot: rule?.fee_type === "flat" ? Number(rule.flat_fee_cents || 0) : Number(rule?.percentage_basis_points || 0),
-    fee_minimum_cents_snapshot: rule?.minimum_fee_cents ?? null,
-    fee_maximum_cents_snapshot: rule?.maximum_fee_cents ?? null,
-    funding_method: settings.default_funding_method,
-    idempotency_key: batchKey,
-    approved_by: user.id,
-    approved_at: now,
-    locked_at: now,
-    created_by: user.id,
-  }).select("id,batch_number").single();
-  if (batchError || !batch) return NextResponse.json({ error: batchError?.message || "Payroll batch could not be created." }, { status: 400 });
-
-  const { data: items, error: itemError } = await service.from("payroll_batch_items").insert(itemValues.map(({ row, gameFeeCents, mileageAmountCents, totalCents }) => ({
-    payroll_batch_id: batch.id,
-    assignment_id: row.id,
-    official_id: row.official_id,
-    official_name_snapshot: `${row.officials?.first_name || ""} ${row.officials?.last_name || ""}`.trim() || "Official",
-    game_id: row.game_id,
-    game_fee_cents: gameFeeCents,
-    mileage_miles_snapshot: Number(row.mileage_miles || 0),
-    mileage_rate_cents_snapshot: cents(Number(row.mileage_rate || 0)),
-    mileage_amount_cents: mileageAmountCents,
-    total_cents: totalCents,
-    memo: `RefAssign payroll batch ${batch.batch_number}`,
-  }))).select("id,assignment_id,official_id,total_cents");
-  if (itemError || !items) {
-    await service.from("payroll_batches").update({ status: "void" }).eq("id", batch.id);
-    return NextResponse.json({ error: itemError?.message || "Payroll batch items could not be created." }, { status: 400 });
+  let batch: { id: string; batch_number: number };
+  let items: Array<{ id: string; assignment_id: string; official_id: string; total_cents: number }>;
+  if (existing) {
+    batch = { id: existing.id, batch_number: existing.batch_number };
+    const retryItems = await service.from("payroll_batch_items").select("id,assignment_id,official_id,total_cents").eq("payroll_batch_id", existing.id);
+    if (retryItems.error || !retryItems.data) return NextResponse.json({ error: retryItems.error?.message || "Payroll retry records could not be loaded." }, { status: 400 });
+    const retryIds = retryItems.data.map((item) => item.assignment_id).sort();
+    if (retryIds.join(",") !== assignmentIds.join(",")) return NextResponse.json({ error: "Retry the complete original payroll selection." }, { status: 409 });
+    items = retryItems.data;
+  } else {
+    const createdBatch = await service.from("payroll_batches").insert({
+      organization_id: organizationId,
+      league_id: leagueId,
+      status: "approved",
+      payroll_subtotal_cents: subtotal,
+      stripe_processing_cost_cents: 0,
+      refassign_fee_cents: refassignFee,
+      total_funding_cents: subtotal + refassignFee,
+      fee_type_snapshot: rule?.fee_type || "none",
+      fee_value_snapshot: rule?.fee_type === "flat" ? Number(rule.flat_fee_cents || 0) : Number(rule?.percentage_basis_points || 0),
+      fee_minimum_cents_snapshot: rule?.minimum_fee_cents ?? null,
+      fee_maximum_cents_snapshot: rule?.maximum_fee_cents ?? null,
+      funding_method: settings.default_funding_method,
+      idempotency_key: batchKey,
+      approved_by: user.id,
+      approved_at: now,
+      locked_at: now,
+      created_by: user.id,
+    }).select("id,batch_number").single();
+    if (createdBatch.error || !createdBatch.data) return NextResponse.json({ error: createdBatch.error?.message || "Payroll batch could not be created." }, { status: 400 });
+    batch = createdBatch.data;
+    const createdItems = await service.from("payroll_batch_items").insert(itemValues.map(({ row, gameFeeCents, mileageAmountCents, totalCents }) => ({
+      payroll_batch_id: batch.id,
+      assignment_id: row.id,
+      official_id: row.official_id,
+      official_name_snapshot: `${row.officials?.first_name || ""} ${row.officials?.last_name || ""}`.trim() || "Official",
+      game_id: row.game_id,
+      game_fee_cents: gameFeeCents,
+      mileage_miles_snapshot: Number(row.mileage_miles || 0),
+      mileage_rate_cents_snapshot: cents(Number(row.mileage_rate || 0)),
+      mileage_amount_cents: mileageAmountCents,
+      total_cents: totalCents,
+      memo: `RefAssign payroll batch ${batch.batch_number}`,
+    }))).select("id,assignment_id,official_id,total_cents");
+    if (createdItems.error || !createdItems.data) {
+      await service.from("payroll_batches").update({ status: "void" }).eq("id", batch.id);
+      return NextResponse.json({ error: createdItems.error?.message || "Payroll batch items could not be created." }, { status: 400 });
+    }
+    items = createdItems.data;
   }
 
   await service.from("payroll_batches").update({ status: "paying" }).eq("id", batch.id);
@@ -136,16 +148,13 @@ export async function POST(request: NextRequest) {
   for (const item of items) {
     const account = accountByOfficial.get(item.official_id)!;
     const transferKey = `${batchKey}-${item.id}`;
-    const { data: transferRecord, error: transferRecordError } = await service.from("payroll_transfers").insert({
-      payroll_batch_id: batch.id,
-      payroll_batch_item_id: item.id,
-      official_id: item.official_id,
-      stripe_account_id_snapshot: account.stripe_account_id,
-      amount_cents: item.total_cents,
-      status: "processing",
-      idempotency_key: transferKey,
-    }).select("id").single();
-    if (transferRecordError || !transferRecord) { failure = transferRecordError?.message || "Transfer record could not be created."; break; }
+    const { data: priorTransfer } = await service.from("payroll_transfers").select("id,status").eq("payroll_batch_item_id", item.id).maybeSingle();
+    if (priorTransfer?.status === "paid") { paidCount += 1; continue; }
+    const transferResult = priorTransfer
+      ? await service.from("payroll_transfers").update({ status: "processing", failure_code: null, failure_message: null }).eq("id", priorTransfer.id).select("id").single()
+      : await service.from("payroll_transfers").insert({ payroll_batch_id: batch.id, payroll_batch_item_id: item.id, official_id: item.official_id, stripe_account_id_snapshot: account.stripe_account_id, amount_cents: item.total_cents, status: "processing", idempotency_key: transferKey }).select("id").single();
+    const transferRecord = transferResult.data;
+    if (transferResult.error || !transferRecord) { failure = transferResult.error?.message || "Transfer record could not be created."; break; }
     try {
       const form = new URLSearchParams({ amount: String(item.total_cents), currency: "usd", destination: account.stripe_account_id, transfer_group: `PAYROLL_${batch.id}`, "metadata[payroll_batch_id]": batch.id, "metadata[payroll_batch_item_id]": item.id });
       const transfer = await stripeConnectRequest<{ id: string }>("transfers", key, form, transferKey);
