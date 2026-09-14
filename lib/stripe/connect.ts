@@ -19,6 +19,29 @@ export async function stripeConnectRequest<T>(path: string, key: string, body?: 
   return result;
 }
 
+
+export async function stripeConnectV2Request<T>(
+  path: string,
+  key: string,
+  body?: Record<string, unknown>,
+  idempotencyKey?: string,
+) {
+  const response = await fetch(`https://api.stripe.com/v2/${path}`, {
+    method: body ? "POST" : "GET",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Stripe-Version": "2026-07-29.dahlia",
+      ...(body ? { "Content-Type": "application/json" } : {}),
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+    cache: "no-store",
+  });
+  const result = await response.json() as T & { error?: { message?: string } };
+  if (!response.ok) throw new Error(result.error?.message || `Stripe request failed (${response.status}).`);
+  return result;
+}
+
 export function connectedAccountState(account: StripeConnectedAccount) {
   const due = account.requirements?.currently_due || [];
   const ready = account.details_submitted === true && account.capabilities?.transfers === "active" && account.payouts_enabled === true;
