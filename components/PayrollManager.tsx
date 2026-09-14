@@ -885,6 +885,7 @@ export default function PayrollManager({
         </div>
       )}
       {selected.length > 0 && (
+        <div>
         <div className="payrollBulk">
           <b>{selected.length} selected</b>
           <button
@@ -911,6 +912,8 @@ export default function PayrollManager({
           <button className="secondary" onClick={() => setSelected([])}>
             Clear
           </button>
+        </div>
+        {error && <div className="errorBox" style={{ marginTop: 8 }}>{error}</div>}
         </div>
       )}
       {loading ? (
