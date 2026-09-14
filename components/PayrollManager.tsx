@@ -295,6 +295,23 @@ export default function PayrollManager({
       0,
     );
   }, [focusAssignmentId, rows]);
+  useEffect(() => {
+    if (!organizationId) return;
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get("session_id");
+    if (params.get("payroll") !== "success" || !sessionId) return;
+    void (async () => {
+      setSaving("stripe-payroll");
+      const response = await fetch(`/api/payroll/confirm?organizationId=${encodeURIComponent(organizationId)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId }) });
+      const result = await response.json() as { settled?: boolean; paidCount?: number; error?: string };
+      if (!response.ok) setError(result.error || "Payroll funding could not be confirmed.");
+      else if (result.settled) setNotice(`League funding settled and ${result.paidCount || 0} official${result.paidCount === 1 ? " was" : "s were"} paid.`);
+      else setNotice("League funding is pending. Officials will be paid automatically after Stripe settles it.");
+      window.history.replaceState({}, "", window.location.pathname);
+      await load();
+      setSaving("");
+    })();
+  }, [organizationId]);
 
   const mileagePlan = mileagePlanFor;
   const originFor = (row: PayrollRow) => {
@@ -512,10 +529,11 @@ export default function PayrollManager({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ assignmentIds: selectedRows.map((row) => row.id) }),
     });
-    const result = await response.json() as { error?: string; paidCount?: number; batchNumber?: number };
+    const result = await response.json() as { error?: string; url?: string; paid?: boolean; batchNumber?: number };
     if (!response.ok) setError(result.error || "Stripe payroll could not be processed.");
+    else if (result.url) window.location.assign(result.url);
     else {
-      setNotice(`Stripe sandbox payroll batch ${result.batchNumber} paid ${result.paidCount} official${result.paidCount === 1 ? "" : "s"}.`);
+      setNotice(result.paid ? "This payroll batch was already paid." : `Payroll funding started for batch ${result.batchNumber}.`);
       setSelected([]);
       await load();
     }
@@ -888,7 +906,7 @@ export default function PayrollManager({
             disabled={saving === "stripe-payroll" || selectedRows.some((row) => row.payment_status !== "approved")}
             onClick={() => void processStripePayroll()}
           >
-            {saving === "stripe-payroll" ? "Processing Stripe Payroll…" : "Process Stripe Payroll"}
+            {saving === "stripe-payroll" ? "Opening Stripe Checkout…" : "Fund & Pay with Stripe"}
           </button>
           <button className="secondary" onClick={() => setSelected([])}>
             Clear
