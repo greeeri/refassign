@@ -43,7 +43,7 @@ type PayrollRow = {
     starts_at: string;
     bill_to_id: string | null;
     bill_to: { name: string } | null;
-    leagues: { name: string; mileage_plan: MileagePlan } | null;
+    leagues: { id: string; name: string; mileage_plan: MileagePlan } | null;
     home: { name: string } | null;
     away: { name: string } | null;
     location: {
@@ -497,6 +497,31 @@ export default function PayrollManager({
     setSaving("");
   }
 
+  async function processStripePayroll() {
+    if (!selectedRows.length || !organizationId) return;
+    if (selectedRows.some((row) => row.payment_status !== "approved")) {
+      return setError("Mark every selected payroll record Approved before sending it through Stripe.");
+    }
+    const leagueIds = new Set(selectedRows.map((row) => row.games?.leagues?.id).filter(Boolean));
+    if (leagueIds.size !== 1) return setError("Select payroll records from one league at a time.");
+    setSaving("stripe-payroll");
+    setError("");
+    setNotice("");
+    const response = await fetch(`/api/payroll/process?organizationId=${encodeURIComponent(organizationId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ assignmentIds: selectedRows.map((row) => row.id) }),
+    });
+    const result = await response.json() as { error?: string; paidCount?: number; batchNumber?: number };
+    if (!response.ok) setError(result.error || "Stripe payroll could not be processed.");
+    else {
+      setNotice(`Stripe sandbox payroll batch ${result.batchNumber} paid ${result.paidCount} official${result.paidCount === 1 ? "" : "s"}.`);
+      setSelected([]);
+      await load();
+    }
+    setSaving("");
+  }
+
   async function exportPayroll() {
     const exportRows = selectedRows.length ? selectedRows : visible;
     if (!exportRows.length)
@@ -856,7 +881,14 @@ export default function PayrollManager({
             disabled={saving === "bulk"}
             onClick={() => void bulkStatus("paid")}
           >
-            Mark Paid
+            Mark Paid Outside Stripe
+          </button>
+          <button
+            className="success"
+            disabled={saving === "stripe-payroll" || selectedRows.some((row) => row.payment_status !== "approved")}
+            onClick={() => void processStripePayroll()}
+          >
+            {saving === "stripe-payroll" ? "Processing Stripe Payroll…" : "Process Stripe Payroll"}
           </button>
           <button className="secondary" onClick={() => setSelected([])}>
             Clear
