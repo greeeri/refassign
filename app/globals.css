@@ -811,6 +811,17 @@ td small {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
+.availabilityOfficialPicker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 12px;
+  max-width: 760px;
+  margin-bottom: 16px;
+}
+.availabilityOfficialPicker label {
+  display: grid;
+  gap: 6px;
+}
 .compactResults {
   max-height: 280px;
   overflow: auto;
@@ -820,6 +831,9 @@ td small {
 }
 @media (max-width: 640px) {
   .bulkActionButtons {
+    grid-template-columns: 1fr;
+  }
+  .availabilityOfficialPicker {
     grid-template-columns: 1fr;
   }
 }
