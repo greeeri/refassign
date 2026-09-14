@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/cron/payroll-reconciliation",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/assignment-reminders",
       "schedule": "0 13 * * *"
     },
@@ -19,10 +23,6 @@
     {
       "path": "/api/cron/history-retention",
       "schedule": "30 13 * * *"
-    },
-    {
-      "path": "/api/cron/payroll-reconciliation",
-      "schedule": "*/5 * * * *"
     }
   ],
   "redirects": [
