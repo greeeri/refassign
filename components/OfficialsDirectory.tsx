@@ -221,6 +221,7 @@ export default function OfficialsDirectory({
   );
   const [showBulkAdd, setShowBulkAdd] = useState(false);
   const [bulkEmailText, setBulkEmailText] = useState("");
+  const [bulkFileName, setBulkFileName] = useState("");
   const [bulkResults, setBulkResults] = useState<LinkOfficialResult[]>([]);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [pendingInvitationEmails, setPendingInvitationEmails] = useState<
@@ -237,6 +238,7 @@ export default function OfficialsDirectory({
     const header = lines[0].split(",").map((cell) =>
       cell
         .trim()
+        .replace(/^\uFEFF/, "")
         .replace(/^['"]|['"]$/g, "")
         .toLowerCase(),
     );
@@ -353,6 +355,7 @@ export default function OfficialsDirectory({
     }
     setBulkResults([]);
     setBulkEmailText("");
+    setBulkFileName("");
     setLinkMessage(
       `${added.length} officials added.${invitationEmails.length ? ` ${sent} invitation emails sent to missing accounts.` : " All already had RefAssign accounts."}`,
     );
@@ -360,9 +363,25 @@ export default function OfficialsDirectory({
   }
 
   async function readBulkFile(file?: File) {
-    if (!file) return;
-    setBulkEmailText(await file.text());
+    if (!file) {
+      setBulkFileName("");
+      return;
+    }
+    setBulkFileName(file.name);
     setBulkResults([]);
+    setError("");
+    try {
+      const contents = await file.text();
+      if (!contents.trim()) {
+        setBulkEmailText("");
+        setError(`${file.name} is empty. Choose a CSV file containing officials.`);
+        return;
+      }
+      setBulkEmailText(contents);
+    } catch {
+      setBulkEmailText("");
+      setError(`RefAssign could not read ${file.name}. Choose the file again or save it as a CSV.`);
+    }
   }
 
   async function searchOfficialByEmail(e: FormEvent<HTMLFormElement>) {
@@ -1281,10 +1300,16 @@ export default function OfficialsDirectory({
                 <input
                   type="file"
                   accept=".csv,text/csv,text/plain"
-                  onChange={(event) =>
-                    void readBulkFile(event.target.files?.[0])
-                  }
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.item(0);
+                    void readBulkFile(file || undefined);
+                  }}
                 />
+                {bulkFileName && (
+                  <span className="selectedFileName">
+                    Selected: {bulkFileName}
+                  </span>
+                )}
               </label>
               <label>
                 Email addresses
@@ -1294,6 +1319,7 @@ export default function OfficialsDirectory({
                   placeholder="official1@example.com&#10;official2@example.com"
                   onChange={(event) => {
                     setBulkEmailText(event.target.value);
+                    setBulkFileName("");
                     setBulkResults([]);
                   }}
                 />

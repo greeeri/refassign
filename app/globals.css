@@ -778,6 +778,12 @@ td small {
 .filePicker input {
   margin-top: 5px;
 }
+.selectedFileName {
+  color: #166534;
+  font-size: 13px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
 .bulkSummary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
