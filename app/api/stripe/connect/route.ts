@@ -25,7 +25,9 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const { official, service } = await context();
-    const key = process.env.STRIPE_CONNECT_MODE === "sandbox"\n      ? process.env.STRIPE_CONNECT_TEST_SECRET_KEY || ""\n      : process.env.STRIPE_SECRET_KEY || "";
+    const key = process.env.STRIPE_CONNECT_MODE === "sandbox"
+      ? process.env.STRIPE_CONNECT_TEST_SECRET_KEY || ""
+      : process.env.STRIPE_SECRET_KEY || "";
     if (process.env.STRIPE_CONNECT_MODE !== "sandbox" || !key.startsWith("sk_test_")) throw new Error("Stripe sandbox onboarding is not configured. Add STRIPE_CONNECT_TEST_SECRET_KEY and set STRIPE_CONNECT_MODE=sandbox.");
     const body = await request.json().catch(() => ({})) as { action?: "onboard" | "dashboard" | "refresh" };
     const { data: stored } = await service.from("official_stripe_accounts").select("stripe_account_id").eq("official_id", official.id).maybeSingle();
