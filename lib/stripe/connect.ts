@@ -7,10 +7,10 @@ export type StripeConnectedAccount = {
   requirements?: { currently_due?: string[]; eventually_due?: string[]; disabled_reason?: string | null };
 };
 
-export async function stripeConnectRequest<T>(path: string, key: string, body?: URLSearchParams) {
+export async function stripeConnectRequest<T>(path: string, key: string, body?: URLSearchParams, idempotencyKey?: string) {
   const response = await fetch(`https://api.stripe.com/v1/${path}`, {
     method: body ? "POST" : "GET",
-    headers: { Authorization: `Bearer ${key}`, ...(body ? { "Content-Type": "application/x-www-form-urlencoded" } : {}), "Stripe-Version": "2026-07-29.dahlia" },
+    headers: { Authorization: `Bearer ${key}`, ...(body ? { "Content-Type": "application/x-www-form-urlencoded" } : {}), ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}), "Stripe-Version": "2026-07-29.dahlia" },
     body,
     cache: "no-store",
   });
