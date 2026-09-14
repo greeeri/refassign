@@ -72,6 +72,7 @@ type ImportRow = {
   notes: string;
 };
 type BillTo = { id: string; name: string };
+type PayrollBatch = { id:string;batch_number:number;status:string;payroll_subtotal_cents:number;stripe_processing_cost_cents:number;stripe_processing_cost_actual_cents:number|null;refassign_fee_cents:number;total_funding_cents:number;funding_method:string|null;funding_failure_message:string|null;created_at:string;paid_at:string|null;leagues:{name:string}|null;items:Array<{id:string;official_name_snapshot:string;total_cents:number;transfer:{status:string;stripe_transfer_id:string|null;failure_message:string|null;paid_at:string|null}|null}> };
 
 const statuses: ReadonlyArray<[PaymentStatus, string]> = [
   ["unpaid", "Unpaid"],
@@ -172,6 +173,7 @@ export default function PayrollManager({
   const handledReportFocus = useRef("");
   const [rows, setRows] = useState<PayrollRow[]>([]);
   const [billTos, setBillTos] = useState<BillTo[]>([]);
+  const [batches, setBatches] = useState<PayrollBatch[]>([]);
   const [canManageBillTos, setCanManageBillTos] = useState(false);
   const [newBillToName, setNewBillToName] = useState("");
   const [weekdayOrigins, setWeekdayOrigins] = useState<WeekdayOrigin[]>([]);
@@ -195,9 +197,10 @@ export default function PayrollManager({
       const query = organizationId
         ? `?organizationId=${encodeURIComponent(organizationId)}`
         : "";
-      const [response, billToResponse] = await Promise.all([
+      const [response, billToResponse, batchResponse] = await Promise.all([
         fetch(`/api/payroll${query}`, { cache: "no-store" }),
         fetch(`/api/bill-tos${query}`, { cache: "no-store" }),
+        fetch(`/api/payroll/batches${query}`, { cache: "no-store" }),
       ]);
       const result = (await response.json()) as {
         assignments?: PayrollRow[];
@@ -224,6 +227,10 @@ export default function PayrollManager({
         };
         setBillTos(billToResult.billTos || []);
         setCanManageBillTos(Boolean(billToResult.canManageBillTos));
+      }
+      if (batchResponse.ok) {
+        const batchResult = await batchResponse.json() as { batches?: PayrollBatch[] };
+        setBatches(batchResult.batches || []);
       }
     } catch (loadError) {
       setError(
@@ -538,6 +545,22 @@ export default function PayrollManager({
       await load();
     }
     setSaving("");
+  }
+
+  async function retryPayrollBatch(batchId: string) {
+    if (!organizationId) return;
+    setSaving(`retry-${batchId}`);setError("");
+    const response=await fetch(`/api/payroll/batches?organizationId=${encodeURIComponent(organizationId)}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({batchId})});
+    const result=await response.json() as {error?:string};
+    if(!response.ok)setError(result.error||"Payroll retry failed.");else{setNotice("The remaining official transfers were completed.");await load();}
+    setSaving("");
+  }
+
+  function downloadReconciliation(batch: PayrollBatch) {
+    const headings=["Batch","League","Status","Official","Official Amount","Transfer Status","Stripe Transfer ID","Payroll Subtotal","RefAssign Fee","Estimated Stripe Fee","Actual Stripe Fee","League Funding","Paid At"];
+    const quote=(value:unknown)=>`"${String(value??"").replaceAll('"','""')}"`;
+    const rows=batch.items.map(item=>[batch.batch_number,batch.leagues?.name||"",batch.status,item.official_name_snapshot,(item.total_cents/100).toFixed(2),item.transfer?.status||"pending",item.transfer?.stripe_transfer_id||"",(batch.payroll_subtotal_cents/100).toFixed(2),(batch.refassign_fee_cents/100).toFixed(2),(batch.stripe_processing_cost_cents/100).toFixed(2),batch.stripe_processing_cost_actual_cents==null?"":(batch.stripe_processing_cost_actual_cents/100).toFixed(2),(batch.total_funding_cents/100).toFixed(2),batch.paid_at||""]);
+    const blob=new Blob([[headings,...rows].map(row=>row.map(quote).join(",")).join("\n")],{type:"text/csv;charset=utf-8"}),url=URL.createObjectURL(blob),link=document.createElement("a");link.href=url;link.download=`payroll-batch-${batch.batch_number}-reconciliation.csv`;link.click();URL.revokeObjectURL(url);
   }
 
   async function exportPayroll() {
@@ -1202,6 +1225,10 @@ export default function PayrollManager({
           </table>
         </div>
       )}
+      <div className="payrollBatchHistory">
+        <div className="cardHead"><div><h3>Stripe Payroll History</h3><p>League funding, Stripe costs, and official transfer reconciliation.</p></div></div>
+        {batches.length===0?<p>No Stripe payroll batches yet.</p>:batches.map(batch=><details key={batch.id} className="registrationReview"><summary><b>Batch {batch.batch_number}</b> · {batch.leagues?.name||"League"} · <span className={`badge ${batch.status==="paid"?"green":batch.status.includes("failed")||batch.status==="returned"?"red":"yellow"}`}>{batch.status.replaceAll("_"," ")}</span> · ${(batch.total_funding_cents/100).toFixed(2)}</summary><div className="tableWrap"><table><thead><tr><th>Official</th><th>Amount</th><th>Transfer</th><th>Stripe ID</th></tr></thead><tbody>{batch.items.map(item=><tr key={item.id}><td>{item.official_name_snapshot}</td><td>{money(item.total_cents/100)}</td><td>{item.transfer?.status||"pending"}</td><td><small>{item.transfer?.stripe_transfer_id||item.transfer?.failure_message||"—"}</small></td></tr>)}</tbody></table></div><p>Payroll {money(batch.payroll_subtotal_cents/100)} · RefAssign fee {money(batch.refassign_fee_cents/100)} · Estimated Stripe cost {money(batch.stripe_processing_cost_cents/100)} · Actual Stripe cost {batch.stripe_processing_cost_actual_cents==null?"Pending":money(batch.stripe_processing_cost_actual_cents/100)}</p>{batch.funding_failure_message&&<div className="errorBox">{batch.funding_failure_message}</div>}<div className="headerActions"><button className="secondary" onClick={()=>downloadReconciliation(batch)}>Download Reconciliation</button>{["partially_paid","on_hold"].includes(batch.status)&&!/(returned|refund|dispute)/i.test(batch.funding_failure_message||"")&&<button className="primary" disabled={saving===`retry-${batch.id}`} onClick={()=>void retryPayrollBatch(batch.id)}>{saving===`retry-${batch.id}`?"Retrying…":"Retry Failed Transfers"}</button>}</div></details>)}
+      </div>
     </section>
   );
 }
