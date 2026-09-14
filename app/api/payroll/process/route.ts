@@ -150,17 +150,19 @@ export async function POST(request: NextRequest) {
     const transferKey = `${batchKey}-${item.id}`;
     const { data: priorTransfer } = await service.from("payroll_transfers").select("id,status").eq("payroll_batch_item_id", item.id).maybeSingle();
     if (priorTransfer?.status === "paid") { paidCount += 1; continue; }
+    if (priorTransfer && priorTransfer.status !== "failed") { failure = "This Stripe transfer is already processing."; break; }
+    const activeTransferKey = priorTransfer ? `${transferKey}-retry-${Date.now()}` : transferKey;
     const transferResult = priorTransfer
-      ? await service.from("payroll_transfers").update({ status: "processing", failure_code: null, failure_message: null }).eq("id", priorTransfer.id).select("id").single()
+      ? await service.from("payroll_transfers").update({ status: "processing", idempotency_key: activeTransferKey, failure_code: null, failure_message: null }).eq("id", priorTransfer.id).eq("status", "failed").select("id").maybeSingle()
       : await service.from("payroll_transfers").insert({ payroll_batch_id: batch.id, payroll_batch_item_id: item.id, official_id: item.official_id, stripe_account_id_snapshot: account.stripe_account_id, amount_cents: item.total_cents, status: "processing", idempotency_key: transferKey }).select("id").single();
     const transferRecord = transferResult.data;
     if (transferResult.error || !transferRecord) { failure = transferResult.error?.message || "Transfer record could not be created."; break; }
     try {
       const form = new URLSearchParams({ amount: String(item.total_cents), currency: "usd", destination: account.stripe_account_id, transfer_group: `PAYROLL_${batch.id}`, "metadata[payroll_batch_id]": batch.id, "metadata[payroll_batch_item_id]": item.id });
-      const transfer = await stripeConnectRequest<{ id: string }>("transfers", key, form, transferKey);
+      const transfer = await stripeConnectRequest<{ id: string }>("transfers", key, form, activeTransferKey);
       await Promise.all([
         service.from("payroll_transfers").update({ stripe_transfer_id: transfer.id, status: "paid", transferred_at: now, paid_at: now }).eq("id", transferRecord.id),
-        service.from("payment_transactions").insert({ organization_id: organizationId, league_id: leagueId, transaction_type: "payroll", related_record_id: item.id, direction: "debit", status: "succeeded", amount_cents: item.total_cents, stripe_object_type: "transfer", stripe_object_id: transfer.id, idempotency_key: transferKey }),
+        service.from("payment_transactions").insert({ organization_id: organizationId, league_id: leagueId, transaction_type: "payroll", related_record_id: item.id, direction: "debit", status: "succeeded", amount_cents: item.total_cents, stripe_object_type: "transfer", stripe_object_id: transfer.id, idempotency_key: activeTransferKey }),
         service.from("assignments").update({ payment_status: "paid", paid_at: now, payroll_updated_at: now, payroll_updated_by: user.id }).eq("id", item.assignment_id),
       ]);
       paidCount += 1;
