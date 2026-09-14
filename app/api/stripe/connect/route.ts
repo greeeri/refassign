@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "../../../../lib/supabase/server";
 import { createServiceClient } from "../../../../lib/supabase/admin";
-import { connectedAccountState, stripeConnectRequest, StripeConnectedAccount } from "../../../../lib/stripe/connect";
+import { connectedAccountState, stripeConnectRequest, stripeConnectV2Request, StripeConnectedAccount } from "../../../../lib/stripe/connect";
 
 async function context() {
   const session = await createServerSupabaseClient();
@@ -28,13 +28,39 @@ export async function POST(request: NextRequest) {
     const key = process.env.STRIPE_CONNECT_MODE === "sandbox"
       ? process.env.STRIPE_CONNECT_TEST_SECRET_KEY || ""
       : process.env.STRIPE_SECRET_KEY || "";
-    if (process.env.STRIPE_CONNECT_MODE !== "sandbox" || !key.startsWith("sk_test_")) throw new Error("Stripe sandbox onboarding is not configured. Add STRIPE_CONNECT_TEST_SECRET_KEY and set STRIPE_CONNECT_MODE=sandbox.");
+    if (process.env.STRIPE_CONNECT_MODE !== "sandbox" || !/^(sk|rk)_test_/.test(key)) throw new Error("Stripe sandbox onboarding is not configured. Add STRIPE_CONNECT_TEST_SECRET_KEY and set STRIPE_CONNECT_MODE=sandbox.");
     const body = await request.json().catch(() => ({})) as { action?: "onboard" | "dashboard" | "refresh" };
     const { data: stored } = await service.from("official_stripe_accounts").select("stripe_account_id").eq("official_id", official.id).maybeSingle();
     let accountId = stored?.stripe_account_id || "";
     if (!accountId) {
-      const form = new URLSearchParams({ type: "express", country: "US", email: official.email || "", business_type: "individual", "capabilities[transfers][requested]": "true", "metadata[refassign_official_id]": official.id });
-      const account = await stripeConnectRequest<StripeConnectedAccount>("accounts", key, form);
+      const account = await stripeConnectV2Request<StripeConnectedAccount>(
+        "core/accounts",
+        key,
+        {
+          contact_email: official.email || undefined,
+          display_name: [official.first_name, official.last_name].filter(Boolean).join(" ") || undefined,
+          identity: { country: "us", entity_type: "individual" },
+          dashboard: "express",
+          defaults: {
+            responsibilities: {
+              fees_collector: "application",
+              losses_collector: "application",
+            },
+          },
+          configuration: {
+            recipient: {
+              capabilities: {
+                stripe_balance: {
+                  stripe_transfers: { requested: true },
+                },
+              },
+            },
+          },
+          metadata: { refassign_official_id: official.id },
+          include: ["configuration.recipient", "defaults", "identity", "requirements"],
+        },
+        `refassign-official-${official.id}`,
+      );
       accountId = account.id;
       const { error } = await service.from("official_stripe_accounts").upsert({ official_id: official.id, stripe_account_id: accountId, ...connectedAccountState(account) });
       if (error) throw error;
