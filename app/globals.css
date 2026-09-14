@@ -775,8 +775,18 @@ td small {
   background: #fff;
   font: inherit;
 }
-.filePicker input {
-  margin-top: 5px;
+.filePicker {
+  display: grid;
+  justify-items: start;
+  gap: 7px;
+  color: #475569;
+  font-size: 12px;
+}
+.hiddenFileInput {
+  display: none;
+}
+.selectCsvButton {
+  margin-top: 2px;
 }
 .selectedFileName {
   color: #166534;

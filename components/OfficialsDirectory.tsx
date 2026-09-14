@@ -192,6 +192,7 @@ export default function OfficialsDirectory({
 }) {
   const supabase = useMemo(() => createClient(), []);
   const handledReportFocus = useRef("");
+  const bulkFileInputRef = useRef<HTMLInputElement>(null);
   const [officials, setOfficials] = useState<Official[]>([]);
   const [positionRanks, setPositionRanks] = useState<
     Record<string, PositionRank>
@@ -370,6 +371,11 @@ export default function OfficialsDirectory({
     setBulkFileName(file.name);
     setBulkResults([]);
     setError("");
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      setBulkEmailText("");
+      setError(`${file.name} is not a CSV file. Export or save it as CSV, then choose it again.`);
+      return;
+    }
     try {
       const contents = await file.text();
       if (!contents.trim()) {
@@ -1295,22 +1301,31 @@ export default function OfficialsDirectory({
                 from the CSV are saved in the directory; pasted-email names are
                 completed when each official creates their account.
               </p>
-              <label className="filePicker">
-                Choose CSV file
+              <div className="filePicker">
+                <b>Choose CSV file</b>
                 <input
+                  ref={bulkFileInputRef}
+                  className="hiddenFileInput"
                   type="file"
-                  accept=".csv,text/csv,text/plain"
                   onChange={(event) => {
                     const file = event.currentTarget.files?.item(0);
                     void readBulkFile(file || undefined);
+                    event.currentTarget.value = "";
                   }}
                 />
+                <button
+                  type="button"
+                  className="secondary selectCsvButton"
+                  onClick={() => bulkFileInputRef.current?.click()}
+                >
+                  Select CSV file
+                </button>
                 {bulkFileName && (
                   <span className="selectedFileName">
                     Selected: {bulkFileName}
                   </span>
                 )}
-              </label>
+              </div>
               <label>
                 Email addresses
                 <textarea
