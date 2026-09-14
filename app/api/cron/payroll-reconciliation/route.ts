@@ -3,7 +3,7 @@ import { createServiceClient } from "../../../../lib/supabase/admin";
 import { stripeConnectRequest } from "../../../../lib/stripe/connect";
 import { releasePayrollBatch } from "../../../../lib/stripe/payroll";
 
-export const maxDuration = 60;
+// Reconciles missed or delayed Stripe webhook deliveries.\nexport const maxDuration = 60;
 
 type CheckoutSession = {
   id: string;
