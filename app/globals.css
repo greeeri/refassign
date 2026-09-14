@@ -200,6 +200,37 @@ p {
   justify-content: flex-end;
   gap: 9px;
 }
+.gameLeagueFilter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 11px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #173b66;
+  font-size: 12px;
+  font-weight: 800;
+}
+.gameLeagueFilter select {
+  width: auto;
+  min-width: 180px;
+  padding: 7px 28px 7px 9px;
+  border: 0;
+  background-color: transparent;
+  color: #172033;
+  font-weight: 700;
+}
+@media (max-width: 700px) {
+  .gameLeagueFilter {
+    width: 100%;
+  }
+  .gameLeagueFilter select {
+    flex: 1;
+    min-width: 0;
+  }
+}
 .signedInHeader {
   display: grid;
   min-width: 130px;
