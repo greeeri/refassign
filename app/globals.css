@@ -689,6 +689,25 @@ td small {
 .officialForm textarea {
   resize: vertical;
 }
+.officialForm .sportChecks {
+  display: grid;
+  gap: 2px;
+}
+.officialForm .sportChecks label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  cursor: pointer;
+}
+.officialForm .sportChecks input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  cursor: pointer;
+}
 .directoryConnectCard,
 .directorySearchCard {
   display: grid;
@@ -821,6 +840,52 @@ td small {
 .availabilityOfficialPicker label {
   display: grid;
   gap: 6px;
+}
+.availabilitySearch {
+  position: relative;
+}
+.availabilitySearchResults {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 5px);
+  left: 0;
+  right: 0;
+  display: grid;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgb(15 23 42 / 16%);
+}
+.availabilitySearchResults button {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 13px;
+  border: 0;
+  border-bottom: 1px solid #e2e8f0;
+  background: #fff;
+  color: #1e293b;
+  text-align: left;
+  cursor: pointer;
+}
+.availabilitySearchResults button:last-of-type {
+  border-bottom: 0;
+}
+.availabilitySearchResults button:hover,
+.availabilitySearchResults button.selected {
+  background: #eff6ff;
+}
+.availabilitySearchResults button span {
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 800;
+}
+.availabilitySearchResults p {
+  margin: 0;
+  padding: 12px 13px;
+  color: #64748b;
 }
 .compactResults {
   max-height: 280px;
