@@ -601,6 +601,23 @@ export default function GameSetup({
     (a, b) =>
       (powers[b.id] ?? 1) - (powers[a.id] ?? 1) || a.name.localeCompare(b.name),
   );
+  const teamNameFilter = team.name.trim().toLowerCase();
+  const hasTeamFilters = Boolean(
+    teamNameFilter || team.sport_id || team.level_id,
+  );
+  const matchingRankedTeams = rankedTeams
+    .map((rankedTeam, index) => ({ team: rankedTeam, rank: index + 1 }))
+    .filter(({ team: rankedTeam }) =>
+      !teamNameFilter || rankedTeam.name.toLowerCase().includes(teamNameFilter),
+    )
+    .filter(
+      ({ team: rankedTeam }) =>
+        !team.sport_id || rankedTeam.sport_id === team.sport_id,
+    )
+    .filter(
+      ({ team: rankedTeam }) =>
+        !team.level_id || rankedTeam.level_id === team.level_id,
+    );
   if (!allowed)
     return (
       <section className="card">
@@ -912,6 +929,21 @@ export default function GameSetup({
               </button>
             </div>
           </form>
+          <div className="cardHead teamMatchesHead">
+            <div>
+              <h3>
+                {hasTeamFilters ? "Potential matching teams" : "Team rankings"}
+              </h3>
+              <p>
+                {hasTeamFilters
+                  ? "Matches update as you enter a team name or select a sport and level."
+                  : "Enter a team name or select a sport or level above to narrow this list."}
+              </p>
+            </div>
+            <span className="badge blue">
+              {matchingRankedTeams.length} {matchingRankedTeams.length === 1 ? "team" : "teams"}
+            </span>
+          </div>
           <div className="tableWrap">
             <table>
               <thead>
@@ -925,10 +957,10 @@ export default function GameSetup({
                 </tr>
               </thead>
               <tbody>
-                {rankedTeams.map((t, index) => (
+                {matchingRankedTeams.map(({ team: t, rank }) => (
                   <tr key={t.id}>
                     <td>
-                      <b>#{index + 1}</b>
+                      <b>#{rank}</b>
                     </td>
                     <td>{t.name}</td>
                     <td>
@@ -974,6 +1006,13 @@ export default function GameSetup({
                     </td>
                   </tr>
                 ))}
+                {matchingRankedTeams.length === 0 && (
+                  <tr>
+                    <td colSpan={6}>
+                      No teams match the selected name, sport, and level.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
