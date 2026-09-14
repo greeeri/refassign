@@ -806,12 +806,22 @@ td small {
   color: #163a61;
   text-align: center;
 }
+.bulkActionButtons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
 .compactResults {
   max-height: 280px;
   overflow: auto;
 }
 .compactResults article {
   padding: 10px 12px;
+}
+@media (max-width: 640px) {
+  .bulkActionButtons {
+    grid-template-columns: 1fr;
+  }
 }
 .locationSourceOptions {
   display: flex;

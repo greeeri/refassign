@@ -307,7 +307,7 @@ export default function OfficialsDirectory({
       );
   }
 
-  async function addBulkOfficials() {
+  async function addBulkOfficials(sendInvitations: boolean) {
     if (!organizationId) return;
     const emails = bulkResults
       .filter((item) => item.valid !== false && !item.already_connected)
@@ -319,8 +319,10 @@ export default function OfficialsDirectory({
       "bulk_add_organization_official_emails",
       { p_organization_id: organizationId, p_emails: emails },
     );
-    setBulkBusy(false);
-    if (bulkError) return setError(bulkError.message);
+    if (bulkError) {
+      setBulkBusy(false);
+      return setError(bulkError.message);
+    }
     const added = (data || []) as LinkOfficialResult[];
     for (const item of bulkResults) {
       if (!item.first_name || !item.last_name || item.already_connected)
@@ -334,13 +336,16 @@ export default function OfficialsDirectory({
           p_last_name: item.last_name,
         },
       );
-      if (nameError) return setError(nameError.message);
+      if (nameError) {
+        setBulkBusy(false);
+        return setError(nameError.message);
+      }
     }
     const invitationEmails = added
       .filter((item) => !item.existing_account)
       .map((item) => item.email);
     let sent = 0;
-    if (invitationEmails.length) {
+    if (sendInvitations && invitationEmails.length) {
       const response = await postOfficialInvitations(invitationEmails);
       const notification = (await response.json().catch(() => ({}))) as {
         sent?: number;
@@ -357,8 +362,11 @@ export default function OfficialsDirectory({
     setBulkResults([]);
     setBulkEmailText("");
     setBulkFileName("");
+    setBulkBusy(false);
     setLinkMessage(
-      `${added.length} officials added.${invitationEmails.length ? ` ${sent} invitation emails sent to missing accounts.` : " All already had RefAssign accounts."}`,
+      sendInvitations
+        ? `${added.length} officials added.${invitationEmails.length ? ` ${sent} invitation emails sent to missing accounts.` : " All already had RefAssign accounts."}`
+        : `${added.length} officials added without sending invitations.`,
     );
     await load();
   }
@@ -1360,7 +1368,7 @@ export default function OfficialsDirectory({
                           (item) => item.valid !== false && !item.found,
                         ).length
                       }{" "}
-                      invitations needed
+                      without accounts
                     </b>
                     <b>
                       {
@@ -1389,28 +1397,44 @@ export default function OfficialsDirectory({
                                 ? "Already in organization"
                                 : item.found
                                   ? "Existing RefAssign account"
-                                  : "New invitation required"}
+                                  : "No RefAssign account yet"}
                           </span>
                         </div>
                       </article>
                     ))}
                   </div>
-                  <button
-                    type="button"
-                    className="primary"
-                    disabled={
-                      bulkBusy ||
-                      !bulkResults.some(
-                        (item) =>
-                          item.valid !== false && !item.already_connected,
-                      )
-                    }
-                    onClick={() => void addBulkOfficials()}
-                  >
-                    {bulkBusy
-                      ? "Adding…"
-                      : "Add officials and email invitations"}
-                  </button>
+                  <div className="bulkActionButtons">
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={
+                        bulkBusy ||
+                        !bulkResults.some(
+                          (item) =>
+                            item.valid !== false && !item.already_connected,
+                        )
+                      }
+                      onClick={() => void addBulkOfficials(false)}
+                    >
+                      {bulkBusy ? "Adding…" : "Add without sending invites"}
+                    </button>
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={
+                        bulkBusy ||
+                        !bulkResults.some(
+                          (item) =>
+                            item.valid !== false && !item.already_connected,
+                        )
+                      }
+                      onClick={() => void addBulkOfficials(true)}
+                    >
+                      {bulkBusy
+                        ? "Adding…"
+                        : "Add officials and send invites"}
+                    </button>
+                  </div>
                 </>
               )}
             </div>
