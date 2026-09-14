@@ -318,6 +318,7 @@ export default function GamesManagerV3({
     [importApproved, setImportApproved] = useState(false),
     [validationBusy, setValidationBusy] = useState(false),
     [range, setRange] = useState<Range>("all"),
+    [leagueFilter, setLeagueFilter] = useState("all"),
     [customDate, setCustomDate] = useState(""),
     [showCalendar, setShowCalendar] = useState(false),
     [showArchived, setShowArchived] = useState(false),
@@ -457,7 +458,12 @@ export default function GamesManagerV3({
     }
     setManagementBusy(false);
   }
-  const filteredGames = games.filter((g) => inRange(g, range, customDate));
+  const leagueGames = games.filter(
+    (game) => leagueFilter === "all" || game.league_id === leagueFilter,
+  );
+  const filteredGames = leagueGames.filter((game) =>
+    inRange(game, range, customDate),
+  );
   const eligible = teams.filter(
     (t) => t.sport_id === form.sport_id && t.level_id === form.level_id,
   );
@@ -1005,6 +1011,23 @@ export default function GamesManagerV3({
         >
           Archived Games
         </button>
+        <label className="gameLeagueFilter">
+          <span>League</span>
+          <select
+            value={leagueFilter}
+            onChange={(event) => {
+              setLeagueFilter(event.target.value);
+              setSelectedGames([]);
+            }}
+          >
+            <option value="all">All Leagues</option>
+            {leagues.map((league) => (
+              <option key={league.id} value={league.id}>
+                {league.name}
+              </option>
+            ))}
+          </select>
+        </label>
         {filters.map(([key, label]) => (
           <button
             key={key}
@@ -1015,7 +1038,9 @@ export default function GamesManagerV3({
               setShowCalendar(false);
             }}
           >
-            {label} ({games.filter((g) => inRange(g, key, customDate)).length})
+            {label} (
+            {leagueGames.filter((game) => inRange(game, key, customDate)).length}
+            )
           </button>
         ))}
         <button
