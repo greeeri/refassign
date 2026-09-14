@@ -62,7 +62,8 @@ export default function GameSetup({
     [levels, setLevels] = useState<Level[]>([]),
     [leagues, setLeagues] = useState<League[]>([]),
     [teams, setTeams] = useState<Team[]>([]),
-    [powers, setPowers] = useState<Record<string, number>>({}),
+    [powers, setPowers] = useState<Record<string, string>>({}),
+    [savedPowers, setSavedPowers] = useState<Record<string, number>>({}),
     [locations, setLocations] = useState<Location[]>([]);
   const [levelName, setLevelName] = useState(""),
     [levelOfficials, setLevelOfficials] = useState("3"),
@@ -303,9 +304,11 @@ export default function GameSetup({
       organizationSetup.error;
     if (err) setError(err.message);
     else {
-      const powerMap: Record<string, number> = {};
+      const powerMap: Record<string, string> = {};
+      const savedPowerMap: Record<string, number> = {};
       ((pw.data || []) as Power[]).forEach((item) => {
-        powerMap[item.team_id] = Number(item.power);
+        powerMap[item.team_id] = String(Number(item.power));
+        savedPowerMap[item.team_id] = Number(item.power);
       });
       setSports(s.data || []);
       const scoped = organizationSetup.data as {
@@ -331,6 +334,7 @@ export default function GameSetup({
       );
       setTeams(visibleTeams);
       setPowers(powerMap);
+      setSavedPowers(savedPowerMap);
       setLocations((loc.data || []) as Location[]);
     }
   }
@@ -451,7 +455,7 @@ export default function GameSetup({
     });
   }
   async function savePower(teamId: string) {
-    const power = powers[teamId] ?? 1;
+    const power = Number(powers[teamId] ?? 1);
     if (!Number.isFinite(power) || power < 1 || power > 10) {
       setError("Power ranking must be between 1.0 and 10.0.");
       return;
@@ -463,6 +467,11 @@ export default function GameSetup({
       p_power: Math.round(power * 10) / 10,
     });
     if (e) setError(e.message);
+    else {
+      const savedPower = Math.round(power * 10) / 10;
+      setPowers((current) => ({ ...current, [teamId]: String(savedPower) }));
+      setSavedPowers((current) => ({ ...current, [teamId]: savedPower }));
+    }
     setSavingPower("");
   }
   async function saveLocation(e: FormEvent) {
@@ -599,7 +608,8 @@ export default function GameSetup({
   }
   const rankedTeams = [...teams].sort(
     (a, b) =>
-      (powers[b.id] ?? 1) - (powers[a.id] ?? 1) || a.name.localeCompare(b.name),
+      (savedPowers[b.id] ?? 1) - (savedPowers[a.id] ?? 1) ||
+      a.name.localeCompare(b.name),
   );
   const teamNameFilter = team.name.trim().toLowerCase();
   const hasTeamFilters = Boolean(
@@ -978,12 +988,12 @@ export default function GameSetup({
                         min="1"
                         max="10"
                         step="0.1"
-                        value={powers[t.id] ?? 1}
+                        value={powers[t.id] ?? "1"}
                         disabled={savingPower === t.id}
                         onChange={(e) =>
                           setPowers((current) => ({
                             ...current,
-                            [t.id]: Number(e.target.value),
+                            [t.id]: e.target.value,
                           }))
                         }
                         onBlur={() => void savePower(t.id)}

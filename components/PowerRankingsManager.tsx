@@ -18,7 +18,8 @@ export default function PowerRankingsManager() {
   const [teams, setTeams] = useState<Team[]>([]),
     [sports, setSports] = useState<Choice[]>([]),
     [levels, setLevels] = useState<Choice[]>([]),
-    [powers, setPowers] = useState<Record<string, number>>({}),
+    [powers, setPowers] = useState<Record<string, string>>({}),
+    [savedPowers, setSavedPowers] = useState<Record<string, number>>({}),
     [sportFilter, setSportFilter] = useState(""),
     [levelFilter, setLevelFilter] = useState(""),
     [search, setSearch] = useState(""),
@@ -60,12 +61,15 @@ export default function PowerRankingsManager() {
       setError(loadError.message);
       return;
     }
-    const powerMap: Record<string, number> = {};
+    const powerMap: Record<string, string> = {};
+    const savedPowerMap: Record<string, number> = {};
     ((powerResult.data || []) as Power[]).forEach((item) => {
-      powerMap[item.team_id] = Number(item.power);
+      powerMap[item.team_id] = String(Number(item.power));
+      savedPowerMap[item.team_id] = Number(item.power);
     });
     setTeams((teamResult.data || []) as Team[]);
     setPowers(powerMap);
+    setSavedPowers(savedPowerMap);
     setSports((sportResult.data || []) as Choice[]);
     setLevels((levelResult.data || []) as Choice[]);
   }
@@ -75,7 +79,7 @@ export default function PowerRankingsManager() {
   }, []);
 
   async function savePower(teamId: string) {
-    const power = powers[teamId] ?? 1;
+    const power = Number(powers[teamId] ?? 1);
     if (!Number.isFinite(power) || power < 1 || power > 10) {
       setError("Power ranking must be between 1.0 and 10.0.");
       return;
@@ -88,7 +92,12 @@ export default function PowerRankingsManager() {
       p_power: Math.round(power * 10) / 10,
     });
     if (saveError) setError(saveError.message);
-    else setMessage("Your power ranking was saved and your assignment priority updated.");
+    else {
+      const savedPower = Math.round(power * 10) / 10;
+      setPowers((current) => ({ ...current, [teamId]: String(savedPower) }));
+      setSavedPowers((current) => ({ ...current, [teamId]: savedPower }));
+      setMessage("Your power ranking was saved and your assignment priority updated.");
+    }
     setSaving("");
   }
 
@@ -98,7 +107,7 @@ export default function PowerRankingsManager() {
     .filter((team) => team.name.toLowerCase().includes(search.trim().toLowerCase()))
     .sort(
       (a, b) =>
-        (powers[b.id] ?? 1) - (powers[a.id] ?? 1) ||
+        (savedPowers[b.id] ?? 1) - (savedPowers[a.id] ?? 1) ||
         a.name.localeCompare(b.name),
     );
 
@@ -189,12 +198,12 @@ export default function PowerRankingsManager() {
                     min="1"
                     max="10"
                     step="0.1"
-                    value={powers[team.id] ?? 1}
+                    value={powers[team.id] ?? "1"}
                     disabled={saving === team.id}
                     onChange={(event) =>
                       setPowers((current) => ({
                         ...current,
-                        [team.id]: Number(event.target.value),
+                        [team.id]: event.target.value,
                       }))
                     }
                     onBlur={() => void savePower(team.id)}
