@@ -42,7 +42,7 @@ export async function POST(request: Request) {
   const payload = await request.text();
   const signature = request.headers.get("stripe-signature") || "";
   if (!validSignature(payload, signature, secret)) return NextResponse.json({ error: "Invalid Stripe signature." }, { status: 400 });
-  let event: { id?: string; type?: string; data?: { object?: Record<string, any> } };
+  let event: { id?: string; type?: string; livemode?: boolean; data?: { object?: Record<string, any> } };
   try { event = JSON.parse(payload); }
   catch { return NextResponse.json({ error: "Invalid payload." }, { status: 400 }); }
   if (!event.id || !event.type) return NextResponse.json({ error: "Stripe event ID and type are required." }, { status: 400 });
@@ -63,10 +63,11 @@ export async function POST(request: Request) {
     if (event.type === "account.updated") {
       const account = object as StripeConnectedAccount;
       const officialId = String(object.metadata?.refassign_official_id || "");
-      const values = { stripe_account_id: account.id, ...connectedAccountState(account) };
+      const stripeMode = event.livemode ? "live" : "sandbox";
+      const values = { stripe_mode: stripeMode, stripe_account_id: account.id, ...connectedAccountState(account) };
       const result = officialId
-        ? await service.from("official_stripe_accounts").upsert({ official_id: officialId, ...values })
-        : await service.from("official_stripe_accounts").update(values).eq("stripe_account_id", account.id);
+        ? await service.from("official_stripe_accounts").upsert({ official_id: officialId, ...values }, { onConflict: "official_id,stripe_mode" })
+        : await service.from("official_stripe_accounts").update(values).eq("stripe_account_id", account.id).eq("stripe_mode", stripeMode);
       if (result.error) throw result.error;
     } else if (event.type === "checkout.session.completed" && object.metadata?.refassign_subscription_id) {
       const subscriptionId = objectId(object.subscription);
