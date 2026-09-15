@@ -3,15 +3,16 @@ import { NextResponse } from "next/server";
 import { createServiceClient } from "../../../../../lib/supabase/admin";
 import { releasePayrollBatch } from "../../../../../lib/stripe/payroll";
 import { stripeConnectRequest } from "../../../../../lib/stripe/connect";
+import { stripeConnectConfig } from "../../../../../lib/stripe/runtime";
 
 function validSignature(payload:string,header:string,secret:string){const values=header.split(",").reduce<Record<string,string[]>>((all,part)=>{const i=part.indexOf("=");if(i>0)(all[part.slice(0,i)]||=[]).push(part.slice(i+1));return all},{}),timestamp=values.t?.[0];if(!timestamp||Math.abs(Date.now()/1000-Number(timestamp))>300)return false;const expected=createHmac("sha256",secret).update(`${timestamp}.${payload}`).digest("hex");return(values.v1||[]).some(signature=>{try{return timingSafeEqual(Buffer.from(expected,"hex"),Buffer.from(signature,"hex"))}catch{return false}})}
 const objectId=(value:unknown)=>typeof value==="string"?value:value&&typeof value==="object"&&"id" in value?String((value as{id?:unknown}).id||""):"";
 
 export async function POST(request:Request){
- const secret=process.env.STRIPE_PAYROLL_TEST_WEBHOOK_SECRET,key=process.env.STRIPE_CONNECT_TEST_SECRET_KEY;
+ let config;try{config=stripeConnectConfig()}catch{return NextResponse.json({error:"Payroll webhook is not configured."},{status:503})}const secret=config.payrollWebhookSecret,key=config.secretKey;
  if(!secret||!key)return NextResponse.json({error:"Payroll webhook is not configured."},{status:503});
  const payload=await request.text(),signature=request.headers.get("stripe-signature")||"";if(!validSignature(payload,signature,secret))return NextResponse.json({error:"Invalid Stripe signature."},{status:400});
- let event:{id?:string;type?:string;data?:{object?:Record<string,any>}};try{event=JSON.parse(payload)}catch{return NextResponse.json({error:"Invalid payload."},{status:400})}if(!event.id||!event.type)return NextResponse.json({error:"Stripe event ID and type are required."},{status:400});
+ let event:{id?:string;type?:string;livemode?:boolean;data?:{object?:Record<string,any>}};try{event=JSON.parse(payload)}catch{return NextResponse.json({error:"Invalid payload."},{status:400})}if(!event.id||!event.type)return NextResponse.json({error:"Stripe event ID and type are required."},{status:400});if(event.livemode!==(config.mode==="live"))return NextResponse.json({error:`This endpoint accepts ${config.mode} Stripe events only.`},{status:400});
  const service=createServiceClient(),now=new Date().toISOString(),object=event.data?.object||{},batchId=String(object.metadata?.refassign_payroll_batch_id||object.client_reference_id||"");
  const{data:existing}=await service.from("stripe_webhook_events").select("processing_status,attempts").eq("event_id",event.id).maybeSingle();if(existing?.processing_status==="completed")return NextResponse.json({received:true,duplicate:true});
  const record={event_id:event.id,event_type:event.type,processing_status:"processing",attempts:Number(existing?.attempts||0)+1,last_error:null,updated_at:now};const recorded=existing?await service.from("stripe_webhook_events").update(record).eq("event_id",event.id):await service.from("stripe_webhook_events").insert(record);if(recorded.error)return NextResponse.json({error:recorded.error.message},{status:500});
