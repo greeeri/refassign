@@ -7,6 +7,25 @@ export type StripeConnectedAccount = {
   requirements?: { currently_due?: string[]; eventually_due?: string[]; disabled_reason?: string | null };
 };
 
+export type StripeConnectedAccountV2 = {
+  id: string;
+  configuration?: { recipient?: { capabilities?: { stripe_balance?: { stripe_transfers?: { status?: string } } } } };
+  requirements?: { currently_due?: Array<Record<string, unknown> | string>; summary?: { minimum_deadline?: { status?: string } } };
+};
+
+export function organizationRecipientState(account: StripeConnectedAccountV2) {
+  const transferStatus = account.configuration?.recipient?.capabilities?.stripe_balance?.stripe_transfers?.status || "inactive";
+  const due = account.requirements?.currently_due || [];
+  const restricted = account.requirements?.summary?.minimum_deadline?.status === "past_due";
+  return {
+    onboarding_status: transferStatus === "active" ? "ready" : restricted ? "restricted" : "pending",
+    transfers_status: transferStatus === "active" ? "active" : restricted ? "restricted" : "pending",
+    requirements_due: due,
+    last_synced_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+}
+
 export async function stripeConnectRequest<T>(path: string, key: string, body?: URLSearchParams, idempotencyKey?: string) {
   const response = await fetch(`https://api.stripe.com/v1/${path}`, {
     method: body ? "POST" : "GET",
