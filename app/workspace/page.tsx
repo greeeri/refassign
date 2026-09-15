@@ -45,6 +45,7 @@ type Role =
   | "registrar"
   | "official"
   | "mentor"
+  | "iowa_development_admin"
   | "contact";
 type TestWorkspace = {
   organization_id: string;
@@ -57,7 +58,8 @@ type TestWorkspace = {
     | "viewer"
     | "official"
     | "mentor"
-    | "registrar";
+    | "registrar"
+    | "iowa_development_admin";
   roles?: Array<
     | "owner"
     | "admin"
@@ -67,6 +69,7 @@ type TestWorkspace = {
     | "official"
     | "mentor"
     | "registrar"
+    | "iowa_development_admin"
   >;
   viewer_permissions: string[];
   leagues?: Array<{ league_id: string; name: string }>;
@@ -78,6 +81,7 @@ const labels: Record<Role, string> = {
   registrar: "Registrar",
   official: "Official",
   mentor: "Mentor",
+  iowa_development_admin: "Iowa Training & Development Admin",
   contact: "Contact",
 };
 const Icon = ({ children }: { children: string }) => (
@@ -258,6 +262,8 @@ export default function Workspace() {
             ? "mentor"
             : role === "registrar"
               ? "registrar"
+              : role === "iowa_development_admin"
+                ? "iowa_development_admin"
               : role === "assignor"
                 ? "assignor"
                 : role === "viewer" || role === "billing"
@@ -349,7 +355,8 @@ export default function Workspace() {
     isOfficials = ["Officials", "Blocks", "Block Removal Requests"].includes(
       section,
     ),
-    iowaAdminView = viewRole === "admin";
+    iowaAdminView = viewRole === "admin",
+    iowaDevelopmentAdminView = viewRole === "iowa_development_admin";
   function nav(view: string) {
     setReportAction(null);
     setSection(view);
@@ -443,12 +450,15 @@ export default function Workspace() {
   if (
     iowaDevelopmentStaff &&
     (viewRole === "admin" ||
+      viewRole === "iowa_development_admin" ||
       viewRole === "registrar" ||
       viewRole === "league_admin")
   )
     iowaViews.push({ view: "Development Admin", label: "Training" });
   if (iowaAdminView)
     iowaViews.push({ view: "Program Referees", label: "Program Referees" });
+  if (iowaDevelopmentAdminView)
+    iowaViews.push({ view: "Program Referees", label: "Development Referees" });
   if (viewRole === "mentor" && iowaMentorAccess)
     iowaViews.push(
       { view: "Program Referees", label: "Program Referees" },
@@ -656,7 +666,18 @@ export default function Workspace() {
           {!manager &&
             viewRole !== "official" &&
             viewRole !== "contact" &&
-            iowaGroup()}
+            <>
+              {viewRole === "iowa_development_admin" && (
+                <button
+                  className={`topNavButton ${section === "Dashboard" ? "active" : ""}`}
+                  onClick={() => nav("Dashboard")}
+                >
+                  <Icon>⌂</Icon>
+                  <span>Dashboard</span>
+                </button>
+              )}
+              {iowaGroup()}
+            </>}
           {isSuperAdmin && (
             <button
               className={`topNavButton ${section === "Support Queue" ? "active" : ""}`}
@@ -798,6 +819,9 @@ export default function Workspace() {
             organizationId={testWorkspace?.organization_id}
             onNavigate={setSection}
           />
+        )}{" "}
+        {viewRole === "iowa_development_admin" && section === "Dashboard" && (
+          <DashboardGames organizationId={testWorkspace?.organization_id} />
         )}{" "}
         {manager && section === "Games" && (
           <GamesManager organizationId={testWorkspace?.organization_id} />
@@ -1020,9 +1044,17 @@ export default function Workspace() {
           )}
         {iowaDevelopmentStaff &&
           (viewRole === "admin" ||
+            viewRole === "iowa_development_admin" ||
             viewRole === "registrar" ||
             viewRole === "league_admin") &&
           section === "Development Admin" && <IowaSoccerDevelopmentAdmin />}
+        {viewRole === "iowa_development_admin" &&
+          section === "Program Referees" && (
+            <>
+              <IowaProgramReferees canManage />
+              <IowaCommunicationGroups />
+            </>
+          )}
         {iowaAdminView && section === "Program Referees" && (
           <>
             <IowaProgramReferees canManage />
