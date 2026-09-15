@@ -9,9 +9,11 @@ export async function GET(request: NextRequest) {
   const organizationId = request.nextUrl.searchParams.get("organizationId");
   if (!organizationId) return NextResponse.json({ error: "Select an organization." }, { status: 400 });
   const service = createServiceClient();
-  const { data: member, error: memberError } = await service.from("organization_memberships")
-    .select("viewer_permissions").eq("organization_id", organizationId).eq("user_id", user.id).eq("role", "viewer").maybeSingle();
-  if (memberError || !member?.viewer_permissions?.includes("assignments")) return NextResponse.json({ error: "Read-only assignment access has not been granted for this organization." }, { status: 403 });
+  const { data: memberships, error: memberError } = await service.from("organization_memberships")
+    .select("role,viewer_permissions").eq("organization_id", organizationId).eq("user_id", user.id).in("role", ["viewer", "mentor"]);
+  const mentor = memberships?.some(member => member.role === "mentor");
+  const viewer = memberships?.some(member => member.role === "viewer" && member.viewer_permissions?.includes("assignments"));
+  if (memberError || (!mentor && !viewer)) return NextResponse.json({ error: "Read-only game and assignment access has not been granted for this organization." }, { status: 403 });
   const [{ data: subscription, error: subscriptionError }, { data: access, error: accessError }] = await Promise.all([
     service.from("refassign_subscriptions").select("status,access_override").eq("organization_id", organizationId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
     service.from("organization_member_league_access").select("league_id").eq("organization_id", organizationId).eq("user_id", user.id),
