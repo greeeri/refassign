@@ -1,4 +1,5 @@
 import { stripeConnectRequest } from "./connect";
+import { stripeConnectMode } from "./runtime";
 
 type ServiceClient = any;
 
@@ -10,7 +11,7 @@ export async function releasePayrollBatch(service: ServiceClient, batchId: strin
 
   const { data: items, error: itemError } = await service.from("payroll_batch_items").select("id,assignment_id,official_id,total_cents").eq("payroll_batch_id", batch.id);
   if (itemError || !items?.length) throw new Error(itemError?.message || "Payroll batch has no items.");
-  const { data: accounts, error: accountError } = await service.from("official_stripe_accounts").select("official_id,stripe_account_id,onboarding_status,transfers_status,payouts_status").in("official_id", [...new Set(items.map((item) => item.official_id))]);
+  const { data: accounts, error: accountError } = await service.from("official_stripe_accounts").select("official_id,stripe_account_id,onboarding_status,transfers_status,payouts_status").eq("stripe_mode", stripeConnectMode()).in("official_id", [...new Set(items.map((item) => item.official_id))]);
   if (accountError) throw new Error(accountError.message);
   const accountByOfficial = new Map<string, any>((accounts || []).map((account: any) => [account.official_id, account]));
   const now = new Date().toISOString();
