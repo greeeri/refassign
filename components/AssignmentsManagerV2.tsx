@@ -3755,6 +3755,7 @@ export default function AssignmentsManagerV2({
     if (!game) return null;
     return (
       <section
+        id="selected-game-assignment"
         className="card assignmentMain mobileInlineAssignment"
         aria-label={`Assignments for game ${game.game_number}`}
       >
@@ -4034,6 +4035,7 @@ export default function AssignmentsManagerV2({
         </label>
         <button
           type="button"
+          aria-expanded={selected === g.id}
           onClick={() => {
             if (pickedOfficial) void dropOfficialOnGame(g.id, pickedOfficial);
             else requestSelectedGame(g.id);
@@ -8164,7 +8166,7 @@ export default function AssignmentsManagerV2({
         {game && filteredGames.some((g) => g.id === game.id) && (
           <div className={`assignmentLayout selectedGameDetailStandalone${focusGameId === game.id ? " reportActionFocus" : ""}`}>
             <section
-              id="selected-game-assignment"
+              id="selected-game-assignment-standalone"
               className="card assignmentMain"
             >
               <div className="cardHead selectedGameStickyHeader">
