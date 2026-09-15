@@ -3,7 +3,8 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { retrieveAndSyncStripeSubscription, syncStripeSubscription } from "../../../../lib/stripe/subscriptions";
 import { sendBillingStatusNotifications } from "../../../../lib/billing/paymentNotifications";
-import { connectedAccountState, StripeConnectedAccount } from "../../../../lib/stripe/connect";
+import { connectedAccountState, organizationRecipientState, stripeConnectRequest, stripeConnectV2Request, StripeConnectedAccount, StripeConnectedAccountV2 } from "../../../../lib/stripe/connect";
+import { stripeConnectConfig } from "../../../../lib/stripe/runtime";
 
 const escapeHtml = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]!);
 
@@ -63,12 +64,19 @@ export async function POST(request: Request) {
     if (event.type === "account.updated") {
       const account = object as StripeConnectedAccount;
       const officialId = String(object.metadata?.refassign_official_id || "");
+      const organizationId = String(object.metadata?.refassign_organization_id || "");
       const stripeMode = event.livemode ? "live" : "sandbox";
-      const values = { stripe_mode: stripeMode, stripe_account_id: account.id, ...connectedAccountState(account) };
-      const result = officialId
+      if (organizationId) {
+        const v2Account = await stripeConnectV2Request<StripeConnectedAccountV2>(`core/accounts/${encodeURIComponent(account.id)}?include[]=configuration.recipient&include[]=requirements`, stripeKey);
+        const result = await service.from("organization_stripe_accounts").upsert({ organization_id: organizationId, stripe_mode: stripeMode, stripe_account_id: account.id, ...organizationRecipientState(v2Account) }, { onConflict: "organization_id,stripe_mode" });
+        if (result.error) throw result.error;
+      } else {
+       const values = { stripe_mode: stripeMode, stripe_account_id: account.id, ...connectedAccountState(account) };
+       const result = officialId
         ? await service.from("official_stripe_accounts").upsert({ official_id: officialId, ...values }, { onConflict: "official_id,stripe_mode" })
         : await service.from("official_stripe_accounts").update(values).eq("stripe_account_id", account.id).eq("stripe_mode", stripeMode);
-      if (result.error) throw result.error;
+       if (result.error) throw result.error;
+      }
     } else if (event.type === "checkout.session.completed" && object.metadata?.refassign_subscription_id) {
       const subscriptionId = objectId(object.subscription);
       if (!subscriptionId) throw new Error("Completed subscription checkout has no Stripe subscription ID.");
@@ -103,8 +111,14 @@ export async function POST(request: Request) {
     } else if (event.type === "checkout.session.expired" && object.metadata?.refassign_subscription_id) {
       const { error } = await service.from("refassign_subscriptions").update({ status: "checkout_error", updated_at: now }).eq("id", object.metadata.refassign_subscription_id).eq("status", "pending");
       if (error) throw error;
-    } else if (event.type === "checkout.session.completed" && object.payment_status === "paid") {
-      await processOfficialRegistrationPayment(service, object, now);
+    } else if (["checkout.session.completed", "checkout.session.async_payment_succeeded"].includes(event.type) && object.payment_status === "paid") {
+      await processOfficialRegistrationPayment(service, object, now, stripeKey, event.id);
+    } else if (event.type === "checkout.session.async_payment_failed" && object.metadata?.registration_id) {
+      await service.from("payment_transactions").update({ status: "failed", failure_message: "Stripe could not complete the registration payment.", occurred_at: now }).eq("stripe_object_type", "checkout_session").eq("stripe_object_id", object.id);
+    } else if (event.type === "charge.refunded") {
+      await processRegistrationRefund(service, object, now, event.id);
+    } else if (event.type === "charge.dispute.created") {
+      await processRegistrationDispute(service, object, now, event.id, stripeKey);
     }
     const { error: completedError } = await service.from("stripe_webhook_events").update({ processing_status: "completed", processed_at: now, updated_at: now }).eq("event_id", event.id);
     if (completedError) throw completedError;
@@ -116,11 +130,22 @@ export async function POST(request: Request) {
   }
 }
 
-async function processOfficialRegistrationPayment(service: any, object: Record<string, any>, now: string) {
+async function processOfficialRegistrationPayment(service: any, object: Record<string, any>, now: string, stripeKey: string, eventId: string) {
   const registrationId = object.metadata?.registration_id;
   if (!registrationId) return;
-  const { data: registration, error } = await service.from("official_registrations").update({ status: "paid", payment_status: "paid", stripe_checkout_session_id: object.id, stripe_payment_intent_id: objectId(object.payment_intent) || null, paid_at: now, updated_at: now }).eq("id", registrationId).select("id,first_name,last_name,email,registration_year,registrar_notified_at,registration_program_id,registration_programs(name)").single();
+  const paymentIntentId = objectId(object.payment_intent);
+  const paymentIntent = paymentIntentId ? await stripeConnectRequest<Record<string, any>>(`payment_intents/${encodeURIComponent(paymentIntentId)}?expand[]=latest_charge`, stripeKey) : null;
+  const charge = paymentIntent?.latest_charge && typeof paymentIntent.latest_charge === "object" ? paymentIntent.latest_charge : null;
+  const chargeId = objectId(charge) || objectId(paymentIntent?.latest_charge);
+  const transferId = objectId(charge?.transfer);
+  const { data: registration, error } = await service.from("official_registrations").update({ status: "paid", payment_status: "paid", stripe_checkout_session_id: object.id, stripe_payment_intent_id: paymentIntentId || null, stripe_charge_id: chargeId || null, stripe_transfer_id: transferId || null, paid_at: now, updated_at: now }).eq("id", registrationId).select("id,organization_id,first_name,last_name,email,registration_year,registrar_notified_at,registration_program_id,registration_amount_cents,platform_fee_cents,processing_surcharge_cents,total_charged_cents,registration_programs(name)").single();
   if (error) throw error;
+  await Promise.all([
+    service.from("payment_transactions").update({ status: "succeeded", stripe_object_type: "payment_intent", stripe_object_id: paymentIntentId || object.id, occurred_at: now }).eq("related_record_id", registrationId).eq("transaction_type", "registration").eq("direction", "credit"),
+    service.from("payment_transactions").upsert({ organization_id: registration.organization_id, transaction_type: "registration", related_record_id: registrationId, direction: "fee", status: "succeeded", amount_cents: Number(registration.platform_fee_cents || 0), idempotency_key: `registration-${registrationId}-platform-fee` }, { onConflict: "idempotency_key" }),
+    service.from("payment_transactions").upsert({ organization_id: registration.organization_id, transaction_type: "registration", related_record_id: registrationId, direction: "debit", status: "succeeded", amount_cents: Number(registration.registration_amount_cents || 0), stripe_object_type: transferId ? "transfer" : null, stripe_object_id: transferId || null, idempotency_key: `registration-${registrationId}-organization-transfer` }, { onConflict: "idempotency_key" }),
+    service.from("payment_audit_events").insert({ organization_id: registration.organization_id, entity_type: "official_registration", entity_id: registrationId, event_type: "registration_payment_settled", new_values: { payment_status: "paid" }, metadata: { stripe_event_id: eventId, stripe_payment_intent_id: paymentIntentId, stripe_charge_id: chargeId, stripe_transfer_id: transferId } }),
+  ]);
   if (registration.registrar_notified_at || !process.env.RESEND_API_KEY) return;
   const [{ data: roles }, { data: owners }] = await Promise.all([
     service.from("registration_program_staff").select("user_id").eq("program_id", registration.registration_program_id),
@@ -138,4 +163,32 @@ async function processOfficialRegistrationPayment(service: any, object: Record<s
   if (!response.ok) throw new Error(`Registrar notification failed (${response.status}).`);
   const { error: notificationError } = await service.from("official_registrations").update({ registrar_notified_at: now }).eq("id", registration.id);
   if (notificationError) throw notificationError;
+}
+
+async function processRegistrationRefund(service: any, charge: Record<string, any>, now: string, eventId: string) {
+  const registrationId = String(charge.metadata?.registration_id || "");
+  if (!registrationId) return;
+  const refunded = Number(charge.amount_refunded || 0);
+  const { data: registration, error } = await service.from("official_registrations").update({ payment_status: charge.refunded ? "refunded" : "paid", refunded_amount_cents: refunded, updated_at: now }).eq("id", registrationId).select("organization_id").single();
+  if (error) throw error;
+  await Promise.all([
+    service.from("payment_transactions").upsert({ organization_id: registration.organization_id, transaction_type: "registration", related_record_id: registrationId, direction: "refund", status: "succeeded", amount_cents: refunded, stripe_object_type: "charge", stripe_object_id: charge.id, idempotency_key: `registration-${registrationId}-refund-${refunded}` }, { onConflict: "idempotency_key" }),
+    service.from("payment_audit_events").insert({ organization_id: registration.organization_id, entity_type: "official_registration", entity_id: registrationId, event_type: "registration_refunded", new_values: { refunded_amount_cents: refunded }, metadata: { stripe_event_id: eventId, stripe_charge_id: charge.id } }),
+  ]);
+}
+
+async function processRegistrationDispute(service: any, dispute: Record<string, any>, now: string, eventId: string, stripeKey: string) {
+  const chargeId = objectId(dispute.charge);
+  if (!chargeId) return;
+  const { data: registration } = await service.from("official_registrations").select("id,organization_id,stripe_transfer_id,registration_amount_cents").eq("stripe_charge_id", chargeId).maybeSingle();
+  if (!registration) return;
+  let reversalId = "";
+  if (registration.stripe_transfer_id) {
+    const reversal = await stripeConnectRequest<{ id: string }>(`transfers/${encodeURIComponent(registration.stripe_transfer_id)}/reversals`, stripeKey, new URLSearchParams({ amount: String(registration.registration_amount_cents || 0), "metadata[registration_id]": registration.id }), `registration-dispute-${dispute.id}`);
+    reversalId = reversal.id;
+  }
+  await Promise.all([
+    service.from("payment_transactions").upsert({ organization_id: registration.organization_id, transaction_type: "registration", related_record_id: registration.id, direction: "reversal", status: "succeeded", amount_cents: Number(registration.registration_amount_cents || 0), stripe_object_type: reversalId ? "transfer_reversal" : null, stripe_object_id: reversalId || null, idempotency_key: `registration-${registration.id}-dispute-${dispute.id}` }, { onConflict: "idempotency_key" }),
+    service.from("payment_audit_events").insert({ organization_id: registration.organization_id, entity_type: "official_registration", entity_id: registration.id, event_type: "registration_dispute_created", metadata: { stripe_event_id: eventId, stripe_dispute_id: dispute.id, stripe_charge_id: chargeId, stripe_transfer_reversal_id: reversalId } }),
+  ]);
 }
