@@ -9,6 +9,7 @@ type RoleCode =
   | "official"
   | "mentor"
   | "registrar"
+  | "iowa_development_admin"
   | "viewer"
   | "billing";
 type TeamAccess = {
@@ -31,6 +32,11 @@ const roleChoices: ReadonlyArray<[RoleCode, string, string]> = [
   ["official", "Official", "Official schedule, availability and profile"],
   ["mentor", "Mentor", "Read-only assignments in selected leagues"],
   ["registrar", "Registrar", "Registration access in selected leagues"],
+  [
+    "iowa_development_admin",
+    "Iowa Soccer Training & Development Admin",
+    "Dashboard plus Iowa Soccer training and development administration only",
+  ],
   ["viewer", "Contact (read-only)", "Selected read-only workspace areas"],
   ["billing", "Billing manager", "Billing and subscription access"],
 ];
@@ -147,6 +153,8 @@ export default function OrganizationTeamManager({
     setMessage("");
     const primary = roles.includes("admin")
       ? "admin"
+      : roles.includes("iowa_development_admin")
+        ? "admin"
       : roles.includes("assignor")
         ? "assignor"
         : roles.includes("viewer")
