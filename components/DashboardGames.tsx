@@ -289,7 +289,7 @@ export default function DashboardGames({
     <div className="modernDashboard">
       <div className="dashboardHero">
         <div>
-          <h2>Welcome to RefAssign</h2>
+          <h2>Welcome to Ref Pro Group</h2>
           <p>Here’s what is happening with your games and assignments.</p>
         </div>
         <div className="dashboardDate">

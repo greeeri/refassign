@@ -14,7 +14,7 @@ export default function IowaRulesQuiz({moduleId,onClose,onPassed}:{moduleId:stri
    if(!response.ok){setError(data.error||"The test could not be scored. Your answers are still saved on this page; please try again.");return}
    setScore(data);if(data.passed)onPassed(new Date().toISOString());window.scrollTo({top:0,behavior:"smooth"});
   }catch{
-   setError("We could not connect to RefAssign to score your test. Your answers are still saved on this page. Check your connection, then select Submit Test again.");
+   setError("We could not connect to Ref Pro Group to score your test. Your answers are still saved on this page. Check your connection, then select Submit Test again.");
   }finally{setBusy(false)}
  }
  function restart(){setAnswers({});setScore(null);setStep(0);setError("")}

@@ -123,7 +123,7 @@ export async function GET(request: NextRequest) {
   const response = await fetch(endpoint, {
     cache: "no-store",
     headers: {
-      "User-Agent": "RefAssign/1.0 (+https://ref-assign.com)",
+      "User-Agent": "Ref Pro Group/1.0 (+https://ref-assign.com)",
       Referer: "https://test.ref-assign.com/",
     },
     signal: AbortSignal.timeout(12000),

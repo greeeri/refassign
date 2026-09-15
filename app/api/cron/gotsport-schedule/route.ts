@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
       fetchEventIndex(EVENT_ID),
       fetchVenueIndex(EVENT_ID),
     ]);
-    if (!sport || !league) throw new Error("RefAssign needs active Soccer and N1 setup records before synchronization.");
+    if (!sport || !league) throw new Error("Ref Pro Group needs active Soccer and N1 setup records before synchronization.");
 
     const settled: PromiseSettledResult<GotSportMatch[]>[] = [];
     for (let index = 0; index < groupIds.length; index += 4) {

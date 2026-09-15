@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { createClient, isTierTestRuntime } from "../../lib/supabase/client";
-import { RefAssignMark } from "../../components/BrandMarks";
+import { RefProMark } from "../../components/BrandMarks";
 import GamesManager from "../../components/SortableGamesManager";
 import GameSetup from "../../components/GameSetup";
 import AssignmentsManager from "../../components/AssignmentsManagerV2";
@@ -532,7 +532,7 @@ export default function Workspace() {
               {testOfficialAccount
                 ? invitationClaimError ||
                   "This account is valid, but it has not claimed an organization invitation yet. Ask the organization to resend the invitation, then open the new email link while signed in."
-                : "Create an organization or accept an invitation before entering RefAssign."}
+                : "Create an organization or accept an invitation before entering Ref Pro Group."}
             </p>
             {testOfficialAccount ? (
               <button className="primary" onClick={signOut}>
@@ -561,12 +561,12 @@ export default function Workspace() {
         className={mobileNavOpen ? "mobileNavOpen" : ""}
       >
         <div className="workspaceBrand">
-          <RefAssignMark className="workspaceBrandMark" />
+          <RefProMark className="workspaceBrandMark" />
           <div>
             <div className="brand">
-              REF<span>ASSIGN</span>
+              REF PRO <span>GROUP</span>
             </div>
-            <div className="tag">ASSIGN • DEVELOP • MANAGE</div>
+            <div className="tag">REFEREE ASSIGNING PLATFORM</div>
           </div>
         </div>
         <nav>
@@ -773,8 +773,8 @@ export default function Workspace() {
               {viewRole === "official"
                 ? "Official workspace"
                 : manager
-                  ? "RefAssign scheduling workspace"
-                  : "RefAssign workspace"}
+                  ? "Ref Pro Group scheduling workspace"
+                  : "Ref Pro Group workspace"}
             </p>
           </div>
           <div className="headerActions">

@@ -32,7 +32,7 @@ export async function POST(request:NextRequest){
   exemptionCertificate=uploaded instanceof File&&uploaded.size>0?uploaded:null;
  }else body=await request.json().catch(()=>({}));
  const plan=body.plan&&PRICES[body.plan]?body.plan:null;
- if(!plan)return NextResponse.json({error:"Choose a valid RefAssign plan."},{status:400});
+ if(!plan)return NextResponse.json({error:"Choose a valid Ref Pro Group plan."},{status:400});
  const organizationName=String(body.organization_name||"").trim().slice(0,160);
  if(!organizationName)return NextResponse.json({error:"Organization name is required."},{status:400});
  const officialCount=Math.max(1,Math.floor(Number(body.official_count)||1));

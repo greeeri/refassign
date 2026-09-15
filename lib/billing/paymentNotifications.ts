@@ -37,7 +37,7 @@ async function sendOne(service: SupabaseClient, input: {
     const response = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
-      body: JSON.stringify({ from: "RefAssign <notifications@assignments.ref-assign.com>", to: [input.recipient], reply_to: "assignments@ref-assign.com", subject: input.subject, html: input.html }),
+      body: JSON.stringify({ from: "Ref Pro Group <notifications@assignments.ref-assign.com>", to: [input.recipient], reply_to: "assignments@ref-assign.com", subject: input.subject, html: input.html }),
     });
     const result = await response.json().catch(() => ({})) as { id?: string; message?: string };
     if (!response.ok) throw new Error(result.message || `Resend returned ${response.status}.`);
@@ -80,10 +80,10 @@ function notificationContent(input: {
   };
   return failed ? {
     subject: `Action required: update payment for ${input.subscription.organization_name}`,
-    html: `<div style="font-family:Arial,sans-serif;color:#102746"><h2>Payment needs attention</h2><p>Hi ${holder},</p><p>We could not complete the subscription payment for <b>${organization}</b>. Operational access is paused until payment succeeds.</p><p><a href="${escapeHtml(`${input.origin}/billing/recover`)}" style="display:inline-block;background:#1677e8;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700">Update Payment Method</a></p><p>After Stripe confirms payment, RefAssign will restore access automatically.</p></div>`,
+    html: `<div style="font-family:Arial,sans-serif;color:#102746"><h2>Payment needs attention</h2><p>Hi ${holder},</p><p>We could not complete the subscription payment for <b>${organization}</b>. Operational access is paused until payment succeeds.</p><p><a href="${escapeHtml(`${input.origin}/billing/recover`)}" style="display:inline-block;background:#1677e8;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700">Update Payment Method</a></p><p>After Stripe confirms payment, Ref Pro Group will restore access automatically.</p></div>`,
   } : {
     subject: `Payment confirmed: ${input.subscription.organization_name} access restored`,
-    html: `<div style="font-family:Arial,sans-serif;color:#102746"><h2>Payment confirmed</h2><p>Hi ${holder},</p><p>Stripe confirmed payment for <b>${organization}</b>. RefAssign operational access has been restored automatically.</p><p><a href="${escapeHtml(input.origin)}" style="display:inline-block;background:#1677e8;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700">Open RefAssign</a></p></div>`,
+    html: `<div style="font-family:Arial,sans-serif;color:#102746"><h2>Payment confirmed</h2><p>Hi ${holder},</p><p>Stripe confirmed payment for <b>${organization}</b>. Ref Pro Group operational access has been restored automatically.</p><p><a href="${escapeHtml(input.origin)}" style="display:inline-block;background:#1677e8;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700">Open Assigning Platform</a></p></div>`,
   };
 }
 
@@ -95,7 +95,7 @@ export async function sendBillingStatusNotifications(service: SupabaseClient, in
 }) {
   const { data: subscription, error } = await service.from("refassign_subscriptions").select("id,user_id,organization_id,organization_name,stripe_subscription_id,status").eq("stripe_subscription_id", input.subscriptionId).maybeSingle();
   if (error) throw error;
-  if (!subscription) throw new Error(`No RefAssign record matches Stripe subscription ${input.subscriptionId}.`);
+  if (!subscription) throw new Error(`No Ref Pro Group record matches Stripe subscription ${input.subscriptionId}.`);
 
   const [{ data: account }, { data: admins, error: adminError }] = await Promise.all([
     service.auth.admin.getUserById(subscription.user_id),

@@ -62,7 +62,7 @@ export async function syncStripeSubscription(
     : query.eq("stripe_subscription_id", subscription.id);
   const { data, error } = await query.select("id").maybeSingle();
   if (error) throw error;
-  if (!data) throw new Error(`No RefAssign record matches Stripe subscription ${subscription.id}.`);
+  if (!data) throw new Error(`No Ref Pro Group record matches Stripe subscription ${subscription.id}.`);
   return data.id as string;
 }
 

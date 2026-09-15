@@ -1056,7 +1056,7 @@ export default function GameSetup({
                 </button>
               </form>
               <fieldset className="locationSourceOptions">
-                <legend>Where should RefAssign search?</legend>
+                <legend>Where should Ref Pro Group search?</legend>
                 <label>
                   <input
                     type="radio"
@@ -1064,7 +1064,7 @@ export default function GameSetup({
                     checked={locationSource === "system"}
                     onChange={() => setLocationSource("system")}
                   />
-                  Existing RefAssign locations
+                  Existing Ref Pro Group locations
                 </label>
                 <label>
                   <input
@@ -1122,7 +1122,7 @@ export default function GameSetup({
                 directoryLocations.length === 0 && (
                   <div className="emptySearchResult">
                     {locationSource === "system"
-                      ? "No existing RefAssign locations matched. Select “Search for a new real-world location” to look outside the system."
+                      ? "No existing Ref Pro Group locations matched. Select “Search for a new real-world location” to look outside the system."
                       : "No locations matched that search."}
                   </div>
                 )}

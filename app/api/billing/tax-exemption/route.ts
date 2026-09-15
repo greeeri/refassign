@@ -32,7 +32,7 @@ export async function POST(request:NextRequest){
  const certificate=uploaded instanceof File&&uploaded.size>0?uploaded:null;
  const requestedSubscriptionId=String(formData.get("subscription_id")||"").trim();
  if(!organizationName)return NextResponse.json({error:"Organization name is required."},{status:400});
- if(!PRICES[plan])return NextResponse.json({error:"Choose a valid RefAssign plan."},{status:400});
+ if(!PRICES[plan])return NextResponse.json({error:"Choose a valid Ref Pro Group plan."},{status:400});
  if(purchaserState!=="IA")return NextResponse.json({error:"This certificate workflow is for Iowa organizations."},{status:400});
  if(!certified)return NextResponse.json({error:"Confirm the Iowa commercial-use certification before saving."},{status:400});
  if(!certificate)return NextResponse.json({error:"Attach the completed Iowa sales-tax exemption certificate."},{status:400});

@@ -402,7 +402,7 @@ export default function OrganizationOperationsReport({ organizationId, onOpenAct
       document = new jsPDF({ orientation: "landscape" });
     document.setTextColor(12, 30, 55);
     document.setFontSize(18);
-    document.text("RefAssign Organization Operations Report", 14, 16);
+    document.text("Ref Pro Group Organization Operations Report", 14, 16);
     document.setFontSize(9);
     document.setTextColor(100, 116, 139);
     document.text(filterLabel(), 14, 23);

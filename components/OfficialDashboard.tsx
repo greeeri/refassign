@@ -212,7 +212,7 @@ export default function OfficialDashboard({
       ics = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
-        "PRODID:-//RefAssign//Official Schedule//EN",
+        "PRODID:-//Ref Pro Group//Official Schedule//EN",
         "BEGIN:VEVENT",
         `UID:${next.assignment_id}@refassign`,
         `DTSTAMP:${icsDate(new Date())}`,

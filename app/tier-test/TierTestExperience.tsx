@@ -370,14 +370,6 @@ export default function TierTestExperience({
             height="64"
             style={{ width: "78px", height: "64px", objectFit: "contain" }}
           />
-          <span />
-          <img
-            src="/brand/refassign-logo.png"
-            alt="RefAssign — Assign, Develop, Manage"
-            width="246"
-            height="65"
-            style={{ width: "auto", height: "58px", objectFit: "contain" }}
-          />
         </div>
         <div className={styles.navLinks}>
           <a href="#plans">Plans</a>
@@ -573,7 +565,7 @@ export default function TierTestExperience({
             <h2>
               {step === 5
                 ? "Your test workspace is ready."
-                : "Let’s configure your RefAssign workspace."}
+                : "Let’s configure your Ref Pro Group workspace."}
             </h2>
             <p>
               This creates a preview only. Nothing is billed or added to Iowa
@@ -935,7 +927,7 @@ export default function TierTestExperience({
                   )
                 }
               >
-                Open RefAssign workspace <span>→</span>
+                Open Ref Pro Group workspace <span>→</span>
               </button>
               <button
                 type="button"
@@ -980,24 +972,8 @@ export default function TierTestExperience({
             height="52"
             style={{ width: "63px", height: "52px", objectFit: "contain" }}
           />
-          <span
-            aria-hidden="true"
-            style={{
-              height: "30px",
-              width: "1px",
-              background: "#71859b",
-              margin: "0 12px",
-            }}
-          />
-          <img
-            src="/brand/refassign-logo.png"
-            alt="RefAssign"
-            width="189"
-            height="50"
-            style={{ width: "auto", height: "42px", objectFit: "contain" }}
-          />
         </div>
-        <p>RefAssign is a Ref Pro Group, LLC platform.</p>
+        <p>Referee assigning and development by Ref Pro Group, LLC.</p>
         <span>© 2026 Ref Pro Group, LLC</span>
       </footer>
     </main>

@@ -118,7 +118,7 @@ export async function POST(req: NextRequest) {
             "Idempotency-Key": `communication-${log.id}`,
           },
           body: JSON.stringify({
-            from: "RefAssign <notifications@assignments.ref-assign.com>",
+            from: "Ref Pro Group <notifications@assignments.ref-assign.com>",
             to: [recipient],
             reply_to: "assignments@ref-assign.com",
             subject,

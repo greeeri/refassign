@@ -238,7 +238,7 @@ export default function CustomReportBuilder({
       document = new jsPDF({ orientation: "landscape" });
     document.setTextColor(12, 30, 55);
     document.setFontSize(18);
-    document.text(definition.title || "RefAssign Custom Report", 14, 17);
+    document.text(definition.title || "Ref Pro Group Custom Report", 14, 17);
     document.setFontSize(9);
     document.text(
       `${
@@ -774,7 +774,7 @@ export default function CustomReportBuilder({
             <div>
               <h3>4. Save and schedule</h3>
               <p>
-                Save this configuration for reuse or have RefAssign email it
+                Save this configuration for reuse or have Ref Pro Group email it
                 automatically.
               </p>
             </div>

@@ -28,7 +28,7 @@ export function RefProMark({ className = "", compact = false }: MarkProps) {
 
 export function RefAssignMark({ className = "", compact = false }: MarkProps) {
   return (
-    <span className={className} aria-label={compact ? "RefAssign" : undefined}>
+    <span className={className} aria-label={compact ? "Ref Pro Group" : undefined}>
       <svg viewBox="0 0 180 108" role="img" aria-hidden={compact ? undefined : true} focusable="false">
         <defs>
           <linearGradient id="raBlue" x1="0" x2="1" y1="0" y2="1">

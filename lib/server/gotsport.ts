@@ -42,7 +42,7 @@ async function getHtml(path: string) {
     redirect: "follow",
     headers: {
       accept: "text/html,application/xhtml+xml",
-      "user-agent": "RefAssign schedule synchronization (contact: assignments@ref-assign.com)",
+      "user-agent": "Ref Pro Group schedule synchronization (contact: assignments@ref-assign.com)",
     },
     signal: AbortSignal.timeout(25_000),
   });

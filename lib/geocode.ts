@@ -91,7 +91,7 @@ async function geocodeOpenStreetMap(query: string): Promise<Coordinates> {
     const response = await fetch(endpoint, {
       cache: "no-store",
       headers: {
-        "User-Agent": "RefAssign/1.0 (https://refassign-chi.vercel.app)",
+        "User-Agent": "Ref Pro Group/1.0 (https://refassign-chi.vercel.app)",
         Referer: "https://refassign-chi.vercel.app/",
       },
       signal: AbortSignal.timeout(12000),

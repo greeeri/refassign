@@ -373,7 +373,7 @@ export default function OfficialProfile() {
           <label>
             USSF-ID
             <input value={official.id} disabled />
-            <small>This is the current RefAssign referee ID.</small>
+            <small>This is the current Ref Pro Group referee ID.</small>
           </label>
           <label>
             Last Name

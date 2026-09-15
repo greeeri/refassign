@@ -287,7 +287,7 @@ export default function OfficialUtilizationReport({ organizationId }: { organiza
       document = new jsPDF({ orientation: "landscape" });
     document.setTextColor(12, 30, 55);
     document.setFontSize(18);
-    document.text("RefAssign Official Utilization Report", 14, 16);
+    document.text("Ref Pro Group Official Utilization Report", 14, 16);
     document.setFontSize(9);
     document.setTextColor(100, 116, 139);
     document.text(`${periodLabel()} • ${organization === "all" ? "All organizations" : organization}`, 14, 23);

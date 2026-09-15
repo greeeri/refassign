@@ -22,6 +22,6 @@ export async function GET(_request:NextRequest,{params}:{params:Promise<{token:s
       "BEGIN:VEVENT",`UID:${row.id}@refassign`,`DTSTAMP:${icsDate(row.assigned_at||new Date())}`,`DTSTART:${icsDate(start)}`,`DTEND:${icsDate(end)}`,`SUMMARY:${escapeIcs(summary)}`,`LOCATION:${escapeIcs(location)}`,`DESCRIPTION:${escapeIcs(description)}`,`URL:${escapeIcs(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapQuery)}`)}`,`STATUS:${canceled?"CANCELLED":"CONFIRMED"}`,"TRANSP:OPAQUE","END:VEVENT"
     ];
   });
-  const body=["BEGIN:VCALENDAR","VERSION:2.0","CALSCALE:GREGORIAN","METHOD:PUBLISH","PRODID:-//RefAssign//Official Schedule//EN","X-WR-CALNAME:RefAssign Schedule","X-PUBLISHED-TTL:PT15M","REFRESH-INTERVAL;VALUE=DURATION:PT15M",...events,"END:VCALENDAR"].map(fold).join("\r\n");
+  const body=["BEGIN:VCALENDAR","VERSION:2.0","CALSCALE:GREGORIAN","METHOD:PUBLISH","PRODID:-//Ref Pro Group//Official Schedule//EN","X-WR-CALNAME:Ref Pro Group Schedule","X-PUBLISHED-TTL:PT15M","REFRESH-INTERVAL;VALUE=DURATION:PT15M",...events,"END:VCALENDAR"].map(fold).join("\r\n");
   return new NextResponse(body,{headers:{"Content-Type":"text/calendar; charset=utf-8","Content-Disposition":"inline; filename=refassign-schedule.ics","Cache-Control":"public, max-age=300, s-maxage=300, stale-while-revalidate=60"}});
 }

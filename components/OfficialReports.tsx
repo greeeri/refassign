@@ -557,7 +557,7 @@ export default function OfficialReports({
         document.setFontSize(8);
         document.setTextColor(100, 116, 139);
         document.text(
-          `Generated ${new Date().toLocaleDateString()}  |  RefAssign`,
+          `Generated ${new Date().toLocaleDateString()}  |  Ref Pro Group`,
           36,
           772,
         );

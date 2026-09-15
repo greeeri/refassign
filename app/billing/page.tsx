@@ -35,7 +35,7 @@ export default function BillingPage(){
  async function portal(){setBusy("portal");const r=await fetch("/api/billing/portal",{method:"POST"});const j=await r.json();if(r.ok&&j.url)location.href=j.url;else{setMessage(j.error||"Could not open billing portal.");setBusy("")}}
  return <main style={{maxWidth:1100,margin:"40px auto",padding:20}}>
   <Link href="/pricing">← Back to pricing</Link>
-  <h1>Set up your RefAssign organization</h1>
+  <h1>Set up your Ref Pro Group organization</h1>
   <p>Confirm your capacity and communication options before beginning the 14-day trial.</p>
   {sub&&<section className="card"><b>Current billing status:</b> {sub.status} · {String(sub.plan).replace("_"," ")}{sub.trial_ends_at&&<> · Trial ends {new Date(sub.trial_ends_at).toLocaleDateString()}</>}<button className="secondary" style={{marginLeft:16}} onClick={portal} disabled={!!busy}>Manage billing</button></section>}
   {authReady&&!userEmail&&<section className="card"><h2>Create or sign in to your organization account</h2><p>Your account will own the new organization workspace.</p><Link className="primary" style={{display:"inline-block",textDecoration:"none"}} href={`/login?signup=organization&next=${encodeURIComponent(returnPath)}`}>Continue with account setup</Link></section>}
@@ -51,9 +51,9 @@ export default function BillingPage(){
    {state==="IA"&&<section className="card" style={{marginTop:18}}>
     <h2>5. Iowa commercial-use tax exemption</h2>
     {taxExemption&&!replaceCertificate?<><p><b>Certificate saved:</b> {taxExemption.certificate_original_name} · {taxExemption.status}</p><p><a href={taxExemption.certificate_url||"#"} target="_blank" rel="noreferrer">View certificate</a></p><button type="button" className="secondary" onClick={()=>setReplaceCertificate(true)}>Replace certificate</button></>:<>
-     <p>Complete this only when RefAssign will be used exclusively for your organization’s commercial purposes.</p>
+     <p>Complete this only when Ref Pro Group will be used exclusively for your organization’s commercial purposes.</p>
      <p><a href="https://revenue.iowa.gov/media/2265/download?inline" target="_blank" rel="noreferrer">Download the Iowa Sales Tax Exemption Certificate (31-014) from the Department of Revenue</a>, complete it, and attach it below.</p>
-     <label style={{display:"flex",gap:10,alignItems:"flex-start"}}><input type="checkbox" checked={iowaCertified} onChange={event=>setIowaCertified(event.target.checked)} style={{width:"auto",marginTop:4}}/><span>I certify that this organization is a commercial enterprise and will use RefAssign exclusively for commercial purposes under Iowa Code §423.3(104).</span></label>
+     <label style={{display:"flex",gap:10,alignItems:"flex-start"}}><input type="checkbox" checked={iowaCertified} onChange={event=>setIowaCertified(event.target.checked)} style={{width:"auto",marginTop:4}}/><span>I certify that this organization is a commercial enterprise and will use Ref Pro Group exclusively for commercial purposes under Iowa Code §423.3(104).</span></label>
      <label style={{display:"block",marginTop:14}}>Completed Iowa sales-tax exemption certificate<input type="file" accept="application/pdf,image/jpeg,image/png" onChange={event=>setCertificate(event.target.files?.[0]||null)}/></label>
      <small>PDF, JPG, or PNG · maximum 10 MB. The certificate is stored privately with your billing record.</small>
      <div style={{marginTop:14,display:"flex",gap:10}}><button type="button" className="primary" disabled={!!busy||!org.trim()||!iowaCertified||!certificate} onClick={()=>void saveExemption()}>{busy==="exemption"?"Saving…":"Save exemption certificate"}</button>{replaceCertificate&&<button type="button" className="secondary" onClick={()=>{setReplaceCertificate(false);setCertificate(null)}}>Cancel</button>}</div>

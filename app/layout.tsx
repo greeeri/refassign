@@ -13,7 +13,7 @@ import "./assignment-center-upgrades.css";
 export const metadata = {
   title: "Ref Pro Group | Better Officiating, Connected",
   description:
-    "Ref Pro Group makes officiating easier to access, more efficient to develop, and simpler to assign and administer through the RefAssign platform.",
+    "Ref Pro Group makes officiating easier to access, more efficient to develop, and simpler to assign and administer through the Ref Pro Group platform.",
 };
 
 export default function RootLayout({

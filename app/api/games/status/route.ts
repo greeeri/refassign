@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
     });
     const label = body.status === "rained_out" ? "rained out" : "cancelled",
       subject = `Game ${body.status === "rained_out" ? "Rained Out" : "Cancelled"}: ${home} vs ${away}`;
-    const html = `<div style="font-family:Arial,sans-serif;background:#f5f7fb;padding:28px"><div style="max-width:620px;margin:auto;background:#fff;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden"><div style="background:#14233b;color:#fff;padding:24px 28px"><div style="font-size:22px;font-weight:800">REF<span style="color:#60a5fa">ASSIGN</span></div><div style="font-size:12px;color:#cbd5e1;margin-top:4px">Game Status Change</div></div><div style="padding:28px"><p>Hi ${esc(o.first_name)},</p><h2 style="color:#b91c1c">This game has been ${esc(label)}.</h2><h3>${esc(home)} vs ${esc(away)}</h3><p><b>${esc(when)}</b><br>${esc(pos?.name || "Official")} • ${esc(loc?.name || "TBD")}<br>Game ${esc(g.game_number || "—")}</p><div style="margin-top:20px;padding:14px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;color:#991b1b">This assignment was removed from your active schedule. You are now available for other games at this time.</div></div></div></div>`;
+    const html = `<div style="font-family:Arial,sans-serif;background:#f5f7fb;padding:28px"><div style="max-width:620px;margin:auto;background:#fff;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden"><div style="background:#14233b;color:#fff;padding:24px 28px"><div style="font-size:22px;font-weight:800">REF PRO <span style="color:#60a5fa">GROUP</span></div><div style="font-size:12px;color:#cbd5e1;margin-top:4px">Game Status Change</div></div><div style="padding:28px"><p>Hi ${esc(o.first_name)},</p><h2 style="color:#b91c1c">This game has been ${esc(label)}.</h2><h3>${esc(home)} vs ${esc(away)}</h3><p><b>${esc(when)}</b><br>${esc(pos?.name || "Official")} • ${esc(loc?.name || "TBD")}<br>Game ${esc(g.game_number || "—")}</p><div style="margin-top:20px;padding:14px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;color:#991b1b">This assignment was removed from your active schedule. You are now available for other games at this time.</div></div></div></div>`;
     const response = await sendOfficialNotification(service, a.official_id, "https://api.resend.com/emails", {
       method: "POST",
       headers: {
@@ -115,7 +115,7 @@ export async function POST(req: NextRequest) {
         "Idempotency-Key": `game-status-${a.id}-${body.status}`,
       },
       body: JSON.stringify({
-        from: "RefAssign <notifications@assignments.ref-assign.com>",
+        from: "Ref Pro Group <notifications@assignments.ref-assign.com>",
         to: [o.email],
         reply_to: "assignments@ref-assign.com",
         subject,

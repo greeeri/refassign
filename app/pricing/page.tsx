@@ -52,7 +52,7 @@ const plans: Plan[] = [
     name: "Enterprise",
     audience: "For state associations & large organizations",
     price: "Custom pricing",
-    href: "mailto:Erin.Green@ref-assign.com?subject=RefAssign%20Enterprise%20Plan",
+    href: "mailto:Erin.Green@ref-assign.com?subject=Ref Pro Group%20Enterprise%20Plan",
     action: "Contact Ref Pro Group",
     features: ["250+ officials", "All Premier features", "Custom development options", "Dedicated account manager", "Onboarding & training", "Ongoing partnership support"],
   },
@@ -70,8 +70,6 @@ export default function PricingPage() {
       <header className={styles.hero}>
         <div className={styles.logos}>
           <Image src="/brand/ref-pro-group-logo-final.png" alt="Ref Pro Group" width={600} height={493} priority unoptimized />
-          <span aria-hidden="true" />
-          <Image src="/brand/refassign-logo-transparent.png" alt="RefAssign — Assign, Develop, Manage" width={2172} height={724} priority />
         </div>
         <h1>A smarter way to manage officials.</h1>
         <p>Built by officials. Designed for assignors. Supporting the future of the game.</p>
@@ -103,11 +101,11 @@ export default function PricingPage() {
           <Link href="/billing?new=1&plan=pro_founding">Claim founding pricing →</Link>
         </article>
         <article><strong>Need more officials?</strong><p>Add officials in blocks of 25 for <b>$50 per block, per year.</b></p></article>
-        <article><strong>Officials are free</strong><p>Officials can create and use their accounts at no cost. Referee payroll is separate from the RefAssign subscription.</p></article>
+        <article><strong>Officials are free</strong><p>Officials can create and use their accounts at no cost. Referee payroll is separate from the platform subscription.</p></article>
       </section>
 
       <section className={styles.trial}>
-        <div><h2>Try RefAssign free for 14 days</h2><p>See how easy official management can be.</p></div>
+        <div><h2>Try Ref Pro Group free for 14 days</h2><p>See how easy official management can be.</p></div>
         <Link href="/billing?new=1&plan=pro">Get started today →</Link>
       </section>
 

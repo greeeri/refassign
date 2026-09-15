@@ -180,7 +180,7 @@ export default function TestAuthPanel({
       )}
       {message && <p>{message}</p>}
       <small>
-        This account exists only in the separate RefAssign test database.
+        This account exists only in the separate Ref Pro Group test database.
       </small>
     </div>
   );

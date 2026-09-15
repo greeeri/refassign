@@ -144,7 +144,7 @@ export default function LoginPage() {
         }
         setOrganizationSignup(false);
         setMessage(
-          "This email already has a RefAssign account. Sign in with your existing password, or use Forgot password below.",
+          "This email already has a Ref Pro Group account. Sign in with your existing password, or use Forgot password below.",
         );
         return;
       }
@@ -217,7 +217,7 @@ export default function LoginPage() {
       setMessage(
         error
           ? error.message
-          : "Sign-in email sent. The secure link will open your RefAssign workspace.",
+          : "Sign-in email sent. The secure link will open your Ref Pro Group workspace.",
       );
     } catch (err) {
       setMessage(
@@ -236,7 +236,7 @@ export default function LoginPage() {
         </div>
         <p>Sports Officials Management</p>
         <h1>{creatingOfficial ? "Create official account" : organizationSignup ? "Create organization account" : "Sign in"}</h1>
-        <p>{creatingOfficial ? "Use the same email address your organization invited." : organizationSignup ? "Create the owner login for your new RefAssign organization." : "Enter your email address and password."}</p>
+        <p>{creatingOfficial ? "Use the same email address your organization invited." : organizationSignup ? "Create the owner login for your new Ref Pro Group organization." : "Enter your email address and password."}</p>
         <form onSubmit={creatingOfficial ? createOfficialAccount : organizationSignup ? createOrganizationAccount : signIn}>
           {creatingOfficial && <>
             <label>First name<input required autoComplete="given-name" value={firstName} onChange={(e) => setFirstName(e.target.value)} /></label>

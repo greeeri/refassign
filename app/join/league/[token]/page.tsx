@@ -90,7 +90,7 @@ export default function LeagueConnectionPage() {
             <h1>Connect to {details.league_name}</h1>
             <p>
               <b>{details.organization_name}</b> invited you to connect your
-              RefAssign official account to this league.
+              Ref Pro Group official account to this league.
             </p>
             <div className="loginMessage">
               Connecting adds you to the organization’s official directory and

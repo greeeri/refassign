@@ -450,7 +450,7 @@ export default function ExecutiveReportingDashboard({
       document = new jsPDF({ orientation: "landscape" });
     document.setTextColor(12, 30, 55);
     document.setFontSize(19);
-    document.text("RefAssign Executive Reporting Dashboard", 14, 17);
+    document.text("Ref Pro Group Executive Reporting Dashboard", 14, 17);
     document.setFontSize(9);
     document.text(
       `Generated ${new Date().toLocaleString()} • Next 30 days and current operational indicators`,

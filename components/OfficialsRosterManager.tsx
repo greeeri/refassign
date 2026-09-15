@@ -507,7 +507,7 @@ export default function OfficialsRosterManager({
       </label>
       <p>
         <small>
-          USSF-ID is the existing RefAssign referee ID. Keep it when updating an
+          USSF-ID is the existing Ref Pro Group referee ID. Keep it when updating an
           official; leave it blank when adding a new official. All{" "}
           {COLUMNS.length} columns must remain in the exported order. Dates use
           YYYY-MM-DD, MM/DD/YYYY, M/D/YYYY, and Excel date values are accepted.

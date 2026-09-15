@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
   body.set("line_items[0][price_data][currency]", "usd");
   body.set(
     "line_items[0][price_data][product_data][name]",
-    `RefAssign Official Registration — ${program?.name || "Iowa Soccer"}`,
+    `Ref Pro Group Official Registration — ${program?.name || "Iowa Soccer"}`,
   );
   body.set("line_items[0][price_data][unit_amount]", String(fee));
   body.set("line_items[0][quantity]", "1");
