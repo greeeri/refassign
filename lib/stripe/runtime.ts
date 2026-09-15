@@ -7,7 +7,7 @@ export function stripeConnectMode(): StripeConnectMode {
 export function stripeConnectConfig() {
   const mode = stripeConnectMode();
   const secretKey = mode === "live"
-    ? process.env.STRIPE_CONNECT_LIVE_SECRET_KEY || ""
+    ? process.env.STRIPE_CONNECT_LIVE_SECRET_KEY || process.env.STRIPE_SECRET_KEY || ""
     : process.env.STRIPE_CONNECT_TEST_SECRET_KEY || "";
   const connectWebhookSecret = mode === "live"
     ? process.env.STRIPE_CONNECT_LIVE_WEBHOOK_SECRET || ""
