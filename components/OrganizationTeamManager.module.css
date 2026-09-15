@@ -142,6 +142,11 @@
   color: #275f38;
   font-weight: 800;
 }
+.validationMessage {
+  margin: 10px 0 0;
+  color: #a12622 !important;
+  font-weight: 800;
+}
 .notice {
   color: #6a5431;
   background: #fff8e7;
