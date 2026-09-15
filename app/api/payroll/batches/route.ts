@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
 import { releasePayrollBatch } from "../../../../lib/stripe/payroll";
+import { stripeConnectConfig, stripeConnectMode } from "../../../../lib/stripe/runtime";
 
 export async function GET(request: NextRequest) {
   const context = await requireManagedOrganization(request, ["owner", "admin", "billing"]);
   if (context.error) return context.error;
   const { service, organizationId } = context;
-  const { data: batches, error } = await service.from("payroll_batches").select("id,batch_number,league_id,status,payroll_subtotal_cents,stripe_processing_cost_cents,stripe_processing_cost_actual_cents,refassign_fee_cents,total_funding_cents,funding_method,stripe_checkout_session_id,stripe_payment_intent_id,funding_failure_message,created_at,funded_at,settled_at,paid_at,leagues(name)").eq("organization_id", organizationId).order("created_at", { ascending: false }).limit(50);
+  const { data: batches, error } = await service.from("payroll_batches").select("id,batch_number,league_id,status,payroll_subtotal_cents,stripe_processing_cost_cents,stripe_processing_cost_actual_cents,refassign_fee_cents,total_funding_cents,funding_method,stripe_checkout_session_id,stripe_payment_intent_id,funding_failure_message,created_at,funded_at,settled_at,paid_at,leagues(name)").eq("organization_id", organizationId).eq("stripe_mode", stripeConnectMode()).order("created_at", { ascending: false }).limit(50);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   const ids = (batches || []).map((batch) => batch.id);
   if (!ids.length) return NextResponse.json({ batches: [] });
@@ -20,7 +21,8 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const context = await requireManagedOrganization(request, ["owner", "admin", "billing"]);
   if (context.error) return context.error;
-  const { service, organizationId } = context, key = process.env.STRIPE_CONNECT_TEST_SECRET_KEY || "";
+  const { service, organizationId } = context;
+  let key = ""; try { key = stripeConnectConfig().secretKey; } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Stripe payroll is not configured." }, { status: 503 }); }
   const { batchId } = await request.json().catch(() => ({})) as { batchId?: string };
   if (!batchId) return NextResponse.json({ error: "Payroll batch is required." }, { status: 400 });
   const { data: batch } = await service.from("payroll_batches").select("id,status,stripe_payment_intent_id,funding_failure_message").eq("id", batchId).eq("organization_id", organizationId).maybeSingle();
