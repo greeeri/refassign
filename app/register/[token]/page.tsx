@@ -50,7 +50,7 @@ export default function RegistrationStatusPage() {
     <main className="publicRegistration">
       <section className="card">
         <div className="brand">
-          Ref<span>Assign</span>
+          Ref Pro <span>Group</span>
         </div>
         <h1>Registration Status</h1>
         {error && <div className="errorBox">{error}</div>}

@@ -59,7 +59,7 @@ export default function AuthCompletePage() {
     <main className="loginPage">
       <section className="loginCard">
         <div className="loginBrand">
-          Ref<span>Assign</span>
+          Ref Pro <span>Group</span>
         </div>
         <p>Sports Officials Management</p>
         <h1>Completing sign-in</h1>

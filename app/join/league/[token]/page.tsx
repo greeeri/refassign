@@ -69,7 +69,7 @@ export default function LeagueConnectionPage() {
     <main className="loginPage">
       <section className="loginCard" style={{ maxWidth: 560 }}>
         <div className="loginBrand">
-          Ref<span>Assign</span>
+          Ref Pro <span>Group</span>
         </div>
         <p>League Official Connection</p>
         {loading ? (
