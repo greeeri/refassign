@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { createClient, isTierTestRuntime } from "../../lib/supabase/client";
-import { RefAssignMark } from "../../components/BrandMarks";
+import { RefProMark } from "../../components/BrandMarks";
 import GamesManager from "../../components/SortableGamesManager";
 import GameSetup from "../../components/GameSetup";
 import AssignmentsManager from "../../components/AssignmentsManagerV2";
@@ -548,12 +548,12 @@ export default function Workspace() {
         className={mobileNavOpen ? "mobileNavOpen" : ""}
       >
         <div className="workspaceBrand">
-          <RefAssignMark className="workspaceBrandMark" />
+          <RefProMark className="workspaceBrandMark" />
           <div>
             <div className="brand">
-              REF<span>ASSIGN</span>
+              REF PRO <span>GROUP</span>
             </div>
-            <div className="tag">ASSIGN • DEVELOP • MANAGE</div>
+            <div className="tag">POWERING BETTER OFFICIATING</div>
           </div>
         </div>
         <nav>
