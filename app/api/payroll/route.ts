@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   const assignmentResult = await service
     .from("assignments")
     .select(
-      "id,status,game_fee,mileage_miles,mileage_rate,payment_status,paid_at,payroll_notes,officials(id,first_name,last_name,home_latitude,home_longitude),sport_positions(name),games!inner(id,game_number,starts_at,organization_id,bill_to_id,bill_to:bill_to_accounts(name),leagues(id,name,mileage_plan),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name,latitude,longitude))",
+      "id,status,game_fee,mileage_miles,mileage_rate,payment_status,paid_at,payroll_notes,officials(id,first_name,last_name,home_latitude,home_longitude),sport_positions(name),games!inner(id,game_number,starts_at,organization_id,bill_to_id,bill_to:bill_to_accounts(name,email),leagues(id,name,mileage_plan),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name,latitude,longitude))",
     )
     .eq("games.organization_id", organizationId)
     .not("official_id", "is", null)
@@ -40,10 +40,15 @@ export async function GET(request: NextRequest) {
         .in("official_id", officialIds)
     : { data: [], error: null };
   const readinessResult = officialIds.length
-    ? await service.from("official_stripe_accounts").select("official_id,onboarding_status,transfers_status,payouts_status").eq("stripe_mode", stripeConnectMode()).in("official_id", officialIds)
+    ? await service
+        .from("official_stripe_accounts")
+        .select("official_id,onboarding_status,transfers_status,payouts_status")
+        .eq("stripe_mode", stripeConnectMode())
+        .in("official_id", officialIds)
     : { data: [], error: null };
 
-  const loadError = assignmentResult.error || originResult.error || readinessResult.error;
+  const loadError =
+    assignmentResult.error || originResult.error || readinessResult.error;
   if (loadError) {
     console.error("[api/payroll] manager payroll load failed", {
       userId: user.id,
@@ -60,10 +65,22 @@ export async function GET(request: NextRequest) {
   });
   return NextResponse.json({
     assignments: (assignmentResult.data || []).map((row) => {
-      const official = row.officials as unknown as { id: string } | Array<{ id: string }> | null;
-      const officialId = Array.isArray(official) ? official[0]?.id : official?.id;
-      const readiness = (readinessResult.data || []).find((item) => item.official_id === officialId);
-      return { ...row, stripe_payment_status: readiness?.onboarding_status || "not_started", stripe_payment_ready: readiness?.onboarding_status === "ready" && readiness.transfers_status === "active" && readiness.payouts_status === "active" };
+      const official = row.officials as unknown as
+        { id: string } | Array<{ id: string }> | null;
+      const officialId = Array.isArray(official)
+        ? official[0]?.id
+        : official?.id;
+      const readiness = (readinessResult.data || []).find(
+        (item) => item.official_id === officialId,
+      );
+      return {
+        ...row,
+        stripe_payment_status: readiness?.onboarding_status || "not_started",
+        stripe_payment_ready:
+          readiness?.onboarding_status === "ready" &&
+          readiness.transfers_status === "active" &&
+          readiness.payouts_status === "active",
+      };
     }),
     weekdayOrigins: originResult.data || [],
   });
