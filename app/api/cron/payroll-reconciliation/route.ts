@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "../../../../lib/supabase/admin";
 import { stripeConnectRequest } from "../../../../lib/stripe/connect";
 import { releasePayrollBatch } from "../../../../lib/stripe/payroll";
+import { stripeConnectConfig } from "../../../../lib/stripe/runtime";
 
-// Reconciles missed or delayed Stripe webhook deliveries.\nexport const maxDuration = 60;
+export const maxDuration = 60;
 
 type CheckoutSession = {
   id: string;
@@ -25,20 +26,16 @@ export async function GET(request: NextRequest) {
   )
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const key = process.env.STRIPE_CONNECT_TEST_SECRET_KEY || "";
-  if (
-    process.env.STRIPE_CONNECT_MODE !== "sandbox" ||
-    !/^(sk|rk)_test_/.test(key)
-  )
-    return NextResponse.json(
-      { error: "Sandbox payroll reconciliation is not configured." },
-      { status: 503 },
-    );
+  let key = "";
+  let mode: "sandbox" | "live" = "sandbox";
+  try { const config = stripeConnectConfig(); key = config.secretKey; mode = config.mode; }
+  catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Stripe payroll reconciliation is not configured." }, { status: 503 }); }
 
   const service = createServiceClient();
   const { data: batches, error } = await service
     .from("payroll_batches")
     .select("id,stripe_checkout_session_id")
+    .eq("stripe_mode", mode)
     .eq("status", "funding")
     .not("stripe_checkout_session_id", "is", null)
     .order("updated_at", { ascending: true })
