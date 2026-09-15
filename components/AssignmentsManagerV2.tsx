@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   gameAcceptsAssignments,
   inactiveGameStatusLabel,
@@ -280,6 +281,8 @@ export default function AssignmentsManagerV2({
 }) {
   const supabase = useMemo(() => createClient(), []);
   const handledReportFocus = useRef("");
+  const [inlineAssignmentHost, setInlineAssignmentHost] =
+    useState<HTMLDivElement | null>(null);
   const [games, setGames] = useState<Game[]>([]),
     [officials, setOfficials] = useState<Official[]>([]),
     [positions, setPositions] = useState<Position[]>([]),
@@ -3755,7 +3758,6 @@ export default function AssignmentsManagerV2({
     if (!game) return null;
     return (
       <section
-        id="selected-game-assignment"
         className="card assignmentMain mobileInlineAssignment"
         aria-label={`Assignments for game ${game.game_number}`}
       >
@@ -7922,8 +7924,15 @@ export default function AssignmentsManagerV2({
                               Boolean(unit.groupId),
                               Boolean(unit.groupId) && index > 0,
                             )}
-                            {selected === listedGame.id &&
-                              renderMobileInlineAssignment()}
+                            {selected === listedGame.id && (
+                              <>
+                                <div
+                                  className="desktopInlineAssignmentHost"
+                                  ref={setInlineAssignmentHost}
+                                />
+                                {renderMobileInlineAssignment()}
+                              </>
+                            )}
                           </div>
                         );
                       })}
@@ -8163,10 +8172,13 @@ export default function AssignmentsManagerV2({
             </select>
           </label>
         </section>
-        {game && filteredGames.some((g) => g.id === game.id) && (
+        {game &&
+          filteredGames.some((g) => g.id === game.id) &&
+          inlineAssignmentHost &&
+          createPortal(
           <div className={`assignmentLayout selectedGameDetailStandalone${focusGameId === game.id ? " reportActionFocus" : ""}`}>
             <section
-              id="selected-game-assignment-standalone"
+              id="selected-game-assignment"
               className="card assignmentMain"
             >
               <div className="cardHead selectedGameStickyHeader">
@@ -8982,7 +8994,8 @@ export default function AssignmentsManagerV2({
                 )}
               </div>
             </aside>
-          </div>
+          </div>,
+          inlineAssignmentHost,
         )}
       </div>
     </>
