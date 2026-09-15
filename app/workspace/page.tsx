@@ -672,6 +672,24 @@ export default function Workspace() {
             viewRole !== "official" &&
             viewRole !== "contact" &&
             <>
+              {viewRole === "mentor" && testWorkspace && (
+                <>
+                  <button
+                    className={`topNavButton ${section === "Games" ? "active" : ""}`}
+                    onClick={() => nav("Games")}
+                  >
+                    <Icon>▣</Icon>
+                    <span>Games</span>
+                  </button>
+                  <button
+                    className={`topNavButton ${section === "Assignments" ? "active" : ""}`}
+                    onClick={() => nav("Assignments")}
+                  >
+                    <Icon>✓</Icon>
+                    <span>Assignments</span>
+                  </button>
+                </>
+              )}
               {viewRole === "iowa_development_admin" && (
                 <button
                   className={`topNavButton ${section === "Dashboard" ? "active" : ""}`}
@@ -1038,6 +1056,19 @@ export default function Workspace() {
               organizationId={testWorkspace.organization_id}
             />
           )}
+        {viewRole === "mentor" && testWorkspace && section === "Games" && (
+          <ReadOnlyAssignments
+            key={`${testWorkspace.organization_id}-games`}
+            organizationId={testWorkspace.organization_id}
+            view="games"
+          />
+        )}
+        {viewRole === "mentor" && testWorkspace && section === "Assignments" && (
+          <ReadOnlyAssignments
+            key={`${testWorkspace.organization_id}-assignments`}
+            organizationId={testWorkspace.organization_id}
+          />
+        )}
         {(viewRole === "registrar" ||
           viewRole === "league_admin" ||
           (viewRole === "admin" && iowaDevelopmentStaff)) &&
