@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 type Named = { name: string } | null;
 type Game = { id: string; game_number: string; starts_at: string; status: string; officials_needed: number; home: Named; away: Named; location: Named; leagues: Named; assignments: { id: string; status: string; published_at: string | null; officials: { first_name: string; last_name: string } | null; sport_positions: Named }[] };
-export default function ReadOnlyAssignments({ organizationId }: { organizationId: string }) {
+export default function ReadOnlyAssignments({ organizationId, view = "assignments" }: { organizationId: string; view?: "games" | "assignments" }) {
   const [from, setFrom] = useState(new Date().toISOString().slice(0,10));
   const [offset, setOffset] = useState(0), [games, setGames] = useState<Game[]>([]);
   const [loading, setLoading] = useState(true), [error, setError] = useState(""), [hasMore, setHasMore] = useState(false);
@@ -16,8 +16,8 @@ export default function ReadOnlyAssignments({ organizationId }: { organizationId
     return () => controller.abort();
   }, [organizationId, from, offset]);
   return <section className="card">
-    <h2>Assignments <small>— Read only</small></h2>
-    <p>Games and assigned officials for the leagues your administrator has granted you access to.</p>
+    <h2>{view === "games" ? "Games" : "Assignments"} <small>— Read only</small></h2>
+    <p>{view === "games" ? "Games for the leagues your administrator has associated with you." : "Games and assigned officials for the leagues your administrator has associated with you."}</p>
     <label>Games starting from<input type="date" value={from} onChange={e => { setFrom(e.target.value); setOffset(0); }} /></label>
     {error && <p className="errorBox" role="alert">{error}</p>}
     {loading ? <p>Loading assignments…</p> : !error && <>
@@ -26,8 +26,10 @@ export default function ReadOnlyAssignments({ organizationId }: { organizationId
         <h3>{game.home?.name || "TBD"} vs {game.away?.name || "TBD"}</h3>
         <p>{new Date(game.starts_at).toLocaleString()} · {game.location?.name || "Venue TBD"}</p>
         <p>{game.leagues?.name} · Game {game.game_number} · {game.status.replaceAll("_", " ")}</p>
-        <ul>{game.assignments.map(a => <li key={a.id}><strong>{a.sport_positions?.name || "Official"}:</strong> {a.officials ? `${a.officials.first_name} ${a.officials.last_name}` : "Unassigned"} — {a.published_at ? a.status : "Not published"}</li>)}</ul>
-        <p>{Math.max(0, game.officials_needed - game.assignments.filter(a => !["declined", "cancelled"].includes(a.status)).length)} open positions</p>
+        {view === "assignments" && <>
+          <ul>{game.assignments.map(a => <li key={a.id}><strong>{a.sport_positions?.name || "Official"}:</strong> {a.officials ? `${a.officials.first_name} ${a.officials.last_name}` : "Unassigned"} — {a.published_at ? a.status : "Not published"}</li>)}</ul>
+          <p>{Math.max(0, game.officials_needed - game.assignments.filter(a => !["declined", "cancelled"].includes(a.status)).length)} open positions</p>
+        </>}
       </article>)}
       <div className="headerActions"><button type="button" className="secondary" disabled={offset===0} onClick={() => setOffset(value => Math.max(0,value-50))}>Previous</button><button type="button" className="secondary" disabled={!hasMore} onClick={() => setOffset(value => value+50)}>Next</button></div>
     </>}
