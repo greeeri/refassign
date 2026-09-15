@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireManagedOrganization } from "../../../lib/server/organizationScope";
+import { stripeConnectMode } from "../../../lib/stripe/runtime";
 
 export async function GET(request: NextRequest) {
   const context = await requireManagedOrganization(request, [
@@ -39,7 +40,7 @@ export async function GET(request: NextRequest) {
         .in("official_id", officialIds)
     : { data: [], error: null };
   const readinessResult = officialIds.length
-    ? await service.from("official_stripe_accounts").select("official_id,onboarding_status,transfers_status,payouts_status").in("official_id", officialIds)
+    ? await service.from("official_stripe_accounts").select("official_id,onboarding_status,transfers_status,payouts_status").eq("stripe_mode", stripeConnectMode()).in("official_id", officialIds)
     : { data: [], error: null };
 
   const loadError = assignmentResult.error || originResult.error || readinessResult.error;
