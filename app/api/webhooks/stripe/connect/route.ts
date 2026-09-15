@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { connectedAccountState, StripeConnectedAccount } from "../../../../../lib/stripe/connect";
+import { stripeConnectConfig } from "../../../../../lib/stripe/runtime";
 
 function validSignature(payload: string, header: string, secret: string) {
   const values = header.split(",").reduce<Record<string, string[]>>((all, part) => {
@@ -24,10 +25,12 @@ function validSignature(payload: string, header: string, secret: string) {
 }
 
 export async function POST(request: Request) {
-  const secret = process.env.STRIPE_CONNECT_TEST_WEBHOOK_SECRET;
+  let config;
+  try { config = stripeConnectConfig(); } catch { return NextResponse.json({ error: "Stripe Connect webhook is not configured." }, { status: 503 }); }
+  const secret = config.connectWebhookSecret;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!secret || !serviceKey) {
-    return NextResponse.json({ error: "Stripe Connect sandbox webhook is not configured." }, { status: 503 });
+    return NextResponse.json({ error: "Stripe Connect webhook is not configured." }, { status: 503 });
   }
 
   const payload = await request.text();
@@ -43,8 +46,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid payload." }, { status: 400 });
   }
 
-  if (event.livemode !== false) {
-    return NextResponse.json({ error: "Only Stripe sandbox events are accepted." }, { status: 400 });
+  if (event.livemode !== (config.mode === "live")) {
+    return NextResponse.json({ error: `This endpoint accepts ${config.mode} Stripe events only.` }, { status: 400 });
   }
   if (event.type !== "account.updated") {
     return NextResponse.json({ received: true, ignored: true });
@@ -59,10 +62,10 @@ export async function POST(request: Request) {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   const officialId = String((account as StripeConnectedAccount & { metadata?: { refassign_official_id?: string } }).metadata?.refassign_official_id || "");
-  const values = { stripe_account_id: account.id, ...connectedAccountState(account) };
+  const values = { stripe_mode: config.mode, stripe_account_id: account.id, ...connectedAccountState(account) };
   const result = officialId
-    ? await service.from("official_stripe_accounts").upsert({ official_id: officialId, ...values })
-    : await service.from("official_stripe_accounts").update(values).eq("stripe_account_id", account.id);
+    ? await service.from("official_stripe_accounts").upsert({ official_id: officialId, ...values }, { onConflict: "official_id,stripe_mode" })
+    : await service.from("official_stripe_accounts").update(values).eq("stripe_account_id", account.id).eq("stripe_mode", config.mode);
 
   if (result.error) {
     return NextResponse.json({ error: result.error.message }, { status: 500 });
