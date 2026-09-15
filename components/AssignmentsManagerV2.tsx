@@ -1757,7 +1757,6 @@ export default function AssignmentsManagerV2({
       ov = levelElig.filter((x) => x.official_id === o.id);
     if (
       targetGame.league_id &&
-      ol.length &&
       !ol.some((x) => x.league_id === targetGame.league_id)
     )
       reasons.push(
@@ -1765,7 +1764,6 @@ export default function AssignmentsManagerV2({
       );
     if (
       targetGame.level_id &&
-      ov.length &&
       !ov.some((x) => x.level_id === targetGame.level_id)
     )
       reasons.push(
