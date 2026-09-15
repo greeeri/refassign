@@ -918,6 +918,7 @@ td small {
   padding: 12px 13px;
   color: #64748b;
 }
+.availabilityTimeShortcuts{grid-column:1/-1;display:flex;align-items:center;gap:8px;flex-wrap:wrap}.availabilityTimeShortcuts button{width:auto;min-height:38px;padding:7px 14px}
 .compactResults {
   max-height: 280px;
   overflow: auto;
