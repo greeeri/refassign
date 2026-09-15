@@ -34,8 +34,8 @@ const roleChoices: ReadonlyArray<[RoleCode, string, string]> = [
   ["registrar", "Registrar", "Registration access in selected leagues"],
   [
     "iowa_development_admin",
-    "Iowa Soccer Training & Development Admin",
-    "Dashboard plus Iowa Soccer training and development administration only",
+    "Iowa Soccer Development Administrator",
+    "Program-wide Iowa Soccer development administration; no league access required",
   ],
   ["viewer", "Contact (read-only)", "Selected read-only workspace areas"],
   ["billing", "Billing manager", "Billing and subscription access"],
@@ -474,12 +474,29 @@ function MemberCard({
 }) {
   const [roles, setRoles] = useState(item.roles || []),
     [permissions, setPermissions] = useState(item.viewer_permissions || []),
-    [leagueIds, setLeagueIds] = useState(item.league_ids || []);
+    [leagueIds, setLeagueIds] = useState(item.league_ids || []),
+    [validationMessage, setValidationMessage] = useState("");
   useEffect(() => {
     setRoles(item.roles || []);
     setPermissions(item.viewer_permissions || []);
     setLeagueIds(item.league_ids || []);
+    setValidationMessage("");
   }, [item.roles, item.viewer_permissions, item.league_ids]);
+  const saveChanges = async () => {
+    const problem = !roles.length
+      ? "Select at least one role."
+      : needsLeagues(roles) && !leagueIds.length
+        ? "Select at least one league for the Registrar, Assignor, Mentor, or Contact role—or uncheck that role."
+        : roles.includes("viewer") && !permissions.length
+          ? "Select at least one area this contact can view."
+          : "";
+    if (problem) {
+      setValidationMessage(problem);
+      return;
+    }
+    setValidationMessage("");
+    await onSave(item, roles, permissions, leagueIds);
+  };
   return (
     <article className={styles.member}>
       <div className={styles.identity}>
@@ -508,16 +525,16 @@ function MemberCard({
       )}
       <button
         className="primary"
-        disabled={
-          disabled ||
-          !roles.length ||
-          (needsLeagues(roles) && !leagueIds.length) ||
-          (roles.includes("viewer") && !permissions.length)
-        }
-        onClick={() => void onSave(item, roles, permissions, leagueIds)}
+        disabled={disabled}
+        onClick={() => void saveChanges()}
       >
         {saving ? "Saving…" : "Save changes"}
       </button>
+      {validationMessage && (
+        <p className={styles.validationMessage} role="alert">
+          {validationMessage}
+        </p>
+      )}
     </article>
   );
 }
