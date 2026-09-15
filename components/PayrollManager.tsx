@@ -42,7 +42,7 @@ type PayrollRow = {
     game_number: string;
     starts_at: string;
     bill_to_id: string | null;
-    bill_to: { name: string } | null;
+    bill_to: { name: string; email: string | null } | null;
     leagues: { id: string; name: string; mileage_plan: MileagePlan } | null;
     home: { name: string } | null;
     away: { name: string } | null;
@@ -71,8 +71,35 @@ type ImportRow = {
   paymentStatus: PaymentStatus;
   notes: string;
 };
-type BillTo = { id: string; name: string };
-type PayrollBatch = { id:string;batch_number:number;status:string;payroll_subtotal_cents:number;stripe_processing_cost_cents:number;stripe_processing_cost_actual_cents:number|null;refassign_fee_cents:number;total_funding_cents:number;funding_method:string|null;stripe_checkout_session_id:string|null;funding_failure_message:string|null;created_at:string;paid_at:string|null;leagues:{name:string}|null;items:Array<{id:string;official_name_snapshot:string;total_cents:number;transfer:{status:string;stripe_transfer_id:string|null;failure_message:string|null;paid_at:string|null}|null}> };
+type BillTo = { id: string; name: string; email: string | null };
+type PayrollBatch = {
+  id: string;
+  batch_number: number;
+  status: string;
+  payroll_subtotal_cents: number;
+  stripe_processing_cost_cents: number;
+  stripe_processing_cost_actual_cents: number | null;
+  refassign_fee_cents: number;
+  total_funding_cents: number;
+  funding_method: string | null;
+  stripe_checkout_session_id: string | null;
+  funding_failure_message: string | null;
+  created_at: string;
+  paid_at: string | null;
+  leagues: { name: string } | null;
+  bill_to: { name: string; email: string | null } | null;
+  items: Array<{
+    id: string;
+    official_name_snapshot: string;
+    total_cents: number;
+    transfer: {
+      status: string;
+      stripe_transfer_id: string | null;
+      failure_message: string | null;
+      paid_at: string | null;
+    } | null;
+  }>;
+};
 
 const statuses: ReadonlyArray<[PaymentStatus, string]> = [
   ["unpaid", "Unpaid"],
@@ -176,6 +203,9 @@ export default function PayrollManager({
   const [batches, setBatches] = useState<PayrollBatch[]>([]);
   const [canManageBillTos, setCanManageBillTos] = useState(false);
   const [newBillToName, setNewBillToName] = useState("");
+  const [newBillToEmail, setNewBillToEmail] = useState("");
+  const [editingBillToId, setEditingBillToId] = useState("");
+  const [editingBillToEmail, setEditingBillToEmail] = useState("");
   const [weekdayOrigins, setWeekdayOrigins] = useState<WeekdayOrigin[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [period, setPeriod] = useState<Period>("all");
@@ -229,11 +259,38 @@ export default function PayrollManager({
         setCanManageBillTos(Boolean(billToResult.canManageBillTos));
       }
       if (batchResponse.ok) {
-        const batchResult = await batchResponse.json() as { batches?: PayrollBatch[] };
-        const loadedBatches=batchResult.batches||[];
+        const batchResult = (await batchResponse.json()) as {
+          batches?: PayrollBatch[];
+        };
+        const loadedBatches = batchResult.batches || [];
         setBatches(loadedBatches);
-        const pending=loadedBatches.find(batch=>batch.status==="funding"&&batch.stripe_checkout_session_id);
-        if(pending?.stripe_checkout_session_id){const confirmation=await fetch(`/api/payroll/confirm${query}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId:pending.stripe_checkout_session_id})}),confirmed=await confirmation.json() as {settled?:boolean;paidCount?:number;error?:string};if(confirmation.ok&&confirmed.settled){setNotice(`Batch ${pending.batch_number} settled and ${confirmed.paidCount||0} official${confirmed.paidCount===1?" was":"s were"} paid.`);window.setTimeout(()=>void load(),0);}else if(!confirmation.ok)setError(confirmed.error||"Payroll funding could not be confirmed.");}
+        const pending = loadedBatches.find(
+          (batch) =>
+            batch.status === "funding" && batch.stripe_checkout_session_id,
+        );
+        if (pending?.stripe_checkout_session_id) {
+          const confirmation = await fetch(`/api/payroll/confirm${query}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                sessionId: pending.stripe_checkout_session_id,
+              }),
+            }),
+            confirmed = (await confirmation.json()) as {
+              settled?: boolean;
+              paidCount?: number;
+              error?: string;
+            };
+          if (confirmation.ok && confirmed.settled) {
+            setNotice(
+              `Batch ${pending.batch_number} settled and ${confirmed.paidCount || 0} official${confirmed.paidCount === 1 ? " was" : "s were"} paid.`,
+            );
+            window.setTimeout(() => void load(), 0);
+          } else if (!confirmation.ok)
+            setError(
+              confirmed.error || "Payroll funding could not be confirmed.",
+            );
+        }
       }
     } catch (loadError) {
       setError(
@@ -312,11 +369,29 @@ export default function PayrollManager({
     if (params.get("payroll") !== "success" || !sessionId) return;
     void (async () => {
       setSaving("stripe-payroll");
-      const response = await fetch(`/api/payroll/confirm?organizationId=${encodeURIComponent(organizationId)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId }) });
-      const result = await response.json() as { settled?: boolean; paidCount?: number; error?: string };
-      if (!response.ok) setError(result.error || "Payroll funding could not be confirmed.");
-      else if (result.settled) setNotice(`League funding settled and ${result.paidCount || 0} official${result.paidCount === 1 ? " was" : "s were"} paid.`);
-      else setNotice("League funding is pending. Officials will be paid automatically after Stripe settles it.");
+      const response = await fetch(
+        `/api/payroll/confirm?organizationId=${encodeURIComponent(organizationId)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId }),
+        },
+      );
+      const result = (await response.json()) as {
+        settled?: boolean;
+        paidCount?: number;
+        error?: string;
+      };
+      if (!response.ok)
+        setError(result.error || "Payroll funding could not be confirmed.");
+      else if (result.settled)
+        setNotice(
+          `League funding settled and ${result.paidCount || 0} official${result.paidCount === 1 ? " was" : "s were"} paid.`,
+        );
+      else
+        setNotice(
+          "League funding is pending. Officials will be paid automatically after Stripe settles it.",
+        );
       window.history.replaceState({}, "", window.location.pathname);
       await load();
       setSaving("");
@@ -460,6 +535,9 @@ export default function PayrollManager({
                       name:
                         billTos.find((billTo) => billTo.id === billToId)
                           ?.name || "",
+                      email:
+                        billTos.find((billTo) => billTo.id === billToId)
+                          ?.email || null,
                     }
                   : null,
               },
@@ -471,7 +549,8 @@ export default function PayrollManager({
 
   async function addBillTo() {
     const name = newBillToName.trim();
-    if (!name || !organizationId) return;
+    const email = newBillToEmail.trim();
+    if (!name || !email || !organizationId) return;
     setSaving("bill-to");
     setError("");
     const response = await fetch(
@@ -479,7 +558,7 @@ export default function PayrollManager({
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name, email }),
       },
     );
     const result = (await response.json()) as {
@@ -495,7 +574,38 @@ export default function PayrollManager({
         ),
       );
       setNewBillToName("");
+      setNewBillToEmail("");
       setNotice(`${result.billTo.name} added to Bill To options.`);
+    }
+    setSaving("");
+  }
+
+  async function saveBillToEmail() {
+    const email = editingBillToEmail.trim();
+    if (!editingBillToId || !email || !organizationId) return;
+    setSaving("bill-to-email");
+    setError("");
+    const response = await fetch(
+      `/api/bill-tos?organizationId=${encodeURIComponent(organizationId)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: editingBillToId, email }),
+      },
+    );
+    const result = (await response.json()) as {
+      billTo?: BillTo;
+      error?: string;
+    };
+    if (!response.ok || !result.billTo)
+      setError(result.error || "Billing email could not be saved.");
+    else {
+      setBillTos((current) =>
+        current.map((billTo) =>
+          billTo.id === result.billTo!.id ? result.billTo! : billTo,
+        ),
+      );
+      setNotice(`Billing email saved for ${result.billTo.name}.`);
     }
     setSaving("");
   }
@@ -527,23 +637,59 @@ export default function PayrollManager({
   async function processStripePayroll() {
     if (!selectedRows.length || !organizationId) return;
     if (selectedRows.some((row) => row.payment_status !== "approved")) {
-      return setError("Mark every selected payroll record Approved before sending it through Stripe.");
+      return setError(
+        "Mark every selected payroll record Approved before sending it through Stripe.",
+      );
     }
-    const leagueIds = new Set(selectedRows.map((row) => row.games?.leagues?.id).filter(Boolean));
-    if (leagueIds.size !== 1) return setError("Select payroll records from one league at a time.");
+    const leagueIds = new Set(
+      selectedRows.map((row) => row.games?.leagues?.id).filter(Boolean),
+    );
+    if (leagueIds.size !== 1)
+      return setError("Select payroll records from one league at a time.");
+    const billToIds = new Set(
+      selectedRows.map((row) => row.games?.bill_to_id).filter(Boolean),
+    );
+    if (selectedRows.some((row) => !row.games?.bill_to_id))
+      return setError("Select a Bill To for every payroll record first.");
+    if (billToIds.size !== 1)
+      return setError(
+        "Select payroll records for one Bill To at a time so Stripe funding routes correctly.",
+      );
+    const selectedBillTo = billTos.find(
+      (billTo) => billTo.id === [...billToIds][0],
+    );
+    if (!selectedBillTo?.email)
+      return setError(
+        `Add a billing email to ${selectedBillTo?.name || "the selected Bill To"} before opening Stripe.`,
+      );
     setSaving("stripe-payroll");
     setError("");
     setNotice("");
-    const response = await fetch(`/api/payroll/process?organizationId=${encodeURIComponent(organizationId)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ assignmentIds: selectedRows.map((row) => row.id) }),
-    });
-    const result = await response.json() as { error?: string; url?: string; paid?: boolean; batchNumber?: number };
-    if (!response.ok) setError(result.error || "Stripe payroll could not be processed.");
+    const response = await fetch(
+      `/api/payroll/process?organizationId=${encodeURIComponent(organizationId)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          assignmentIds: selectedRows.map((row) => row.id),
+        }),
+      },
+    );
+    const result = (await response.json()) as {
+      error?: string;
+      url?: string;
+      paid?: boolean;
+      batchNumber?: number;
+    };
+    if (!response.ok)
+      setError(result.error || "Stripe payroll could not be processed.");
     else if (result.url) window.location.assign(result.url);
     else {
-      setNotice(result.paid ? "This payroll batch was already paid." : `Payroll funding started for batch ${result.batchNumber}.`);
+      setNotice(
+        result.paid
+          ? "This payroll batch was already paid."
+          : `Payroll funding started for batch ${result.batchNumber}.`,
+      );
       setSelected([]);
       await load();
     }
@@ -552,18 +698,72 @@ export default function PayrollManager({
 
   async function retryPayrollBatch(batchId: string) {
     if (!organizationId) return;
-    setSaving(`retry-${batchId}`);setError("");
-    const response=await fetch(`/api/payroll/batches?organizationId=${encodeURIComponent(organizationId)}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({batchId})});
-    const result=await response.json() as {error?:string};
-    if(!response.ok)setError(result.error||"Payroll retry failed.");else{setNotice("The remaining official transfers were completed.");await load();}
+    setSaving(`retry-${batchId}`);
+    setError("");
+    const response = await fetch(
+      `/api/payroll/batches?organizationId=${encodeURIComponent(organizationId)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ batchId }),
+      },
+    );
+    const result = (await response.json()) as { error?: string };
+    if (!response.ok) setError(result.error || "Payroll retry failed.");
+    else {
+      setNotice("The remaining official transfers were completed.");
+      await load();
+    }
     setSaving("");
   }
 
   function downloadReconciliation(batch: PayrollBatch) {
-    const headings=["Batch","League","Status","Official","Official Amount","Transfer Status","Stripe Transfer ID","Payroll Subtotal","Ref Pro Group Fee","Estimated Stripe Fee","Actual Stripe Fee","League Funding","Paid At"];
-    const quote=(value:unknown)=>`"${String(value??"").replaceAll('"','""')}"`;
-    const rows=batch.items.map(item=>[batch.batch_number,batch.leagues?.name||"",batch.status,item.official_name_snapshot,(item.total_cents/100).toFixed(2),item.transfer?.status||"pending",item.transfer?.stripe_transfer_id||"",(batch.payroll_subtotal_cents/100).toFixed(2),(batch.refassign_fee_cents/100).toFixed(2),(batch.stripe_processing_cost_cents/100).toFixed(2),batch.stripe_processing_cost_actual_cents==null?"":(batch.stripe_processing_cost_actual_cents/100).toFixed(2),(batch.total_funding_cents/100).toFixed(2),batch.paid_at||""]);
-    const blob=new Blob([[headings,...rows].map(row=>row.map(quote).join(",")).join("\n")],{type:"text/csv;charset=utf-8"}),url=URL.createObjectURL(blob),link=document.createElement("a");link.href=url;link.download=`payroll-batch-${batch.batch_number}-reconciliation.csv`;link.click();URL.revokeObjectURL(url);
+    const headings = [
+      "Batch",
+      "League",
+      "Bill To",
+      "Status",
+      "Official",
+      "Official Amount",
+      "Transfer Status",
+      "Stripe Transfer ID",
+      "Payroll Subtotal",
+      "RefAssign Fee",
+      "Estimated Stripe Fee",
+      "Actual Stripe Fee",
+      "League Funding",
+      "Paid At",
+    ];
+    const quote = (value: unknown) =>
+      `"${String(value ?? "").replaceAll('"', '""')}"`;
+    const rows = batch.items.map((item) => [
+      batch.batch_number,
+      batch.leagues?.name || "",
+      batch.bill_to?.name || "",
+      batch.status,
+      item.official_name_snapshot,
+      (item.total_cents / 100).toFixed(2),
+      item.transfer?.status || "pending",
+      item.transfer?.stripe_transfer_id || "",
+      (batch.payroll_subtotal_cents / 100).toFixed(2),
+      (batch.refassign_fee_cents / 100).toFixed(2),
+      (batch.stripe_processing_cost_cents / 100).toFixed(2),
+      batch.stripe_processing_cost_actual_cents == null
+        ? ""
+        : (batch.stripe_processing_cost_actual_cents / 100).toFixed(2),
+      (batch.total_funding_cents / 100).toFixed(2),
+      batch.paid_at || "",
+    ]);
+    const blob = new Blob(
+        [[headings, ...rows].map((row) => row.map(quote).join(",")).join("\n")],
+        { type: "text/csv;charset=utf-8" },
+      ),
+      url = URL.createObjectURL(blob),
+      link = document.createElement("a");
+    link.href = url;
+    link.download = `payroll-batch-${batch.batch_number}-reconciliation.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   async function exportPayroll() {
@@ -779,19 +979,77 @@ export default function PayrollManager({
         <div className="formGrid payrollFilters">
           <label>
             Add Bill To
+            <input
+              value={newBillToName}
+              placeholder="Organization or customer name"
+              onChange={(event) => setNewBillToName(event.target.value)}
+            />
+          </label>
+          <label>
+            Billing email
             <span style={{ display: "flex", gap: 8 }}>
               <input
-                value={newBillToName}
-                placeholder="Organization or customer name"
-                onChange={(event) => setNewBillToName(event.target.value)}
+                type="email"
+                value={newBillToEmail}
+                placeholder="accounts-payable@example.com"
+                onChange={(event) => setNewBillToEmail(event.target.value)}
               />
               <button
                 type="button"
                 className="secondary"
-                disabled={saving === "bill-to" || !newBillToName.trim()}
+                disabled={
+                  saving === "bill-to" ||
+                  !newBillToName.trim() ||
+                  !newBillToEmail.trim()
+                }
                 onClick={() => void addBillTo()}
               >
                 {saving === "bill-to" ? "Adding…" : "Add"}
+              </button>
+            </span>
+          </label>
+          <label>
+            Update Bill To billing email
+            <select
+              value={editingBillToId}
+              onChange={(event) => {
+                const id = event.target.value;
+                setEditingBillToId(id);
+                setEditingBillToEmail(
+                  billTos.find((billTo) => billTo.id === id)?.email || "",
+                );
+              }}
+            >
+              <option value="">Select Bill To</option>
+              {billTos.map((billTo) => (
+                <option key={billTo.id} value={billTo.id}>
+                  {billTo.name}
+                  {billTo.email ? ` — ${billTo.email}` : " — email required"}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Billing email for selected Bill To
+            <span style={{ display: "flex", gap: 8 }}>
+              <input
+                type="email"
+                value={editingBillToEmail}
+                disabled={!editingBillToId}
+                placeholder="accounts-payable@example.com"
+                onChange={(event) => setEditingBillToEmail(event.target.value)}
+              />
+              <button
+                type="button"
+                className="secondary"
+                disabled={
+                  saving === "bill-to-email" ||
+                  !editingBillToId ||
+                  !editingBillToEmail.trim()
+                }
+                onClick={() => void saveBillToEmail()}
+              >
+                {saving === "bill-to-email" ? "Saving…" : "Save"}
               </button>
             </span>
           </label>
@@ -912,34 +1170,43 @@ export default function PayrollManager({
       )}
       {selected.length > 0 && (
         <div>
-        <div className="payrollBulk">
-          <b>{selected.length} selected</b>
-          <button
-            className="secondary"
-            disabled={saving === "bulk"}
-            onClick={() => void bulkStatus("approved")}
-          >
-            Mark Approved
-          </button>
-          <button
-            className="success"
-            disabled={saving === "bulk"}
-            onClick={() => void bulkStatus("paid")}
-          >
-            Mark Paid Outside Stripe
-          </button>
-          <button
-            className="success"
-            disabled={saving === "stripe-payroll" || selectedRows.some((row) => row.payment_status !== "approved")}
-            onClick={() => void processStripePayroll()}
-          >
-            {saving === "stripe-payroll" ? "Opening Stripe Checkout…" : "Fund & Pay with Stripe"}
-          </button>
-          <button className="secondary" onClick={() => setSelected([])}>
-            Clear
-          </button>
-        </div>
-        {error && <div className="errorBox" style={{ marginTop: 8 }}>{error}</div>}
+          <div className="payrollBulk">
+            <b>{selected.length} selected</b>
+            <button
+              className="secondary"
+              disabled={saving === "bulk"}
+              onClick={() => void bulkStatus("approved")}
+            >
+              Mark Approved
+            </button>
+            <button
+              className="success"
+              disabled={saving === "bulk"}
+              onClick={() => void bulkStatus("paid")}
+            >
+              Mark Paid Outside Stripe
+            </button>
+            <button
+              className="success"
+              disabled={
+                saving === "stripe-payroll" ||
+                selectedRows.some((row) => row.payment_status !== "approved")
+              }
+              onClick={() => void processStripePayroll()}
+            >
+              {saving === "stripe-payroll"
+                ? "Opening Stripe Checkout…"
+                : "Fund & Pay with Stripe"}
+            </button>
+            <button className="secondary" onClick={() => setSelected([])}>
+              Clear
+            </button>
+          </div>
+          {error && (
+            <div className="errorBox" style={{ marginTop: 8 }}>
+              {error}
+            </div>
+          )}
         </div>
       )}
       {loading ? (
@@ -973,18 +1240,24 @@ export default function PayrollManager({
                     aria-label="Select all visible payroll records"
                     checked={
                       visible.some((row) => row.stripe_payment_ready) &&
-                      visible.filter((row) => row.stripe_payment_ready).every((row) => selected.includes(row.id))
+                      visible
+                        .filter((row) => row.stripe_payment_ready)
+                        .every((row) => selected.includes(row.id))
                     }
                     onChange={() =>
                       setSelected(
-                        visible.filter((row) => row.stripe_payment_ready).every((row) => selected.includes(row.id))
+                        visible
+                          .filter((row) => row.stripe_payment_ready)
+                          .every((row) => selected.includes(row.id))
                           ? selected.filter(
                               (id) => !visible.some((row) => row.id === id),
                             )
                           : Array.from(
                               new Set([
                                 ...selected,
-                                ...visible.filter((row) => row.stripe_payment_ready).map((row) => row.id),
+                                ...visible
+                                  .filter((row) => row.stripe_payment_ready)
+                                  .map((row) => row.id),
                               ]),
                             ),
                       )
@@ -1046,7 +1319,11 @@ export default function PayrollManager({
                           aria-label={`Select payroll record for ${officialName(row)}`}
                           checked={selected.includes(row.id)}
                           disabled={!row.stripe_payment_ready}
-                          title={!row.stripe_payment_ready ? "Official must complete Stripe payment setup before payroll." : undefined}
+                          title={
+                            !row.stripe_payment_ready
+                              ? "Official must complete Stripe payment setup before payroll."
+                              : undefined
+                          }
                           onChange={() =>
                             setSelected((current) =>
                               current.includes(row.id)
@@ -1075,7 +1352,11 @@ export default function PayrollManager({
                             ? "Confirmed"
                             : "Accepted"}
                         </small>
-                        <small>{row.stripe_payment_ready ? "Stripe ready" : `Stripe: ${row.stripe_payment_status.replaceAll("_", " ")}`}</small>
+                        <small>
+                          {row.stripe_payment_ready
+                            ? "Stripe ready"
+                            : `Stripe: ${row.stripe_payment_status.replaceAll("_", " ")}`}
+                        </small>
                       </td>
                       <td>{row.sport_positions?.name || "Official"}</td>
                       <td>
@@ -1229,8 +1510,96 @@ export default function PayrollManager({
         </div>
       )}
       <div className="payrollBatchHistory">
-        <div className="cardHead"><div><h3>Stripe Payroll History</h3><p>League funding, Stripe costs, and official transfer reconciliation.</p></div></div>
-        {batches.length===0?<p>No Stripe payroll batches yet.</p>:batches.map(batch=><details key={batch.id} className="registrationReview"><summary><b>Batch {batch.batch_number}</b> · {batch.leagues?.name||"League"} · <span className={`badge ${batch.status==="paid"?"green":batch.status.includes("failed")||batch.status==="returned"?"red":"yellow"}`}>{batch.status.replaceAll("_"," ")}</span> · ${(batch.total_funding_cents/100).toFixed(2)}</summary><div className="tableWrap"><table><thead><tr><th>Official</th><th>Amount</th><th>Transfer</th><th>Stripe ID</th></tr></thead><tbody>{batch.items.map(item=><tr key={item.id}><td>{item.official_name_snapshot}</td><td>{money(item.total_cents/100)}</td><td>{item.transfer?.status||"pending"}</td><td><small>{item.transfer?.stripe_transfer_id||item.transfer?.failure_message||"—"}</small></td></tr>)}</tbody></table></div><p>Payroll {money(batch.payroll_subtotal_cents/100)} · Ref Pro Group fee {money(batch.refassign_fee_cents/100)} · Estimated Stripe cost {money(batch.stripe_processing_cost_cents/100)} · Actual Stripe cost {batch.stripe_processing_cost_actual_cents==null?"Pending":money(batch.stripe_processing_cost_actual_cents/100)}</p>{batch.funding_failure_message&&<div className="errorBox">{batch.funding_failure_message}</div>}<div className="headerActions"><button className="secondary" onClick={()=>downloadReconciliation(batch)}>Download Reconciliation</button>{["partially_paid","on_hold"].includes(batch.status)&&!/(returned|refund|dispute)/i.test(batch.funding_failure_message||"")&&<button className="primary" disabled={saving===`retry-${batch.id}`} onClick={()=>void retryPayrollBatch(batch.id)}>{saving===`retry-${batch.id}`?"Retrying…":"Retry Failed Transfers"}</button>}</div></details>)}
+        <div className="cardHead">
+          <div>
+            <h3>Stripe Payroll History</h3>
+            <p>
+              League funding, Stripe costs, and official transfer
+              reconciliation.
+            </p>
+          </div>
+        </div>
+        {batches.length === 0 ? (
+          <p>No Stripe payroll batches yet.</p>
+        ) : (
+          batches.map((batch) => (
+            <details key={batch.id} className="registrationReview">
+              <summary>
+                <b>Batch {batch.batch_number}</b> ·{" "}
+                {batch.leagues?.name || "League"} · Bill To:{" "}
+                {batch.bill_to?.name || "Not recorded"} ·{" "}
+                <span
+                  className={`badge ${batch.status === "paid" ? "green" : batch.status.includes("failed") || batch.status === "returned" ? "red" : "yellow"}`}
+                >
+                  {batch.status.replaceAll("_", " ")}
+                </span>{" "}
+                · ${(batch.total_funding_cents / 100).toFixed(2)}
+              </summary>
+              <div className="tableWrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Official</th>
+                      <th>Amount</th>
+                      <th>Transfer</th>
+                      <th>Stripe ID</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {batch.items.map((item) => (
+                      <tr key={item.id}>
+                        <td>{item.official_name_snapshot}</td>
+                        <td>{money(item.total_cents / 100)}</td>
+                        <td>{item.transfer?.status || "pending"}</td>
+                        <td>
+                          <small>
+                            {item.transfer?.stripe_transfer_id ||
+                              item.transfer?.failure_message ||
+                              "—"}
+                          </small>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p>
+                Payroll {money(batch.payroll_subtotal_cents / 100)} · RefAssign
+                fee {money(batch.refassign_fee_cents / 100)} · Estimated Stripe
+                cost {money(batch.stripe_processing_cost_cents / 100)} · Actual
+                Stripe cost{" "}
+                {batch.stripe_processing_cost_actual_cents == null
+                  ? "Pending"
+                  : money(batch.stripe_processing_cost_actual_cents / 100)}
+              </p>
+              {batch.funding_failure_message && (
+                <div className="errorBox">{batch.funding_failure_message}</div>
+              )}
+              <div className="headerActions">
+                <button
+                  className="secondary"
+                  onClick={() => downloadReconciliation(batch)}
+                >
+                  Download Reconciliation
+                </button>
+                {["partially_paid", "on_hold"].includes(batch.status) &&
+                  !/(returned|refund|dispute)/i.test(
+                    batch.funding_failure_message || "",
+                  ) && (
+                    <button
+                      className="primary"
+                      disabled={saving === `retry-${batch.id}`}
+                      onClick={() => void retryPayrollBatch(batch.id)}
+                    >
+                      {saving === `retry-${batch.id}`
+                        ? "Retrying…"
+                        : "Retry Failed Transfers"}
+                    </button>
+                  )}
+              </div>
+            </details>
+          ))
+        )}
       </div>
     </section>
   );

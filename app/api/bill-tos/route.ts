@@ -79,3 +79,34 @@ export async function POST(request: NextRequest) {
     );
   return NextResponse.json({ billTo: data });
 }
+
+export async function PATCH(request: NextRequest) {
+  const context = await requireManagedOrganization(request, editRoles);
+  if (context.error) return context.error;
+  const { service, organizationId } = context;
+  const body = (await request.json()) as { id?: string; email?: string };
+  const id = String(body.id || "").trim();
+  const email = String(body.email || "")
+    .trim()
+    .toLowerCase();
+  if (!id || !email || !email.includes("@"))
+    return NextResponse.json(
+      { error: "Bill To and a valid billing email are required." },
+      { status: 400 },
+    );
+  const { data, error } = await service
+    .from("bill_to_accounts")
+    .update({ email })
+    .eq("id", id)
+    .eq("organization_id", organizationId)
+    .select("id,name,contact_name,email,phone,address,active")
+    .maybeSingle();
+  if (error)
+    return NextResponse.json({ error: error.message }, { status: 400 });
+  if (!data)
+    return NextResponse.json(
+      { error: "Bill To was not found." },
+      { status: 404 },
+    );
+  return NextResponse.json({ billTo: data });
+}

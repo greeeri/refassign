@@ -4,30 +4,482 @@ import { requireManagedOrganization } from "../../../../lib/server/organizationS
 import { stripeConnectRequest } from "../../../../lib/stripe/connect";
 import { stripeConnectConfig } from "../../../../lib/stripe/runtime";
 
-type Assignment={id:string;status:string;official_id:string;game_id:string;game_fee:number|null;mileage_miles:number|null;mileage_rate:number|null;payment_status:string;officials:{first_name:string|null;last_name:string|null}|null;games:{league_id:string;leagues:{name:string}|null}|null};
-const cents=(n:number)=>Math.max(0,Math.round(n*100));
-function feeFor(subtotal:number,rule:any){if(!rule||rule.fee_type==="none")return 0;let fee=rule.fee_type==="flat"?Number(rule.flat_fee_cents||0):Math.round(subtotal*Number(rule.percentage_basis_points||0)/10000);if(rule.minimum_fee_cents!=null)fee=Math.max(fee,Number(rule.minimum_fee_cents));if(rule.maximum_fee_cents!=null)fee=Math.min(fee,Number(rule.maximum_fee_cents));return fee;}
-function processingFor(base:number,method:string){if(method==="ach")return Math.min(500,Math.ceil(base*80/10000));if(method==="card")return Math.ceil((base+30)/(1-0.029))-base;return 0;}
-function checkoutForm(origin:string,userEmail:string,batch:{id:string;batch_number:number},leagueName:string,total:number,paymentMethodConfigurationId:string){const form=new URLSearchParams({mode:"payment",success_url:`${origin}/workspace?section=payroll&payroll=success&session_id={CHECKOUT_SESSION_ID}`,cancel_url:`${origin}/workspace?section=payroll&payroll=cancelled`,client_reference_id:batch.id,customer_email:userEmail});form.set("line_items[0][price_data][currency]","usd");form.set("line_items[0][price_data][product_data][name]",`Payroll funding — ${leagueName} batch ${batch.batch_number}`);form.set("line_items[0][price_data][unit_amount]",String(total));form.set("line_items[0][quantity]","1");form.set("metadata[refassign_payroll_batch_id]",batch.id);form.set("payment_intent_data[metadata][refassign_payroll_batch_id]",batch.id);if(paymentMethodConfigurationId)form.set("payment_method_configuration",paymentMethodConfigurationId);form.set("integration_identifier",`refassign_payroll_${randomBytes(4).toString("hex")}`);return form;}
+type Assignment = {
+  id: string;
+  status: string;
+  official_id: string;
+  game_id: string;
+  game_fee: number | null;
+  mileage_miles: number | null;
+  mileage_rate: number | null;
+  payment_status: string;
+  officials: { first_name: string | null; last_name: string | null } | null;
+  games: {
+    league_id: string;
+    bill_to_id: string | null;
+    leagues: { name: string } | null;
+  } | null;
+};
+const cents = (n: number) => Math.max(0, Math.round(n * 100));
+function feeFor(subtotal: number, rule: any) {
+  if (!rule || rule.fee_type === "none") return 0;
+  let fee =
+    rule.fee_type === "flat"
+      ? Number(rule.flat_fee_cents || 0)
+      : Math.round(
+          (subtotal * Number(rule.percentage_basis_points || 0)) / 10000,
+        );
+  if (rule.minimum_fee_cents != null)
+    fee = Math.max(fee, Number(rule.minimum_fee_cents));
+  if (rule.maximum_fee_cents != null)
+    fee = Math.min(fee, Number(rule.maximum_fee_cents));
+  return fee;
+}
+function processingFor(base: number, method: string) {
+  if (method === "ach") return Math.min(500, Math.ceil((base * 80) / 10000));
+  if (method === "card") return Math.ceil((base + 30) / (1 - 0.029)) - base;
+  return 0;
+}
+function checkoutForm(
+  origin: string,
+  billingEmail: string,
+  batch: { id: string; batch_number: number },
+  leagueName: string,
+  billTo: { id: string; name: string },
+  total: number,
+  paymentMethodConfigurationId: string,
+) {
+  const form = new URLSearchParams({
+    mode: "payment",
+    success_url: `${origin}/workspace?section=payroll&payroll=success&session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${origin}/workspace?section=payroll&payroll=cancelled`,
+    client_reference_id: batch.id,
+    customer_email: billingEmail,
+  });
+  form.set("line_items[0][price_data][currency]", "usd");
+  form.set(
+    "line_items[0][price_data][product_data][name]",
+    `Payroll funding — ${billTo.name} · ${leagueName} batch ${batch.batch_number}`,
+  );
+  form.set("line_items[0][price_data][unit_amount]", String(total));
+  form.set("line_items[0][quantity]", "1");
+  form.set("metadata[refassign_payroll_batch_id]", batch.id);
+  form.set("metadata[refassign_bill_to_id]", billTo.id);
+  form.set(
+    "payment_intent_data[metadata][refassign_payroll_batch_id]",
+    batch.id,
+  );
+  form.set("payment_intent_data[metadata][refassign_bill_to_id]", billTo.id);
+  if (paymentMethodConfigurationId)
+    form.set("payment_method_configuration", paymentMethodConfigurationId);
+  form.set(
+    "integration_identifier",
+    `refpro_payroll_${randomBytes(4).toString("hex")}`,
+  );
+  return form;
+}
 
-export async function POST(request:NextRequest){
- const context=await requireManagedOrganization(request,["owner","admin","billing"]);if(context.error)return context.error;
- const{service,user,organizationId}=context;let config;try{config=stripeConnectConfig()}catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Stripe payroll is not configured."},{status:503})}const{secretKey:key,mode,payrollPaymentMethodConfigurationId}=config;
- const body=await request.json().catch(()=>({})) as{assignmentIds?:string[]},assignmentIds=[...new Set((body.assignmentIds||[]).filter(Boolean))].sort();
- if(!assignmentIds.length)return NextResponse.json({error:"Select approved payroll records."},{status:400});if(assignmentIds.length>250)return NextResponse.json({error:"Process no more than 250 payroll records at once."},{status:400});
- const{data,error}=await service.from("assignments").select("id,status,official_id,game_id,game_fee,mileage_miles,mileage_rate,payment_status,officials(first_name,last_name),games!inner(organization_id,league_id,leagues(name))").in("id",assignmentIds).eq("games.organization_id",organizationId);
- if(error)return NextResponse.json({error:error.message},{status:400});const assignments=(data||[])as unknown as Assignment[];
- if(assignments.length!==assignmentIds.length||assignments.some(r=>!["accepted","confirmed"].includes(r.status)||r.payment_status!=="approved"))return NextResponse.json({error:"Every selected payroll record must be accepted and marked Approved."},{status:400});
- const leagueIds=[...new Set(assignments.map(r=>r.games?.league_id).filter(Boolean))]as string[];if(leagueIds.length!==1)return NextResponse.json({error:"Process one league at a time."},{status:400});const leagueId=leagueIds[0],officialIds=[...new Set(assignments.map(r=>r.official_id))];
- const[{data:settings},{data:rule},{data:accounts}]=await Promise.all([service.from("league_payment_settings").select("payroll_enabled,payroll_hold,payroll_hold_reason,default_funding_method").eq("organization_id",organizationId).eq("league_id",leagueId).maybeSingle(),service.from("transaction_fee_rules").select("fee_type,flat_fee_cents,percentage_basis_points,minimum_fee_cents,maximum_fee_cents").eq("organization_id",organizationId).eq("league_id",leagueId).eq("transaction_type","payroll").eq("active",true).maybeSingle(),service.from("official_stripe_accounts").select("official_id,stripe_account_id,onboarding_status,transfers_status,payouts_status").eq("stripe_mode",mode).in("official_id",officialIds)]);
- if(!settings?.payroll_enabled)return NextResponse.json({error:"Stripe payroll is not enabled for this league."},{status:400});if(settings.payroll_hold)return NextResponse.json({error:settings.payroll_hold_reason||"Payroll is on hold for this league."},{status:400});
- const byOfficial=new Map((accounts||[]).map(a=>[a.official_id,a])),unavailable=assignments.find(r=>{const a=byOfficial.get(r.official_id);return!a?.stripe_account_id||a.onboarding_status!=="ready"||a.transfers_status!=="active"||a.payouts_status!=="active"});if(unavailable)return NextResponse.json({error:`${unavailable.officials?.first_name||"An official"} is not ready for Stripe payroll.`},{status:400});
- const values=assignments.map(row=>{const gameFeeCents=cents(Number(row.game_fee||0)),mileageAmountCents=cents(Number(row.mileage_miles||0)*Number(row.mileage_rate||0));return{row,gameFeeCents,mileageAmountCents,totalCents:gameFeeCents+mileageAmountCents}});if(values.some(v=>v.totalCents<=0))return NextResponse.json({error:"Each payroll record must have an amount greater than zero."},{status:400});
- const subtotal=values.reduce((s,v)=>s+v.totalCents,0),fee=feeFor(subtotal,rule),processing=processingFor(subtotal+fee,settings.default_funding_method),total=subtotal+fee+processing,fingerprint=createHash("sha256").update(`${mode}:${organizationId}:${assignmentIds.join(",")}`).digest("hex").slice(0,32),batchKey=`payroll-${fingerprint}`,now=new Date().toISOString();
- const{data:existing}=await service.from("payroll_batches").select("id,batch_number,status,stripe_checkout_session_id").eq("stripe_mode",mode).eq("idempotency_key",batchKey).maybeSingle();if(existing?.status==="paid")return NextResponse.json({paid:true,duplicate:true,batchId:existing.id});if(existing?.stripe_checkout_session_id){const prior=await stripeConnectRequest<{url:string|null;payment_method_types?:string[]}>(`checkout/sessions/${encodeURIComponent(existing.stripe_checkout_session_id)}`,key);if(prior.url&&prior.payment_method_types?.includes("us_bank_account"))return NextResponse.json({url:prior.url,batchNumber:existing.batch_number});if(existing.status==="funding"){const replacement=await stripeConnectRequest<{id:string;url:string}>("checkout/sessions",key,checkoutForm(request.nextUrl.origin,user.email||"",existing,assignments[0].games?.leagues?.name||"League",total,payrollPaymentMethodConfigurationId),`${batchKey}-checkout-ach`);await Promise.all([service.from("payroll_batches").update({stripe_checkout_session_id:replacement.id,updated_at:now}).eq("id",existing.id),service.from("payment_transactions").update({stripe_object_id:replacement.id,occurred_at:now}).eq("related_record_id",existing.id).eq("direction","credit")]);return NextResponse.json({url:replacement.url,batchNumber:existing.batch_number});}}if(existing)return NextResponse.json({error:"This payroll batch already exists and requires review."},{status:409});
- const created=await service.from("payroll_batches").insert({organization_id:organizationId,league_id:leagueId,stripe_mode:mode,status:"approved",payroll_subtotal_cents:subtotal,stripe_processing_cost_cents:processing,refassign_fee_cents:fee,total_funding_cents:total,fee_type_snapshot:rule?.fee_type||"none",fee_value_snapshot:rule?.fee_type==="flat"?Number(rule.flat_fee_cents||0):Number(rule?.percentage_basis_points||0),fee_minimum_cents_snapshot:rule?.minimum_fee_cents??null,fee_maximum_cents_snapshot:rule?.maximum_fee_cents??null,funding_method:settings.default_funding_method,idempotency_key:batchKey,approved_by:user.id,approved_at:now,locked_at:now,created_by:user.id}).select("id,batch_number").single();if(created.error||!created.data)return NextResponse.json({error:created.error?.message||"Payroll batch could not be created."},{status:400});const batch=created.data;
- const items=await service.from("payroll_batch_items").insert(values.map(({row,gameFeeCents,mileageAmountCents,totalCents})=>({payroll_batch_id:batch.id,assignment_id:row.id,official_id:row.official_id,official_name_snapshot:`${row.officials?.first_name||""} ${row.officials?.last_name||""}`.trim()||"Official",game_id:row.game_id,game_fee_cents:gameFeeCents,mileage_miles_snapshot:Number(row.mileage_miles||0),mileage_rate_cents_snapshot:cents(Number(row.mileage_rate||0)),mileage_amount_cents:mileageAmountCents,total_cents:totalCents,memo:`Ref Pro Group payroll batch ${batch.batch_number}`})));if(items.error){await service.from("payroll_batches").update({status:"void"}).eq("id",batch.id);return NextResponse.json({error:items.error.message},{status:400});}
- const form=checkoutForm(request.nextUrl.origin,user.email||"",batch,assignments[0].games?.leagues?.name||"League",total,payrollPaymentMethodConfigurationId);
- try{const session=await stripeConnectRequest<{id:string;url:string}>("checkout/sessions",key,form,`${batchKey}-checkout`);await Promise.all([service.from("payroll_batches").update({status:"funding",stripe_checkout_session_id:session.id,updated_at:now}).eq("id",batch.id),service.from("payment_transactions").insert({organization_id:organizationId,league_id:leagueId,transaction_type:"payroll",related_record_id:batch.id,direction:"credit",status:"pending",amount_cents:total,stripe_object_type:"checkout_session",stripe_object_id:session.id,idempotency_key:`${batchKey}-funding`}),service.from("payment_audit_events").insert({organization_id:organizationId,league_id:leagueId,payroll_batch_id:batch.id,entity_type:"payroll_batch",entity_id:batch.id,event_type:"payroll_funding_checkout_created",actor_user_id:user.id,new_values:{status:"funding",total_funding_cents:total},metadata:{stripe_checkout_session_id:session.id,funding_method:settings.default_funding_method}})]);return NextResponse.json({url:session.url,batchNumber:batch.batch_number,totalFundingCents:total});}
- catch(e){const message=e instanceof Error?e.message:"Stripe Checkout could not be created.";await service.from("payroll_batches").update({status:"funding_failed",funding_failure_message:message.slice(0,1000),updated_at:now}).eq("id",batch.id);return NextResponse.json({error:message},{status:502});}
+export async function POST(request: NextRequest) {
+  const context = await requireManagedOrganization(request, [
+    "owner",
+    "admin",
+    "billing",
+  ]);
+  if (context.error) return context.error;
+  const { service, user, organizationId } = context;
+  let config;
+  try {
+    config = stripeConnectConfig();
+  } catch (e) {
+    return NextResponse.json(
+      {
+        error:
+          e instanceof Error ? e.message : "Stripe payroll is not configured.",
+      },
+      { status: 503 },
+    );
+  }
+  const { secretKey: key, mode, payrollPaymentMethodConfigurationId } = config;
+  const body = (await request.json().catch(() => ({}))) as {
+      assignmentIds?: string[];
+    },
+    assignmentIds = [
+      ...new Set((body.assignmentIds || []).filter(Boolean)),
+    ].sort();
+  if (!assignmentIds.length)
+    return NextResponse.json(
+      { error: "Select approved payroll records." },
+      { status: 400 },
+    );
+  if (assignmentIds.length > 250)
+    return NextResponse.json(
+      { error: "Process no more than 250 payroll records at once." },
+      { status: 400 },
+    );
+  const { data, error } = await service
+    .from("assignments")
+    .select(
+      "id,status,official_id,game_id,game_fee,mileage_miles,mileage_rate,payment_status,officials(first_name,last_name),games!inner(organization_id,league_id,bill_to_id,leagues(name))",
+    )
+    .in("id", assignmentIds)
+    .eq("games.organization_id", organizationId);
+  if (error)
+    return NextResponse.json({ error: error.message }, { status: 400 });
+  const assignments = (data || []) as unknown as Assignment[];
+  if (
+    assignments.length !== assignmentIds.length ||
+    assignments.some(
+      (r) =>
+        !["accepted", "confirmed"].includes(r.status) ||
+        r.payment_status !== "approved",
+    )
+  )
+    return NextResponse.json(
+      {
+        error:
+          "Every selected payroll record must be accepted and marked Approved.",
+      },
+      { status: 400 },
+    );
+  const leagueIds = [
+    ...new Set(assignments.map((r) => r.games?.league_id).filter(Boolean)),
+  ] as string[];
+  if (leagueIds.length !== 1)
+    return NextResponse.json(
+      { error: "Process one league at a time." },
+      { status: 400 },
+    );
+  const billToIds = [
+    ...new Set(assignments.map((r) => r.games?.bill_to_id).filter(Boolean)),
+  ] as string[];
+  if (assignments.some((r) => !r.games?.bill_to_id))
+    return NextResponse.json(
+      {
+        error:
+          "Select a Bill To for every payroll record before opening Stripe.",
+      },
+      { status: 400 },
+    );
+  if (billToIds.length !== 1)
+    return NextResponse.json(
+      {
+        error:
+          "Process one Bill To at a time so Stripe funding is routed and reconciled correctly.",
+      },
+      { status: 400 },
+    );
+  const leagueId = leagueIds[0],
+    billToId = billToIds[0],
+    officialIds = [...new Set(assignments.map((r) => r.official_id))];
+  const [
+    { data: settings },
+    { data: rule },
+    { data: accounts },
+    { data: billTo },
+  ] = await Promise.all([
+    service
+      .from("league_payment_settings")
+      .select(
+        "payroll_enabled,payroll_hold,payroll_hold_reason,default_funding_method",
+      )
+      .eq("organization_id", organizationId)
+      .eq("league_id", leagueId)
+      .maybeSingle(),
+    service
+      .from("transaction_fee_rules")
+      .select(
+        "fee_type,flat_fee_cents,percentage_basis_points,minimum_fee_cents,maximum_fee_cents",
+      )
+      .eq("organization_id", organizationId)
+      .eq("league_id", leagueId)
+      .eq("transaction_type", "payroll")
+      .eq("active", true)
+      .maybeSingle(),
+    service
+      .from("official_stripe_accounts")
+      .select(
+        "official_id,stripe_account_id,onboarding_status,transfers_status,payouts_status",
+      )
+      .eq("stripe_mode", mode)
+      .in("official_id", officialIds),
+    service
+      .from("bill_to_accounts")
+      .select("id,name,email,active")
+      .eq("id", billToId)
+      .eq("organization_id", organizationId)
+      .maybeSingle(),
+  ]);
+  if (!billTo?.active)
+    return NextResponse.json(
+      { error: "The selected Bill To is inactive or unavailable." },
+      { status: 400 },
+    );
+  if (!billTo.email)
+    return NextResponse.json(
+      {
+        error: `Add a billing email to ${billTo.name} before opening Stripe Checkout.`,
+      },
+      { status: 400 },
+    );
+  if (!settings?.payroll_enabled)
+    return NextResponse.json(
+      { error: "Stripe payroll is not enabled for this league." },
+      { status: 400 },
+    );
+  if (settings.payroll_hold)
+    return NextResponse.json(
+      {
+        error:
+          settings.payroll_hold_reason || "Payroll is on hold for this league.",
+      },
+      { status: 400 },
+    );
+  const byOfficial = new Map((accounts || []).map((a) => [a.official_id, a])),
+    unavailable = assignments.find((r) => {
+      const a = byOfficial.get(r.official_id);
+      return (
+        !a?.stripe_account_id ||
+        a.onboarding_status !== "ready" ||
+        a.transfers_status !== "active" ||
+        a.payouts_status !== "active"
+      );
+    });
+  if (unavailable)
+    return NextResponse.json(
+      {
+        error: `${unavailable.officials?.first_name || "An official"} is not ready for Stripe payroll.`,
+      },
+      { status: 400 },
+    );
+  const values = assignments.map((row) => {
+    const gameFeeCents = cents(Number(row.game_fee || 0)),
+      mileageAmountCents = cents(
+        Number(row.mileage_miles || 0) * Number(row.mileage_rate || 0),
+      );
+    return {
+      row,
+      gameFeeCents,
+      mileageAmountCents,
+      totalCents: gameFeeCents + mileageAmountCents,
+    };
+  });
+  if (values.some((v) => v.totalCents <= 0))
+    return NextResponse.json(
+      { error: "Each payroll record must have an amount greater than zero." },
+      { status: 400 },
+    );
+  const subtotal = values.reduce((s, v) => s + v.totalCents, 0),
+    fee = feeFor(subtotal, rule),
+    processing = processingFor(subtotal + fee, settings.default_funding_method),
+    total = subtotal + fee + processing,
+    fingerprint = createHash("sha256")
+      .update(
+        `${mode}:${organizationId}:${billToId}:${assignmentIds.join(",")}`,
+      )
+      .digest("hex")
+      .slice(0, 32),
+    batchKey = `payroll-${fingerprint}`,
+    now = new Date().toISOString();
+  const { data: existing } = await service
+    .from("payroll_batches")
+    .select("id,batch_number,status,stripe_checkout_session_id")
+    .eq("stripe_mode", mode)
+    .eq("idempotency_key", batchKey)
+    .maybeSingle();
+  if (existing?.status === "paid")
+    return NextResponse.json({
+      paid: true,
+      duplicate: true,
+      batchId: existing.id,
+    });
+  if (existing?.stripe_checkout_session_id) {
+    const prior = await stripeConnectRequest<{
+      url: string | null;
+      payment_method_types?: string[];
+    }>(
+      `checkout/sessions/${encodeURIComponent(existing.stripe_checkout_session_id)}`,
+      key,
+    );
+    if (prior.url && prior.payment_method_types?.includes("us_bank_account"))
+      return NextResponse.json({
+        url: prior.url,
+        batchNumber: existing.batch_number,
+      });
+    if (existing.status === "funding") {
+      const replacement = await stripeConnectRequest<{
+        id: string;
+        url: string;
+      }>(
+        "checkout/sessions",
+        key,
+        checkoutForm(
+          request.nextUrl.origin,
+          billTo.email,
+          existing,
+          assignments[0].games?.leagues?.name || "League",
+          billTo,
+          total,
+          payrollPaymentMethodConfigurationId,
+        ),
+        `${batchKey}-checkout-ach`,
+      );
+      await Promise.all([
+        service
+          .from("payroll_batches")
+          .update({
+            stripe_checkout_session_id: replacement.id,
+            updated_at: now,
+          })
+          .eq("id", existing.id),
+        service
+          .from("payment_transactions")
+          .update({ stripe_object_id: replacement.id, occurred_at: now })
+          .eq("related_record_id", existing.id)
+          .eq("direction", "credit"),
+      ]);
+      return NextResponse.json({
+        url: replacement.url,
+        batchNumber: existing.batch_number,
+      });
+    }
+  }
+  if (existing)
+    return NextResponse.json(
+      { error: "This payroll batch already exists and requires review." },
+      { status: 409 },
+    );
+  const created = await service
+    .from("payroll_batches")
+    .insert({
+      organization_id: organizationId,
+      league_id: leagueId,
+      bill_to_id: billToId,
+      stripe_mode: mode,
+      status: "approved",
+      payroll_subtotal_cents: subtotal,
+      stripe_processing_cost_cents: processing,
+      refassign_fee_cents: fee,
+      total_funding_cents: total,
+      fee_type_snapshot: rule?.fee_type || "none",
+      fee_value_snapshot:
+        rule?.fee_type === "flat"
+          ? Number(rule.flat_fee_cents || 0)
+          : Number(rule?.percentage_basis_points || 0),
+      fee_minimum_cents_snapshot: rule?.minimum_fee_cents ?? null,
+      fee_maximum_cents_snapshot: rule?.maximum_fee_cents ?? null,
+      funding_method: settings.default_funding_method,
+      idempotency_key: batchKey,
+      approved_by: user.id,
+      approved_at: now,
+      locked_at: now,
+      created_by: user.id,
+    })
+    .select("id,batch_number")
+    .single();
+  if (created.error || !created.data)
+    return NextResponse.json(
+      {
+        error: created.error?.message || "Payroll batch could not be created.",
+      },
+      { status: 400 },
+    );
+  const batch = created.data;
+  const items = await service.from("payroll_batch_items").insert(
+    values.map(({ row, gameFeeCents, mileageAmountCents, totalCents }) => ({
+      payroll_batch_id: batch.id,
+      assignment_id: row.id,
+      official_id: row.official_id,
+      official_name_snapshot:
+        `${row.officials?.first_name || ""} ${row.officials?.last_name || ""}`.trim() ||
+        "Official",
+      game_id: row.game_id,
+      game_fee_cents: gameFeeCents,
+      mileage_miles_snapshot: Number(row.mileage_miles || 0),
+      mileage_rate_cents_snapshot: cents(Number(row.mileage_rate || 0)),
+      mileage_amount_cents: mileageAmountCents,
+      total_cents: totalCents,
+      memo: `Ref Pro Group payroll batch ${batch.batch_number}`,
+    })),
+  );
+  if (items.error) {
+    await service
+      .from("payroll_batches")
+      .update({ status: "void" })
+      .eq("id", batch.id);
+    return NextResponse.json({ error: items.error.message }, { status: 400 });
+  }
+  const form = checkoutForm(
+    request.nextUrl.origin,
+    billTo.email,
+    batch,
+    assignments[0].games?.leagues?.name || "League",
+    billTo,
+    total,
+    payrollPaymentMethodConfigurationId,
+  );
+  try {
+    const session = await stripeConnectRequest<{ id: string; url: string }>(
+      "checkout/sessions",
+      key,
+      form,
+      `${batchKey}-checkout`,
+    );
+    await Promise.all([
+      service
+        .from("payroll_batches")
+        .update({
+          status: "funding",
+          stripe_checkout_session_id: session.id,
+          updated_at: now,
+        })
+        .eq("id", batch.id),
+      service.from("payment_transactions").insert({
+        organization_id: organizationId,
+        league_id: leagueId,
+        transaction_type: "payroll",
+        related_record_id: batch.id,
+        direction: "credit",
+        status: "pending",
+        amount_cents: total,
+        stripe_object_type: "checkout_session",
+        stripe_object_id: session.id,
+        idempotency_key: `${batchKey}-funding`,
+      }),
+      service.from("payment_audit_events").insert({
+        organization_id: organizationId,
+        league_id: leagueId,
+        payroll_batch_id: batch.id,
+        entity_type: "payroll_batch",
+        entity_id: batch.id,
+        event_type: "payroll_funding_checkout_created",
+        actor_user_id: user.id,
+        new_values: { status: "funding", total_funding_cents: total },
+        metadata: {
+          stripe_checkout_session_id: session.id,
+          funding_method: settings.default_funding_method,
+          bill_to_id: billTo.id,
+          bill_to_name: billTo.name,
+        },
+      }),
+    ]);
+    return NextResponse.json({
+      url: session.url,
+      batchNumber: batch.batch_number,
+      billToId: billTo.id,
+      billToName: billTo.name,
+      totalFundingCents: total,
+    });
+  } catch (e) {
+    const message =
+      e instanceof Error ? e.message : "Stripe Checkout could not be created.";
+    await service
+      .from("payroll_batches")
+      .update({
+        status: "funding_failed",
+        funding_failure_message: message.slice(0, 1000),
+        updated_at: now,
+      })
+      .eq("id", batch.id);
+    return NextResponse.json({ error: message }, { status: 502 });
+  }
 }
