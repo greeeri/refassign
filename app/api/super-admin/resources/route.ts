@@ -24,10 +24,13 @@ export async function GET(request: NextRequest) {
     const { service } = await requireSuperAdmin();
     const [
       { data: organizations, error: organizationError },
+      { data: leagues, error: leagueError },
     ] = await Promise.all([
       service.from("organizations").select("id,name,created_at").order("name"),
+      service.from("leagues").select("id,name,active").order("name"),
     ]);
     if (organizationError) throw organizationError;
+    if (leagueError) throw leagueError;
 
     const organizationRows = await Promise.all(
       (organizations || []).map(async (organization) => {
@@ -62,6 +65,23 @@ export async function GET(request: NextRequest) {
       }),
     );
 
+    const leagueRows = await Promise.all((leagues || []).map(async (league) => {
+      const [games, eligibility, coverage] = await Promise.all([
+        service.from("games").select("id", { count: "exact", head: true }).eq("league_id", league.id),
+        service.from("official_league_eligibility").select("official_id", { count: "exact", head: true }).eq("league_id", league.id),
+        service.from("organization_league_coverage").select("organizations(name)").eq("league_id", league.id),
+      ]);
+      return {
+        ...league,
+        game_count: games.count || 0,
+        official_count: eligibility.count || 0,
+        organizations: (coverage.data || []).map((row) => {
+          const organization = row.organizations as unknown as { name?: string } | null;
+          return organization?.name || "";
+        }).filter(Boolean),
+      };
+    }));
+
     const search = (request.nextUrl.searchParams.get("officialQuery") || "").trim();
     let officials: Record<string, unknown>[] = [];
     let protectedRows: { user_id: string }[] = [];
@@ -87,6 +107,7 @@ export async function GET(request: NextRequest) {
     );
     return NextResponse.json({
       organizations: organizationRows,
+      leagues: leagueRows,
       official_search_active: search.length >= 2,
       officials: officials.map((official) => ({
         ...official,
@@ -102,7 +123,7 @@ export async function DELETE(request: NextRequest) {
   try {
     const { user, service } = await requireSuperAdmin();
     const body = (await request.json()) as {
-      type?: "official" | "organization";
+      type?: "official" | "league" | "organization";
       id?: string;
       confirmation?: string;
     };
@@ -111,7 +132,7 @@ export async function DELETE(request: NextRequest) {
     if (body.type === "official") {
       const { data: official, error } = await service
         .from("officials")
-        .select("first_name,last_name,full_name,email")
+        .select("first_name,last_name,full_name,email,auth_user_id")
         .eq("id", body.id)
         .maybeSingle();
       if (error) throw error;
@@ -131,7 +152,26 @@ export async function DELETE(request: NextRequest) {
         },
       );
       if (deleteError) throw deleteError;
-      return NextResponse.json({ deleted: true });
+      if (official.auth_user_id) {
+        const { data: protectedAccount } = await service.from("protected_accounts").select("user_id").eq("user_id", official.auth_user_id).maybeSingle();
+        if (protectedAccount) throw new Error("The protected Super Admin login cannot be deleted.");
+        const { error: authDeleteError } = await service.auth.admin.deleteUser(official.auth_user_id);
+        if (authDeleteError) throw new Error(`Official records were deleted, but the linked login could not be removed: ${authDeleteError.message}`);
+      }
+      return NextResponse.json({ deleted: true, cache_version: Date.now() });
+    }
+
+    if (body.type === "league") {
+      const { data: league, error } = await service.from("leagues").select("name").eq("id", body.id).maybeSingle();
+      if (error) throw error;
+      if (!league) throw new Error("League not found.");
+      if (body.confirmation !== league.name) throw new Error(`Type ${league.name} exactly to confirm deletion.`);
+      const { error: deleteError } = await service.rpc("super_admin_delete_league", {
+        p_actor_user_id: user.id,
+        p_league_id: body.id,
+      });
+      if (deleteError) throw deleteError;
+      return NextResponse.json({ deleted: true, cache_version: Date.now() });
     }
 
     const { data: organization, error } = await service
@@ -151,7 +191,7 @@ export async function DELETE(request: NextRequest) {
       },
     );
     if (deleteError) throw deleteError;
-    return NextResponse.json({ deleted: true });
+    return NextResponse.json({ deleted: true, cache_version: Date.now() });
   } catch (error) {
     return failure(error);
   }

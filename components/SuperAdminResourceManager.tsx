@@ -22,9 +22,19 @@ type Official = {
   protected: boolean;
 };
 
+type League = {
+  id: string;
+  name: string;
+  active: boolean;
+  game_count: number;
+  official_count: number;
+  organizations: string[];
+};
+
 export default function SuperAdminResourceManager() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [officials, setOfficials] = useState<Official[]>([]);
+  const [leagues, setLeagues] = useState<League[]>([]);
   const [query, setQuery] = useState("");
   const [busyId, setBusyId] = useState("");
   const [error, setError] = useState("");
@@ -40,6 +50,7 @@ export default function SuperAdminResourceManager() {
     if (!response.ok)
       return setError(result.error || "Unable to load records.");
     setOrganizations(result.organizations || []);
+    setLeagues(result.leagues || []);
     setOfficials(result.officials || []);
   }
 
@@ -53,14 +64,16 @@ export default function SuperAdminResourceManager() {
   }, [query]);
 
   async function remove(
-    type: "official" | "organization",
+    type: "official" | "league" | "organization",
     id: string,
     required: string,
   ) {
     const warning =
       type === "organization"
         ? "This permanently removes the organization, its games, memberships, settings, and organization-linked history. Officials remain in the master directory."
-        : "This permanently removes the official and their assignment and development history. A linked login account is not deleted.";
+        : type === "league"
+          ? "This permanently purges the league and all of its games, assignments, eligibility, registration, payroll, payment, document, and access records."
+          : "This permanently purges the official, assignment and development history, Stripe connection record, and linked test login account.";
     const confirmation = window.prompt(
       `${warning}\n\nType ${required} to continue:`,
     );
@@ -77,8 +90,14 @@ export default function SuperAdminResourceManager() {
     if (!response.ok) setError(result.error || "Delete failed.");
     else {
       setNotice(
-        `${type === "organization" ? "Organization" : "Official"} deleted.`,
+        `${type === "organization" ? "Organization" : type === "league" ? "League" : "Official"} and related cached records deleted.`,
       );
+      for (const key of Object.keys(window.localStorage)) {
+        if (key.toLowerCase().startsWith("refassign")) window.localStorage.removeItem(key);
+      }
+      for (const key of Object.keys(window.sessionStorage)) {
+        if (key.toLowerCase().startsWith("refassign")) window.sessionStorage.removeItem(key);
+      }
       await load(query);
     }
     setBusyId("");
@@ -162,6 +181,36 @@ export default function SuperAdminResourceManager() {
       <section className="card">
         <div className="cardHead">
           <div>
+            <h2>League Management</h2>
+            <p>Permanently purge test leagues and every record tied to them.</p>
+          </div>
+        </div>
+        <div className="tableWrap">
+          <table>
+            <thead><tr><th>League</th><th>Organization</th><th>Officials</th><th>Games</th><th>Status</th><th>Action</th></tr></thead>
+            <tbody>
+              {leagues.map((league) => (
+                <tr key={league.id}>
+                  <td><b>{league.name}</b></td>
+                  <td>{league.organizations.join(", ") || "Not assigned"}</td>
+                  <td>{league.official_count}</td>
+                  <td>{league.game_count}</td>
+                  <td>{league.active ? "Active" : "Inactive"}</td>
+                  <td>
+                    <button className="danger" disabled={busyId === league.id} onClick={() => void remove("league", league.id, league.name)}>
+                      {busyId === league.id ? "Purging…" : "Purge League"}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="card">
+        <div className="cardHead">
+          <div>
             <h2>Official Record Management</h2>
             <p>Search the master directory by name or email.</p>
           </div>
@@ -218,7 +267,7 @@ export default function SuperAdminResourceManager() {
                           ? "Protected"
                           : busyId === official.id
                             ? "Deleting…"
-                            : "Delete Official"}
+                            : "Purge Official + Login"}
                       </button>
                     </td>
                   </tr>
