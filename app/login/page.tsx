@@ -296,6 +296,9 @@ export default function LoginPage() {
           {resetting ? "Sending…" : "Forgot password?"}
         </button>}
         {message && <div className="loginMessage">{message}</div>}
+        <p style={{ textAlign: "center", marginTop: 18, marginBottom: 0 }}>
+          <a href="/help">Need help? Visit the Help Center</a>
+        </p>
       </section>
     </main>
   );
