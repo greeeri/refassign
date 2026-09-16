@@ -365,7 +365,7 @@ export default function OfficialsDirectory({
     setBulkBusy(false);
     setLinkMessage(
       sendInvitations
-        ? `${added.length} officials added.${invitationEmails.length ? ` ${sent} invitation emails sent to missing accounts.` : " All already had Ref Pro Group accounts."}`
+        ? `${added.length} officials added.${invitationEmails.length ? ` ${sent} invitation emails sent to missing accounts.` : " All already had RefAssign accounts."}`
         : `${added.length} officials added without sending invitations.`,
     );
     await load();
@@ -394,7 +394,7 @@ export default function OfficialsDirectory({
       setBulkEmailText(contents);
     } catch {
       setBulkEmailText("");
-      setError(`Ref Pro Group could not read ${file.name}. Choose the file again or save it as a CSV.`);
+      setError(`RefAssign could not read ${file.name}. Choose the file again or save it as a CSV.`);
     }
   }
 
@@ -974,7 +974,7 @@ export default function OfficialsDirectory({
         }
       } else {
         setLinkMessage(
-          `${linked.email} already had a Ref Pro Group profile and was connected to this organization.`,
+          `${linked.email} already had a RefAssign profile and was connected to this organization.`,
         );
       }
     } else {
@@ -1008,6 +1008,22 @@ export default function OfficialsDirectory({
         return;
       }
 
+      if (organizationId) {
+        const eligibilityResult = await supabase.rpc(
+          "set_organization_official_eligibility",
+          {
+            p_organization_id: organizationId,
+            p_official_id: officialId,
+            p_league_ids: form.league_ids,
+            p_level_ids: form.level_ids,
+          },
+        );
+        if (eligibilityResult.error) {
+          setSaving(false);
+          setError(eligibilityResult.error.message);
+          return;
+        }
+      } else {
       const [leagueDelete, levelDelete] = await Promise.all([
         leagues.length
           ? supabase
@@ -1061,6 +1077,7 @@ export default function OfficialsDirectory({
         setSaving(false);
         setError(levelInsert.error.message);
         return;
+      }
       }
     }
 
@@ -1241,7 +1258,7 @@ export default function OfficialsDirectory({
                   </strong>
                   <span>
                     {officialMatch.found
-                      ? `${officialMatch.email} — Existing Ref Pro Group account found`
+                      ? `${officialMatch.email} — Existing RefAssign account found`
                       : `${officialMatch.email} — No account yet; an invitation will be prepared`}
                   </span>
                 </div>
@@ -1396,8 +1413,8 @@ export default function OfficialsDirectory({
                               : item.already_connected
                                 ? "Already in organization"
                                 : item.found
-                                  ? "Existing Ref Pro Group account"
-                                  : "No Ref Pro Group account yet"}
+                                  ? "Existing RefAssign account"
+                                  : "No RefAssign account yet"}
                           </span>
                         </div>
                       </article>
