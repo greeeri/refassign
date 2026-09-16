@@ -25,6 +25,7 @@ const roleLabels: Record<string, string> = {
   league_admin: "League Administrator",
   registrar: "Registrar",
   official: "Official",
+  mentor: "Mentor",
   contact: "Contact",
 };
 function formatLastLogin(value: string | null) {
