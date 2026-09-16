@@ -1235,15 +1235,15 @@ export default function Workspace() {
           />
         )}
         {section === "Account" && (
-          <section className="card">
+          <section className="card accountCard">
             <div className="cardHead">
               <div>
                 <h2>My Account</h2>
                 <p>Review the account and workspace currently in use.</p>
               </div>
             </div>
-            <div className="eligibilityGrid">
-              <label>
+            <div className="accountGrid">
+              <label className="accountNameField">
                 <b>Your full name</b>
                 <input
                   value={accountNameDraft}
@@ -1253,15 +1253,15 @@ export default function Workspace() {
                 />
                 <small>This name appears at the top of every workspace page.</small>
               </label>
-              <div>
+              <div className="accountDetail">
                 <b>Email</b>
                 <p>{accountEmail || "Signed-in account"}</p>
               </div>
-              <div>
+              <div className="accountDetail">
                 <b>Organization</b>
                 <p>{testWorkspace?.name || "No organization selected"}</p>
               </div>
-              <div>
+              <div className="accountDetail">
                 <b>Current view</b>
                 <p>{labels[viewRole]}</p>
               </div>
@@ -1271,7 +1271,7 @@ export default function Workspace() {
                 {accountNotice}
               </div>
             )}
-            <div className="toolbar">
+            <div className="toolbar accountActions">
               <button
                 className="primary"
                 disabled={savingAccount}

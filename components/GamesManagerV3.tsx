@@ -528,11 +528,18 @@ export default function GamesManagerV3({
         const isScheduleConflict =
           e2.code === "23514" ||
           /double-book|overlap|conflict/i.test(databaseMessage);
+        const isDuplicateLeagueGameNumber =
+          e2.code === "23505" &&
+          /games_active_league_game_number_unique/i.test(databaseMessage);
         const detailedConflict = isScheduleConflict
           ? describeGameConflict(games, payload, editing)
           : null;
         throw new Error(
-          detailedConflict || databaseMessage || "Unable to save game",
+          detailedConflict ||
+            (isDuplicateLeagueGameNumber
+              ? "That game number is already in use for this league. A different league may use the same number."
+              : databaseMessage) ||
+            "Unable to save game",
         );
       }
       setMessage(editing ? "Game updated." : "Game added.");
@@ -673,10 +680,17 @@ export default function GamesManagerV3({
         if (
           a.game_number &&
           b.game_number &&
+          norm(a.league) === norm(b.league) &&
           norm(a.game_number) === norm(b.game_number)
         ) {
-          addIssue(a, `Duplicate game number also appears on row ${b.row}`);
-          addIssue(b, `Duplicate game number also appears on row ${a.row}`);
+          addIssue(
+            a,
+            `Duplicate game number for ${a.league} also appears on row ${b.row}`,
+          );
+          addIssue(
+            b,
+            `Duplicate game number for ${b.league} also appears on row ${a.row}`,
+          );
           continue;
         }
         const aStart = new Date(`${a.date}T${a.time}:00`).getTime(),
@@ -706,8 +720,15 @@ export default function GamesManagerV3({
     }
     for (const row of validated) {
       if (!row.valid) continue;
+      const rowLeague = leagues.find(
+        (league) => norm(league.name) === norm(row.league),
+      );
       const existing = row.game_number
-        ? games.find((game) => norm(game.game_number) === norm(row.game_number))
+        ? games.find(
+            (game) =>
+              game.league_id === rowLeague?.id &&
+              norm(game.game_number) === norm(row.game_number),
+          )
         : undefined;
       if (!existing) {
         row.action = "add";
@@ -830,7 +851,11 @@ export default function GamesManagerV3({
         loc = locations.find((x) => norm(x.name) === norm(r.location)),
         billTo = billTos.find((x) => norm(x.name) === norm(r.bill_to)),
         existing = r.game_number
-          ? games.find((g) => norm(g.game_number) === norm(r.game_number))
+          ? games.find(
+              (g) =>
+                g.league_id === lg?.id &&
+                norm(g.game_number) === norm(r.game_number),
+            )
           : undefined;
       if (r.action !== "skip" && (!s || !lg || !lv || !home || !away || !loc))
         throw new Error(

@@ -1817,6 +1817,64 @@ td small {
   align-items: center;
   gap: 7px;
 }
+.accountCard {
+  container-type: inline-size;
+  overflow: hidden;
+}
+.accountGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px 28px;
+  margin-top: 18px;
+}
+.accountGrid > * {
+  min-width: 0;
+}
+.accountNameField,
+.accountDetail {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+}
+.accountNameField input {
+  width: 100%;
+  min-width: 0;
+}
+.accountNameField small,
+.accountDetail p {
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+.accountNameField small {
+  color: #64748b;
+  line-height: 1.45;
+}
+.accountDetail p {
+  margin: 0;
+  line-height: 1.45;
+}
+.accountActions {
+  justify-content: flex-start;
+  margin-top: 14px;
+}
+.accountActions > * {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+@container (max-width: 620px) {
+  .accountGrid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+  .accountActions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+  .accountActions > * {
+    width: 100%;
+  }
+}
 @media (max-width: 650px) {
   .registrarMetrics {
     grid-template-columns: 1fr;
