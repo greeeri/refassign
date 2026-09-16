@@ -79,3 +79,65 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({ added: true });
 }
+
+export async function DELETE(request: NextRequest) {
+  const session = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await session.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const body = (await request.json().catch(() => ({}))) as {
+    officialId?: string;
+  };
+  const officialId = body.officialId?.trim();
+  if (!officialId) {
+    return NextResponse.json(
+      { error: "Select an official to remove." },
+      { status: 400 },
+    );
+  }
+
+  const service = createServiceClient();
+  const { data: program, error: programError } = await service
+    .from("registration_programs")
+    .select("id")
+    .eq("slug", "iowa-soccer")
+    .single();
+  if (programError || !program) {
+    return NextResponse.json(
+      { error: programError?.message || "Iowa Soccer program was not found." },
+      { status: 404 },
+    );
+  }
+
+  const { data: allowed, error: accessError } = await session.rpc(
+    "can_manage_registration_program",
+    { p_program_id: program.id },
+  );
+  if (accessError || !allowed) {
+    return NextResponse.json(
+      { error: "Iowa Soccer admin or registrar access is required." },
+      { status: 403 },
+    );
+  }
+
+  const { data: removed, error: deleteError } = await service
+    .from("registration_program_officials")
+    .delete()
+    .eq("program_id", program.id)
+    .eq("official_id", officialId)
+    .select("official_id")
+    .maybeSingle();
+  if (deleteError) {
+    return NextResponse.json({ error: deleteError.message }, { status: 400 });
+  }
+  if (!removed) {
+    return NextResponse.json(
+      { error: "This official is not in the Iowa Soccer development program." },
+      { status: 404 },
+    );
+  }
+
+  return NextResponse.json({ removed: true });
+}
