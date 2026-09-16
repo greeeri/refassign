@@ -1,5 +1,5 @@
 "use client";
-import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../lib/supabase/client";
 
 const COLUMNS = [
@@ -178,6 +178,8 @@ export default function OfficialsRosterManager({
     [rows, setRows] = useState<Row[]>([]),
     [error, setError] = useState(""),
     [message, setMessage] = useState(""),
+    [selectedFileName, setSelectedFileName] = useState(""),
+    fileInputRef = useRef<HTMLInputElement>(null),
     [importing, setImporting] = useState(false);
   async function load() {
     setError("");
@@ -357,6 +359,7 @@ export default function OfficialsRosterManager({
     setError("");
     const file = event.target.files?.[0];
     if (!file) return;
+    setSelectedFileName(file.name);
     try {
       const buffer = await file.arrayBuffer();
       let raw: string[][] | null = null;
@@ -501,10 +504,26 @@ export default function OfficialsRosterManager({
           Download Blank Upload Template
         </button>
       </div>
-      <label>
+      <div className="filePicker">
         <b>Upload completed roster or template</b>
-        <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFile} />
-      </label>
+        <input
+          ref={fileInputRef}
+          className="hiddenFileInput"
+          type="file"
+          aria-label="Choose referee roster file"
+          onChange={handleFile}
+        />
+        <button
+          type="button"
+          className="secondary selectCsvButton"
+          onClick={() => fileInputRef.current?.click()}
+        >
+          Select roster file
+        </button>
+        {selectedFileName && (
+          <span className="selectedFileName">Selected: {selectedFileName}</span>
+        )}
+      </div>
       <p>
         <small>
           USSF-ID is the existing Ref Pro Group referee ID. Keep it when updating an
