@@ -200,13 +200,23 @@
   font-size: 16px;
 }
 
+.assignmentGameTable {
+  overflow-x: auto !important;
+}
+
+/* Header and body share one horizontal scroll area at desktop widths. */
+.assignmentGameTableHeader,
+.assignmentGameRows {
+  min-width: 1080px;
+}
+
 .assignmentGameTableHeader,
 .assignmentGameRow {
   display: grid;
   grid-template-columns: 44px minmax(220px, 2.1fr) minmax(150px, 1.25fr) minmax(135px, 1fr) 68px minmax(125px, .9fr) minmax(150px, 1fr);
   align-items: center;
   gap: 10px;
-  min-width: 0;
+  min-width: 1080px;
 }
 
 .assignmentGameTableHeader {
@@ -676,11 +686,6 @@
     overflow-x: auto !important;
     overscroll-behavior-inline: contain;
     -webkit-overflow-scrolling: touch;
-  }
-
-  .assignmentGameTable > div,
-  .assignmentGameRows {
-    min-width: 720px;
   }
 
   .assignmentGameRows {

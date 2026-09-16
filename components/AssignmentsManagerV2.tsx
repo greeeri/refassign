@@ -7730,10 +7730,7 @@ export default function AssignmentsManagerV2({
                 Assignment Status{sortArrow("assignments")}
               </button>
             </div>
-            <div
-              className="assignmentGameRows"
-              style={{ maxHeight: 420, overflowY: "auto" }}
-            >
+            <div className="assignmentGameRows">
               {gameUnits.length ? (
                 gameUnits.map((unit) => {
                   const warnings = unit.groupId
