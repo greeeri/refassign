@@ -43,6 +43,7 @@ type Communication = {
   } | null;
 };
 const messageLabels: Record<string, string> = {
+  custom: "Custom Message",
   confirmation_request: "Confirmation Request",
   schedule_change: "Schedule Change",
   cancellation: "Cancellation",
@@ -82,9 +83,9 @@ export default function CommunicationCenter({
       supabase
         .from("official_communications")
         .select(
-          "id,assignment_id,channel,message_type,recipient,delivery_status,error_message,sent_at,created_at,assignments!inner(status,officials(first_name,last_name),games!inner(game_number,organization_id,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name)))",
+          "id,assignment_id,channel,message_type,recipient,delivery_status,error_message,sent_at,created_at,assignments(status,officials(first_name,last_name),games(game_number,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name)))",
         )
-        .eq("assignments.games.organization_id", organizationId || "")
+        .eq("organization_id", organizationId || "")
         .order("created_at", { ascending: false })
         .limit(300),
     ]);

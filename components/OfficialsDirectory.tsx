@@ -205,6 +205,10 @@ export default function OfficialsDirectory({
   const [showForm, setShowForm] = useState(false);
   const [showRoster, setShowRoster] = useState(false);
   const [showCommunications, setShowCommunications] = useState(false);
+  const [showTextComposer, setShowTextComposer] = useState(false);
+  const [textMessage, setTextMessage] = useState("");
+  const [textSending, setTextSending] = useState(false);
+  const [textNotice, setTextNotice] = useState("");
   const [saving, setSaving] = useState(false);
   const [rankMessage, setRankMessage] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1143,14 +1147,66 @@ export default function OfficialsDirectory({
   }
 
   function textSelected() {
-    const phones = officials
-      .filter((o) => selectedIds.includes(o.id) && o.phone)
-      .map((o) => o.phone as string);
-    if (!phones.length) {
+    const recipients = officials.filter(
+      (o) => selectedIds.includes(o.id) && (o.mobile_phone || o.phone),
+    );
+    if (!recipients.length) {
       setError("Select at least one official with a phone number.");
       return;
     }
-    window.location.href = `sms:${phones.join(",")}`;
+    setError("");
+    setTextNotice("");
+    setTextMessage("");
+    setShowTextComposer(true);
+  }
+
+  async function sendSelectedTexts() {
+    const recipientIds = officials
+      .filter(
+        (o) => selectedIds.includes(o.id) && (o.mobile_phone || o.phone),
+      )
+      .map((o) => o.id);
+    if (!organizationId || !recipientIds.length || !textMessage.trim()) return;
+    setTextSending(true);
+    setError("");
+    setTextNotice("");
+    try {
+      const response = await fetch(
+        `/api/communications/officials/send?organizationId=${encodeURIComponent(organizationId)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            officialIds: recipientIds,
+            message: textMessage.trim(),
+          }),
+        },
+      );
+      const result = (await response.json()) as {
+        sent?: number;
+        failed?: number;
+        failures?: string[];
+        error?: string;
+      };
+      if (!response.ok)
+        throw new Error(result.error || "Unable to send text messages.");
+      setTextNotice(
+        `${result.sent || 0} text message${result.sent === 1 ? "" : "s"} sent.${result.failed ? ` ${result.failed} failed.` : ""}`,
+      );
+      if (result.failures?.length)
+        setError(result.failures.slice(0, 5).join(" | "));
+      setSelectedIds([]);
+      setTextMessage("");
+      setShowTextComposer(false);
+    } catch (sendError) {
+      setError(
+        sendError instanceof Error
+          ? sendError.message
+          : "Unable to send text messages.",
+      );
+    } finally {
+      setTextSending(false);
+    }
   }
 
   function rankInput(
@@ -1459,6 +1515,73 @@ export default function OfficialsDirectory({
         </section>
       )}
       {showRoster && <OfficialsRosterManager organizationId={organizationId} />}
+      {textNotice && <div className="loginMessage">{textNotice}</div>}
+      {showTextComposer && (
+        <div
+          role="presentation"
+          onClick={() => !textSending && setShowTextComposer(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1200,
+            display: "grid",
+            placeItems: "center",
+            padding: 20,
+            background: "rgba(15, 23, 42, .55)",
+          }}
+        >
+          <section
+            className="card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="directory-text-title"
+            onClick={(event) => event.stopPropagation()}
+            style={{ width: "min(620px, 100%)", margin: 0 }}
+          >
+            <div className="cardHead">
+              <div>
+                <h2 id="directory-text-title">Send Text Message</h2>
+                <p>
+                  Sending through Ref Pro Group to {officials.filter((o) => selectedIds.includes(o.id) && (o.mobile_phone || o.phone)).length} selected official{officials.filter((o) => selectedIds.includes(o.id) && (o.mobile_phone || o.phone)).length === 1 ? "" : "s"}.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="secondary"
+                disabled={textSending}
+                onClick={() => setShowTextComposer(false)}
+              >
+                Cancel
+              </button>
+            </div>
+            <label>
+              Message
+              <textarea
+                rows={6}
+                maxLength={1600}
+                autoFocus
+                value={textMessage}
+                onChange={(event) => setTextMessage(event.target.value)}
+                placeholder="Enter the message officials will receive…"
+              />
+              <small>{textMessage.length}/1600 characters</small>
+            </label>
+            <div className="loginMessage" style={{ marginTop: 12 }}>
+              Messages are sent through Twilio and recorded in the communication log. Recipients can reply STOP to opt out.
+            </div>
+            <div className="headerActions" style={{ marginTop: 16 }}>
+              <button
+                type="button"
+                className="primary"
+                disabled={textSending || !textMessage.trim()}
+                onClick={() => void sendSelectedTexts()}
+              >
+                {textSending ? "Sending…" : "Send Text Message"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
       {showCommunications ? (
         <CommunicationCenter organizationId={organizationId} />
       ) : (

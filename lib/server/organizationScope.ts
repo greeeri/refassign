@@ -116,6 +116,7 @@ export async function requireManagedOrganization(
     service,
     user,
     organizationId,
+    isSuperAdmin: Boolean(superAdmin),
     fullOrganizationAccess,
     leagueIds,
   };

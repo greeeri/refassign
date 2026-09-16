@@ -21,7 +21,7 @@ const labels = {
 export async function POST(req: NextRequest) {
   const scope = await requireManagedOrganization(req);
   if (scope.error) return scope.error;
-  const { service: supabase, user, organizationId } = scope;
+  const { service: supabase, user, organizationId, isSuperAdmin } = scope;
   const body = (await req.json().catch(() => ({}))) as {
     assignmentIds?: string[];
     channel?: "email" | "text";
@@ -36,6 +36,28 @@ export async function POST(req: NextRequest) {
       { error: "Assignments, channel, and message type are required." },
       { status: 400 },
     );
+  if (channel === "text" && !isSuperAdmin) {
+    const [{ data: subscription }, { data: addon }] = await Promise.all([
+      supabase
+        .from("refassign_subscriptions")
+        .select("plan")
+        .eq("organization_id", organizationId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from("organization_addons")
+        .select("enabled")
+        .eq("organization_id", organizationId)
+        .eq("code", "text_messaging")
+        .maybeSingle(),
+    ]);
+    if (subscription?.plan !== "enterprise" && !addon?.enabled)
+      return NextResponse.json(
+        { error: "This organization does not have an active texting plan." },
+        { status: 403 },
+      );
+  }
   const { data: rows, error } = await supabase
     .from("assignments")
     .select(
@@ -76,6 +98,7 @@ export async function POST(req: NextRequest) {
     const { data: log, error: logError } = await supabase
       .from("official_communications")
       .insert({
+        organization_id: organizationId,
         assignment_id: a.id,
         game_id: a.game_id,
         official_id: a.official_id,
@@ -83,6 +106,7 @@ export async function POST(req: NextRequest) {
         message_type: messageType,
         recipient: recipient || null,
         subject,
+        message_body: note || null,
         sent_by: user.id,
         delivery_status: "queued",
       })
