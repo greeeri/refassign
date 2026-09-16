@@ -97,6 +97,7 @@ const isRealAccountName = (name: string, email: string) => {
 export default function Workspace() {
   const supabase = useMemo(() => createClient(), []);
   const [section, setSection] = useState("Dashboard"),
+    [assignmentListReturnRequest, setAssignmentListReturnRequest] = useState(0),
     [accountEmail, setAccountEmail] = useState(""),
     [accountName, setAccountName] = useState(""),
     [accountNameDraft, setAccountNameDraft] = useState(""),
@@ -974,6 +975,7 @@ export default function Workspace() {
         {manager && section === "Assignments" && (
           <AssignmentsManager
             organizationId={testWorkspace?.organization_id}
+            returnToListRequest={assignmentListReturnRequest}
             focusGameId={
               reportAction?.section === "Assignments"
                 ? reportAction.gameId
@@ -1293,7 +1295,13 @@ export default function Workspace() {
             <button
               key={v}
               className={section === v ? "active" : ""}
-              onClick={() => nav(v)}
+              onClick={() => {
+                if (v === "Assignments" && section === "Assignments") {
+                  setAssignmentListReturnRequest((current) => current + 1);
+                  return;
+                }
+                nav(v);
+              }}
             >
               <span>{i}</span>
               {l}

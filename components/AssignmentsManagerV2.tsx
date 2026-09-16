@@ -275,12 +275,15 @@ function inRange(g: Game, r: Range, customDate = "") {
 export default function AssignmentsManagerV2({
   organizationId,
   focusGameId,
+  returnToListRequest = 0,
 }: {
   organizationId?: string;
   focusGameId?: string;
+  returnToListRequest?: number;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const handledReportFocus = useRef("");
+  const handledListReturnRequest = useRef(returnToListRequest);
   const [inlineAssignmentHost, setInlineAssignmentHost] =
     useState<HTMLDivElement | null>(null);
   const [games, setGames] = useState<Game[]>([]),
@@ -637,6 +640,31 @@ export default function AssignmentsManagerV2({
     setReplacementOnly(false);
     void load();
   }, [organizationId]);
+  useEffect(() => {
+    if (handledListReturnRequest.current === returnToListRequest) return;
+    handledListReturnRequest.current = returnToListRequest;
+    const previousGameId = selected;
+    setCandidatePositionId("");
+    setPendingReplacement(null);
+    setPendingTapAssignment(null);
+    setScheduleOfficialId("");
+    setShowActivityTimeline(false);
+    setShowPublishReview(false);
+    setShowCrewTemplates(false);
+    setShowSelfAssignDialog(false);
+    setShowBulkAssign(false);
+    setShowBulkCrew(false);
+    setSelected("");
+    setOverrideOfficial("");
+    setLinkSelected([]);
+    window.setTimeout(() => {
+      const previousGame = previousGameId
+        ? document.getElementById(`assignment-game-${previousGameId}`)
+        : null;
+      (previousGame || document.getElementById("assignment-filtered-games"))
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 0);
+  }, [returnToListRequest, selected]);
   useEffect(() => {
     if (!focusGameId || handledReportFocus.current === focusGameId || !games.some((item) => item.id === focusGameId)) return;
     handledReportFocus.current = focusGameId;
@@ -3988,6 +4016,7 @@ export default function AssignmentsManagerV2({
     return (
       <div
         key={g.id}
+        id={`assignment-game-${g.id}`}
         className={`assignmentGameRow${officialDropGame === g.id ? " officialDropTarget" : ""}${draggingOfficial ? " officialDropReady" : ""}`}
         onDragEnter={(event) => {
           if (!draggingOfficial || !canManage) return;
@@ -7730,7 +7759,7 @@ export default function AssignmentsManagerV2({
                 Assignment Status{sortArrow("assignments")}
               </button>
             </div>
-            <div className="assignmentGameRows">
+            <div id="assignment-filtered-games" className="assignmentGameRows">
               {gameUnits.length ? (
                 gameUnits.map((unit) => {
                   const warnings = unit.groupId
