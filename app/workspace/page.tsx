@@ -961,6 +961,7 @@ export default function Workspace() {
           <GameSetup
             view={section as SetupView}
             organizationId={testWorkspace?.organization_id}
+            canManageLeagueDirectory={viewRole === "admin"}
           />
         )}{" "}
         {manager && section === "Officials" && (

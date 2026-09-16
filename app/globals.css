@@ -2156,6 +2156,11 @@ td small {
   color: #64748b;
 }
 
+.payrollTable td .payrollLeagueName {
+  color: #0f4c81;
+  font-weight: 800;
+}
+
 .payrollTable {
   width: 100%;
   min-width: 0;

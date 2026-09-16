@@ -52,9 +52,11 @@ type DirectoryLocation = Pick<
 export default function GameSetup({
   view,
   organizationId,
+  canManageLeagueDirectory = true,
 }: {
   view: View;
   organizationId?: string;
+  canManageLeagueDirectory?: boolean;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const [allowed, setAllowed] = useState(false),
@@ -642,35 +644,37 @@ export default function GameSetup({
         <section className="card">
           <h2>Leagues</h2>
           {leagueMessage && <div className="loginMessage">{leagueMessage}</div>}
-          {organizationId && (
+          {organizationId && canManageLeagueDirectory && (
             <SharedDirectorySearch
               organizationId={organizationId}
               entity="league"
               onConnected={load}
             />
           )}
-          <form className="toolbar" onSubmit={addLeague}>
-            <input
-              required
-              placeholder="Example: Iowa Soccer League"
-              value={leagueName}
-              onChange={(e) => setLeagueName(e.target.value)}
-            />
-            <select
-              aria-label="Mileage plan for new league"
-              value={leagueMileagePlan}
-              onChange={(e) =>
-                setLeagueMileagePlan(e.target.value as MileagePlan)
-              }
-            >
-              {mileagePlans.map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-            <button className="primary">Add League</button>
-          </form>
+          {canManageLeagueDirectory && (
+            <form className="toolbar" onSubmit={addLeague}>
+              <input
+                required
+                placeholder="Example: Iowa Soccer League"
+                value={leagueName}
+                onChange={(e) => setLeagueName(e.target.value)}
+              />
+              <select
+                aria-label="Mileage plan for new league"
+                value={leagueMileagePlan}
+                onChange={(e) =>
+                  setLeagueMileagePlan(e.target.value as MileagePlan)
+                }
+              >
+                {mileagePlans.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <button className="primary">Add League</button>
+            </form>
+          )}
           <div className="tableWrap">
             <table>
               <thead>
@@ -756,12 +760,14 @@ export default function GameSetup({
                         </button>
                       </td>
                       <td>
-                        <button
-                          className="tableButton"
-                          onClick={() => remove("leagues", l.id)}
-                        >
-                          Remove
-                        </button>
+                        {canManageLeagueDirectory && (
+                          <button
+                            className="tableButton"
+                            onClick={() => remove("leagues", l.id)}
+                          >
+                            Remove
+                          </button>
+                        )}
                       </td>
                     </tr>
                     {openLeagueDocuments === l.id && (

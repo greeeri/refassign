@@ -1302,7 +1302,7 @@ export default function PayrollManager({
                 {(
                   [
                     ["date", "Date"],
-                    ["game", "Game"],
+                    ["game", "Game / League"],
                     ["location", "Location"],
                     ["official", "Accepted Official"],
                     ["position", "Position"],
@@ -1378,6 +1378,9 @@ export default function PayrollManager({
                       <td>
                         <b>{gameName(row)}</b>
                         <small>{row.games?.game_number}</small>
+                        <small className="payrollLeagueName">
+                          League: {row.games?.leagues?.name || "Not assigned"}
+                        </small>
                       </td>
                       <td>{row.games?.location?.name || "TBD"}</td>
                       <td>
