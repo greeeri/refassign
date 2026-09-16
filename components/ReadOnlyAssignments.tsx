@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import styles from "./ReadOnlyAssignments.module.css";
 
 type Named = { name: string } | null;
 type Assignment = {
@@ -168,7 +169,7 @@ export default function ReadOnlyAssignments({
   }
 
   return (
-    <section className="card mentorReadOnly">
+    <section className="card">
       <div className="cardHead">
         <div>
           <h2>
@@ -184,7 +185,7 @@ export default function ReadOnlyAssignments({
         <span className="badge">{filteredGames.length} results</span>
       </div>
 
-      <div className="mentorReadOnlyFilters" aria-label="Game and assignment filters">
+      <div className={styles.filters} aria-label="Game and assignment filters">
         <label>
           Date filter
           <select
@@ -268,7 +269,7 @@ export default function ReadOnlyAssignments({
           />
         </label>
       </div>
-      <div className="mentorReadOnlyFilterActions">
+      <div className={styles.actions}>
         <button
           type="button"
           className="secondary"
