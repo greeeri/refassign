@@ -4,3 +4,8 @@
 /* Keep customer support immediately above the sidebar footer divider. */
 .refAssignBranded .asideSupportNav{margin-top:auto}
 .refAssignBranded .asideSupportNav+.asideFoot{margin-top:0}
+
+/* Keep the signed-in identity and switch-account controls usable on tablets. */
+@media (min-width:761px) and (max-width:900px){
+  .refAssignBranded main{margin-left:245px;width:calc(100% - 245px)}
+}
