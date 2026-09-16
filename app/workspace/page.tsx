@@ -89,10 +89,19 @@ const Icon = ({ children }: { children: string }) => (
     {children}
   </span>
 );
+const isRealAccountName = (name: string, email: string) => {
+  const clean = name.trim();
+  const emailName = email.split("@")[0]?.trim().toLowerCase() || "";
+  return clean.length >= 2 && clean.toLowerCase() !== emailName && !clean.includes("@");
+};
 export default function Workspace() {
   const supabase = useMemo(() => createClient(), []);
   const [section, setSection] = useState("Dashboard"),
     [accountEmail, setAccountEmail] = useState(""),
+    [accountName, setAccountName] = useState(""),
+    [accountNameDraft, setAccountNameDraft] = useState(""),
+    [accountNotice, setAccountNotice] = useState(""),
+    [savingAccount, setSavingAccount] = useState(false),
     [roles, setRoles] = useState<Role[]>([]),
     [viewRole, setViewRole] = useState<Role>("admin"),
     [isSuperAdmin, setIsSuperAdmin] = useState(false),
@@ -143,7 +152,31 @@ export default function Workspace() {
         window.location.replace("/login");
         return;
       }
-      setAccountEmail(user.email || "");
+      const signedInEmail = user.email || "";
+      setAccountEmail(signedInEmail);
+      const [{ data: profile }, { data: official }] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select("full_name")
+          .eq("id", user.id)
+          .maybeSingle(),
+        supabase
+          .from("officials")
+          .select("first_name,last_name,full_name")
+          .eq("auth_user_id", user.id)
+          .eq("active", true)
+          .limit(1)
+          .maybeSingle(),
+      ]);
+      const officialName = [official?.first_name, official?.last_name]
+        .filter(Boolean)
+        .join(" ")
+        .trim();
+      const resolvedName = [officialName, official?.full_name, profile?.full_name]
+        .map((value) => String(value || "").trim())
+        .find((value) => isRealAccountName(value, signedInEmail)) || "";
+      setAccountName(resolvedName);
+      setAccountNameDraft(resolvedName);
       const tierRuntime = isTierTestRuntime();
       setTestMode(tierRuntime);
       if (tierRuntime) {
@@ -295,7 +328,13 @@ export default function Workspace() {
           "official";
         setRoles(workspaceRoles);
         setViewRole(mapped);
-        setSection(mapped === "official" ? "Official Dashboard" : "Dashboard");
+        setSection(
+          !resolvedName
+            ? "Account"
+            : mapped === "official"
+              ? "Official Dashboard"
+              : "Dashboard",
+        );
         setReady(true);
         return;
       }
@@ -334,7 +373,9 @@ export default function Workspace() {
             : available[0] || "official";
       setViewRole(initial);
       setSection(
-        initial === "official"
+        !resolvedName
+          ? "Account"
+          : initial === "official"
           ? "Official Dashboard"
           : initial === "mentor"
             ? "Development Mentors"
@@ -389,6 +430,34 @@ export default function Workspace() {
   async function signOut() {
     await supabase.auth.signOut();
     location.href = "/login";
+  }
+  async function saveAccountName() {
+    const name = accountNameDraft.trim().replace(/\s+/g, " ");
+    if (!isRealAccountName(name, accountEmail)) {
+      setAccountNotice("Enter the person's full name, not an email address or sign-in name.");
+      return;
+    }
+    setSavingAccount(true);
+    setAccountNotice("");
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      setAccountNotice("Please sign in again to update this account.");
+      setSavingAccount(false);
+      return;
+    }
+    const { error } = await supabase
+      .from("profiles")
+      .update({ full_name: name })
+      .eq("id", user.id);
+    if (error) setAccountNotice(error.message);
+    else {
+      setAccountName(name);
+      setAccountNameDraft(name);
+      setAccountNotice("Name saved.");
+    }
+    setSavingAccount(false);
   }
   function switchTestWorkspace(organizationId: string) {
     const next = testWorkspaces.find(
@@ -760,9 +829,13 @@ export default function Workspace() {
           >
             Terms &amp; Conditions
           </a>
-          <br />
+          <div className="signedInAside">
+            <span>Signed in as</span>
+            <strong>{accountName || "Name required"}</strong>
+            <small>{accountEmail}</small>
+          </div>
           <button className="signOutButton" onClick={signOut}>
-            Sign out
+            Sign out / switch account
           </button>
         </div>
       </aside>
@@ -778,6 +851,10 @@ export default function Workspace() {
             ☰
           </button>
           <div>
+            <div className="pageIdentity">
+              <span>Signed in as</span>
+              <strong>{accountName || "Name required — open My Account"}</strong>
+            </div>
             <h1>
               {isSetup
                 ? `Games — ${section}`
@@ -1144,6 +1221,16 @@ export default function Workspace() {
               </div>
             </div>
             <div className="eligibilityGrid">
+              <label>
+                <b>Your full name</b>
+                <input
+                  value={accountNameDraft}
+                  onChange={(event) => setAccountNameDraft(event.target.value)}
+                  placeholder="First and last name"
+                  autoComplete="name"
+                />
+                <small>This name appears at the top of every workspace page.</small>
+              </label>
               <div>
                 <b>Email</b>
                 <p>{accountEmail || "Signed-in account"}</p>
@@ -1157,7 +1244,19 @@ export default function Workspace() {
                 <p>{labels[viewRole]}</p>
               </div>
             </div>
+            {accountNotice && (
+              <div className={accountName ? "loginMessage" : "errorBox"}>
+                {accountNotice}
+              </div>
+            )}
             <div className="toolbar">
+              <button
+                className="primary"
+                disabled={savingAccount}
+                onClick={() => void saveAccountName()}
+              >
+                {savingAccount ? "Saving…" : "Save name"}
+              </button>
               {roles.includes("official") && (
                 <button
                   className="secondary"
@@ -1170,7 +1269,7 @@ export default function Workspace() {
                   Open referee profile
                 </button>
               )}
-              <button className="primary" onClick={signOut}>
+              <button className="secondary" onClick={signOut}>
                 Sign out / switch account
               </button>
             </div>
