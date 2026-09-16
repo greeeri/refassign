@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
     "billing",
   ]);
   if (context.error) return context.error;
-  const { service, user, organizationId } = context;
+  const { service, user, organizationId, leagueIds: allowedLeagueIds } = context;
   let config;
   try {
     config = stripeConnectConfig();
@@ -148,6 +148,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { error: "Process one league at a time." },
       { status: 400 },
+    );
+  if (allowedLeagueIds && !allowedLeagueIds.includes(leagueIds[0]))
+    return NextResponse.json(
+      { error: "You do not have billing access to this league." },
+      { status: 403 },
     );
   const billToIds = [
     ...new Set(assignments.map((r) => r.games?.bill_to_id).filter(Boolean)),

@@ -13,14 +13,18 @@ export async function GET(request: NextRequest) {
     "billing",
   ]);
   if (context.error) return context.error;
-  const { service, organizationId } = context;
-  const { data: batches, error } = await service
+  const { service, organizationId, leagueIds } = context;
+  if (leagueIds && !leagueIds.length)
+    return NextResponse.json({ batches: [] });
+  let batchQuery = service
     .from("payroll_batches")
     .select(
       "id,batch_number,league_id,bill_to_id,status,payroll_subtotal_cents,stripe_processing_cost_cents,stripe_processing_cost_actual_cents,refassign_fee_cents,total_funding_cents,funding_method,stripe_checkout_session_id,stripe_payment_intent_id,funding_failure_message,created_at,funded_at,settled_at,paid_at,leagues(name),bill_to:bill_to_accounts(name,email)",
     )
     .eq("organization_id", organizationId)
-    .eq("stripe_mode", stripeConnectMode())
+    .eq("stripe_mode", stripeConnectMode());
+  if (leagueIds) batchQuery = batchQuery.in("league_id", leagueIds);
+  const { data: batches, error } = await batchQuery
     .order("created_at", { ascending: false })
     .limit(50);
   if (error)
@@ -62,7 +66,7 @@ export async function POST(request: NextRequest) {
     "billing",
   ]);
   if (context.error) return context.error;
-  const { service, organizationId } = context;
+  const { service, organizationId, leagueIds } = context;
   let key = "";
   try {
     key = stripeConnectConfig().secretKey;
@@ -87,7 +91,7 @@ export async function POST(request: NextRequest) {
     );
   const { data: batch } = await service
     .from("payroll_batches")
-    .select("id,status,stripe_payment_intent_id,funding_failure_message")
+    .select("id,league_id,status,stripe_payment_intent_id,funding_failure_message")
     .eq("id", batchId)
     .eq("organization_id", organizationId)
     .maybeSingle();
@@ -95,6 +99,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { error: "Payroll batch was not found." },
       { status: 404 },
+    );
+  if (leagueIds && !leagueIds.includes(batch.league_id))
+    return NextResponse.json(
+      { error: "You do not have billing access to this league." },
+      { status: 403 },
     );
   if (
     !["partially_paid", "on_hold"].includes(batch.status) ||

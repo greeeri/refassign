@@ -27,7 +27,11 @@ export async function requireManagedOrganization(
     };
 
   const service = createServiceClient();
-  const [{ data: membership, error: membershipError }, { data: superAdmin }] =
+  const [
+    { data: membership, error: membershipError },
+    { data: accessProfile, error: accessProfileError },
+    { data: superAdmin },
+  ] =
     await Promise.all([
       service
         .from("organization_memberships")
@@ -38,12 +42,26 @@ export async function requireManagedOrganization(
         .limit(1)
         .maybeSingle(),
       service
+        .from("organization_user_access_profiles")
+        .select("roles,league_ids")
+        .eq("organization_id", organizationId)
+        .eq("user_id", user.id)
+        .maybeSingle(),
+      service
         .from("protected_accounts")
         .select("user_id")
         .eq("user_id", user.id)
         .maybeSingle(),
     ]);
-  if (membershipError || (!membership && !superAdmin))
+  const profileRoles = accessProfile?.roles || [];
+  const profileAuthorized = profileRoles.some((role: string) =>
+    allowedRoles.includes(role),
+  );
+  if (
+    membershipError ||
+    accessProfileError ||
+    (!membership && !profileAuthorized && !superAdmin)
+  )
     return {
       error: NextResponse.json(
         { error: "You do not manage this organization." },
@@ -83,5 +101,22 @@ export async function requireManagedOrganization(
       ),
     };
 
-  return { session, service, user, organizationId };
+  const fullOrganizationAccess = Boolean(
+    superAdmin ||
+      membership?.role === "owner" ||
+      membership?.role === "admin" ||
+      profileRoles.includes("admin"),
+  );
+  const leagueIds = fullOrganizationAccess
+    ? null
+    : [...new Set((accessProfile?.league_ids || []) as string[])];
+
+  return {
+    session,
+    service,
+    user,
+    organizationId,
+    fullOrganizationAccess,
+    leagueIds,
+  };
 }

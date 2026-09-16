@@ -10,16 +10,23 @@ export async function GET(request: NextRequest) {
     "billing",
   ]);
   if (context.error) return context.error;
-  const { service, user, organizationId } = context;
-  const assignmentResult = await service
+  const { service, user, organizationId, leagueIds } = context;
+  let assignmentQuery = service
     .from("assignments")
     .select(
       "id,status,game_fee,mileage_miles,mileage_rate,payment_status,paid_at,payroll_notes,officials(id,first_name,last_name,home_latitude,home_longitude),sport_positions(name),games!inner(id,game_number,starts_at,organization_id,bill_to_id,bill_to:bill_to_accounts(name,email),leagues(id,name,mileage_plan),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name,latitude,longitude))",
     )
     .eq("games.organization_id", organizationId)
     .not("official_id", "is", null)
-    .in("status", ["accepted", "confirmed"])
-    .order("assigned_at", { ascending: false });
+    .in("status", ["accepted", "confirmed"]);
+  if (leagueIds) {
+    if (!leagueIds.length)
+      return NextResponse.json({ assignments: [], weekdayOrigins: [] });
+    assignmentQuery = assignmentQuery.in("games.league_id", leagueIds);
+  }
+  const assignmentResult = await assignmentQuery.order("assigned_at", {
+    ascending: false,
+  });
   const officialIds = [
     ...new Set(
       (assignmentResult.data || [])
@@ -93,7 +100,7 @@ export async function PATCH(request: NextRequest) {
     "billing",
   ]);
   if (context.error) return context.error;
-  const { service, user, organizationId } = context;
+  const { service, user, organizationId, leagueIds } = context;
   const body = (await request.json()) as {
     assignmentId?: string;
     billToId?: string | null;
@@ -126,7 +133,7 @@ export async function PATCH(request: NextRequest) {
     );
   const { data: assignment, error: assignmentError } = await service
     .from("assignments")
-    .select("id,game_id,paid_at,games!inner(organization_id)")
+    .select("id,game_id,paid_at,games!inner(organization_id,league_id)")
     .eq("id", body.assignmentId)
     .eq("games.organization_id", organizationId)
     .single();
@@ -134,6 +141,14 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json(
       { error: "Payroll assignment was not found." },
       { status: 404 },
+    );
+  const game = Array.isArray(assignment.games)
+    ? assignment.games[0]
+    : assignment.games;
+  if (leagueIds && (!game?.league_id || !leagueIds.includes(game.league_id)))
+    return NextResponse.json(
+      { error: "You do not have billing access to this league." },
+      { status: 403 },
     );
   if (body.billToId) {
     const { data: billTo } = await service

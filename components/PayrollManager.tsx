@@ -210,6 +210,7 @@ export default function PayrollManager({
   const [weekdayOrigins, setWeekdayOrigins] = useState<WeekdayOrigin[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [period, setPeriod] = useState<Period>("all");
+  const [leagueFilter, setLeagueFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("stripe");
   const [sort, setSort] = useState<{ key: SortKey; direction: "asc" | "desc" }>(
@@ -453,6 +454,15 @@ export default function PayrollManager({
   const sortLabel = (label: string, key: SortKey) =>
     `${label}${sort.key === key ? (sort.direction === "asc" ? " ▲" : " ▼") : ""}`;
 
+  const availableLeagues = Array.from(
+    new Map(
+      rows
+        .map((row) => row.games?.leagues)
+        .filter((league): league is NonNullable<typeof league> => Boolean(league))
+        .map((league) => [league.id, league]),
+    ).values(),
+  ).sort((a, b) => a.name.localeCompare(b.name));
+
   const visible = rows
     .filter((row) => {
       const gameDate = new Date(row.games?.starts_at || 0);
@@ -466,6 +476,7 @@ export default function PayrollManager({
         (period === "future" && gameDate >= end);
       return (
         periodMatch &&
+        (leagueFilter === "all" || row.games?.leagues?.id === leagueFilter) &&
         (statusFilter === "all" || row.payment_status === statusFilter)
       );
     })
@@ -1092,6 +1103,20 @@ export default function PayrollManager({
         ))}
       </div>
       <div className="formGrid payrollFilters">
+        <label>
+          League
+          <select
+            value={leagueFilter}
+            onChange={(event) => setLeagueFilter(event.target.value)}
+          >
+            <option value="all">All Leagues</option>
+            {availableLeagues.map((league) => (
+              <option key={league.id} value={league.id}>
+                {league.name}
+              </option>
+            ))}
+          </select>
+        </label>
         <label>
           Payment Status
           <select
