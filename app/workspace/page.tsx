@@ -92,6 +92,7 @@ const Icon = ({ children }: { children: string }) => (
 export default function Workspace() {
   const supabase = useMemo(() => createClient(), []);
   const [section, setSection] = useState("Dashboard"),
+    [accountEmail, setAccountEmail] = useState(""),
     [roles, setRoles] = useState<Role[]>([]),
     [viewRole, setViewRole] = useState<Role>("admin"),
     [isSuperAdmin, setIsSuperAdmin] = useState(false),
@@ -142,6 +143,7 @@ export default function Workspace() {
         window.location.replace("/login");
         return;
       }
+      setAccountEmail(user.email || "");
       const tierRuntime = isTierTestRuntime();
       setTestMode(tierRuntime);
       if (tierRuntime) {
@@ -315,10 +317,12 @@ export default function Workspace() {
       setIowaDevelopmentStaff(Boolean(staff));
       setIowaMentorAccess(Boolean(mentor));
       const found = (data || []) as Role[],
+        // Organization roles are authoritative when an organization is selected.
+        // Legacy global roles can otherwise restore a stale Official view and hide
+        // the leagues and games the user currently administers.
         available = Array.from(
           new Set([
-            ...workspaceRoles,
-            ...found,
+            ...(selectedWorkspace ? workspaceRoles : found),
             ...(Boolean(mentor) ? (["mentor"] as Role[]) : []),
           ]),
         );
@@ -717,6 +721,13 @@ export default function Workspace() {
             <Icon>?</Icon>
             <span>Report an Issue</span>
           </button>
+          <button
+            className={`topNavButton ${section === "Account" ? "active" : ""}`}
+            onClick={() => nav("Account")}
+          >
+            <Icon>♙</Icon>
+            <span>My Account</span>
+          </button>
           {isSuperAdmin && (
             <button
               className={`topNavButton ${section === "Super Admin" ? "active" : ""}`}
@@ -783,11 +794,12 @@ export default function Workspace() {
             </p>
           </div>
           <div className="headerActions">
-            {testMode && (
-              <button className="secondary" onClick={signOut}>
-                Sign out / switch account
-              </button>
-            )}
+            <button className="secondary" onClick={() => nav("Account")}>
+              My Account
+            </button>
+            <button className="secondary" onClick={signOut}>
+              Sign out
+            </button>
             {testWorkspace && (
               <label style={{ fontSize: 12, fontWeight: 800 }}>
                 Organization
@@ -1122,6 +1134,47 @@ export default function Workspace() {
                 : testWorkspace?.organization_id
             }
           />
+        )}
+        {section === "Account" && (
+          <section className="card">
+            <div className="cardHead">
+              <div>
+                <h2>My Account</h2>
+                <p>Review the account and workspace currently in use.</p>
+              </div>
+            </div>
+            <div className="eligibilityGrid">
+              <div>
+                <b>Email</b>
+                <p>{accountEmail || "Signed-in account"}</p>
+              </div>
+              <div>
+                <b>Organization</b>
+                <p>{testWorkspace?.name || "No organization selected"}</p>
+              </div>
+              <div>
+                <b>Current view</b>
+                <p>{labels[viewRole]}</p>
+              </div>
+            </div>
+            <div className="toolbar">
+              {roles.includes("official") && (
+                <button
+                  className="secondary"
+                  onClick={() => {
+                    setViewRole("official");
+                    localStorage.setItem("refassign-view-role", "official");
+                    nav("My Profile");
+                  }}
+                >
+                  Open referee profile
+                </button>
+              )}
+              <button className="primary" onClick={signOut}>
+                Sign out / switch account
+              </button>
+            </div>
+          </section>
         )}
         {isSuperAdmin && section === "Support Queue" && (
           <SupportCenter isSuperAdmin />
