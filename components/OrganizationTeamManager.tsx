@@ -38,7 +38,7 @@ const roleChoices: ReadonlyArray<[RoleCode, string, string]> = [
     "Program-wide Iowa Soccer development administration; no league access required",
   ],
   ["viewer", "Contact (read-only)", "Selected read-only workspace areas"],
-  ["billing", "Billing manager", "Billing and subscription access"],
+  ["billing", "Billing manager", "Payroll access in selected leagues"],
 ];
 const labels = Object.fromEntries(
   roleChoices.map(([code, label]) => [code, label]),
@@ -53,7 +53,13 @@ const permissions = [
   ["payroll", "Payroll summaries"],
   ["training_documents", "Training and documents"],
 ] as const;
-const leagueRoles: RoleCode[] = ["assignor", "mentor", "registrar", "viewer"];
+const leagueRoles: RoleCode[] = [
+  "assignor",
+  "mentor",
+  "registrar",
+  "viewer",
+  "billing",
+];
 const needsLeagues = (roles: RoleCode[]) =>
   roles.some((role) => leagueRoles.includes(role));
 const withTimeout = async <T,>(request: PromiseLike<T>, milliseconds = 12000) => {
@@ -486,7 +492,7 @@ function MemberCard({
     const problem = !roles.length
       ? "Select at least one role."
       : needsLeagues(roles) && !leagueIds.length
-        ? "Select at least one league for the Registrar, Assignor, Mentor, or Contact role—or uncheck that role."
+        ? "Select at least one league for the Billing Manager, Registrar, Assignor, Mentor, or Contact role—or uncheck that role."
         : roles.includes("viewer") && !permissions.length
           ? "Select at least one area this contact can view."
           : "";

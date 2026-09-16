@@ -191,9 +191,11 @@ function normalizedRecord(record: Record<string, unknown>) {
 export default function PayrollManager({
   organizationId,
   focusAssignmentId,
+  canGeocode = false,
 }: {
   organizationId?: string;
   focusAssignmentId?: string;
+  canGeocode?: boolean;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -306,6 +308,7 @@ export default function PayrollManager({
   }
   useEffect(() => {
     if (
+      !canGeocode ||
       !organizationId ||
       geocodeBackfillOrganization.current === organizationId
     )
@@ -345,7 +348,7 @@ export default function PayrollManager({
         );
       }
     })();
-  }, [organizationId]);
+  }, [organizationId, canGeocode]);
   useEffect(() => {
     if (
       !focusAssignmentId ||

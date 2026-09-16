@@ -1015,6 +1015,7 @@ export default function Workspace() {
           <>
             <PayrollManager
               organizationId={testWorkspace?.organization_id}
+              canGeocode={manager}
               focusAssignmentId={
                 reportAction?.section === "Payroll"
                   ? reportAction.assignmentId
