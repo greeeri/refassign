@@ -313,6 +313,10 @@ export default function PayrollManager({
     setLoading(false);
   }
   useEffect(() => {
+    if (!organizationId) return;
+    void load();
+  }, [organizationId]);
+  useEffect(() => {
     if (
       !canGeocode ||
       !organizationId ||
@@ -321,7 +325,6 @@ export default function PayrollManager({
       return;
     geocodeBackfillOrganization.current = organizationId;
     void (async () => {
-      await load();
       try {
         const query = organizationId
           ? `?organizationId=${encodeURIComponent(organizationId)}`
