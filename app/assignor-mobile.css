@@ -350,6 +350,12 @@
     transform: translateX(0);
   }
 
+  .refAssignBranded aside .asideFoot {
+    display: block;
+    margin-top: auto;
+    padding: 16px 4px 0;
+  }
+
   .refAssignBranded .workspaceBrand {
     display: flex;
     align-items: center;
