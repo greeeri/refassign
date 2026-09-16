@@ -21,6 +21,9 @@ type Slot = {
   location_name: string | null;
   location_city: string | null;
   location_state: string | null;
+  eligible: boolean;
+  eligibility_reason: string | null;
+  request_status: string | null;
 };
 
 type Props = {
@@ -36,6 +39,7 @@ export default function SelfAssignBoard({
   const [slots, setSlots] = useState<Slot[]>([]);
   const [loading, setLoading] = useState(true);
   const [claiming, setClaiming] = useState("");
+  const [requesting, setRequesting] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -49,7 +53,7 @@ export default function SelfAssignBoard({
     }
     const results = await Promise.all(
       organizationIds.map(async (organizationId) => {
-        const result = await supabase.rpc("list_my_self_assign_positions", {
+        const result = await supabase.rpc("list_my_self_assign_opportunities", {
           p_organization_id: organizationId,
         });
         return { organizationId, ...result };
@@ -75,7 +79,11 @@ export default function SelfAssignBoard({
           .sort(
             (a, b) =>
               new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime(),
-          ),
+          )
+          .filter((slot) => {
+            const requestedGames = new URLSearchParams(window.location.search).get("games");
+            return !requestedGames || requestedGames.split(",").includes(slot.game_id);
+          }),
       );
     setLoading(false);
   }
@@ -107,15 +115,31 @@ export default function SelfAssignBoard({
     setClaiming("");
   }
 
+  async function requestOverride(slot: Slot) {
+    if (!window.confirm(`Request an eligibility override for ${slot.position_name} on Game #${slot.game_number}?`)) return;
+    setRequesting(slot.slot_id);
+    setError("");
+    setNotice("");
+    const response = await fetch("/api/assignments/self-assign-request", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slotId: slot.slot_id, organizationId: slot.organization_id }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) setError(result.error || "Unable to send the request.");
+    else setNotice("Your request was sent to the assignor for eligibility review.");
+    await load();
+    setRequesting("");
+  }
+
   return (
     <section className="card">
       <div className="cardHead">
         <div>
           <h2>Self Assign</h2>
           <p>
-            Open positions matching your league and level qualifications. Your
-            other availability blocks do not apply; games are hidden only when
-            you already have an overlapping game assignment.
+            Review open positions. Eligible officials can self-assign immediately.
+            If league or level eligibility is missing, you can request an assignor override.
           </p>
         </div>
         <button className="secondary" disabled={loading} onClick={() => void load()}>
@@ -201,16 +225,25 @@ export default function SelfAssignBoard({
                       )}
                     </td>
                     <td>
-                      <span className="badge green">{slot.position_name}</span>
+                      <span className={slot.eligible ? "badge green" : "badge yellow"}>{slot.position_name}</span>
+                      {!slot.eligible && <small>{slot.eligibility_reason}</small>}
                     </td>
                     <td style={{ textAlign: "right" }}>
-                      <button
-                        className="success"
-                        disabled={claiming === slot.slot_id}
-                        onClick={() => void claim(slot)}
-                      >
-                        {claiming === slot.slot_id ? "Claiming…" : "Self Assign"}
-                      </button>
+                      {slot.eligible ? (
+                        <button className="success" disabled={claiming === slot.slot_id} onClick={() => void claim(slot)}>
+                          {claiming === slot.slot_id ? "Claiming…" : "Self Assign & Confirm"}
+                        </button>
+                      ) : slot.eligibility_reason === "Schedule conflict" ? (
+                        <span className="badge red">Unavailable</span>
+                      ) : slot.request_status === "pending" ? (
+                        <span className="badge yellow">Request Pending</span>
+                      ) : slot.request_status === "approved" ? (
+                        <span className="badge green">Approved</span>
+                      ) : (
+                        <button className="secondary" disabled={requesting === slot.slot_id} onClick={() => void requestOverride(slot)}>
+                          {requesting === slot.slot_id ? "Sending…" : "Request Assignment"}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );

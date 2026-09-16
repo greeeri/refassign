@@ -147,6 +147,10 @@ export default function Workspace() {
     [officialOrganizationScope, officialWorkspaces, testWorkspace],
   );
   useEffect(() => {
+    const requestedSection = new URLSearchParams(window.location.search).get("section");
+    if (requestedSection) setSection(requestedSection);
+  }, []);
+  useEffect(() => {
     async function load() {
       const {
         data: { user },
