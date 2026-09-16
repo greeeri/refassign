@@ -41,6 +41,7 @@ type SetupView = (typeof setupNav)[number];
 type Role =
   | "admin"
   | "assignor"
+  | "billing"
   | "league_admin"
   | "registrar"
   | "official"
@@ -77,6 +78,7 @@ type TestWorkspace = {
 const labels: Record<Role, string> = {
   admin: "Admin",
   assignor: "Assignor",
+  billing: "Billing Manager",
   league_admin: "League Admin",
   registrar: "Registrar",
   official: "Official",
@@ -302,7 +304,9 @@ export default function Workspace() {
                 ? "iowa_development_admin"
               : role === "assignor"
                 ? "assignor"
-                : role === "viewer" || role === "billing"
+                : role === "billing"
+                  ? "billing"
+                : role === "viewer"
                   ? "contact"
                   : "admin";
       const workspaceRoles = Array.from(
@@ -377,18 +381,21 @@ export default function Workspace() {
         !resolvedName
           ? "Account"
           : initial === "official"
-          ? "Official Dashboard"
-          : initial === "mentor"
-            ? "Development Mentors"
-            : initial === "registrar" || initial === "league_admin"
-              ? "Registrar"
-              : "Dashboard",
+            ? "Official Dashboard"
+            : initial === "mentor"
+              ? "Development Mentors"
+              : initial === "billing"
+                ? "Payroll"
+                : initial === "registrar" || initial === "league_admin"
+                  ? "Registrar"
+                  : "Dashboard",
       );
       setReady(true);
     }
     void load();
   }, [supabase]);
   const manager = viewRole === "admin" || viewRole === "assignor",
+    billingManager = viewRole === "billing",
     organizationTaxAdmin = Boolean(
       testWorkspace &&
         (testWorkspace.role === "owner" ||
@@ -423,9 +430,11 @@ export default function Workspace() {
         ? "Official Dashboard"
         : role === "mentor"
           ? "Development Mentors"
-          : role === "registrar" || role === "league_admin"
-            ? "Registrar"
-            : "Dashboard",
+          : role === "billing"
+            ? "Payroll"
+            : role === "registrar" || role === "league_admin"
+              ? "Registrar"
+              : "Dashboard",
     );
   }
   async function signOut() {
@@ -723,6 +732,15 @@ export default function Workspace() {
               {iowaGroup()}
             </>
           )}
+          {billingManager && (
+            <button
+              className={`topNavButton ${section === "Payroll" ? "active" : ""}`}
+              onClick={() => nav("Payroll")}
+            >
+              <Icon>▤</Icon>
+              <span>Payroll &amp; Game Fees</span>
+            </button>
+          )}
           {viewRole === "contact" &&
             [
               "Dashboard",
@@ -992,7 +1010,7 @@ export default function Workspace() {
         {manager && section === "Auto Assign" && (
           <AutoAssignManager organizationId={testWorkspace?.organization_id} />
         )}
-        {manager && section === "Payroll" && (
+        {(manager || billingManager) && section === "Payroll" && (
           <>
             <PayrollManager
               organizationId={testWorkspace?.organization_id}
@@ -1002,9 +1020,11 @@ export default function Workspace() {
                   : undefined
               }
             />
-            <MileageCoordinatesManager
-              organizationId={testWorkspace?.organization_id}
-            />
+            {manager && (
+              <MileageCoordinatesManager
+                organizationId={testWorkspace?.organization_id}
+              />
+            )}
           </>
         )}
         {manager && section === "Blocks" && (

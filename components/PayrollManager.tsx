@@ -6,6 +6,7 @@ import { createClient } from "../lib/supabase/client";
 type PaymentStatus = "unpaid" | "approved" | "paid" | "void";
 type MileagePlan = "one_way" | "round_trip" | "actual" | "none";
 type Period = "all" | "past" | "week" | "future";
+type PaymentMethod = "stripe" | "outside_stripe";
 type SortKey =
   | "date"
   | "game"
@@ -210,6 +211,7 @@ export default function PayrollManager({
   const [selected, setSelected] = useState<string[]>([]);
   const [period, setPeriod] = useState<Period>("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("stripe");
   const [sort, setSort] = useState<{ key: SortKey; direction: "asc" | "desc" }>(
     { key: "date", direction: "asc" },
   );
@@ -614,19 +616,36 @@ export default function PayrollManager({
     if (!selected.length) return;
     setSaving("bulk");
     setError("");
-    const { data: userData } = await supabase.auth.getUser();
-    const now = new Date().toISOString();
-    const { error: updateError } = await supabase
-      .from("assignments")
-      .update({
-        payment_status: paymentStatus,
-        paid_at: paymentStatus === "paid" ? now : null,
-        payroll_updated_at: now,
-        payroll_updated_by: userData.user?.id || null,
-      })
-      .in("id", selected);
-    if (updateError) setError(updateError.message);
-    else {
+    const selectedRecords = rows.filter((row) => selected.includes(row.id));
+    const responses = await Promise.all(
+      selectedRecords.map((row) =>
+        fetch(
+          `/api/payroll?organizationId=${encodeURIComponent(organizationId || "")}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              assignmentId: row.id,
+              billToId: row.games?.bill_to_id || null,
+              gameFee: Number(row.game_fee || 0),
+              mileageMiles: Number(row.mileage_miles || 0),
+              mileageRate: Number(row.mileage_rate || 0),
+              paymentStatus,
+              payrollNotes: row.payroll_notes?.trim() || null,
+            }),
+          },
+        ),
+      ),
+    );
+    const failed = responses.find((response) => !response.ok);
+    if (failed) {
+      const result = (await failed.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      setError(
+        result.error || "One or more payroll records could not be updated.",
+      );
+    } else {
       setNotice(`${selected.length} payroll records marked ${paymentStatus}.`);
       setSelected([]);
       await load();
@@ -1172,6 +1191,19 @@ export default function PayrollManager({
         <div>
           <div className="payrollBulk">
             <b>{selected.length} selected</b>
+            <label>
+              Payment method
+              <select
+                value={paymentMethod}
+                onChange={(event) =>
+                  setPaymentMethod(event.target.value as PaymentMethod)
+                }
+                disabled={Boolean(saving)}
+              >
+                <option value="stripe">Stripe</option>
+                <option value="outside_stripe">Outside Stripe</option>
+              </select>
+            </label>
             <button
               className="secondary"
               disabled={saving === "bulk"}
@@ -1179,25 +1211,28 @@ export default function PayrollManager({
             >
               Mark Approved
             </button>
-            <button
-              className="success"
-              disabled={saving === "bulk"}
-              onClick={() => void bulkStatus("paid")}
-            >
-              Mark Paid Outside Stripe
-            </button>
-            <button
-              className="success"
-              disabled={
-                saving === "stripe-payroll" ||
-                selectedRows.some((row) => row.payment_status !== "approved")
-              }
-              onClick={() => void processStripePayroll()}
-            >
-              {saving === "stripe-payroll"
-                ? "Opening Stripe Checkout…"
-                : "Fund & Pay with Stripe"}
-            </button>
+            {paymentMethod === "outside_stripe" ? (
+              <button
+                className="success"
+                disabled={saving === "bulk"}
+                onClick={() => void bulkStatus("paid")}
+              >
+                Mark Paid Outside Stripe
+              </button>
+            ) : (
+              <button
+                className="success"
+                disabled={
+                  saving === "stripe-payroll" ||
+                  selectedRows.some((row) => row.payment_status !== "approved")
+                }
+                onClick={() => void processStripePayroll()}
+              >
+                {saving === "stripe-payroll"
+                  ? "Opening Stripe Checkout…"
+                  : "Continue to Stripe"}
+              </button>
+            )}
             <button className="secondary" onClick={() => setSelected([])}>
               Clear
             </button>
