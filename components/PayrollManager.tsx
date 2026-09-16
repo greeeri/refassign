@@ -73,6 +73,7 @@ type ImportRow = {
   notes: string;
 };
 type BillTo = { id: string; name: string; email: string | null };
+type PayrollLeague = { id: string; name: string; mileage_plan: MileagePlan };
 type PayrollBatch = {
   id: string;
   batch_number: number;
@@ -202,6 +203,7 @@ export default function PayrollManager({
   const geocodeBackfillOrganization = useRef("");
   const handledReportFocus = useRef("");
   const [rows, setRows] = useState<PayrollRow[]>([]);
+  const [availableLeagues, setAvailableLeagues] = useState<PayrollLeague[]>([]);
   const [billTos, setBillTos] = useState<BillTo[]>([]);
   const [batches, setBatches] = useState<PayrollBatch[]>([]);
   const [canManageBillTos, setCanManageBillTos] = useState(false);
@@ -240,12 +242,16 @@ export default function PayrollManager({
       const result = (await response.json()) as {
         assignments?: PayrollRow[];
         weekdayOrigins?: WeekdayOrigin[];
+        leagues?: PayrollLeague[];
         error?: string;
       };
       if (!response.ok)
         throw new Error(result.error || "Payroll could not be loaded.");
       const origins = result.weekdayOrigins || [];
       const loadedRows = result.assignments || [];
+      setAvailableLeagues(
+        (result.leagues || []).sort((a, b) => a.name.localeCompare(b.name)),
+      );
       setRows(
         loadedRows.map((row) => {
           const automaticMiles = calculatedMileage(row, origins);
@@ -456,15 +462,6 @@ export default function PayrollManager({
   }
   const sortLabel = (label: string, key: SortKey) =>
     `${label}${sort.key === key ? (sort.direction === "asc" ? " ▲" : " ▼") : ""}`;
-
-  const availableLeagues = Array.from(
-    new Map(
-      rows
-        .map((row) => row.games?.leagues)
-        .filter((league): league is NonNullable<typeof league> => Boolean(league))
-        .map((league) => [league.id, league]),
-    ).values(),
-  ).sort((a, b) => a.name.localeCompare(b.name));
 
   const visible = rows
     .filter((row) => {

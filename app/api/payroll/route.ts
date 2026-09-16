@@ -11,6 +11,15 @@ export async function GET(request: NextRequest) {
   ]);
   if (context.error) return context.error;
   const { service, user, organizationId, leagueIds } = context;
+  let leagueQuery = service
+    .from("organization_league_coverage")
+    .select("league_id,leagues(id,name,mileage_plan)")
+    .eq("organization_id", organizationId)
+    .eq("active", true);
+  if (leagueIds?.length) leagueQuery = leagueQuery.in("league_id", leagueIds);
+  const leagueResult = leagueIds?.length === 0
+    ? { data: [], error: null }
+    : await leagueQuery;
   let assignmentQuery = service
     .from("assignments")
     .select(
@@ -21,7 +30,7 @@ export async function GET(request: NextRequest) {
     .in("status", ["accepted", "confirmed"]);
   if (leagueIds) {
     if (!leagueIds.length)
-      return NextResponse.json({ assignments: [], weekdayOrigins: [] });
+      return NextResponse.json({ assignments: [], weekdayOrigins: [], leagues: [] });
     assignmentQuery = assignmentQuery.in("games.league_id", leagueIds);
   }
   const assignmentResult = await assignmentQuery.order("assigned_at", {
@@ -55,7 +64,10 @@ export async function GET(request: NextRequest) {
     : { data: [], error: null };
 
   const loadError =
-    assignmentResult.error || originResult.error || readinessResult.error;
+    leagueResult.error ||
+    assignmentResult.error ||
+    originResult.error ||
+    readinessResult.error;
   if (loadError) {
     console.error("[api/payroll] manager payroll load failed", {
       userId: user.id,
@@ -71,6 +83,14 @@ export async function GET(request: NextRequest) {
     assignments: assignmentResult.data?.length || 0,
   });
   return NextResponse.json({
+    leagues: (leagueResult.data || []).flatMap((row) => {
+      const league = row.leagues as unknown as
+        | { id: string; name: string; mileage_plan: string }
+        | Array<{ id: string; name: string; mileage_plan: string }>
+        | null;
+      const normalized = Array.isArray(league) ? league[0] : league;
+      return normalized ? [normalized] : [];
+    }),
     assignments: (assignmentResult.data || []).map((row) => {
       const official = row.officials as unknown as
         { id: string } | Array<{ id: string }> | null;
