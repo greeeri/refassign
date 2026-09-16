@@ -1380,8 +1380,8 @@ export default function GamesManagerV3({
                   applied.
                 </div>
               )}
-              <div className="tableWrap">
-                <table>
+              <div className="tableWrap workspaceDataScroll" role="region" aria-label="Game import preview" tabIndex={0}>
+                <table className="gameImportPreviewTable">
                   <thead>
                     <tr>
                       <th>Row</th>
@@ -1540,8 +1540,8 @@ export default function GamesManagerV3({
           </div>
         </div>
       )}
-      <div className="tableWrap">
-        <table>
+      <div className="tableWrap workspaceDataScroll" role="region" aria-label="Games" tabIndex={0}>
+        <table className="gamesManagementTable">
           <thead>
             <tr>
               <th>

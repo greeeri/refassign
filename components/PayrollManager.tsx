@@ -1212,13 +1212,12 @@ export default function PayrollManager({
       {loading ? (
         <p>Loading payroll…</p>
       ) : (
-        <div className="tableWrap">
+        <div className="tableWrap workspaceDataScroll" role="region" aria-label="Payroll records" tabIndex={0}>
           <table className="payrollTable">
             <colgroup>
               <col className="payrollSelectCol" />
               <col className="payrollDateCol" />
               <col className="payrollGameCol" />
-              <col className="payrollLocationCol" />
               <col className="payrollLocationCol" />
               <col className="payrollOfficialCol" />
               <col className="payrollPositionCol" />
@@ -1226,6 +1225,7 @@ export default function PayrollManager({
               <col className="payrollDefaultMilesCol" />
               <col className="payrollMilesCol" />
               <col className="payrollRateCol" />
+              <col className="payrollBillToCol" />
               <col className="payrollMileagePayCol" />
               <col className="payrollTotalCol" />
               <col className="payrollStatusCol" />

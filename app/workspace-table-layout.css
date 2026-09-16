@@ -1,0 +1,100 @@
+/* Keep wide tables inside their own scroll region in desktop/computer mode. */
+.workspaceDataScroll,
+.assignmentPositionsScroll,
+.officialReports .tableWrap {
+  min-width: 0;
+  max-width: 100%;
+  overflow: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.workspaceDataScroll:focus-visible,
+.assignmentPositionsScroll:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+/* Assignment details: retain a complete table above the mobile breakpoint. */
+.assignmentPositionsTable {
+  min-width: 780px;
+}
+
+/* Games and previews: allow room for names, validation messages and actions. */
+.gamesManagementTable,
+.gameImportPreviewTable {
+  min-width: 1080px;
+}
+.gamesManagementTable td,
+.gameImportPreviewTable td {
+  overflow-wrap: anywhere;
+}
+.gamesManagementTable td:nth-child(3),
+.gameImportPreviewTable td:nth-child(3) {
+  min-width: 200px;
+}
+
+/* Payroll has 16 editable columns; do not compress them into a phone width. */
+.payrollTable {
+  min-width: 1440px;
+}
+.payrollBillToCol {
+  width: 7.5%;
+}
+
+/* Report grids must shrink around wide tables instead of widening the page. */
+.officialReports,
+.officialReports .reportCharts > *,
+.officialReports .changeAuditGrid > *,
+.officialReports .customBuilderMain,
+.officialReports .customBuilderSection {
+  min-width: 0;
+}
+.officialReports .reportFilters label {
+  flex: 1 1 220px;
+  min-width: 0;
+  max-width: 100%;
+}
+.officialReports .reportFilters input,
+.officialReports .reportFilters select {
+  min-width: 0;
+  max-width: 100%;
+}
+.officialReports .financialPlanningHead {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 760px) {
+  /* Stack labels above controls; positional controls retain the full card width. */
+  .assignmentMain .assignmentPositionsScroll {
+    overflow: visible;
+  }
+  .assignmentMain .assignmentPositionsTable {
+    min-width: 0;
+  }
+  .assignmentMain .assignmentPositionsTable td,
+  .assignmentMain .assignmentPositionsTable td:first-child {
+    display: block;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .assignmentMain .assignmentPositionsTable td::before {
+    display: block;
+    margin-bottom: 6px;
+  }
+  .assignmentPositionsTable td > div {
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+  .assignmentPositionsTable select,
+  .assignmentPositionsTable button {
+    max-width: 100%;
+  }
+  .assignmentMain .selectedGameStickyHeader p {
+    display: block;
+    overflow: visible;
+    -webkit-line-clamp: unset;
+  }
+  .officialReports .reportFilters label {
+    flex-basis: 100%;
+  }
+}

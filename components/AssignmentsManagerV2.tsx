@@ -8329,8 +8329,8 @@ export default function AssignmentsManagerV2({
                     </button>
                   </div>
                   {visibleGamePositions.length ? (
-                    <div className="tableWrap">
-                      <table>
+                    <div className="tableWrap assignmentPositionsScroll" role="region" aria-label="Game assignment positions" tabIndex={0}>
+                      <table className="assignmentPositionsTable">
                         <thead>
                           <tr>
                             <th>Self Assign</th>
