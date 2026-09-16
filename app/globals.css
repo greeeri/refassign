@@ -160,6 +160,23 @@ nav button.active {
 .signedInAside span { color: #8fa8bd; font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
 .signedInAside strong { color: #fff; font-size: 13px; }
 .signedInAside small { color: #b7c8d7; font-size: 11px; }
+.pageIdentity {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-bottom: 5px;
+}
+.pageIdentity span {
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+.pageIdentity strong {
+  color: #173b62;
+  font-size: 14px;
+}
 main {
   margin-left: 245px;
   width: calc(100% - 245px);
@@ -1893,10 +1910,10 @@ td small {
     font-size: 18px;
   }
   .tag,
-  .asideFoot,
   .navParent {
     display: none;
   }
+  .asideFoot { display: block; }
   nav button,
   .navGroup button.subNav {
     font-size: 0;
