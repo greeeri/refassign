@@ -78,6 +78,7 @@ export default function IowaProgramReferees({
     [subject, setSubject] = useState("Iowa Soccer Referee Development Program"),
     [message, setMessage] = useState(""),
     [busy, setBusy] = useState(false),
+    [removingId, setRemovingId] = useState(""),
     [error, setError] = useState(""),
     [notice, setNotice] = useState("");
   async function load() {
@@ -148,6 +149,42 @@ export default function IowaProgramReferees({
       );
     } finally {
       setBusy(false);
+    }
+  }
+  async function removeOfficial(person: Person) {
+    if (!canManage) return;
+    const name = `${person.first_name} ${person.last_name}`.trim();
+    if (
+      !window.confirm(
+        `Remove ${name} from the Iowa Soccer Referee Development Program? Their official account, assignments, notes, and training history will not be deleted.`,
+      )
+    )
+      return;
+    setRemovingId(person.id);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch("/api/development/officials", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ officialId: person.id }),
+        }),
+        result = (await response.json()) as { error?: string };
+      if (!response.ok)
+        throw new Error(result.error || "Unable to remove official.");
+      setSelected((old) => old.filter((id) => id !== person.id));
+      if (openCard === person.id) {
+        setOpenCard("");
+        setNotes([]);
+      }
+      setNotice(`${name} was removed from the development program.`);
+      await load();
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : "Unable to remove official.",
+      );
+    } finally {
+      setRemovingId("");
     }
   }
   async function openDevelopmentCard(id: string) {
@@ -423,6 +460,7 @@ export default function IowaProgramReferees({
                 <th>Email</th>
                 <th>Mobile</th>
                 <th>Development</th>
+                {canManage && <th>Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -452,11 +490,27 @@ export default function IowaProgramReferees({
                       Development Card ({person.note_count})
                     </button>
                   </td>
+                  {canManage && (
+                    <td>
+                      <button
+                        type="button"
+                        className="tableButton"
+                        disabled={Boolean(removingId)}
+                        onClick={() => void removeOfficial(person)}
+                      >
+                        {removingId === person.id
+                          ? "Removing…"
+                          : "Remove from program"}
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
               {!visiblePeople.length && (
                 <tr>
-                  <td colSpan={5}>No program referees match your search.</td>
+                  <td colSpan={canManage ? 6 : 5}>
+                    No program referees match your search.
+                  </td>
                 </tr>
               )}
             </tbody>
