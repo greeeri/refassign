@@ -333,6 +333,16 @@ export default function GamesManagerV3({
     [error, setError] = useState(""),
     [message, setMessage] = useState("");
   async function load() {
+    const locationRequest = organizationId
+      ? sb.rpc("get_organization_locations", {
+          p_organization_id: organizationId,
+        })
+      : sb
+          .from("locations")
+          .select("id,name,city,state")
+          .eq("active", true)
+          .order("name");
+
     const gamesQuery = sb
       .from("games")
       .select(
@@ -351,11 +361,7 @@ export default function GamesManagerV3({
       sb.from("leagues").select("id,name").eq("active", true).order("name"),
       sb.from("levels").select("id,name").eq("active", true).order("name"),
       sb.from("teams").select("id,name,level_id,sport_id").order("name"),
-      sb
-        .from("locations")
-        .select("id,name,city,state")
-        .eq("active", true)
-        .order("name"),
+      locationRequest,
       organizationId
         ? visibleGamesQuery.eq("organization_id", organizationId)
         : visibleGamesQuery,
@@ -595,7 +601,9 @@ export default function GamesManagerV3({
         home = get("home_team"),
         away = get("away_team"),
         location = get("location"),
-        billTo = get("bill_to"),
+        suppliedBillTo = get("bill_to"),
+        billTo =
+          billTos.find((x) => norm(x.name) === norm(suppliedBillTo))?.name || "",
         date = dateVal(cell("date")),
         time = timeVal(cell("time")),
         duration = Number(get("duration_minutes") || 110),
@@ -609,8 +617,6 @@ export default function GamesManagerV3({
       if (!levelMatch) issues.push("Level not found");
       if (!locations.some((x) => norm(x.name) === norm(location)))
         issues.push("Location not found");
-      if (billTo && !billTos.some((x) => norm(x.name) === norm(billTo)))
-        issues.push("Bill To not found");
       if (!date) issues.push("Invalid date");
       if (!time) issues.push("Invalid time");
       if (
