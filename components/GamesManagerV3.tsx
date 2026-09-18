@@ -100,6 +100,7 @@ const req = [
 ];
 const pad = (n: number) => String(n).padStart(2, "0");
 const norm = (s: string) => s.trim().toLowerCase();
+const locationKey = (s: string) => norm(s).replace(/[^a-z0-9]+/g, "");
 function excelDateParts(value: number) {
   if (!Number.isFinite(value)) return null;
   const wholeDays = Math.floor(value);
@@ -587,7 +588,7 @@ export default function GamesManagerV3({
     XLSX.utils.book_append_sheet(wb, ws, "Games");
     XLSX.writeFile(wb, "refassign-games.xlsx");
   }
-  function validate(raw: unknown[][]) {
+  function validate(raw: unknown[][], availableLocations = locations) {
     const h = raw[0].map((x) => norm(String(x)).replace(/\s+/g, "_"));
     const missing = req.filter((x) => !h.includes(x));
     if (missing.length)
@@ -615,7 +616,11 @@ export default function GamesManagerV3({
       if (!leagues.some((x) => norm(x.name) === norm(league)))
         issues.push("League not found");
       if (!levelMatch) issues.push("Level not found");
-      if (!locations.some((x) => norm(x.name) === norm(location)))
+      if (
+        !availableLocations.some(
+          (x) => locationKey(x.name) === locationKey(location),
+        )
+      )
         issues.push("Location not found");
       if (!date) issues.push("Invalid date");
       if (!time) issues.push("Invalid time");
@@ -704,7 +709,8 @@ export default function GamesManagerV3({
           aEnd = aStart + a.duration_minutes * 60_000,
           bEnd = bStart + b.duration_minutes * 60_000;
         if (aStart >= bEnd || bStart >= aEnd) continue;
-        const sameLocation = norm(a.location) === norm(b.location),
+        const sameLocation =
+            locationKey(a.location) === locationKey(b.location),
           teamKey = (row: Row, team: string) =>
             `${norm(row.sport)}|${norm(row.level)}|${norm(team)}`,
           aTeams = new Set([teamKey(a, a.home_team), teamKey(a, a.away_team)]),
@@ -796,7 +802,35 @@ export default function GamesManagerV3({
           defval: "",
           raw: true,
         }) as unknown[][];
-      const validated = validate(raw);
+      const headers = raw[0].map((x) =>
+          norm(String(x)).replace(/\s+/g, "_"),
+        ),
+        locationColumn = headers.indexOf("location"),
+        requestedLocations = [
+          ...new Set(
+            raw
+              .slice(1)
+              .map((row) => String(row[locationColumn] || "").trim())
+              .filter(Boolean),
+          ),
+        ],
+        { data: importLocations, error: locationError } = await sb.rpc(
+          "prepare_game_import_locations",
+          {
+            p_organization_id: organizationId,
+            p_location_names: requestedLocations,
+          },
+        );
+      if (locationError) throw locationError;
+      const mergedLocations = [
+        ...locations,
+        ...((importLocations || []) as Location[]).filter(
+          (candidate) =>
+            !locations.some((location) => location.id === candidate.id),
+        ),
+      ];
+      setLocations(mergedLocations);
+      const validated = validate(raw, mergedLocations);
       setRows(validated);
       if (!validated.length)
         throw new Error("The spreadsheet does not contain any game rows.");
@@ -806,7 +840,7 @@ export default function GamesManagerV3({
           const { error: validationError } = await sb.rpc(
             "validate_game_import",
             {
-              p_rows: importPayload(databaseValidated),
+              p_rows: importPayload(databaseValidated, mergedLocations),
             },
           );
           if (!validationError) break;
@@ -837,7 +871,10 @@ export default function GamesManagerV3({
     setValidationBusy(false);
     e.target.value = "";
   }
-  function importPayload(sourceRows: Row[]) {
+  function importPayload(
+    sourceRows: Row[],
+    availableLocations = locations,
+  ) {
     return sourceRows.map((r) => {
       const s = sports.find((x) => norm(x.name) === norm(r.sport)),
         lg = leagues.find((x) => norm(x.name) === norm(r.league)),
@@ -854,7 +891,9 @@ export default function GamesManagerV3({
             x.sport_id === s?.id &&
             x.level_id === lv?.id,
         ),
-        loc = locations.find((x) => norm(x.name) === norm(r.location)),
+        loc = availableLocations.find(
+          (x) => locationKey(x.name) === locationKey(r.location),
+        ),
         billTo = billTos.find((x) => norm(x.name) === norm(r.bill_to)),
         existing = r.game_number
           ? games.find(
