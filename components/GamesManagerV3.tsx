@@ -2,6 +2,7 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import { createClient } from "../lib/supabase/client";
 import { announceUndoAvailable } from "./UndoCenter";
+import { resolveImportTeam } from "../lib/game-import-team";
 type Named = { id: string; name: string };
 type BillTo = Named;
 type Sport = Named & { default_officials: number };
@@ -628,26 +629,16 @@ export default function GamesManagerV3({
         home &&
         sportMatch &&
         levelMatch &&
-        !teams.some(
-          (x) =>
-            norm(x.name) === norm(home) &&
-            x.sport_id === sportMatch.id &&
-            x.level_id === levelMatch.id,
-        )
+        !resolveImportTeam(teams, home, sportMatch.id, levelMatch.id)
       )
-        issues.push("Home team not found for the selected sport and level");
+        issues.push("Home team not found for the selected sport");
       if (
         away &&
         sportMatch &&
         levelMatch &&
-        !teams.some(
-          (x) =>
-            norm(x.name) === norm(away) &&
-            x.sport_id === sportMatch.id &&
-            x.level_id === levelMatch.id,
-        )
+        !resolveImportTeam(teams, away, sportMatch.id, levelMatch.id)
       )
-        issues.push("Away team not found for the selected sport and level");
+        issues.push("Away team not found for the selected sport");
       if (home && away && norm(home) === norm(away))
         issues.push("Home and away teams must be different");
       if (!Number.isFinite(duration) || duration < 1)
@@ -879,18 +870,8 @@ export default function GamesManagerV3({
       const s = sports.find((x) => norm(x.name) === norm(r.sport)),
         lg = leagues.find((x) => norm(x.name) === norm(r.league)),
         lv = levels.find((x) => norm(x.name) === norm(r.level)),
-        home = teams.find(
-          (x) =>
-            norm(x.name) === norm(r.home_team) &&
-            x.sport_id === s?.id &&
-            x.level_id === lv?.id,
-        ),
-        away = teams.find(
-          (x) =>
-            norm(x.name) === norm(r.away_team) &&
-            x.sport_id === s?.id &&
-            x.level_id === lv?.id,
-        ),
+        home = resolveImportTeam(teams, r.home_team, s?.id, lv?.id),
+        away = resolveImportTeam(teams, r.away_team, s?.id, lv?.id),
         loc = availableLocations.find(
           (x) => locationKey(x.name) === locationKey(r.location),
         ),
@@ -1526,12 +1507,8 @@ export default function GamesManagerV3({
                   </tbody>
                 </table>
               </div>
-              <button
-                type="button"
-                role="checkbox"
-                aria-checked={importApproved}
-                disabled={!importPreviewReady}
-                onClick={() => setImportApproved((approved) => !approved)}
+              <label
+                htmlFor="approve-game-import"
                 style={{
                   display: "flex",
                   gap: 10,
@@ -1540,35 +1517,18 @@ export default function GamesManagerV3({
                   fontWeight: 700,
                   cursor: importPreviewReady ? "pointer" : "not-allowed",
                   minHeight: 44,
-                  width: "100%",
-                  padding: 0,
-                  border: 0,
-                  background: "transparent",
-                  color: "#172033",
-                  textAlign: "left",
-                  fontSize: "inherit",
                 }}
               >
-                <span
-                  aria-hidden="true"
-                  style={{
-                    width: 26,
-                    height: 26,
-                    flex: "0 0 26px",
-                    display: "grid",
-                    placeItems: "center",
-                    border: `2px solid ${importApproved ? "#2563eb" : "#94a3b8"}`,
-                    borderRadius: 7,
-                    background: importApproved ? "#2563eb" : "#fff",
-                    color: "#fff",
-                    fontSize: 19,
-                    lineHeight: 1,
-                  }}
-                >
-                  {importApproved ? "✓" : ""}
-                </span>
+                <input
+                  id="approve-game-import"
+                  type="checkbox"
+                  checked={importApproved}
+                  disabled={!importPreviewReady}
+                  onChange={(e) => setImportApproved(e.target.checked)}
+                  style={{ width: 22, height: 22, flex: "0 0 auto" }}
+                />
                 I reviewed this preview and approve importing all valid rows.
-              </button>
+              </label>
               {!validationBusy && rows.length > 0 && !rows.some((row) => row.valid) && (
                 <div className="errorBox" role="status">
                   No rows are ready to import. Correct the listed validation errors
