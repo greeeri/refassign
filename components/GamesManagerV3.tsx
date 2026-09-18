@@ -2,6 +2,7 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import { createClient } from "../lib/supabase/client";
 import { announceUndoAvailable } from "./UndoCenter";
+import { resolveImportTeam } from "../lib/game-import-team";
 type Named = { id: string; name: string };
 type BillTo = Named;
 type Sport = Named & { default_officials: number };
@@ -628,26 +629,16 @@ export default function GamesManagerV3({
         home &&
         sportMatch &&
         levelMatch &&
-        !teams.some(
-          (x) =>
-            norm(x.name) === norm(home) &&
-            x.sport_id === sportMatch.id &&
-            x.level_id === levelMatch.id,
-        )
+        !resolveImportTeam(teams, home, sportMatch.id, levelMatch.id)
       )
-        issues.push("Home team not found for the selected sport and level");
+        issues.push("Home team not found for the selected sport");
       if (
         away &&
         sportMatch &&
         levelMatch &&
-        !teams.some(
-          (x) =>
-            norm(x.name) === norm(away) &&
-            x.sport_id === sportMatch.id &&
-            x.level_id === levelMatch.id,
-        )
+        !resolveImportTeam(teams, away, sportMatch.id, levelMatch.id)
       )
-        issues.push("Away team not found for the selected sport and level");
+        issues.push("Away team not found for the selected sport");
       if (home && away && norm(home) === norm(away))
         issues.push("Home and away teams must be different");
       if (!Number.isFinite(duration) || duration < 1)
@@ -879,18 +870,8 @@ export default function GamesManagerV3({
       const s = sports.find((x) => norm(x.name) === norm(r.sport)),
         lg = leagues.find((x) => norm(x.name) === norm(r.league)),
         lv = levels.find((x) => norm(x.name) === norm(r.level)),
-        home = teams.find(
-          (x) =>
-            norm(x.name) === norm(r.home_team) &&
-            x.sport_id === s?.id &&
-            x.level_id === lv?.id,
-        ),
-        away = teams.find(
-          (x) =>
-            norm(x.name) === norm(r.away_team) &&
-            x.sport_id === s?.id &&
-            x.level_id === lv?.id,
-        ),
+        home = resolveImportTeam(teams, r.home_team, s?.id, lv?.id),
+        away = resolveImportTeam(teams, r.away_team, s?.id, lv?.id),
         loc = availableLocations.find(
           (x) => locationKey(x.name) === locationKey(r.location),
         ),
