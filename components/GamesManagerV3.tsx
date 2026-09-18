@@ -933,7 +933,9 @@ export default function GamesManagerV3({
     setBusy(true);
     setError("");
     try {
-      if (!importValidated || !importApproved)
+      const previewIsReady =
+        importValidated && rows.length > 0 && rows.every((row) => row.valid);
+      if (!previewIsReady || !importApproved)
         throw new Error(
           "Validate and approve the complete preview before applying this import.",
         );
@@ -1016,6 +1018,11 @@ export default function GamesManagerV3({
     ["thisWeek", "This Week"],
     ["nextWeek", "Next Week"],
   ];
+  const importPreviewReady =
+    importValidated &&
+    !validationBusy &&
+    rows.length > 0 &&
+    rows.every((row) => row.valid);
   return (
     <section className="card">
       <div className="cardHead">
@@ -1507,28 +1514,39 @@ export default function GamesManagerV3({
                 </table>
               </div>
               <label
+                htmlFor="approve-game-import"
                 style={{
                   display: "flex",
                   gap: 10,
                   alignItems: "center",
                   margin: "14px 0",
                   fontWeight: 700,
+                  cursor: importPreviewReady ? "pointer" : "not-allowed",
+                  minHeight: 44,
                 }}
               >
                 <input
+                  id="approve-game-import"
                   type="checkbox"
                   checked={importApproved}
-                  disabled={!importValidated}
+                  disabled={!importPreviewReady}
                   onChange={(e) => setImportApproved(e.target.checked)}
+                  style={{ width: 22, height: 22, flex: "0 0 auto" }}
                 />
                 I reviewed and approve this complete import preview.
               </label>
+              {!importPreviewReady && rows.length > 0 && (
+                <div className="errorBox" role="status">
+                  Approval will be available after every row passes validation.
+                  Review the Validation column for any row that still needs attention.
+                </div>
+              )}
               <button
+                type="button"
                 className="primary"
                 disabled={
                   busy ||
-                  validationBusy ||
-                  !importValidated ||
+                  !importPreviewReady ||
                   !importApproved ||
                   rows.some((r) => !r.valid)
                 }
