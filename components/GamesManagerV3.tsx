@@ -933,14 +933,15 @@ export default function GamesManagerV3({
     setBusy(true);
     setError("");
     try {
-      const previewIsReady =
-        importValidated && rows.length > 0 && rows.every((row) => row.valid);
+      const validRows = rows.filter((row) => row.valid);
+      const blockedRows = rows.length - validRows.length;
+      const previewIsReady = !validationBusy && validRows.length > 0;
       if (!previewIsReady || !importApproved)
         throw new Error(
-          "Validate and approve the complete preview before applying this import.",
+          "Review and approve the valid preview rows before applying this import.",
         );
       const { data, error: applyError } = await sb.rpc("apply_game_import", {
-        p_rows: importPayload(rows),
+        p_rows: importPayload(validRows),
       });
       if (applyError) throw applyError;
       const result = data as {
@@ -949,7 +950,7 @@ export default function GamesManagerV3({
         skipped?: number;
       };
       setMessage(
-        `Import complete: ${result.updated || 0} updated, ${result.added || 0} added, ${result.skipped || 0} unchanged and skipped.`,
+        `Import complete: ${result.updated || 0} updated, ${result.added || 0} added, ${result.skipped || 0} unchanged${blockedRows ? `, and ${blockedRows} unresolved row${blockedRows === 1 ? " was" : "s were"} not imported` : ""}.`,
       );
       announceUndoAvailable();
       setRows([]);
@@ -1019,10 +1020,10 @@ export default function GamesManagerV3({
     ["nextWeek", "Next Week"],
   ];
   const importPreviewReady =
-    importValidated &&
     !validationBusy &&
     rows.length > 0 &&
-    rows.every((row) => row.valid);
+    rows.some((row) => row.valid);
+  const blockedImportRows = rows.filter((row) => !row.valid);
   return (
     <section className="card">
       <div className="cardHead">
@@ -1446,9 +1447,21 @@ export default function GamesManagerV3({
               </div>
               {rows.some((r) => !r.valid) && (
                 <div className="errorBox">
-                  Import paused: {rows.filter((r) => !r.valid).length}{" "}
-                  spreadsheet row(s) need correction. Review the Validation
-                  column below, update the file, and upload it again.
+                  {blockedImportRows.length} spreadsheet row
+                  {blockedImportRows.length === 1 ? " needs" : "s need"}{" "}
+                  correction and will not be imported. You can still approve and
+                  import every valid row below.
+                  <ul style={{ margin: "8px 0 0", paddingLeft: 20 }}>
+                    {blockedImportRows.slice(0, 10).map((row) => (
+                      <li key={row.row}>
+                        <b>Row {row.row}</b>
+                        {row.game_number ? ` (Game ${row.game_number})` : ""}: {row.issue}
+                      </li>
+                    ))}
+                    {blockedImportRows.length > 10 && (
+                      <li>{blockedImportRows.length - 10} additional rows need attention.</li>
+                    )}
+                  </ul>
                 </div>
               )}
               {importValidated && (
@@ -1533,12 +1546,12 @@ export default function GamesManagerV3({
                   onChange={(e) => setImportApproved(e.target.checked)}
                   style={{ width: 22, height: 22, flex: "0 0 auto" }}
                 />
-                I reviewed and approve this complete import preview.
+                I reviewed this preview and approve importing all valid rows.
               </label>
-              {!importPreviewReady && rows.length > 0 && (
+              {!validationBusy && rows.length > 0 && !rows.some((row) => row.valid) && (
                 <div className="errorBox" role="status">
-                  Approval will be available after every row passes validation.
-                  Review the Validation column for any row that still needs attention.
+                  No rows are ready to import. Correct the listed validation errors
+                  and upload the file again.
                 </div>
               )}
               <button
@@ -1548,11 +1561,13 @@ export default function GamesManagerV3({
                   busy ||
                   !importPreviewReady ||
                   !importApproved ||
-                  rows.some((r) => !r.valid)
+                  !rows.some((r) => r.valid)
                 }
                 onClick={() => void applyImport()}
               >
-                {busy ? "Applying Import…" : "Apply Approved Import"}
+                {busy
+                  ? "Applying Import…"
+                  : `Apply ${rows.filter((row) => row.valid).length} Approved Row${rows.filter((row) => row.valid).length === 1 ? "" : "s"}`}
               </button>
             </>
           )}
