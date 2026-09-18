@@ -972,7 +972,7 @@ export default function GamesManagerV3({
   }
   function template() {
     const csv =
-      "game_number,sport,league,level,home_team,away_team,date,time,location,duration_minutes,officials_needed,bill_to,notes\n,Soccer,Approved League,U19,Approved Home Team,Approved Away Team,29-Aug-26,7:00 PM,Approved Location,110,3,Approved Bill To,Conference game\n";
+      "game_number,sport,league,level,home_team,away_team,date,time,location,duration_minutes,officials_needed,bill_to,notes\n";
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     a.download = "refassign-game-import-template.csv";
