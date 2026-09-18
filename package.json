@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test:game-status": "node --test --experimental-strip-types tests/game-status.test.mjs"
+    "test:game-status": "node --test --experimental-strip-types tests/game-status.test.mjs",
+    "test:game-import-team": "node --test --experimental-strip-types tests/game-import-team.test.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.7.0",
