@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
   ]);
   if (subscriptionError || accessError) return NextResponse.json({ error: "Could not verify assignment access." }, { status: 500 });
   if (!subscription || (!subscription.access_override && !["active", "trialing"].includes(subscription.status))) return NextResponse.json({ error: "This organization needs an active subscription." }, { status: 402 });
-  if (!access?.length) return NextResponse.json({ games: [], hasMore: false });
+  if (!access?.length) return NextResponse.json({ games: [], hasMore: false, isMentor: mentor });
   const from = new Date().toISOString().slice(0,10);
   // Explicit projection excludes response tokens, personal contact data, rankings and pay.
   const { data: games, error } = await service.from("games")
@@ -28,5 +28,16 @@ export async function GET(request: NextRequest) {
     .eq("organization_id", organizationId).in("league_id", access.map(row => row.league_id))
     .gte("starts_at", `${from}T00:00:00Z`).order("starts_at").order("id").limit(5000);
   if (error) return NextResponse.json({ error: "Could not load assignments." }, { status: 500 });
-  return NextResponse.json({ games: games || [] }, { headers: { "Cache-Control": "private, no-store" } });
+  return NextResponse.json({ games: games || [], isMentor: mentor }, { headers: { "Cache-Control": "private, no-store" } });
+}
+
+export async function POST(request: NextRequest) {
+  const session = await createServerSupabaseClient();
+  const { data: { user } } = await session.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Please sign in." }, { status: 401 });
+  const { gameId } = await request.json() as { gameId?: string };
+  if (!gameId) return NextResponse.json({ error: "Select a game." }, { status: 400 });
+  const { error } = await session.rpc("self_assign_game_mentor", { p_game_id: gameId });
+  if (error) return NextResponse.json({ error: error.message }, { status: error.code === "42501" ? 403 : 400 });
+  return NextResponse.json({ success: true });
 }

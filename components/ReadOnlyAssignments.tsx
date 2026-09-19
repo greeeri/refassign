@@ -56,6 +56,9 @@ export default function ReadOnlyAssignments({
   const [locationSearch, setLocationSearch] = useState("");
   const [officialFilter, setOfficialFilter] = useState("all");
   const [officialSearch, setOfficialSearch] = useState("");
+  const [isMentor, setIsMentor] = useState(false);
+  const [selfAssigning, setSelfAssigning] = useState("");
+  const [notice, setNotice] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -72,7 +75,7 @@ export default function ReadOnlyAssignments({
           throw new Error(result.error || "Could not load assignments.");
         return result;
       })
-      .then((result) => setGames(result.games))
+      .then((result) => { setGames(result.games); setIsMentor(Boolean(result.isMentor)); })
       .catch((problem) => {
         if (!controller.signal.aborted) setError(problem.message);
       })
@@ -166,6 +169,19 @@ export default function ReadOnlyAssignments({
     setOfficialFilter("all");
     setOfficialSearch("");
     setPage(0);
+  }
+
+  async function selfAssignMentor(gameId: string) {
+    setSelfAssigning(gameId); setError(""); setNotice("");
+    const response = await fetch("/api/assignments/read-only", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gameId }) });
+    const result = await response.json();
+    if (!response.ok) setError(result.error || "Could not self-assign as mentor.");
+    else {
+      setNotice("Mentor assignment accepted.");
+      const refreshed = await fetch(`/api/assignments/read-only?${new URLSearchParams({ organizationId })}`, { cache: "no-store" }).then((item) => item.json());
+      setGames(refreshed.games || []);
+    }
+    setSelfAssigning("");
   }
 
   return (
@@ -281,6 +297,7 @@ export default function ReadOnlyAssignments({
       </div>
 
       {error && <p className="errorBox" role="alert">{error}</p>}
+      {notice && <p className="loginMessage" role="status">{notice}</p>}
       {loading ? (
         <p>Loading assignments…</p>
       ) : !error && (
@@ -289,7 +306,12 @@ export default function ReadOnlyAssignments({
             <p>No games match the selected date, location, and official filters.</p>
           )}
           {visibleGames.map((game) => (
-            <article className="card" key={game.id} style={{ marginTop: 12 }}>
+            <article className={`card ${styles.gameCard}`} key={game.id} style={{ marginTop: 12 }}>
+              {isMentor && !game.assignments.some((assignment) => assignment.sport_positions?.name.toLowerCase().includes("mentor") && !["declined", "cancelled"].includes(assignment.status)) && (
+                <button type="button" className={styles.selfAssign} disabled={selfAssigning === game.id} onClick={() => void selfAssignMentor(game.id)}>
+                  {selfAssigning === game.id ? "Assigning…" : "Self-Assign"}
+                </button>
+              )}
               <h3>{game.home?.name || "TBD"} vs {game.away?.name || "TBD"}</h3>
               <p>
                 {new Date(game.starts_at).toLocaleString()} ·{" "}

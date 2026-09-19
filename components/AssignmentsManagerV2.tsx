@@ -123,6 +123,7 @@ type SelfAssignSlot = {
   position_id: string;
   status: "open" | "claimed" | "withdrawn";
 };
+type MentorSlot = { game_id: string; position_id: string };
 type AssignmentTemplateSlot = {
   id: string;
   position_id: string;
@@ -301,6 +302,7 @@ export default function AssignmentsManagerV2({
     [officials, setOfficials] = useState<Official[]>([]),
     [positions, setPositions] = useState<Position[]>([]),
     [assignments, setAssignments] = useState<Assignment[]>([]),
+    [mentorSlots, setMentorSlots] = useState<MentorSlot[]>([]),
     [ranks, setRanks] = useState<Record<string, number>>({}),
     [positionRanks, setPositionRanks] = useState<Record<string, PositionRank>>(
       {},
@@ -326,6 +328,7 @@ export default function AssignmentsManagerV2({
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [saving, setSaving] = useState(""),
+    [mentorSlotSaving, setMentorSlotSaving] = useState(""),
     [movingAssignment, setMovingAssignment] = useState(""),
     [publishing, setPublishing] = useState(false),
     [retryingNotifications, setRetryingNotifications] = useState(false),
@@ -451,7 +454,7 @@ export default function AssignmentsManagerV2({
         "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,time_tbd,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,city,state,latitude,longitude)",
       )
       .order("starts_at");
-    const [g, oo, o, p, a, r, pr, pw, le, ve, bl, lg, lm, sas, ah, at] =
+    const [g, oo, o, p, a, r, pr, pw, le, ve, bl, lg, lm, sas, ms, ah, at] =
       await Promise.all([
         organizationId
           ? gamesQuery.eq("organization_id", organizationId)
@@ -513,6 +516,7 @@ export default function AssignmentsManagerV2({
           .from("assignment_self_assign_slots")
           .select("id,game_id,position_id,status")
           .eq("status", "open"),
+        supabase.from("game_mentor_slots").select("game_id,position_id"),
         supabase
           .from("audit_history")
           .select("game_id,old_data")
@@ -540,6 +544,7 @@ export default function AssignmentsManagerV2({
       lg.error ||
       lm.error ||
       sas.error ||
+      ms.error ||
       ah.error ||
       at.error;
     if (err) {
@@ -619,6 +624,9 @@ export default function AssignmentsManagerV2({
       ((sas.data || []) as SelfAssignSlot[]).filter((slot) =>
         scopedGameIds.has(slot.game_id),
       ),
+    );
+    setMentorSlots(
+      ((ms.data || []) as MentorSlot[]).filter((slot) => scopedGameIds.has(slot.game_id)),
     );
     setAssignmentTemplates((at.data || []) as AssignmentTemplate[]);
     setUnassignedSlotKeys([
@@ -703,7 +711,7 @@ export default function AssignmentsManagerV2({
     void loadSavedViews();
   }, []);
   async function refreshAssignmentState() {
-    const [assignmentResult, selfAssignResult, unassignmentResult] =
+    const [assignmentResult, selfAssignResult, mentorSlotResult, unassignmentResult] =
       await Promise.all([
         supabase
           .from("assignments")
@@ -714,6 +722,7 @@ export default function AssignmentsManagerV2({
           .from("assignment_self_assign_slots")
           .select("id,game_id,position_id,status")
           .eq("status", "open"),
+        supabase.from("game_mentor_slots").select("game_id,position_id"),
         supabase
           .from("audit_history")
           .select("game_id,old_data")
@@ -722,6 +731,7 @@ export default function AssignmentsManagerV2({
     const refreshError =
       assignmentResult.error ||
       selfAssignResult.error ||
+      mentorSlotResult.error ||
       unassignmentResult.error;
     if (refreshError) {
       setError(refreshError.message);
@@ -737,6 +747,9 @@ export default function AssignmentsManagerV2({
       ((selfAssignResult.data || []) as SelfAssignSlot[]).filter((slot) =>
         visibleGameIds.has(slot.game_id),
       ),
+    );
+    setMentorSlots(
+      ((mentorSlotResult.data || []) as MentorSlot[]).filter((slot) => visibleGameIds.has(slot.game_id)),
     );
     setUnassignedSlotKeys([
       ...new Set(
@@ -1459,10 +1472,10 @@ export default function AssignmentsManagerV2({
         .sort((a, b) => a.sort_order - b.sort_order)
     : [];
   const gamePositions = game
-    ? sportPositions.slice(
+    ? [...sportPositions.slice(
         0,
         Math.max(0, Math.min(game.officials_needed, sportPositions.length)),
-      )
+      ), ...sportPositions.filter((position) => mentorSlots.some((slot) => slot.game_id === game.id && slot.position_id === position.id) && !sportPositions.slice(0, game.officials_needed).some((active) => active.id === position.id))]
     : [];
   const gameAssignments = game
     ? assignments.filter((a) => a.game_id === game.id)
@@ -2225,12 +2238,16 @@ export default function AssignmentsManagerV2({
         .from("assignments")
         .delete()
         .eq("id", existing.id);
-    else if (officialId)
-      result = await supabase.rpc("assign_official_to_linked_games", {
-        p_game_id: targetGame.id,
-        p_position_id: positionId,
-        p_official_id: officialId,
-      });
+    else if (officialId) {
+      const mentorPosition = positions.find((item) => item.id === positionId)?.name.toLowerCase().includes("mentor");
+      result = mentorPosition
+        ? await supabase.rpc("assign_game_mentor", { p_game_id: targetGame.id, p_official_id: officialId })
+        : await supabase.rpc("assign_official_to_linked_games", {
+            p_game_id: targetGame.id,
+            p_position_id: positionId,
+            p_official_id: officialId,
+          });
+    }
     if (!result) {
       setSaving("");
       return false;
@@ -2268,6 +2285,20 @@ export default function AssignmentsManagerV2({
   async function assign(positionId: string, officialId: string) {
     if (!game) return;
     await assignToGame(game, positionId, officialId);
+  }
+  async function addMentorSlot() {
+    if (!game || !canManage) return;
+    setMentorSlotSaving(game.id); setError(""); setNotice("");
+    const { data: mentorPositionId, error: slotError } = await supabase.rpc("add_game_mentor_slot", { p_game_id: game.id });
+    if (slotError) setError(slotError.message);
+    else {
+      setNotice("Mentor slot added. Select a mentor now or leave it open for later.");
+      setNeedsAssignmentView((current) => ({ ...current, [game.id]: false }));
+      setCandidatePositionId(String(mentorPositionId || ""));
+    }
+    await refreshAssignmentState();
+    if (!slotError && mentorPositionId) window.setTimeout(() => document.getElementById(`assignment-position-${mentorPositionId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
+    setMentorSlotSaving("");
   }
   function nextOpenPositionAfter(positionId: string) {
     if (!game) return undefined;
@@ -8698,6 +8729,11 @@ export default function AssignmentsManagerV2({
                     </span>
                   </div>
                   <div className="selectedGameUtilities">
+                    {canManage && !mentorSlots.some((slot) => slot.game_id === game.id) && (
+                      <button type="button" className="primary" disabled={mentorSlotSaving === game.id} onClick={() => void addMentorSlot()}>
+                        {mentorSlotSaving === game.id ? "Adding Mentor…" : "Add Mentor"}
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="assignmentActivityLink"

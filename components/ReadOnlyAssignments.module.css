@@ -33,3 +33,7 @@
     grid-template-columns: 1fr;
   }
 }
+.gameCard { position: relative; padding-top: 3.25rem; }
+.selfAssign { position: absolute; top: .85rem; right: 1rem; border: 0; border-bottom: 2px dashed #2563eb; border-radius: 0; background: transparent; color: #2563eb; font-size: .875rem; font-weight: 700; padding: .2rem .1rem .35rem; cursor: pointer; }
+.selfAssign:hover { color: #1d4ed8; border-bottom-color: #1d4ed8; }
+.selfAssign:disabled { cursor: wait; opacity: .6; }
