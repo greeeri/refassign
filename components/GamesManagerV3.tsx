@@ -843,13 +843,15 @@ export default function GamesManagerV3({
       setRows(validated);
       if (!validated.length)
         throw new Error("The spreadsheet does not contain any game rows.");
-      if (!validated.some((row) => !row.valid)) {
-        const databaseValidated = validated.map((row) => ({ ...row }));
+      const databaseValidated = validated.map((row) => ({ ...row }));
+      if (databaseValidated.some((row) => row.valid)) {
         for (let attempt = 0; attempt < databaseValidated.length; attempt++) {
+          const rowsToValidate = databaseValidated.filter((row) => row.valid);
+          if (!rowsToValidate.length) break;
           const { error: validationError } = await sb.rpc(
             "validate_game_import",
             {
-              p_rows: importPayload(databaseValidated, mergedLocations),
+              p_rows: importPayload(rowsToValidate, mergedLocations),
             },
           );
           if (!validationError) break;
@@ -867,10 +869,11 @@ export default function GamesManagerV3({
           failedRow.changes = failedRow.issue;
         }
         setRows(databaseValidated);
-        if (!databaseValidated.some((row) => !row.valid)) {
+        const readyCount = databaseValidated.filter((row) => row.valid).length;
+        if (readyCount) {
           setImportValidated(true);
           setMessage(
-            `Validation passed for all ${databaseValidated.length} spreadsheet rows. Review the preview and approve it before applying any changes.`,
+            `Validation finished for the complete spreadsheet. ${readyCount} row${readyCount === 1 ? " is" : "s are"} ready${readyCount === databaseValidated.length ? "" : `; ${databaseValidated.length - readyCount} unresolved row${databaseValidated.length - readyCount === 1 ? " will" : "s will"} be excluded`}. Review the preview and approve it before applying any changes.`,
           );
         }
       }
