@@ -9,7 +9,11 @@ import {
 import { createClient } from "../lib/supabase/client";
 import { announceUndoAvailable } from "./UndoCenter";
 import SelfAssignOverrideRequests from "./SelfAssignOverrideRequests";
-import { formatEventDate, formatEventTime } from "../lib/event-time";
+import {
+  eventTimeParts,
+  formatEventDate,
+  formatEventTime,
+} from "../lib/event-time";
 type Team = { id: string; name: string };
 type Game = {
   id: string;
@@ -151,6 +155,8 @@ type SavedAssignmentView = {
   name: string;
   range: Range;
   customDate: string;
+  dayFilter?: string;
+  timeFilter?: string;
   locationFilter: string;
   officialFilter: string;
   leagueFilter?: string;
@@ -313,6 +319,8 @@ export default function AssignmentsManagerV2({
     [completenessFilter, setCompletenessFilter] = useState<Completeness>("all"),
     [officialFilter, setOfficialFilter] = useState(""),
     [locationFilter, setLocationFilter] = useState(""),
+    [dayFilter, setDayFilter] = useState(""),
+    [timeFilter, setTimeFilter] = useState(""),
     [leagueFilter, setLeagueFilter] = useState(""),
     [levelFilter, setLevelFilter] = useState(""),
     [error, setError] = useState(""),
@@ -892,6 +900,19 @@ export default function AssignmentsManagerV2({
   function matchesLocationFilter(g: Game) {
     return !locationFilter || g.location_id === locationFilter;
   }
+  function matchesDayFilter(g: Game) {
+    return (
+      !dayFilter ||
+      eventTimeParts(g.starts_at, g.location).date === dayFilter
+    );
+  }
+  function matchesTimeFilter(g: Game) {
+    return (
+      !timeFilter ||
+      (!g.time_tbd &&
+        eventTimeParts(g.starts_at, g.location).time === timeFilter)
+    );
+  }
   function matchesLeagueFilter(g: Game) {
     return !leagueFilter || g.league_id === leagueFilter;
   }
@@ -917,7 +938,12 @@ export default function AssignmentsManagerV2({
       );
   }
   const hasDirectGameFilter = Boolean(
-    locationFilter || officialFilter || leagueFilter || levelFilter,
+    locationFilter ||
+      dayFilter ||
+      timeFilter ||
+      officialFilter ||
+      leagueFilter ||
+      levelFilter,
   );
   const rangeGames = games.filter((g) => inRange(g, range, customDate));
   const baseFilteredGames = games.filter((g) => {
@@ -926,6 +952,8 @@ export default function AssignmentsManagerV2({
     if (hasDirectGameFilter)
       return (
         matchesLocationFilter(g) &&
+        matchesDayFilter(g) &&
+        matchesTimeFilter(g) &&
         matchesOfficialFilter(g) &&
         matchesLeagueFilter(g) &&
         matchesLevelFilter(g) &&
@@ -1557,6 +1585,8 @@ export default function AssignmentsManagerV2({
     setCompletenessFilter("all");
     setOfficialFilter("");
     setLocationFilter("");
+    setDayFilter("");
+    setTimeFilter("");
     setLeagueFilter("");
     setLevelFilter("");
     setSelected("");
@@ -1582,6 +1612,8 @@ export default function AssignmentsManagerV2({
     const filters = {
       range,
       customDate,
+      dayFilter,
+      timeFilter,
       locationFilter,
       officialFilter,
       leagueFilter,
@@ -1610,6 +1642,8 @@ export default function AssignmentsManagerV2({
   function applySavedView(view: SavedAssignmentView) {
     setRange(view.range);
     setCustomDate(view.customDate);
+    setDayFilter(view.dayFilter || "");
+    setTimeFilter(view.timeFilter || "");
     setLocationFilter(view.locationFilter);
     setOfficialFilter(view.officialFilter);
     setLeagueFilter(view.leagueFilter || "");
@@ -7447,6 +7481,79 @@ export default function AssignmentsManagerV2({
                   .map(([id, name]) => (
                     <option key={id} value={id}>
                       {name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label className="assignmentToolbarField">
+              <span>Day</span>
+              <select
+                aria-label="Show games on day"
+                value={dayFilter}
+                onChange={(event) => {
+                  setDayFilter(event.target.value);
+                  setLinkSelected([]);
+                  setSelected("");
+                }}
+              >
+                <option value="">All Days</option>
+                {Array.from(
+                  new Set(
+                    games.map(
+                      (listedGame) =>
+                        eventTimeParts(
+                          listedGame.starts_at,
+                          listedGame.location,
+                        ).date,
+                    ),
+                  ),
+                )
+                  .sort()
+                  .map((date) => (
+                    <option key={date} value={date}>
+                      {new Intl.DateTimeFormat("en-US", {
+                        weekday: "short",
+                        month: "short",
+                        day: "numeric",
+                        timeZone: "UTC",
+                      }).format(new Date(`${date}T12:00:00Z`))}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label className="assignmentToolbarField">
+              <span>Time</span>
+              <select
+                aria-label="Show games at time"
+                value={timeFilter}
+                onChange={(event) => {
+                  setTimeFilter(event.target.value);
+                  setLinkSelected([]);
+                  setSelected("");
+                }}
+              >
+                <option value="">All Times</option>
+                {Array.from(
+                  new Set(
+                    games
+                      .filter((listedGame) => !listedGame.time_tbd)
+                      .map(
+                        (listedGame) =>
+                          eventTimeParts(
+                            listedGame.starts_at,
+                            listedGame.location,
+                          ).time,
+                      ),
+                  ),
+                )
+                  .sort()
+                  .map((time) => (
+                    <option key={time} value={time}>
+                      {new Intl.DateTimeFormat("en-US", {
+                        hour: "numeric",
+                        minute: "2-digit",
+                        timeZone: "UTC",
+                      }).format(new Date(`2000-01-01T${time}:00Z`))}
                     </option>
                   ))}
               </select>
