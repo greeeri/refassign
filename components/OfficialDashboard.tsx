@@ -6,6 +6,7 @@ import CrewChatButton from "./CrewChatButton";
 import CalendarSync from "./CalendarSync";
 import VenueDetailsButton from "./VenueDetailsButton";
 import OfficialPaymentSetup from "./OfficialPaymentSetup";
+import TournamentRulesLink from "./TournamentRulesLink";
 type Assignment = {
   assignment_id: string;
   game_id: string;
@@ -322,6 +323,9 @@ export default function OfficialDashboard({
                   .join(", ")}
               </span>
             </div>
+          </div>
+          <div className="headerActions" style={{ marginTop: 12 }}>
+            <TournamentRulesLink leagueName={next.league_name} />
           </div>
           {next.status === "proposed" && !declining && (
             <div className="mobileResponseActions">

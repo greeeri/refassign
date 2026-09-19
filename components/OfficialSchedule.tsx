@@ -6,6 +6,7 @@ import CrewProfileLink from "./CrewProfileLink";
 import LocationContactLink from "./LocationContactLink";
 import CrewChatButton from "./CrewChatButton";
 import VenueDetailsButton from "./VenueDetailsButton";
+import TournamentRulesLink from "./TournamentRulesLink";
 import { crewPositionLabel, orderedCrew } from "../lib/crewDisplay";
 type Assignment = {
   assignment_id: string;
@@ -436,6 +437,7 @@ export default function OfficialSchedule({ organizationId,organizationIds,organi
                     )}
                     <div className="officialScheduleActions">
                     <VenueDetailsButton gameId={e.a.game_id} />
+                    <TournamentRulesLink leagueName={e.a.league_name} compact />
                     {aStatus(e.a) === "Needs Response" &&
                     new Date(e.a.starts_at).getTime() >= now ? (
                       <>
