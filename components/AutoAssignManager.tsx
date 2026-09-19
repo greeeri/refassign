@@ -143,13 +143,28 @@ export default function AutoAssignManager({
       same_team_days: sameTeamDays,
       active: true,
     };
-    const response = existing
+    let response = existing
       ? await supabase
           .from("auto_assign_rules")
           .update(payload)
           .eq("id", existing.id)
           .eq("organization_id", organizationId)
       : await supabase.from("auto_assign_rules").insert(payload);
+
+    // The initial rules request can still be loading when Save is clicked. If
+    // another copy of this scoped rule already exists, update that row instead
+    // of surfacing the unique-index error to the assignor.
+    if (!existing && response.error?.code === "23505") {
+      let retry = supabase
+        .from("auto_assign_rules")
+        .update(payload)
+        .eq("organization_id", organizationId)
+        .eq("position_id", positionId);
+      retry = levelId
+        ? retry.eq("level_id", levelId)
+        : retry.is("level_id", null);
+      response = await retry;
+    }
     if (response.error) setError(response.error.message);
     else setNotice("Auto Assign rule saved.");
     await load();
