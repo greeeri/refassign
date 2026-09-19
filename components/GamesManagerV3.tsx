@@ -3,6 +3,7 @@ import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import { createClient } from "../lib/supabase/client";
 import { announceUndoAvailable } from "./UndoCenter";
 import { resolveImportTeam } from "../lib/game-import-team";
+import { eventLocalToIso, eventTimeParts, formatEventDate, formatEventTime } from "../lib/event-time";
 type Named = { id: string; name: string };
 type BillTo = Named;
 type Sport = Named & { default_officials: number };
@@ -321,6 +322,12 @@ export default function GamesManagerV3({
     [validationBusy, setValidationBusy] = useState(false),
     [range, setRange] = useState<Range>("all"),
     [leagueFilter, setLeagueFilter] = useState("all"),
+    [levelFilter, setLevelFilter] = useState("all"),
+    [venueFilter, setVenueFilter] = useState("all"),
+    [dateFrom, setDateFrom] = useState(""),
+    [dateTo, setDateTo] = useState(""),
+    [timeFrom, setTimeFrom] = useState(""),
+    [timeTo, setTimeTo] = useState(""),
     [customDate, setCustomDate] = useState(""),
     [showCalendar, setShowCalendar] = useState(false),
     [showArchived, setShowArchived] = useState(false),
@@ -439,7 +446,14 @@ export default function GamesManagerV3({
     setStatusBusy("");
   }
   async function manageGames(action: "archive" | "restore" | "delete", ids: string[]) {
-    if (!ids.length || !organizationId) return;
+    if (!ids.length) {
+      setError("Select at least one game first.");
+      return;
+    }
+    if (!organizationId) {
+      setError("Select an organization before managing games.");
+      return;
+    }
     if (
       action === "delete" &&
       !window.confirm(
@@ -469,14 +483,22 @@ export default function GamesManagerV3({
   const leagueGames = games.filter(
     (game) => leagueFilter === "all" || game.league_id === leagueFilter,
   );
-  const filteredGames = leagueGames.filter((game) =>
-    inRange(game, range, customDate),
-  );
+  const filteredGames = leagueGames.filter((game) => {
+    if (!inRange(game, range, customDate)) return false;
+    if (levelFilter !== "all" && game.level_id !== levelFilter) return false;
+    if (venueFilter !== "all" && game.location_id !== venueFilter) return false;
+    const { date: localDate, time: localTime } = eventTimeParts(game.starts_at, game.location);
+    if (dateFrom && localDate < dateFrom) return false;
+    if (dateTo && localDate > dateTo) return false;
+    if (!game.time_tbd && timeFrom && localTime < timeFrom) return false;
+    if (!game.time_tbd && timeTo && localTime > timeTo) return false;
+    return true;
+  });
   const eligible = teams.filter(
     (t) => t.sport_id === form.sport_id && t.level_id === form.level_id,
   );
   function edit(g: Game) {
-    const d = new Date(g.starts_at);
+    const eventTime = eventTimeParts(g.starts_at, g.location);
     setEditing(g.id);
     setForm({
       game_number: g.game_number,
@@ -487,8 +509,8 @@ export default function GamesManagerV3({
       away_team_id: g.away_team_id || "",
       location_id: g.location_id || "",
       bill_to_id: g.bill_to_id || "",
-      date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
-      time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+      date: eventTime.date,
+      time: eventTime.time,
       time_tbd: g.time_tbd,
       field_tbd: g.field_tbd,
       duration_minutes: g.duration_minutes || 110,
@@ -518,7 +540,7 @@ export default function GamesManagerV3({
         away_team_id: form.away_team_id,
         location_id: form.location_id,
         bill_to_id: form.bill_to_id || null,
-        starts_at: new Date(`${form.date}T${form.time_tbd ? "00:00" : form.time}:00`).toISOString(),
+        starts_at: eventLocalToIso(form.date, form.time_tbd ? "00:00" : form.time, locations.find((location) => location.id === form.location_id)),
         time_tbd: form.time_tbd,
         field_tbd: form.field_tbd,
         duration_minutes: +form.duration_minutes || 110,
@@ -562,8 +584,7 @@ export default function GamesManagerV3({
   }
   async function exportGames() {
     const XLSX = await import("xlsx");
-    const data = games.map((g) => {
-      const d = new Date(g.starts_at);
+    const data = filteredGames.map((g) => {
       return {
         "Game Number": g.game_number,
         Sport: g.sports?.name || "",
@@ -571,11 +592,8 @@ export default function GamesManagerV3({
         Level: g.levels?.name || "",
         Home_Team: g.home?.name || "",
         Away_Team: g.away?.name || "",
-        Date: d.toLocaleDateString("en-US"),
-        Time: g.time_tbd ? "TBD" : d.toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-        }),
+        Date: formatEventDate(g.starts_at, g.location),
+        Time: g.time_tbd ? "TBD" : formatEventTime(g.starts_at, g.location),
         Location: g.field_tbd ? "Field TBD" : g.location?.name || "",
         Duration_Minutes: g.duration_minutes || 110,
         Officials_Needed: g.officials_needed,
@@ -587,7 +605,7 @@ export default function GamesManagerV3({
     const ws = XLSX.utils.json_to_sheet(data),
       wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Games");
-    XLSX.writeFile(wb, "refassign-games.xlsx");
+    XLSX.writeFile(wb, "refassign-filtered-games.xlsx");
   }
   function validate(raw: unknown[][], availableLocations = locations) {
     const h = raw[0].map((x) => norm(String(x)).replace(/\s+/g, "_"));
@@ -738,9 +756,9 @@ export default function GamesManagerV3({
         row.changes = "New game will be added";
         continue;
       }
-      const currentDate = new Date(existing.starts_at),
-        currentDateValue = `${currentDate.getFullYear()}-${pad(currentDate.getMonth() + 1)}-${pad(currentDate.getDate())}`,
-        currentTimeValue = `${pad(currentDate.getHours())}:${pad(currentDate.getMinutes())}`,
+      const currentEventTime = eventTimeParts(existing.starts_at, existing.location),
+        currentDateValue = currentEventTime.date,
+        currentTimeValue = currentEventTime.time,
         changes: string[] = [],
         compare = (
           label: string,
@@ -901,7 +919,7 @@ export default function GamesManagerV3({
         away_team_id: away?.id || null,
         location_id: loc?.id || null,
         bill_to_id: billTo?.id || null,
-        starts_at: new Date(`${r.date}T${r.time}:00`).toISOString(),
+        starts_at: eventLocalToIso(r.date, r.time, loc),
         time_tbd: false,
         field_tbd: false,
         duration_minutes: r.duration_minutes,
@@ -1015,8 +1033,8 @@ export default function GamesManagerV3({
           </p>
         </div>
         <div className="headerActions">
-          <button className="secondary" onClick={() => void exportGames()}>
-            Export Games
+          <button className="secondary" disabled={!filteredGames.length} onClick={() => void exportGames()}>
+            Export Shown Games
           </button>
           <button
             className="secondary"
@@ -1086,6 +1104,20 @@ export default function GamesManagerV3({
             ))}
           </select>
         </label>
+        <label className="gameLeagueFilter">
+          <span>Level</span>
+          <select value={levelFilter} onChange={(event) => { setLevelFilter(event.target.value); setSelectedGames([]); }}>
+            <option value="all">All Levels</option>
+            {levels.map((level) => <option key={level.id} value={level.id}>{level.name}</option>)}
+          </select>
+        </label>
+        <label className="gameLeagueFilter">
+          <span>Venue</span>
+          <select value={venueFilter} onChange={(event) => { setVenueFilter(event.target.value); setSelectedGames([]); }}>
+            <option value="all">All Venues</option>
+            {locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
+          </select>
+        </label>
         {filters.map(([key, label]) => (
           <button
             key={key}
@@ -1132,6 +1164,13 @@ export default function GamesManagerV3({
             {new Date(`${customDate}T00:00:00`).toLocaleDateString()} (
             {filteredGames.length})
           </span>
+        )}
+        <label className="gameLeagueFilter"><span>From date</span><input type="date" value={dateFrom} onChange={(event) => { setDateFrom(event.target.value); setSelectedGames([]); }} /></label>
+        <label className="gameLeagueFilter"><span>Through date</span><input type="date" value={dateTo} min={dateFrom || undefined} onChange={(event) => { setDateTo(event.target.value); setSelectedGames([]); }} /></label>
+        <label className="gameLeagueFilter"><span>From time</span><input type="time" value={timeFrom} onChange={(event) => { setTimeFrom(event.target.value); setSelectedGames([]); }} /></label>
+        <label className="gameLeagueFilter"><span>Through time</span><input type="time" value={timeTo} onChange={(event) => { setTimeTo(event.target.value); setSelectedGames([]); }} /></label>
+        {(levelFilter !== "all" || venueFilter !== "all" || dateFrom || dateTo || timeFrom || timeTo) && (
+          <button type="button" className="secondary" onClick={() => { setLevelFilter("all"); setVenueFilter("all"); setDateFrom(""); setDateTo(""); setTimeFrom(""); setTimeTo(""); setSelectedGames([]); }}>Clear detailed filters</button>
         )}
       </div>
       {selectedGames.length > 0 && (
@@ -1681,7 +1720,6 @@ export default function GamesManagerV3({
           </thead>
           <tbody>
             {filteredGames.map((g) => {
-              const d = new Date(g.starts_at);
               const row = statusColors(g.status);
               const rainOut = g.status === "rained_out";
               return (
@@ -1706,12 +1744,9 @@ export default function GamesManagerV3({
                     <b>{g.game_number}</b>
                   </td>
                   <td>
-                    {d.toLocaleDateString()}
+                    {formatEventDate(g.starts_at, g.location)}
                     <small style={{ color: rainOut ? "#dbeafe" : undefined }}>
-                      {g.time_tbd ? "Time TBD" : d.toLocaleTimeString([], {
-                        hour: "numeric",
-                        minute: "2-digit",
-                      })}
+                      {g.time_tbd ? "Time TBD" : formatEventTime(g.starts_at, g.location)}
                     </small>
                   </td>
                   <td>

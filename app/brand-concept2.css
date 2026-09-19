@@ -4,6 +4,7 @@
 /* Keep customer support immediately above the sidebar footer divider. */
 .refAssignBranded .asideSupportNav{margin-top:auto}
 .refAssignBranded .asideSupportNav+.asideFoot{margin-top:0}
+.refAssignBranded .signOutButton{width:100%;min-height:44px;border:2px solid #8bdcff!important;background:#fff!important;color:#06335b!important;font-size:14px;font-weight:900;text-align:center;box-shadow:0 4px 12px #001a3540}.refAssignBranded .signOutButton:hover,.refAssignBranded .signOutButton:focus-visible{background:#dff4ff!important;border-color:#fff!important;color:#031c38!important;outline:3px solid #62d531;outline-offset:2px}
 
 /* Keep the signed-in identity and switch-account controls usable on tablets. */
 @media (min-width:761px) and (max-width:900px){

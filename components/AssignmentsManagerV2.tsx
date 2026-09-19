@@ -9,6 +9,7 @@ import {
 import { createClient } from "../lib/supabase/client";
 import { announceUndoAvailable } from "./UndoCenter";
 import SelfAssignOverrideRequests from "./SelfAssignOverrideRequests";
+import { formatEventDate, formatEventTime } from "../lib/event-time";
 type Team = { id: string; name: string };
 type Game = {
   id: string;
@@ -3520,6 +3521,50 @@ export default function AssignmentsManagerV2({
       wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Assignments");
     XLSX.writeFile(wb, "refassign-game-assignments.xlsx");
+  }
+  function checkInRows(gameIds: string[]) {
+    const selectedAssignments = assignments.filter((assignment) =>
+      gameIds.includes(assignment.game_id) && assignment.status !== "declined",
+    );
+    const byOfficial = new Map<string, { name: string; email: string; phone: string; games: string[] }>();
+    for (const assignment of selectedAssignments) {
+      const official = officials.find((item) => item.id === assignment.official_id);
+      const listedGame = games.find((item) => item.id === assignment.game_id);
+      const position = positions.find((item) => item.id === assignment.position_id);
+      if (!official || !listedGame) continue;
+      const row = byOfficial.get(official.id) || {
+        name: `${official.first_name} ${official.last_name}`.trim(),
+        email: official.email || "",
+        phone: official.phone || "",
+        games: [],
+      };
+      row.games.push(`#${listedGame.game_number} · ${formatEventDate(listedGame.starts_at, listedGame.location)} ${formatEventTime(listedGame.starts_at, listedGame.location)} · ${position?.name || "Official"} · ${listedGame.location?.name || "Venue TBD"}`);
+      byOfficial.set(official.id, row);
+    }
+    return [...byOfficial.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }
+  async function downloadCheckInSheet(gameIds: string[]) {
+    const XLSX = await import("xlsx");
+    const data = checkInRows(gameIds).map((row) => ({
+      "Checked In": "",
+      Official: row.name,
+      Email: row.email,
+      Phone: row.phone,
+      Assignments: row.games.join(" | "),
+      Notes: "",
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(data), workbook = XLSX.utils.book_new();
+    worksheet["!cols"] = [{ wch: 12 }, { wch: 28 }, { wch: 30 }, { wch: 18 }, { wch: 80 }, { wch: 28 }];
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Official Check-In");
+    XLSX.writeFile(workbook, "refassign-event-check-in.xlsx");
+  }
+  function printCheckInSheet(gameIds: string[]) {
+    const rows = checkInRows(gameIds);
+    const escape = (value: string) => value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character] || character);
+    const printWindow = window.open("", "_blank", "noopener,noreferrer");
+    if (!printWindow) return setError("Allow pop-ups to open the printable check-in sheet.");
+    printWindow.document.write(`<!doctype html><html><head><title>Event Official Check-In</title><style>body{font-family:Arial,sans-serif;margin:24px;color:#172033}h1{font-size:22px;margin:0 0 6px}p{margin:0 0 18px;color:#475569}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid #94a3b8;padding:8px;text-align:left;vertical-align:top}th{background:#eaf2ff}.check{width:52px;height:28px}.notes{width:150px}@page{size:landscape;margin:.45in}</style></head><body><h1>Event Official Check-In</h1><p>${gameIds.length} selected game${gameIds.length === 1 ? "" : "s"} · ${rows.length} assigned official${rows.length === 1 ? "" : "s"}</p><table><thead><tr><th>Checked In</th><th>Official</th><th>Contact</th><th>Assignments</th><th>Notes</th></tr></thead><tbody>${rows.map((row) => `<tr><td class="check">☐</td><td><b>${escape(row.name)}</b></td><td>${escape(row.email)}<br>${escape(row.phone)}</td><td>${row.games.map(escape).join("<br>")}</td><td class="notes"></td></tr>`).join("")}</tbody></table><script>window.onload=()=>window.print()<\/script></body></html>`);
+    printWindow.document.close();
   }
   async function runBulkAction(
     action: "publish" | "confirm" | "unassign" | "status" | "closeSelfAssign",
@@ -7647,6 +7692,12 @@ export default function AssignmentsManagerV2({
                     onClick={() => void exportAssignments(linkSelected)}
                   >
                     Export Selected
+                  </button>
+                  <button className="secondary" disabled={bulkWorking} onClick={() => void downloadCheckInSheet(linkSelected)}>
+                    Download Check-In Sheet
+                  </button>
+                  <button className="secondary" disabled={bulkWorking} onClick={() => printCheckInSheet(linkSelected)}>
+                    Print Check-In Sheet
                   </button>
                 </div>
               </details>
