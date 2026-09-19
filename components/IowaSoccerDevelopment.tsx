@@ -59,6 +59,9 @@ const developmentLevels = [
   { key: "u12_ar", label: "U12 AR", short: "U12", icon: "4" },
   { key: "u13_referee", label: "U13 Referee", short: "U13", icon: "5" },
 ];
+const specialPathways = [
+  { key: "tournament_ar", label: "Tournament AR", icon: "⚑" },
+];
 const categoryIcon = (c: string) =>
   c.includes("Law")
     ? "▣"
@@ -560,6 +563,40 @@ export default function IowaSoccerDevelopment({
           })}
         </div>
       </section>
+      <section className="trainingSection">
+        <div className="trainingSectionHead">
+          <div>
+            <h3>⚑ &nbsp; Tournament Pathways</h3>
+            <p>Focused training for officials working tournament assignments.</p>
+          </div>
+        </div>
+        <div className="developmentLevelSections">
+          {specialPathways.map((pathway) => {
+            const pathwayModules = modules.filter(
+              (module) => module.level_key === pathway.key,
+            );
+            const completedCount = pathwayModules.filter(
+              (module) => progress[module.id]?.status === "completed",
+            ).length;
+            const done = pathwayModules.length > 0 && completedCount === pathwayModules.length;
+            return (
+              <section className="developmentLevel unlocked" key={pathway.key}>
+                <div className="developmentLevelHead">
+                  <div><span>PATHWAY</span><h4>{pathway.label}</h4></div>
+                  <span className={`levelPill ${done ? "complete" : "current"}`}>
+                    {done ? "✓ Complete" : `${completedCount} of ${pathwayModules.length} completed`}
+                  </span>
+                </div>
+                <div className="trainingGrid">
+                  {pathwayModules.length
+                    ? pathwayModules.map((module) => moduleCard(module))
+                    : <p className="emptyLevel">Modules will appear here when assigned by Iowa Soccer.</p>}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      </section>
       {recommended.length > 0 && (
         <section className="trainingSection">
           <h3>◎ &nbsp; Recommended for You</h3>
@@ -611,7 +648,7 @@ export default function IowaSoccerDevelopment({
           <div className="trainingGrid" style={{ marginTop: 14 }}>
             {filtered.map((module) => {
               const levelIndex = developmentLevels.findIndex((level) => level.key === module.level_key);
-              return moduleCard(module, !levelUnlocked(levelIndex));
+              return moduleCard(module, levelIndex >= 0 && !levelUnlocked(levelIndex));
             })}
           </div>
         ) : null}

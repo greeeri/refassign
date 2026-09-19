@@ -56,6 +56,7 @@ const developmentLevels = [
   { key: "u11_ar", label: "U11 AR" },
   { key: "u12_ar", label: "U12 AR" },
   { key: "u13_referee", label: "U13 Referee" },
+  { key: "tournament_ar", label: "Tournament AR", pathway: true },
 ];
 const localInput = (value: string | null) =>
   value
@@ -628,7 +629,7 @@ export default function IowaSoccerDevelopmentAdmin() {
                 onClick={() => setActiveLevel(level.key)}
                 key={level.key}
               >
-                <span>{index + 1}</span>
+                <span>{level.pathway ? "T" : index + 1}</span>
                 <b>{level.label}</b>
                 <small>
                   {levelModules.length} module
@@ -642,7 +643,7 @@ export default function IowaSoccerDevelopmentAdmin() {
           <div className="coursePathPreview">
             {developmentLevels.map((level, index) => (
               <div key={level.key}>
-                <span>{index + 1}</span>
+                <span>{level.pathway ? "T" : index + 1}</span>
                 <b>{level.label}</b>
                 <small>
                   {modules
@@ -662,10 +663,14 @@ export default function IowaSoccerDevelopmentAdmin() {
           <div className="courseLaneHead">
             <div>
               <span>
-                LEVEL{" "}
-                {developmentLevels.findIndex(
-                  (level) => level.key === activeLevel,
-                ) + 1}
+                {developmentLevels.find((level) => level.key === activeLevel)
+                  ?.pathway
+                  ? "PATHWAY"
+                  : `LEVEL ${
+                      developmentLevels.findIndex(
+                        (level) => level.key === activeLevel,
+                      ) + 1
+                    }`}
               </span>
               <h3>
                 {
