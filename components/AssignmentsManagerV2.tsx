@@ -3460,24 +3460,18 @@ export default function AssignmentsManagerV2({
     const exportGames = gameIds?.length
       ? filteredGames.filter((listedGame) => gameIds.includes(listedGame.id))
       : filteredGames;
-    const data = exportGames.flatMap((g) => {
-      const d = new Date(g.starts_at);
-      return positions
+    const positionNames: string[] = [];
+    for (const g of exportGames) {
+      for (const position of positions
         .filter((p) => p.sport_id === g.sport_id)
         .sort((a, b) => a.sort_order - b.sort_order)
-        .slice(0, Math.max(0, g.officials_needed))
-        .map((pos) => {
-          const assignment = assignments.find(
-              (item) =>
-                item.game_id === g.id &&
-                item.position_id === pos.id &&
-                assignmentOccupiesPosition(item.status),
-            ),
-            official = assignment
-              ? officials.find((item) => item.id === assignment.official_id)
-              : undefined;
-          return {
-          "Assignment ID": assignment?.id || "",
+        .slice(0, Math.max(0, g.officials_needed))) {
+        if (!positionNames.includes(position.name)) positionNames.push(position.name);
+      }
+    }
+    const data = exportGames.map((g) => {
+      const d = new Date(g.starts_at);
+      const row: Record<string, string | number> = {
           "Game ID": g.id,
           "Game Number": g.game_number,
           Date: d.toLocaleDateString(),
@@ -3491,35 +3485,60 @@ export default function AssignmentsManagerV2({
           "Away Team": g.away?.name || "TBD",
           Location: g.location?.name || "TBD",
           Power: Number(gamePower(g).toFixed(1)),
-          Position: pos.name,
-          Official: official
+      };
+      for (const name of positionNames) {
+        row[`${name} Assignment ID`] = "";
+        row[`${name} Official`] = "";
+        row[`${name} Email`] = "";
+        row[`${name} Phone`] = "";
+        row[`${name} Status`] = "";
+        row[`${name} Published`] = "";
+        row[`${name} Accept By`] = "";
+        row[`${name} Game Fee`] = "";
+        row[`${name} Payment Status`] = "";
+        row[`${name} Payroll Ready`] = "";
+      }
+      const gamePositions = positions
+        .filter((position) => position.sport_id === g.sport_id)
+        .sort((a, b) => a.sort_order - b.sort_order)
+        .slice(0, Math.max(0, g.officials_needed));
+      for (const position of gamePositions) {
+        const assignment = assignments.find(
+            (item) =>
+              item.game_id === g.id &&
+              item.position_id === position.id &&
+              assignmentOccupiesPosition(item.status),
+          ),
+          official = assignment
+            ? officials.find((item) => item.id === assignment.official_id)
+            : undefined,
+          name = position.name;
+        row[`${name} Assignment ID`] = assignment?.id || "";
+        row[`${name} Official`] = official
             ? `${official.first_name} ${official.last_name}`.trim()
-            : "UNASSIGNED",
-          Email: official?.email || "",
-          Phone: official?.phone || "",
-          "Assignment Status": assignment
+            : "UNASSIGNED";
+        row[`${name} Email`] = official?.email || "";
+        row[`${name} Phone`] = official?.phone || "";
+        row[`${name} Status`] = assignment
             ? assignmentStatus(assignment).label
-            : "Unassigned",
-          Published: assignment?.published_at ? "Yes" : "No",
-          "Accept By": assignment?.accept_by
+            : "Unassigned";
+        row[`${name} Published`] = assignment?.published_at ? "Yes" : "No";
+        row[`${name} Accept By`] = assignment?.accept_by
             ? new Date(assignment.accept_by).toLocaleString()
-            : "",
-          "Game Fee": assignment ? Number(assignment.game_fee || 0) : "",
-          "Payment Status": assignment?.payment_status || "",
-          "Payroll Ready": assignment && ["accepted", "confirmed"].includes(assignment.status)
+            : "";
+        row[`${name} Game Fee`] = assignment ? Number(assignment.game_fee || 0) : "";
+        row[`${name} Payment Status`] = assignment?.payment_status || "";
+        row[`${name} Payroll Ready`] = assignment && ["accepted", "confirmed"].includes(assignment.status)
             ? "Yes"
-            : "No",
-        };
-        });
+            : "No";
+      }
+      return row;
     });
     const ws = XLSX.utils.json_to_sheet(data),
       wb = XLSX.utils.book_new();
-    ws["!cols"] = [
-      { wch: 38 }, { wch: 38 }, { wch: 16 }, { wch: 12 }, { wch: 12 },
-      { wch: 16 }, { wch: 22 }, { wch: 26 }, { wch: 26 }, { wch: 24 },
-      { wch: 10 }, { wch: 14 }, { wch: 28 }, { wch: 30 }, { wch: 18 },
-      { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 14 },
-    ];
+    ws["!cols"] = Object.keys(data[0] || {}).map((header) => ({
+      wch: header.includes("ID") ? 38 : header.includes("Official") || header.includes("Email") ? 28 : header.includes("Accept By") ? 22 : 16,
+    }));
     XLSX.utils.book_append_sheet(wb, ws, "Assignments");
     XLSX.writeFile(wb, "refassign-game-assignments.xlsx");
   }
@@ -3543,20 +3562,27 @@ export default function AssignmentsManagerV2({
             value,
           ]),
         );
-        const assignmentId = String(normalized.assignment_id || "").trim();
-        const rawFee = normalized.game_fee;
-        if (!assignmentId && (rawFee === "" || rawFee == null)) return [];
-        if (!assignmentId)
-          throw new Error(`Spreadsheet row ${index + 2}: Game Fee can only be uploaded for an assigned position.`);
-        const gameFee = Number(rawFee);
-        if (!Number.isFinite(gameFee) || gameFee < 0)
-          throw new Error(`Spreadsheet row ${index + 2}: Game Fee must be zero or greater.`);
-        return [{
-          spreadsheetRow: index + 2,
-          assignmentId,
-          gameId: String(normalized.game_id || "").trim(),
-          gameFee,
-        }];
+        const gameId = String(normalized.game_id || "").trim();
+        const feeRows: Array<{ spreadsheetRow: number; assignmentId: string; gameId: string; gameFee: number }> = [];
+        const prefixes = Object.keys(normalized)
+          .filter((key) => key.endsWith("_assignment_id"))
+          .map((key) => key.slice(0, -"_assignment_id".length));
+        for (const prefix of prefixes) {
+          const position = prefix
+            .split("_")
+            .map((word) => word ? word[0].toUpperCase() + word.slice(1) : "")
+            .join(" ");
+          const assignmentId = String(normalized[`${prefix}_assignment_id`] || "").trim();
+          const rawFee = normalized[`${prefix}_game_fee`];
+          if (!assignmentId && (rawFee === "" || rawFee == null)) continue;
+          if (!assignmentId)
+            throw new Error(`Spreadsheet row ${index + 2}: ${position} Game Fee can only be uploaded when that position is assigned.`);
+          const gameFee = Number(rawFee);
+          if (!Number.isFinite(gameFee) || gameFee < 0)
+            throw new Error(`Spreadsheet row ${index + 2}: ${position} Game Fee must be zero or greater.`);
+          feeRows.push({ spreadsheetRow: index + 2, assignmentId, gameId, gameFee });
+        }
+        return feeRows;
       });
       if (!rows.length)
         throw new Error("No assigned positions with game fees were found in the spreadsheet.");
