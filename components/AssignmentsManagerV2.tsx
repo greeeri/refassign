@@ -81,6 +81,8 @@ type Assignment = {
   cancellation_notified_at: string | null;
   cancellation_email_error: string | null;
   cancellation_email_id: string | null;
+  game_fee: number;
+  payment_status: "unpaid" | "approved" | "paid" | "void";
 };
 type Rank = { official_id: string; rank: number };
 type PositionRank = {
@@ -285,6 +287,7 @@ export default function AssignmentsManagerV2({
 }) {
   const supabase = useMemo(() => createClient(), []);
   const handledReportFocus = useRef("");
+  const assignmentFeeImportInput = useRef<HTMLInputElement>(null);
   const handledListReturnRequest = useRef(returnToListRequest);
   const [inlineAssignmentHost, setInlineAssignmentHost] =
     useState<HTMLDivElement | null>(null);
@@ -469,7 +472,7 @@ export default function AssignmentsManagerV2({
         supabase
           .from("assignments")
           .select(
-            "id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at,assignment_source,email_sent_at,email_error,resend_email_id,cancellation_notified_at,cancellation_email_error,cancellation_email_id",
+            "id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at,assignment_source,email_sent_at,email_error,resend_email_id,cancellation_notified_at,cancellation_email_error,cancellation_email_id,game_fee,payment_status",
           ),
         supabase.from("my_assignment_rankings").select("official_id,rank"),
         supabase
@@ -697,7 +700,7 @@ export default function AssignmentsManagerV2({
         supabase
           .from("assignments")
           .select(
-            "id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at,assignment_source,email_sent_at,email_error,resend_email_id,cancellation_notified_at,cancellation_email_error,cancellation_email_id",
+            "id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at,assignment_source,email_sent_at,email_error,resend_email_id,cancellation_notified_at,cancellation_email_error,cancellation_email_id,game_fee,payment_status",
           ),
         supabase
           .from("assignment_self_assign_slots")
@@ -3457,18 +3460,25 @@ export default function AssignmentsManagerV2({
     const exportGames = gameIds?.length
       ? filteredGames.filter((listedGame) => gameIds.includes(listedGame.id))
       : filteredGames;
-    const positionNames: string[] = [];
-    for (const g of exportGames) {
-      const gp = positions
+    const data = exportGames.flatMap((g) => {
+      const d = new Date(g.starts_at);
+      return positions
         .filter((p) => p.sport_id === g.sport_id)
         .sort((a, b) => a.sort_order - b.sort_order)
-        .slice(0, Math.max(0, g.officials_needed));
-      for (const pos of gp)
-        if (!positionNames.includes(pos.name)) positionNames.push(pos.name);
-    }
-    const data = exportGames.map((g) => {
-      const d = new Date(g.starts_at),
-        row: Record<string, string | number> = {
+        .slice(0, Math.max(0, g.officials_needed))
+        .map((pos) => {
+          const assignment = assignments.find(
+              (item) =>
+                item.game_id === g.id &&
+                item.position_id === pos.id &&
+                assignmentOccupiesPosition(item.status),
+            ),
+            official = assignment
+              ? officials.find((item) => item.id === assignment.official_id)
+              : undefined;
+          return {
+          "Assignment ID": assignment?.id || "",
+          "Game ID": g.id,
           "Game Number": g.game_number,
           Date: d.toLocaleDateString(),
           Time: d.toLocaleTimeString([], {
@@ -3481,46 +3491,94 @@ export default function AssignmentsManagerV2({
           "Away Team": g.away?.name || "TBD",
           Location: g.location?.name || "TBD",
           Power: Number(gamePower(g).toFixed(1)),
+          Position: pos.name,
+          Official: official
+            ? `${official.first_name} ${official.last_name}`.trim()
+            : "UNASSIGNED",
+          Email: official?.email || "",
+          Phone: official?.phone || "",
+          "Assignment Status": assignment
+            ? assignmentStatus(assignment).label
+            : "Unassigned",
+          Published: assignment?.published_at ? "Yes" : "No",
+          "Accept By": assignment?.accept_by
+            ? new Date(assignment.accept_by).toLocaleString()
+            : "",
+          "Game Fee": assignment ? Number(assignment.game_fee || 0) : "",
+          "Payment Status": assignment?.payment_status || "",
+          "Payroll Ready": assignment && ["accepted", "confirmed"].includes(assignment.status)
+            ? "Yes"
+            : "No",
         };
-      for (const name of positionNames) {
-        row[`${name} Official`] = "";
-        row[`${name} Email`] = "";
-        row[`${name} Phone`] = "";
-        row[`${name} Status`] = "";
-        row[`${name} Published`] = "";
-        row[`${name} Accept By`] = "";
-      }
-      const gp = positions
-        .filter((p) => p.sport_id === g.sport_id)
-        .sort((a, b) => a.sort_order - b.sort_order)
-        .slice(0, Math.max(0, g.officials_needed));
-      for (const pos of gp) {
-        const a = assignments.find(
-            (x) =>
-              x.game_id === g.id &&
-              x.position_id === pos.id &&
-              x.status !== "declined",
-          ),
-          o = a ? officials.find((x) => x.id === a.official_id) : undefined;
-        row[`${pos.name} Official`] = o
-          ? `${o.first_name} ${o.last_name}`
-          : "UNASSIGNED";
-        row[`${pos.name} Email`] = o?.email || "";
-        row[`${pos.name} Phone`] = o?.phone || "";
-        row[`${pos.name} Status`] = a
-          ? assignmentStatus(a).label
-          : "Unassigned";
-        row[`${pos.name} Published`] = a?.published_at ? "Yes" : "No";
-        row[`${pos.name} Accept By`] = a?.accept_by
-          ? new Date(a.accept_by).toLocaleString()
-          : "";
-      }
-      return row;
+        });
     });
     const ws = XLSX.utils.json_to_sheet(data),
       wb = XLSX.utils.book_new();
+    ws["!cols"] = [
+      { wch: 38 }, { wch: 38 }, { wch: 16 }, { wch: 12 }, { wch: 12 },
+      { wch: 16 }, { wch: 22 }, { wch: 26 }, { wch: 26 }, { wch: 24 },
+      { wch: 10 }, { wch: 14 }, { wch: 28 }, { wch: 30 }, { wch: 18 },
+      { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 14 },
+    ];
     XLSX.utils.book_append_sheet(wb, ws, "Assignments");
     XLSX.writeFile(wb, "refassign-game-assignments.xlsx");
+  }
+  async function importAssignmentFees(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !organizationId) return;
+    setError("");
+    setNotice("");
+    try {
+      const XLSX = await import("xlsx");
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      const records = XLSX.utils.sheet_to_json<Record<string, unknown>>(
+        workbook.Sheets[workbook.SheetNames[0]],
+        { defval: "" },
+      );
+      const rows = records.flatMap((record, index) => {
+        const normalized = Object.fromEntries(
+          Object.entries(record).map(([key, value]) => [
+            key.toLowerCase().replace(/[^a-z0-9]+/g, "_"),
+            value,
+          ]),
+        );
+        const assignmentId = String(normalized.assignment_id || "").trim();
+        const rawFee = normalized.game_fee;
+        if (!assignmentId && (rawFee === "" || rawFee == null)) return [];
+        if (!assignmentId)
+          throw new Error(`Spreadsheet row ${index + 2}: Game Fee can only be uploaded for an assigned position.`);
+        const gameFee = Number(rawFee);
+        if (!Number.isFinite(gameFee) || gameFee < 0)
+          throw new Error(`Spreadsheet row ${index + 2}: Game Fee must be zero or greater.`);
+        return [{
+          spreadsheetRow: index + 2,
+          assignmentId,
+          gameId: String(normalized.game_id || "").trim(),
+          gameFee,
+        }];
+      });
+      if (!rows.length)
+        throw new Error("No assigned positions with game fees were found in the spreadsheet.");
+      const duplicate = rows.find((row, index) => rows.findIndex((other) => other.assignmentId === row.assignmentId) !== index);
+      if (duplicate)
+        throw new Error(`Spreadsheet row ${duplicate.spreadsheetRow}: this assignment appears more than once.`);
+      if (!window.confirm(`Upload game fees for ${rows.length} assigned position${rows.length === 1 ? "" : "s"}? The amounts will appear in Payroll as soon as each assignment is accepted or confirmed.`)) return;
+      setSaving("assignment-fee-import");
+      const response = await fetch(`/api/assignments/import-fees?organizationId=${encodeURIComponent(organizationId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows }),
+      });
+      const result = (await response.json().catch(() => ({}))) as { updated?: number; error?: string };
+      if (!response.ok) throw new Error(result.error || "Assignment fees could not be imported.");
+      setNotice(`${result.updated || rows.length} assignment fee${(result.updated || rows.length) === 1 ? " was" : "s were"} uploaded and sent to Payroll.`);
+      await refreshAssignmentState();
+    } catch (importError) {
+      setError(importError instanceof Error ? importError.message : "Assignment fees could not be imported.");
+    } finally {
+      setSaving("");
+    }
   }
   function checkInRows(gameIds: string[]) {
     const selectedAssignments = assignments.filter((assignment) =>
@@ -4372,6 +4430,13 @@ export default function AssignmentsManagerV2({
   }
   return (
     <>
+      <input
+        ref={assignmentFeeImportInput}
+        hidden
+        type="file"
+        accept=".xlsx,.xls,.csv"
+        onChange={importAssignmentFees}
+      />
       {canManage && organizationId && (
         <SelfAssignOverrideRequests organizationId={organizationId} />
       )}
@@ -5511,7 +5576,14 @@ export default function AssignmentsManagerV2({
                       disabled={!filteredGames.length}
                       onClick={() => void exportAssignments()}
                     >
-                      Export
+                      Export Assignments
+                    </button>
+                    <button
+                      type="button"
+                      disabled={saving === "assignment-fee-import"}
+                      onClick={() => assignmentFeeImportInput.current?.click()}
+                    >
+                      {saving === "assignment-fee-import" ? "Uploading Fees…" : "Upload Game Fees"}
                     </button>
                     <button
                       type="button"
@@ -5569,7 +5641,14 @@ export default function AssignmentsManagerV2({
                 disabled={!filteredGames.length}
                 onClick={() => void exportAssignments()}
               >
-                Export
+                Export Assignments
+              </button>
+              <button
+                type="button"
+                disabled={saving === "assignment-fee-import"}
+                onClick={() => assignmentFeeImportInput.current?.click()}
+              >
+                {saving === "assignment-fee-import" ? "Uploading Fees…" : "Upload Game Fees"}
               </button>
               <button
                 type="button"
