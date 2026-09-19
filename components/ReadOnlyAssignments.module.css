@@ -37,3 +37,25 @@
 .selfAssign { position: absolute; top: .85rem; right: 1rem; border: 0; border-bottom: 2px dashed #2563eb; border-radius: 0; background: transparent; color: #2563eb; font-size: .875rem; font-weight: 700; padding: .2rem .1rem .35rem; cursor: pointer; }
 .selfAssign:hover { color: #1d4ed8; border-bottom-color: #1d4ed8; }
 .selfAssign:disabled { cursor: wait; opacity: .6; }
+
+@media (max-width: 700px) {
+  .gameCard.gameCard {
+    position: relative;
+    padding-top: 4rem;
+  }
+
+  .selfAssign.selfAssign {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    top: .75rem;
+    right: .75rem;
+    z-index: 2;
+    min-height: 40px;
+    padding: .45rem .25rem .35rem;
+    font-size: 1rem;
+    line-height: 1.1;
+    white-space: nowrap;
+    visibility: visible;
+  }
+}
