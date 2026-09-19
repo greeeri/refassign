@@ -3481,6 +3481,7 @@ export default function AssignmentsManagerV2({
           }),
           Sport: g.sports?.name || "",
           League: g.leagues?.name || "",
+          Level: g.levels?.name || "",
           "Home Team": g.home?.name || "TBD",
           "Away Team": g.away?.name || "TBD",
           Location: g.location?.name || "TBD",
