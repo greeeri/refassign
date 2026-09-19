@@ -6676,7 +6676,8 @@ export default function AssignmentsManagerV2({
               </div>
             </div>
           )}
-          {showPublishReview && game && !game.time_tbd && (
+          {showPublishReview && game && !game.time_tbd && inlineAssignmentHost &&
+            createPortal(
             <div
               className="assignmentDialogBackdrop"
               role="presentation"
@@ -6790,7 +6791,8 @@ export default function AssignmentsManagerV2({
                   </button>
                 </div>
               </div>
-            </div>
+            </div>,
+            document.body,
           )}
           {showActivityTimeline && game && (
             <div
@@ -7409,6 +7411,36 @@ export default function AssignmentsManagerV2({
                 <option value="custom">Choose a Date</option>
               </select>
             </label>
+            <label className="assignmentToolbarField">
+              <span>Field</span>
+              <select
+                aria-label="Show games on field"
+                value={locationFilter}
+                onChange={(event) => {
+                  setLocationFilter(event.target.value);
+                  setLinkSelected([]);
+                  setSelected("");
+                }}
+              >
+                <option value="">All Fields</option>
+                {Array.from(
+                  new Map(
+                    games
+                      .filter((listedGame) => listedGame.location)
+                      .map((listedGame) => [
+                        listedGame.location!.id,
+                        listedGame.location!.name,
+                      ]),
+                  ).entries(),
+                )
+                  .sort((a, b) => a[1].localeCompare(b[1]))
+                  .map(([id, name]) => (
+                    <option key={id} value={id}>
+                      {name}
+                    </option>
+                  ))}
+              </select>
+            </label>
             {canManage && (
               <label className="assignmentToolbarField assignmentSavedViewField">
                 <span>Saved View</span>
@@ -7450,36 +7482,6 @@ export default function AssignmentsManagerV2({
                 <summary>More Filters</summary>
                 <div className="assignmentDirectFilters">
                   <span className="assignmentFilterLabel">Filters</span>
-                  <label>
-                    Location
-                    <select
-                      aria-label="Show games at location"
-                      value={locationFilter}
-                      onChange={(event) => {
-                        setLocationFilter(event.target.value);
-                        setLinkSelected([]);
-                        setSelected("");
-                      }}
-                    >
-                      <option value="">All Locations</option>
-                      {Array.from(
-                        new Map(
-                          games
-                            .filter((listedGame) => listedGame.location)
-                            .map((listedGame) => [
-                              listedGame.location!.id,
-                              listedGame.location!.name,
-                            ]),
-                        ).entries(),
-                      )
-                        .sort((a, b) => a[1].localeCompare(b[1]))
-                        .map(([id, name]) => (
-                          <option key={id} value={id}>
-                            {name}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
                   <label>
                     League
                     <select
