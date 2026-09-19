@@ -2029,9 +2029,19 @@ export default function AssignmentsManagerV2({
     }, 0);
   }
   function sortOfficials<
-    T extends Official & { rank: number; distance: number | null },
+    T extends Official & {
+      rank: number;
+      distance: number | null;
+      reasons?: string[];
+    },
   >(items: T[], sort: typeof officialListSort) {
     return [...items].sort((a, b) => {
+      // Candidate lists may include officials who require an override. Keep all
+      // fully eligible officials first, then apply the selected sort within
+      // each eligibility group.
+      const eligibilityOrder =
+        (a.reasons?.length ? 1 : 0) - (b.reasons?.length ? 1 : 0);
+      if (eligibilityOrder !== 0) return eligibilityOrder;
       if (sort === "distance")
         return (a.distance ?? 9999) - (b.distance ?? 9999) || b.rank - a.rank;
       if (sort === "rank")
