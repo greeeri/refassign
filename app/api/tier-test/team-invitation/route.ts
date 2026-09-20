@@ -23,10 +23,9 @@ export async function POST(request: NextRequest) {
   let link: URL;
   try { link = new URL(actionLink); }
   catch { return NextResponse.json({ error: "The invitation link is invalid." }, { status: 400 }); }
-  const productionOrigin = productionUrl ? new URL(productionUrl).origin : "";
-  const linkUsesTestProject = link.origin === testUrl;
-  const linkUsesProductionProject = Boolean(productionOrigin && link.origin === productionOrigin);
-  if ((!linkUsesTestProject && !linkUsesProductionProject) || !link.pathname.startsWith("/auth/v1/verify")) {
+  const linkUsesTestProject = link.origin === "https://test.ref-assign.com";
+  const linkUsesProductionProject = link.origin === "https://ref-assign.com" || link.origin === "https://www.ref-assign.com";
+  if ((!linkUsesTestProject && !linkUsesProductionProject) || link.pathname !== "/login" || !link.searchParams.get("team_invite")) {
     return NextResponse.json({ error: "The invitation link is invalid." }, { status: 400 });
   }
   const supabaseUrl = linkUsesTestProject ? testUrl : productionUrl;
