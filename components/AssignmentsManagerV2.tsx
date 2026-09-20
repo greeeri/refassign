@@ -2378,6 +2378,40 @@ export default function AssignmentsManagerV2({
     if (!slotError && mentorPositionId) window.setTimeout(() => document.getElementById(`assignment-position-${mentorPositionId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
     setMentorSlotSaving("");
   }
+  async function removePosition(position: Position) {
+    if (!game || !canManage) return;
+    const current = assignments.find(
+      (assignment) =>
+        assignment.game_id === game.id &&
+        assignment.position_id === position.id &&
+        assignment.status !== "declined",
+    );
+    const official = current
+      ? officials.find((item) => item.id === current.official_id)
+      : null;
+    const warning = current
+      ? `Remove ${shortPositionName(position.name)} and unassign ${official ? `${official.first_name} ${official.last_name}` : "the assigned official"}?`
+      : `Remove ${shortPositionName(position.name)} from this game?`;
+    if (!window.confirm(warning)) return;
+
+    setSaving(position.id);
+    setError("");
+    setNotice("");
+    const { error: removeError } = await supabase.rpc(
+      "remove_game_assignment_position",
+      { p_game_id: game.id, p_position_id: position.id },
+    );
+    if (removeError) setError(removeError.message);
+    else {
+      setNotice(`${shortPositionName(position.name)} removed from Game #${game.game_number}.`);
+      setCandidatePositionId("");
+      announceUndoAvailable(
+        `${shortPositionName(position.name)} removed from Game #${game.game_number}.`,
+      );
+    }
+    await load();
+    setSaving("");
+  }
   function nextOpenPositionAfter(positionId: string) {
     if (!game) return undefined;
     const currentIndex = gamePositions.findIndex(
@@ -4169,7 +4203,7 @@ export default function AssignmentsManagerV2({
         <div className="mobileInlineSummary">
           <span>
             <b>
-              {activeAssignmentCount}/{game.officials_needed}
+              {activeAssignmentCount}/{gamePositions.length}
             </b>{" "}
             Filled
           </span>
@@ -4257,7 +4291,7 @@ export default function AssignmentsManagerV2({
                   <span>
                     <b>{shortPositionName(pos.name)}</b>
                     <small>
-                      Position {index + 1} of {game.officials_needed}
+                      Position {index + 1} of {gamePositions.length}
                     </small>
                   </span>
                   {status ? (
@@ -4314,6 +4348,24 @@ export default function AssignmentsManagerV2({
                     })}
                   </div>
                 )}
+                {canManage &&
+                  (mentorSlots.some(
+                    (slot) =>
+                      slot.game_id === game.id && slot.position_id === pos.id,
+                  ) ||
+                    (game.officials_needed > 1 &&
+                      index === game.officials_needed - 1)) && (
+                    <div className="mobileInlineActions">
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={saving === pos.id}
+                        onClick={() => void removePosition(pos)}
+                      >
+                        {saving === pos.id ? "Removing…" : "Remove Position"}
+                      </button>
+                    </div>
+                  )}
                 {current && canManage && (
                   <div className="mobileInlineActions">
                     <button
@@ -8798,7 +8850,7 @@ export default function AssignmentsManagerV2({
                     {game.duration_minutes || 110} min • {game.sports?.name} •{" "}
                     {game.leagues?.name || "No league"} •{" "}
                     {game.location?.name || "TBD"} •{" "}
-                    <b>{game.officials_needed} assignment slots</b>
+                    <b>{gamePositions.length} assignment slots</b>
                   </p>
                   <div
                     className="selectedGameSummary"
@@ -8806,7 +8858,7 @@ export default function AssignmentsManagerV2({
                   >
                     <span>
                       <b>
-                        {activeAssignmentCount}/{game.officials_needed}
+                        {activeAssignmentCount}/{gamePositions.length}
                       </b>{" "}
                       Filled
                     </span>
@@ -9042,9 +9094,34 @@ export default function AssignmentsManagerV2({
                                       <b>{shortPositionName(pos.name)}</b>
                                       <small>
                                         Slot {index + 1} of{" "}
-                                        {game.officials_needed}
+                                        {gamePositions.length}
                                       </small>
                                     </div>
+                                    {canManage &&
+                                      (mentorSlots.some(
+                                        (slot) =>
+                                          slot.game_id === game.id &&
+                                          slot.position_id === pos.id,
+                                      ) ||
+                                        (game.officials_needed > 1 &&
+                                          index ===
+                                            game.officials_needed - 1)) && (
+                                        <button
+                                          type="button"
+                                          className="secondary"
+                                          style={{
+                                            padding: "5px 8px",
+                                            fontSize: 11,
+                                            color: "#b91c1c",
+                                          }}
+                                          disabled={saving === pos.id}
+                                          onClick={() => void removePosition(pos)}
+                                        >
+                                          {saving === pos.id
+                                            ? "Removing…"
+                                            : "Remove Position"}
+                                        </button>
+                                      )}
                                   </div>
                                 </td>
                                 <td>
