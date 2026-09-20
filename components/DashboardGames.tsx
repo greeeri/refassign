@@ -24,6 +24,7 @@ type Assignment = {
   officials: { first_name: string; last_name: string } | null;
   sport_positions: { name: string } | null;
 };
+type Decline = { id: string; game_id: string };
 type ImportError = {
   id: number;
   error_message: string;
@@ -66,6 +67,7 @@ export default function DashboardGames({
   const supabase = useMemo(() => createClient(), []),
     [games, setGames] = useState<Game[]>([]),
     [assignments, setAssignments] = useState<Assignment[]>([]),
+    [declineRows, setDeclineRows] = useState<Decline[]>([]),
     [importErrors, setImportErrors] = useState<ImportError[]>([]),
     [officials, setOfficials] = useState<Official[]>([]),
     [audit, setAudit] = useState<Audit[]>([]),
@@ -94,6 +96,23 @@ export default function DashboardGames({
           from += pageSize;
         }
       }
+      async function loadAllDeclines() {
+        const pageSize = 1000,
+          rows: Decline[] = [];
+        let from = 0;
+        while (true) {
+          const page = await supabase
+            .from("assignment_declines")
+            .select("id,game_id")
+            .order("id")
+            .range(from, from + pageSize - 1);
+          if (page.error) return { data: rows, error: page.error };
+          const next = (page.data || []) as Decline[];
+          rows.push(...next);
+          if (next.length < pageSize) return { data: rows, error: null };
+          from += pageSize;
+        }
+      }
       const gameQuery = supabase
           .from("games")
           .select(
@@ -111,11 +130,12 @@ export default function DashboardGames({
           .select("id,action,summary,occurred_at,actor_name,organization_id")
           .order("occurred_at", { ascending: false })
           .limit(8);
-      const [g, a, i, oo, h] = await Promise.all([
+      const [g, a, d, i, oo, h] = await Promise.all([
         organizationId
           ? gameQuery.eq("organization_id", organizationId)
           : gameQuery,
         loadAllAssignments(),
+        loadAllDeclines(),
         organizationId
           ? importQuery.eq("organization_id", organizationId)
           : importQuery,
@@ -133,7 +153,8 @@ export default function DashboardGames({
           ? auditQuery.eq("organization_id", organizationId)
           : auditQuery,
       ]);
-      const firstError = g.error || a.error || i.error || oo.error || h.error;
+      const firstError =
+        g.error || a.error || d.error || i.error || oo.error || h.error;
       if (firstError) setError(firstError.message);
       else {
         const nextGames = (g.data || []) as unknown as Game[],
@@ -143,6 +164,9 @@ export default function DashboardGames({
           ((a.data || []) as unknown as Assignment[]).filter((assignment) =>
             gameIds.has(assignment.game_id),
           ),
+        );
+        setDeclineRows(
+          (d.data || []).filter((decline) => gameIds.has(decline.game_id)),
         );
         setImportErrors((i.data || []) as ImportError[]);
         setOfficials(
@@ -181,10 +205,10 @@ export default function DashboardGames({
         !["accepted", "confirmed", "declined", "cancelled"].includes(a.status)
       );
     }),
-    declined = assignments.filter((a) => {
-      const g = map.get(a.game_id);
+    declined = declineRows.filter((decline) => {
+      const g = map.get(decline.game_id);
       return (
-        g && new Date(g.starts_at).getTime() >= now && a.status === "declined"
+        g && new Date(g.starts_at).getTime() >= now
       );
     }),
     hold = future.filter((g) => g.status === "suspended"),

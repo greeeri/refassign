@@ -35,6 +35,14 @@ type Assignment = {
   officials: { id: string; first_name: string; last_name: string } | null;
   sport_positions: Named;
 };
+type Decline = {
+  id: string;
+  game_id: string;
+  official_id: string;
+  position_id: string;
+  declined_at: string;
+  decline_reason: string | null;
+};
 type Audit = {
   game_id: string | null;
   action: string;
@@ -74,6 +82,7 @@ const pct = (filled: number, slots: number) =>
 export default function OrganizationOperationsReport({ organizationId, onOpenAction }: { organizationId?: string; onOpenAction?: (target: ReportActionTarget) => void }) {
   const [games, setGames] = useState<Game[]>([]),
     [assignments, setAssignments] = useState<Assignment[]>([]),
+    [declines, setDeclines] = useState<Decline[]>([]),
     [audit, setAudit] = useState<Audit[]>([]),
     [reportingAccess, setReportingAccess] = useState<"standard" | "premium">(
       "standard",
@@ -114,6 +123,7 @@ export default function OrganizationOperationsReport({ organizationId, onOpenAct
           );
         setGames(result.games || []);
         setAssignments(result.assignments || []);
+        setDeclines(result.declines || []);
         setAudit(result.audit || []);
         setReportingAccess(
           result.reportingAccess === "premium" ? "premium" : "standard",
@@ -146,11 +156,18 @@ export default function OrganizationOperationsReport({ organizationId, onOpenAct
       );
     return rows;
   }, [audit]);
+  const declinesByGame = useMemo(() => {
+    const rows = new Map<string, Decline[]>();
+    declines.forEach((item) =>
+      rows.set(item.game_id, [...(rows.get(item.game_id) || []), item]),
+    );
+    return rows;
+  }, [declines]);
   const gameState = (game: Game) => {
     const rows = assignmentsByGame.get(game.id) || [],
       active = rows.filter(activeAssignment),
       confirmed = active.filter((item) => item.status === "confirmed"),
-      declined = rows.filter((item) => item.status === "declined"),
+      declined = declinesByGame.get(game.id) || [],
       financial = rows.filter(paidAssignment),
       fees = financial.reduce(
         (sum, item) => sum + Number(item.game_fee || 0),
@@ -326,7 +343,7 @@ export default function OrganizationOperationsReport({ organizationId, onOpenAct
     return [...rows.entries()].sort(
       (a, b) => b[1].games.size - a[1].games.size || a[0].localeCompare(b[0]),
     );
-  }, [visible, assignmentsByGame, changesByGame, dimension]);
+  }, [visible, assignmentsByGame, declinesByGame, changesByGame, dimension]);
 
   const filterLabel = () =>
     [
