@@ -3416,6 +3416,20 @@ export default function AssignmentsManagerV2({
     await refreshAssignmentState();
     setPublishing(false);
   }
+  function openPublishReview() {
+    if (publishing) return;
+    if (game && unpublishedCount > 0) {
+      setShowPublishReview(true);
+      return;
+    }
+    const unpublishedGame = filteredGames.find(isUnpublishedGame);
+    if (!unpublishedGame) {
+      setError("There are no unpublished assignments in the current filtered list.");
+      return;
+    }
+    setSelected(unpublishedGame.id);
+    setShowPublishReview(true);
+  }
   async function broadcastAssignments() {
     if (!linkSelected.length || broadcasting) return;
     setBroadcasting(true);
@@ -5630,9 +5644,13 @@ export default function AssignmentsManagerV2({
                 </span>
               ) : (
                 <button
+                  type="button"
                   className="primary"
-                  disabled={!game || unpublishedCount === 0 || publishing}
-                  onClick={() => setShowPublishReview(true)}
+                  disabled={
+                    publishing ||
+                    (!unpublishedCount && !filteredGames.some(isUnpublishedGame))
+                  }
+                  onClick={openPublishReview}
                 >
                   {publishing
                     ? "Publishing & Sending…"
@@ -6751,7 +6769,7 @@ export default function AssignmentsManagerV2({
               </div>
             </div>
           )}
-          {showPublishReview && game && !game.time_tbd && inlineAssignmentHost &&
+          {showPublishReview && game && !game.time_tbd &&
             createPortal(
             <div
               className="assignmentDialogBackdrop"
