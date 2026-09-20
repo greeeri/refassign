@@ -2,6 +2,7 @@
 
 import {useEffect,useMemo,useState} from 'react'
 import {createClient} from '../lib/supabase/client'
+import {readAllForChunks,readAllPages} from '../lib/supabase/readAll'
 
 type RequestRow={id:string;block_id:string|null;official_id:string;status:'pending'|'approved'|'denied';request_note:string|null;requested_at:string;review_note:string|null;reviewed_at:string|null;block_type:string|null;block_start_date:string|null;block_end_date:string|null;block_starts_at:string|null;block_ends_at:string|null;block_notes:string|null}
 type Official={id:string;first_name:string;last_name:string}
@@ -13,13 +14,13 @@ export default function BlockRemovalRequests({organizationId}:{organizationId?:s
   async function load(){
     setError('')
     if(!organizationId){setRows([]);setOfficials([]);return}
-    const {data:links,error:linkError}=await supabase.from('organization_officials').select('official_id').eq('organization_id',organizationId).eq('active',true)
+    const {data:links,error:linkError}=await readAllPages<{official_id:string}>((from,to)=>supabase.from('organization_officials').select('official_id').eq('organization_id',organizationId).eq('active',true).order('official_id').range(from,to))
     if(linkError){setError(linkError.message);return}
     const officialIds=(links||[]).map(row=>row.official_id)
     if(!officialIds.length){setRows([]);setOfficials([]);return}
     const [r,o]=await Promise.all([
-      supabase.from('block_removal_requests').select('id,block_id,official_id,status,request_note,requested_at,review_note,reviewed_at,block_type,block_start_date,block_end_date,block_starts_at,block_ends_at,block_notes').in('official_id',officialIds).order('requested_at',{ascending:false}),
-      supabase.from('officials').select('id,first_name,last_name').in('id',officialIds)
+      readAllForChunks<RequestRow,string>(officialIds,(ids,from,to)=>supabase.from('block_removal_requests').select('id,block_id,official_id,status,request_note,requested_at,review_note,reviewed_at,block_type,block_start_date,block_end_date,block_starts_at,block_ends_at,block_notes').in('official_id',ids).order('requested_at',{ascending:false}).order('id').range(from,to)),
+      readAllForChunks<Official,string>(officialIds,(ids,from,to)=>supabase.from('officials').select('id,first_name,last_name').in('id',ids).order('id').range(from,to))
     ])
     if(r.error||o.error){setError((r.error||o.error)?.message||'Unable to load removal requests.');return}
     setRows((r.data||[]) as RequestRow[]);setOfficials((o.data||[]) as Official[])

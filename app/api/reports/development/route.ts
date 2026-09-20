@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "../../../../lib/supabase/admin";
 import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
 import { iowaEntryRulesAnswers } from "../../../../lib/server/iowaEntryRulesQuizAnswers";
+import { readAllForChunks, readAllPages } from "../../../../lib/supabase/readAll";
 
 const quizTopics: Record<string, string> = {
   q1: "Players & match time",
@@ -79,11 +80,12 @@ export async function GET(request: NextRequest) {
   let organizations: Array<{ id: string; name: string }> = [];
   if (organizationIds.length) {
     const [links, organizationRows] = await Promise.all([
-      service
+      readAllPages<{ organization_id: string; official_id: string }>((from, to) => service
         .from("organization_officials")
         .select("organization_id,official_id")
         .in("organization_id", organizationIds)
-        .eq("active", true),
+        .eq("active", true)
+        .order("organization_id").order("official_id").range(from, to)),
       service
         .from("organizations")
         .select("id,name")
@@ -104,12 +106,12 @@ export async function GET(request: NextRequest) {
   ];
   let officials: Array<Record<string, unknown>> = [];
   if (officialIds.length) {
-    const result = await service
+    const result = await readAllForChunks<Record<string, unknown>, string>(officialIds, (ids, from, to) => service
       .from("officials")
       .select("id,first_name,last_name,email,active,certification_level")
-      .in("id", officialIds)
+      .in("id", ids)
       .order("last_name")
-      .order("first_name");
+      .order("first_name").order("id").range(from, to));
     if (result.error)
       return NextResponse.json(
         { error: result.error.message },
@@ -149,10 +151,10 @@ export async function GET(request: NextRequest) {
   };
   if (!officialIds.length) return NextResponse.json(empty);
 
-  const programMembershipsResult = await service
+  const programMembershipsResult = await readAllForChunks<any, string>(officialIds, (ids, from, to) => service
     .from("registration_program_officials")
     .select("program_id,official_id,added_at")
-    .in("official_id", officialIds);
+    .in("official_id", ids).order("official_id").order("program_id").range(from, to));
   if (programMembershipsResult.error)
     return NextResponse.json(
       { error: programMembershipsResult.error.message },
@@ -179,57 +181,58 @@ export async function GET(request: NextRequest) {
     questions,
     assignments,
   ] = await Promise.all([
-    service
+    readAllPages<any>((from, to) => service
       .from("registration_programs")
       .select("id,name,slug,active")
       .in("id", programIds)
-      .order("name"),
-    service
+      .order("name").order("id").range(from, to)),
+    readAllPages<any>((from, to) => service
       .from("development_modules")
       .select(
         "id,program_id,title,category,required,active,content_type,sort_order,course_end_at",
       )
       .in("program_id", programIds)
       .eq("active", true)
-      .order("sort_order"),
-    service
+      .order("sort_order").order("id").range(from, to)),
+    readAllForChunks<any, string>(officialIds, (ids, from, to) => service
       .from("official_development_progress")
       .select("module_id,official_id,status,completed_at,updated_at")
-      .in("official_id", officialIds),
-    service
+      .in("official_id", ids).order("official_id").order("module_id").range(from, to)),
+    readAllForChunks<QuizAttempt, string>(officialIds, (ids, from, to) => service
       .from("development_quiz_attempts")
       .select(
         "id,module_id,official_id,answers,correct_count,total_questions,score_percent,passed,completed_at",
       )
-      .in("official_id", officialIds)
-      .order("completed_at", { ascending: false }),
-    service
+      .in("official_id", ids)
+      .order("completed_at", { ascending: false }).order("id").range(from, to)),
+    readAllForChunks<any, string>(officialIds, (ids, from, to) => service
       .from("development_mentor_requests")
       .select(
         "id,program_id,official_id,status,requested_at,responded_at,accepted_at,accepted_by_official_id",
       )
       .in("program_id", programIds)
-      .in("official_id", officialIds),
-    service
+      .in("official_id", ids).order("id").range(from, to)),
+    readAllForChunks<any, string>(officialIds, (ids, from, to) => service
       .from("official_development_notes")
       .select("id,program_id,official_id,created_at")
       .in("program_id", programIds)
-      .in("official_id", officialIds),
-    service
+      .in("official_id", ids).order("created_at").order("id").range(from, to)),
+    readAllForChunks<any, string>(officialIds, (ids, from, to) => service
       .from("development_questions")
       .select("id,program_id,official_id,status,asked_at,responded_at")
       .in("program_id", programIds)
-      .in("official_id", officialIds),
+      .in("official_id", ids).order("asked_at").order("id").range(from, to)),
     reportingAccess === "premium"
-      ? supabase
+      ? readAllForChunks<any, string>(officialIds, (ids, from, to) => supabase
           .from("assignments")
           .select(
             "id,official_id,status,assigned_at,games!inner(id,starts_at,organization_id,level_id,levels(name)),sport_positions(name)",
           )
-          .in("official_id", officialIds)
+          .in("official_id", ids)
           .eq("games.organization_id", organizationId)
           .in("status", ["accepted", "confirmed"])
           .lte("games.starts_at", new Date().toISOString())
+          .order("assigned_at").order("id").range(from, to))
       : Promise.resolve({ data: [], error: null }),
   ]);
   const error =

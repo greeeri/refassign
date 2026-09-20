@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../lib/supabase/client";
+import { readAllPages } from "../lib/supabase/readAll";
 type Assignment = {
   id: string;
   status: string;
@@ -71,7 +72,7 @@ export default function CommunicationCenter({
     setError("");
     const [role, a, c] = await Promise.all([
       supabase.rpc("current_user_roles"),
-      supabase
+      readAllPages<Assignment>((from, to) => supabase
         .from("assignments")
         .select(
           "id,status,game_id,official_id,published_at,officials(first_name,last_name,email,phone),sport_positions(name),games!inner(game_number,starts_at,status,organization_id,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name))",
@@ -79,7 +80,9 @@ export default function CommunicationCenter({
         .not("published_at", "is", null)
         .gte("games.starts_at", new Date().toISOString())
         .eq("games.organization_id", organizationId || "")
-        .order("starts_at", { referencedTable: "games", ascending: true }),
+        .order("starts_at", { referencedTable: "games", ascending: true })
+        .order("id")
+        .range(from, to)),
       supabase
         .from("official_communications")
         .select(

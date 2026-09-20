@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../lib/supabase/client";
+import { readAllForChunks, readAllPages } from "../lib/supabase/readAll";
 
 type Level = { id: string; name: string };
 type Position = {
@@ -242,23 +243,27 @@ export default function AutoAssignManager({
       const start = new Date(`${result.start_date}T00:00:00`),
         end = new Date(`${result.end_date}T00:00:00`);
       end.setDate(end.getDate() + 1);
-      const { data: games, error: gamesError } = await supabase
+      const { data: games, error: gamesError } = await readAllPages<{id:string}>((from, to) => supabase
         .from("games")
         .select("id")
         .eq("organization_id", organizationId)
         .gte("starts_at", start.toISOString())
-        .lt("starts_at", end.toISOString());
+        .lt("starts_at", end.toISOString())
+        .order("id")
+        .range(from, to));
       if (gamesError) throw gamesError;
       const gameIds = (games || []).map((g) => g.id);
       if (!gameIds.length) {
         setNotice("No games were found in this AutoAssign date range.");
         return;
       }
-      const { data: unpublished, error: assignmentError } = await supabase
+      const { data: unpublished, error: assignmentError } = await readAllForChunks<{game_id:string}, string>(gameIds, (ids, from, to) => supabase
         .from("assignments")
         .select("game_id")
-        .in("game_id", gameIds)
-        .is("published_at", null);
+        .in("game_id", ids)
+        .is("published_at", null)
+        .order("id")
+        .range(from, to));
       if (assignmentError) throw assignmentError;
       const publishGameIds = [
         ...new Set((unpublished || []).map((a) => a.game_id)),

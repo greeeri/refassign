@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { readAllForChunks, readAllPages } from "../supabase/readAll";
 
 const inactive = new Set(["canceled", "cancelled", "rained_out", "on_hold"]);
 const activeAssignment = (row: { status: string; official_id?: string | null }) =>
@@ -23,16 +24,16 @@ export async function getExecutiveSummary(service: SupabaseClient, organizationI
   const now = new Date(), in30 = new Date(now.getTime() + 30 * 86400000), since30 = new Date(now.getTime() - 30 * 86400000);
   const [{ data: organization }, gamesResult, linksResult] = await Promise.all([
     service.from("organizations").select("name").eq("id", organizationId).single(),
-    service.from("games").select("id,status,starts_at,officials_needed").eq("organization_id", organizationId).lte("starts_at", in30.toISOString()),
-    service.from("organization_officials").select("official_id").eq("organization_id", organizationId).eq("active", true),
+    readAllPages<any>((from, to) => service.from("games").select("id,status,starts_at,officials_needed").eq("organization_id", organizationId).lte("starts_at", in30.toISOString()).order("starts_at").order("id").range(from, to)),
+    readAllPages<any>((from, to) => service.from("organization_officials").select("official_id").eq("organization_id", organizationId).eq("active", true).order("official_id").range(from, to)),
   ]);
   if (gamesResult.error || linksResult.error) throw new Error(gamesResult.error?.message || linksResult.error?.message);
   const games = gamesResult.data || [], gameIds = games.map((game) => game.id), officialIds = (linksResult.data || []).map((row) => row.official_id);
   const [assignmentsResult, registrationsResult, membershipsResult, communicationsResult] = await Promise.all([
-    gameIds.length ? service.from("assignments").select("id,game_id,official_id,status,game_fee,mileage_miles,mileage_rate,payment_status,assigned_at").in("game_id", gameIds) : Promise.resolve({ data: [], error: null }),
-    officialIds.length ? service.from("official_registrations").select("official_id,status,payment_status,registration_year").in("official_id", officialIds).eq("registration_year", now.getFullYear()) : Promise.resolve({ data: [], error: null }),
-    officialIds.length ? service.from("registration_program_officials").select("official_id,program_id").in("official_id", officialIds) : Promise.resolve({ data: [], error: null }),
-    gameIds.length ? service.from("official_communications").select("delivery_status,created_at").in("game_id", gameIds).gte("created_at", since30.toISOString()) : Promise.resolve({ data: [], error: null }),
+    gameIds.length ? readAllForChunks<any, string>(gameIds, (ids, from, to) => service.from("assignments").select("id,game_id,official_id,status,game_fee,mileage_miles,mileage_rate,payment_status,assigned_at").in("game_id", ids).order("id").range(from, to)) : Promise.resolve({ data: [], error: null }),
+    officialIds.length ? readAllForChunks<any, string>(officialIds, (ids, from, to) => service.from("official_registrations").select("official_id,status,payment_status,registration_year").in("official_id", ids).eq("registration_year", now.getFullYear()).order("official_id").range(from, to)) : Promise.resolve({ data: [], error: null }),
+    officialIds.length ? readAllForChunks<any, string>(officialIds, (ids, from, to) => service.from("registration_program_officials").select("official_id,program_id").in("official_id", ids).order("official_id").order("program_id").range(from, to)) : Promise.resolve({ data: [], error: null }),
+    gameIds.length ? readAllForChunks<any, string>(gameIds, (ids, from, to) => service.from("official_communications").select("id,delivery_status,created_at").in("game_id", ids).gte("created_at", since30.toISOString()).order("created_at").order("id").range(from, to)) : Promise.resolve({ data: [], error: null }),
   ]);
   const firstError = assignmentsResult.error || registrationsResult.error || membershipsResult.error || communicationsResult.error;
   if (firstError) throw new Error(firstError.message);

@@ -8,6 +8,7 @@ import CrewChatButton from "./CrewChatButton";
 import VenueDetailsButton from "./VenueDetailsButton";
 import TournamentRulesLink from "./TournamentRulesLink";
 import { crewPositionLabel, orderedCrew } from "../lib/crewDisplay";
+import { readAllPages } from "../lib/supabase/readAll";
 type Assignment = {
   assignment_id: string;
   game_id: string;
@@ -132,16 +133,16 @@ export default function OfficialSchedule({ organizationId,organizationIds,organi
       return;
     }
     const [assignmentResults, b, locationLinks, t, observationResults] = await Promise.all([
-      Promise.all(scopeIds.map(async id=>({...await sb.rpc("my_official_assignments",{p_organization_id:id}),organizationId:id}))),
-      sb
+      Promise.all(scopeIds.map(async id=>({...await readAllPages<any>((from, to) => sb.rpc("my_official_assignments",{p_organization_id:id}).order("starts_at").order("assignment_id").range(from, to)),organizationId:id}))),
+      readAllPages<Block>((from, to) => sb
         .from("official_availability_blocks")
         .select(
           "id,block_type,start_date,end_date,starts_at,ends_at,location_id,team_id,notes,source_assignment_id",
         )
-        .eq("official_id", o.id),
-      sb.from("organization_locations").select("location_id,locations(id,name)").in("organization_id", scopeIds).eq("active", true),
-      sb.from("teams").select("id,name").in("organization_id", scopeIds),
-      Promise.all(scopeIds.map(async id=>({...await sb.rpc("list_my_mentor_observations",{p_organization_id:id}),organizationId:id}))),
+        .eq("official_id", o.id).order("id").range(from, to)),
+      readAllPages<any>((from, to) => sb.from("organization_locations").select("location_id,locations(id,name)").in("organization_id", scopeIds).eq("active", true).order("location_id").range(from, to)),
+      readAllPages<Choice>((from, to) => sb.from("teams").select("id,name").in("organization_id", scopeIds).order("id").range(from, to)),
+      Promise.all(scopeIds.map(async id=>({...await readAllPages<any>((from, to) => sb.rpc("list_my_mentor_observations",{p_organization_id:id}).order("starts_at").order("request_id").range(from, to)),organizationId:id}))),
     ]);
     const e = assignmentResults.find(result=>result.error)?.error || b.error || locationLinks.error || t.error || observationResults.find(result=>result.error)?.error;
     if (e) setError(e.message);

@@ -26,3 +26,22 @@ export async function readAllPages<T>(
     if (rows.length < pageSize) return { data, error: null };
   }
 }
+
+/** Read paged rows for bounded groups of filter values to avoid oversized URLs. */
+export async function readAllForChunks<T, V>(
+  values: V[],
+  readChunkPage: (values: V[], from: number, to: number) => PromiseLike<PageResult<T>>,
+  chunkSize = 200,
+  pageSize = 1000,
+): Promise<PageResult<T>> {
+  const data: T[] = [];
+  for (let index = 0; index < values.length; index += chunkSize) {
+    const result = await readAllPages<T>(
+      (from, to) => readChunkPage(values.slice(index, index + chunkSize), from, to),
+      pageSize,
+    );
+    if (result.error) return result;
+    data.push(...(result.data || []));
+  }
+  return { data, error: null };
+}

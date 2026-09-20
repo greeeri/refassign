@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "../../../../lib/supabase/admin";
 import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
-import { readAllPages } from "../../../../lib/supabase/readAll";
+import { readAllForChunks, readAllPages } from "../../../../lib/supabase/readAll";
 
 const one = (value: unknown) =>
   Array.isArray(value) ? value[0] || null : value;
@@ -63,6 +63,23 @@ export async function GET(request: NextRequest) {
       };
     },
   );
+  const { data: recordedDeclines, error: recordedDeclinesError } =
+    await readAllPages<Record<string, any>>((from, to) =>
+      service
+        .from("assignment_declines")
+        .select(
+          "id,game_id,official_id,position_id,declined_at,decline_reason,officials(id,first_name,last_name),sport_positions(id,name),games!inner(id,organization_id,game_number,status,starts_at,leagues(id,name),levels(name),location:locations(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name))",
+        )
+        .eq("games.organization_id", organizationId)
+        .order("declined_at", { ascending: false })
+        .order("id")
+        .range(from, to),
+    );
+  if (recordedDeclinesError)
+    return NextResponse.json(
+      { error: recordedDeclinesError.message },
+      { status: 400 },
+    );
   const { data: officialLinks, error: officialLinksError } =
     await readAllPages<{ official_id: string }>((from, to) =>
       service
@@ -78,15 +95,15 @@ export async function GET(request: NextRequest) {
       { error: officialLinksError.message },
       { status: 400 },
     );
-  const { data: officials, error: officialsError } = await readAllPages<
-    Record<string, any>
-  >((from, to) =>
+  const { data: officials, error: officialsError } = await readAllForChunks<
+    Record<string, any>, string
+  >((officialLinks || []).map((row) => row.official_id), (ids, from, to) =>
     service
       .from("officials")
       .select("id,first_name,last_name,active")
       .in(
         "id",
-        (officialLinks || []).map((row) => row.official_id),
+        ids,
       )
       .order("last_name")
       .order("first_name")
@@ -99,18 +116,23 @@ export async function GET(request: NextRequest) {
       { status: 400 },
     );
   const gameIds = [
-    ...new Set(assignments.map((row) => row.game_id).filter(Boolean)),
+    ...new Set(
+      [...assignments, ...(recordedDeclines || [])]
+        .map((row) => row.game_id)
+        .filter(Boolean),
+    ),
   ];
   let history: Array<Record<string, unknown>> = [];
   if (gameIds.length) {
-    const { data, error } = await readAllPages<Record<string, any>>(
-      (from, to) =>
+    const { data, error } = await readAllForChunks<Record<string, any>, string>(
+      gameIds,
+      (ids, from, to) =>
         supabase
           .from("audit_history")
           .select(
             "id,game_id,assignment_id,action,occurred_at,old_data,new_data",
           )
-          .in("game_id", gameIds)
+          .in("game_id", ids)
           .in("action", [
             "assigned",
             "assignment_changed",
@@ -126,40 +148,19 @@ export async function GET(request: NextRequest) {
   }
 
   const text = (value: unknown) => (typeof value === "string" ? value : null);
-  const historicalDeclines = history.flatMap((event) => {
-    const next =
-      event.new_data && typeof event.new_data === "object"
-        ? (event.new_data as Record<string, unknown>)
-        : {};
-    return next.status === "declined"
-      ? [
-          {
-            key: `history-${event.id}`,
-            assignment_id: text(event.assignment_id),
-            game_id: text(event.game_id),
-            position_id: text(next.position_id),
-            official_id: text(next.official_id),
-            declined_at: text(next.responded_at) || text(event.occurred_at),
-            decline_reason: text(next.decline_reason),
-          },
-        ]
-      : [];
-  });
-  const recordedIds = new Set(
-    historicalDeclines.map((row) => row.assignment_id).filter(Boolean),
-  );
-  const currentDeclines = assignments
-    .filter((row) => row.status === "declined" && !recordedIds.has(row.id))
-    .map((row) => ({
-      key: `current-${row.id}`,
-      assignment_id: row.id,
-      game_id: row.game_id,
-      position_id: row.position_id,
-      official_id: row.official_id,
-      declined_at: row.responded_at || row.assigned_at,
-      decline_reason: row.decline_reason,
-    }));
-  const declines = [...historicalDeclines, ...currentDeclines].map(
+  const durableDeclines = (recordedDeclines || []).map((row) => ({
+    key: `decline-${row.id}`,
+    assignment_id: null,
+    game_id: row.game_id,
+    position_id: row.position_id,
+    official_id: row.official_id,
+    declined_at: row.declined_at,
+    decline_reason: row.decline_reason,
+    games: one(row.games),
+    officials: one(row.officials),
+    sport_positions: one(row.sport_positions),
+  }));
+  const declines = durableDeclines.map(
     (decline) => {
       const replacementEvents = history.flatMap((event) => {
         if (
@@ -215,6 +216,6 @@ export async function GET(request: NextRequest) {
     officials: officials || [],
     assignments,
     declines,
-    historyAvailable: history.length > 0,
+    historyAvailable: durableDeclines.length > 0 || history.length > 0,
   });
 }

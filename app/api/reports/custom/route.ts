@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "../../../../lib/supabase/admin";
 import { createServerSupabaseClient } from "../../../../lib/supabase/server";
 import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
+import { readAllPages } from "../../../../lib/supabase/readAll";
 
 const nextSend = (frequency: "weekly" | "monthly", day: number) => {
   const now = new Date(),
@@ -66,20 +67,28 @@ export async function GET(request: NextRequest) {
             .in("id", organizationIds)
             .order("name")
         : Promise.resolve({ data: [], error: null }),
-      supabase
-        .from("games")
-        .select(
-          "id,organization_id,game_number,status,starts_at,officials_needed,leagues(id,name),levels(id,name),location:locations(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name)",
-        )
-        .in("organization_id", organizationIds)
-        .order("starts_at", { ascending: false }),
-      supabase
-        .from("assignments")
-        .select(
-          "id,game_id,official_id,status,game_fee,mileage_miles,mileage_rate,payment_status,officials(id,first_name,last_name),sport_positions(id,name),games!inner(organization_id)",
-        )
-        .in("games.organization_id", organizationIds)
-        .order("assigned_at", { ascending: false }),
+      readAllPages<Record<string, any>>((from, to) =>
+        supabase
+          .from("games")
+          .select(
+            "id,organization_id,game_number,status,starts_at,officials_needed,leagues(id,name),levels(id,name),location:locations(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name)",
+          )
+          .in("organization_id", organizationIds)
+          .order("starts_at", { ascending: false })
+          .order("id")
+          .range(from, to),
+      ),
+      readAllPages<Record<string, any>>((from, to) =>
+        supabase
+          .from("assignments")
+          .select(
+            "id,game_id,official_id,status,game_fee,mileage_miles,mileage_rate,payment_status,officials(id,first_name,last_name),sport_positions(id,name),games!inner(organization_id)",
+          )
+          .in("games.organization_id", organizationIds)
+          .order("assigned_at", { ascending: false })
+          .order("id")
+          .range(from, to),
+      ),
       organizationIds.length
         ? service
             .from("custom_report_templates")
