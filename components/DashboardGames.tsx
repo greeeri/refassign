@@ -75,6 +75,25 @@ export default function DashboardGames({
   useEffect(() => {
     async function load() {
       setLoading(true);
+      async function loadAllAssignments() {
+        const pageSize = 1000,
+          rows: Assignment[] = [];
+        let from = 0;
+        while (true) {
+          const page = await supabase
+            .from("assignments")
+            .select(
+              "id,game_id,official_id,status,published_at,officials(first_name,last_name),sport_positions(name)",
+            )
+            .order("id")
+            .range(from, from + pageSize - 1);
+          if (page.error) return { data: rows, error: page.error };
+          const next = (page.data || []) as unknown as Assignment[];
+          rows.push(...next);
+          if (next.length < pageSize) return { data: rows, error: null };
+          from += pageSize;
+        }
+      }
       const gameQuery = supabase
           .from("games")
           .select(
@@ -96,11 +115,7 @@ export default function DashboardGames({
         organizationId
           ? gameQuery.eq("organization_id", organizationId)
           : gameQuery,
-        supabase
-          .from("assignments")
-          .select(
-            "id,game_id,official_id,status,published_at,officials(first_name,last_name),sport_positions(name)",
-          ),
+        loadAllAssignments(),
         organizationId
           ? importQuery.eq("organization_id", organizationId)
           : importQuery,
