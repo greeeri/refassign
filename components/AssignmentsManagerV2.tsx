@@ -110,6 +110,10 @@ type Block = {
   location_id: string | null;
   team_id: string | null;
 };
+type CandidateScheduleConflict = {
+  target_game_id: string;
+  official_id: string;
+};
 type LinkGroup = {
   id: string;
   name: string;
@@ -311,6 +315,9 @@ export default function AssignmentsManagerV2({
     [leagueElig, setLeagueElig] = useState<EligL[]>([]),
     [levelElig, setLevelElig] = useState<EligV[]>([]),
     [blocks, setBlocks] = useState<Block[]>([]),
+    [candidateScheduleConflicts, setCandidateScheduleConflicts] = useState<
+      Set<string>
+    >(new Set()),
     [selected, setSelected] = useState(""),
     [range, setRange] = useState<Range>("all"),
     [customDate, setCustomDate] = useState(""),
@@ -437,6 +444,25 @@ export default function AssignmentsManagerV2({
       override?: boolean;
     } | null>(null),
     [bulkResult, setBulkResult] = useState<BulkActionResult | null>(null);
+  async function loadCandidateScheduleConflicts(targetGames: Game[]) {
+    if (!targetGames.length) {
+      setCandidateScheduleConflicts(new Set());
+      return null;
+    }
+    const { data, error: conflictError } = await supabase.rpc(
+      "get_assignment_candidate_conflicts",
+      { p_target_game_ids: targetGames.map((targetGame) => targetGame.id) },
+    );
+    if (conflictError) return conflictError;
+    setCandidateScheduleConflicts(
+      new Set(
+        ((data || []) as CandidateScheduleConflict[]).map(
+          (conflict) => `${conflict.target_game_id}:${conflict.official_id}`,
+        ),
+      ),
+    );
+    return null;
+  }
   async function load() {
     setError("");
     const { data: userData } = await supabase.auth.getUser();
@@ -605,6 +631,11 @@ export default function AssignmentsManagerV2({
     setOfficials(officialRows);
     setPositions((p.data || []) as Position[]);
     const scopedGames = (g.data || []) as unknown as Game[];
+    const candidateConflictError = await loadCandidateScheduleConflicts(scopedGames);
+    if (candidateConflictError) {
+      setError(candidateConflictError.message);
+      return;
+    }
     const scopedGameIds = new Set(scopedGames.map((game) => game.id));
     setAssignments(
       ((a.data || []) as Assignment[]).filter((assignment) =>
@@ -711,7 +742,7 @@ export default function AssignmentsManagerV2({
     void loadSavedViews();
   }, []);
   async function refreshAssignmentState() {
-    const [assignmentResult, selfAssignResult, mentorSlotResult, unassignmentResult] =
+    const [assignmentResult, selfAssignResult, mentorSlotResult, unassignmentResult, candidateConflictError] =
       await Promise.all([
         supabase
           .from("assignments")
@@ -727,12 +758,14 @@ export default function AssignmentsManagerV2({
           .from("audit_history")
           .select("game_id,old_data")
           .eq("action", "unassigned"),
+        loadCandidateScheduleConflicts(games),
       ]);
     const refreshError =
       assignmentResult.error ||
       selfAssignResult.error ||
       mentorSlotResult.error ||
-      unassignmentResult.error;
+      unassignmentResult.error ||
+      candidateConflictError;
     if (refreshError) {
       setError(refreshError.message);
       return false;
@@ -1744,6 +1777,12 @@ export default function AssignmentsManagerV2({
         );
       }
     }
+    if (
+      reasons.length === 0 &&
+      candidateScheduleConflicts.has(`${targetGame.id}:${o.id}`)
+    ) {
+      reasons.push("Already assigned during this game time");
+    }
     return reasons;
   }
   function conflictingAssignedGamesForGame(
@@ -1809,7 +1848,10 @@ export default function AssignmentsManagerV2({
     reasons.push(
       ...assignmentConflictReasonsForGame(o, targetGame, ignorePositionId),
     );
-    const day = targetGame.starts_at.slice(0, 10),
+    const day = eventTimeParts(
+        targetGame.starts_at,
+        targetGame.location,
+      ).date,
       gs = new Date(targetGame.starts_at).getTime(),
       ge = gs + (targetGame.duration_minutes || 110) * 60000;
     for (const b of blocks) {
@@ -2053,6 +2095,12 @@ export default function AssignmentsManagerV2({
             ),
         ),
       }))
+      .filter(
+        (candidate) =>
+          current?.official_id === candidate.id ||
+          !candidateScheduleConflicts.has(`${game.id}:${candidate.id}`) ||
+          candidate.conflictingGames.length > 0,
+      )
       .sort(
         (a, b) =>
           (a.reasons.length ? 1 : 0) - (b.reasons.length ? 1 : 0) ||
