@@ -9069,6 +9069,7 @@ export default function AssignmentsManagerV2({
                                 </td>
                                 <td>
                                   <div
+                                    className="assignmentPositionSummary"
                                     style={{
                                       display: "flex",
                                       alignItems: "center",

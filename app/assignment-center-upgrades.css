@@ -204,3 +204,36 @@ body.officialDragActive{cursor:grabbing}
   opacity: .5;
   cursor: not-allowed;
 }
+
+/* Keep position actions readable across narrow desktop and tablet layouts. */
+.assignmentPositionSummary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.assignmentPositionSummary > div {
+  min-width: max-content;
+}
+.assignmentPositionSummary button,
+.assignmentPositionSummary b,
+.assignmentPositionSummary small {
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+@media (min-width: 701px) {
+  .assignmentMain .tableWrap {
+    overflow-x: auto;
+  }
+  .assignmentMain table {
+    min-width: 900px !important;
+  }
+  .assignmentMain th:nth-child(1) { width: 8%; }
+  .assignmentMain th:nth-child(2) { width: 28%; }
+  .assignmentMain th:nth-child(3) { width: 28%; }
+  .assignmentMain th:nth-child(4) { width: 16%; }
+  .assignmentMain th:nth-child(5) { width: 20%; }
+  .assignmentPositionSummary {
+    flex-wrap: nowrap;
+  }
+}
