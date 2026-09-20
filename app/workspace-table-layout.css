@@ -19,6 +19,48 @@
   min-width: 780px;
 }
 
+/* Keep every assignment action visible inside the game card on tablet and
+   desktop. The assignment view already has a separate stacked mobile layout,
+   so the desktop table should compress and wrap instead of scrolling. */
+@media (min-width: 701px) {
+  .assignmentMain .assignmentPositionsScroll {
+    overflow-x: hidden;
+  }
+  .assignmentMain .assignmentPositionsTable {
+    width: 100% !important;
+    min-width: 0 !important;
+    table-layout: fixed;
+  }
+  .assignmentMain .assignmentPositionsTable th:nth-child(1) { width: 9%; }
+  .assignmentMain .assignmentPositionsTable th:nth-child(2) { width: 27%; }
+  .assignmentMain .assignmentPositionsTable th:nth-child(3) { width: 29%; }
+  .assignmentMain .assignmentPositionsTable th:nth-child(4) { width: 14%; }
+  .assignmentMain .assignmentPositionsTable th:nth-child(5) { width: 21%; }
+  .assignmentMain .assignmentPositionsTable th,
+  .assignmentMain .assignmentPositionsTable td {
+    min-width: 0;
+    padding-right: 10px;
+    padding-left: 10px;
+    overflow-wrap: anywhere;
+  }
+  .assignmentMain .assignmentPositionSummary {
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+  .assignmentMain .assignmentPositionSummary > div {
+    min-width: 72px;
+    flex: 1 1 72px;
+  }
+  .assignmentMain .assignmentPositionSummary button {
+    max-width: 100%;
+  }
+  .assignmentMain .candidatePanelButton {
+    width: 100% !important;
+    min-width: 0 !important;
+    white-space: normal !important;
+  }
+}
+
 /* Games and previews: allow room for names, validation messages and actions. */
 .gamesManagementTable,
 .gameImportPreviewTable {
