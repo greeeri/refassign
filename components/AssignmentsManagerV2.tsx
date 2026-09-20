@@ -465,6 +465,40 @@ export default function AssignmentsManagerV2({
   }
   async function load() {
     setError("");
+    const loadAllLeagueEligibility = async () => {
+      const data: EligL[] = [];
+      const pageSize = 1000;
+      for (let from = 0; ; from += pageSize) {
+        const page = await supabase
+          .from("official_league_eligibility")
+          .select("official_id,league_id")
+          .order("official_id")
+          .order("league_id")
+          .range(from, from + pageSize - 1);
+        if (page.error) return { data: null, error: page.error };
+        const rows = (page.data || []) as EligL[];
+        data.push(...rows);
+        if (rows.length < pageSize) break;
+      }
+      return { data, error: null };
+    };
+    const loadAllLevelEligibility = async () => {
+      const data: EligV[] = [];
+      const pageSize = 1000;
+      for (let from = 0; ; from += pageSize) {
+        const page = await supabase
+          .from("official_level_eligibility")
+          .select("official_id,level_id")
+          .order("official_id")
+          .order("level_id")
+          .range(from, from + pageSize - 1);
+        if (page.error) return { data: null, error: page.error };
+        const rows = (page.data || []) as EligV[];
+        data.push(...rows);
+        if (rows.length < pageSize) break;
+      }
+      return { data, error: null };
+    };
     const { data: userData } = await supabase.auth.getUser();
     if (userData.user) {
       const { data: userRoles } = await supabase.rpc("current_user_roles");
@@ -518,12 +552,8 @@ export default function AssignmentsManagerV2({
             "official_id,ref_rank,ar1_rank,ar2_rank,fourth_rank,mentor_certified",
           ),
         supabase.from("assignor_team_power_rankings").select("team_id,power"),
-        supabase
-          .from("official_league_eligibility")
-          .select("official_id,league_id"),
-        supabase
-          .from("official_level_eligibility")
-          .select("official_id,level_id"),
+        loadAllLeagueEligibility(),
+        loadAllLevelEligibility(),
         supabase
           .from("official_availability_blocks")
           .select(
