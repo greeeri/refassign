@@ -4459,6 +4459,17 @@ export default function AssignmentsManagerV2({
               </span>
             )}
           </span>
+          <small
+            className="assignmentGameLevel"
+            style={{
+              display: "block",
+              color: isRainOut ? "#bfdbfe" : "#475569",
+              fontWeight: 800,
+              marginTop: 3,
+            }}
+          >
+            {g.levels?.name || "Level TBD"}
+          </small>
           <small style={{ color: isRainOut ? "#dbeafe" : undefined }}>
             {g.game_number}
           </small>
