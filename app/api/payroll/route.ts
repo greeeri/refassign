@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireManagedOrganization } from "../../../lib/server/organizationScope";
 import { stripeConnectMode } from "../../../lib/stripe/runtime";
+import { readAllPages } from "../../../lib/supabase/readAll";
 
 export async function GET(request: NextRequest) {
   const context = await requireManagedOrganization(request, [
@@ -17,9 +18,8 @@ export async function GET(request: NextRequest) {
     .eq("organization_id", organizationId)
     .eq("active", true);
   if (leagueIds?.length) leagueQuery = leagueQuery.in("league_id", leagueIds);
-  const leagueResult = leagueIds?.length === 0
-    ? { data: [], error: null }
-    : await leagueQuery;
+  const leagueResult =
+    leagueIds?.length === 0 ? { data: [], error: null } : await leagueQuery;
   let assignmentQuery = service
     .from("assignments")
     .select(
@@ -30,12 +30,23 @@ export async function GET(request: NextRequest) {
     .in("status", ["accepted", "confirmed"]);
   if (leagueIds) {
     if (!leagueIds.length)
-      return NextResponse.json({ assignments: [], weekdayOrigins: [], leagues: [] });
+      return NextResponse.json({
+        assignments: [],
+        weekdayOrigins: [],
+        leagues: [],
+      });
     assignmentQuery = assignmentQuery.in("games.league_id", leagueIds);
   }
-  const assignmentResult = await assignmentQuery.order("assigned_at", {
-    ascending: false,
-  });
+  const assignmentResult = await readAllPages<Record<string, any>>(
+    (from, to) =>
+      assignmentQuery
+        .order("assigned_at", { ascending: false })
+        .order("id")
+        .range(from, to) as unknown as PromiseLike<{
+        data: Record<string, any>[] | null;
+        error: { message: string } | null;
+      }>,
+  );
   const officialIds = [
     ...new Set(
       (assignmentResult.data || [])

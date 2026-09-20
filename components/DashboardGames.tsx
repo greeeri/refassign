@@ -1,17 +1,23 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../lib/supabase/client";
+import { readAllPages } from "../lib/supabase/readAll";
 
 type Game = {
   id: string;
   game_number: string;
+  location_id: string | null;
   starts_at: string;
   duration_minutes: number;
   officials_needed: number;
   status: string;
   home: { name: string } | null;
   away: { name: string } | null;
-  location: { name: string } | null;
+  location: {
+    name: string;
+    latitude: number | null;
+    longitude: number | null;
+  } | null;
   leagues: { name: string } | null;
   levels: { name: string } | null;
 };
@@ -32,6 +38,11 @@ type ImportError = {
   created_at: string;
 };
 type Official = { id: string; active: boolean };
+type OrganizationOfficial = {
+  organization_id: string;
+  official_id: string;
+  officials: Official | Official[] | null;
+};
 type Audit = {
   id: number;
   action: string;
@@ -57,6 +68,28 @@ const cards: [Focus, string][] = [
   ["imports", "Import errors"],
   ["conflicts", "Upcoming conflicts"],
 ];
+function milesBetween(
+  latitudeA: number | null,
+  longitudeA: number | null,
+  latitudeB: number | null,
+  longitudeB: number | null,
+) {
+  if (
+    [latitudeA, longitudeA, latitudeB, longitudeB].some(
+      (value) => value == null,
+    )
+  )
+    return null;
+  const radians = (degrees: number) => (degrees * Math.PI) / 180,
+    latA = radians(latitudeA!),
+    latB = radians(latitudeB!),
+    deltaLat = radians(latitudeB! - latitudeA!),
+    deltaLon = radians(longitudeB! - longitudeA!),
+    value =
+      Math.sin(deltaLat / 2) ** 2 +
+      Math.cos(latA) * Math.cos(latB) * Math.sin(deltaLon / 2) ** 2;
+  return 3958.8 * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
+}
 export default function DashboardGames({
   onNavigate,
   organizationId,
@@ -78,48 +111,30 @@ export default function DashboardGames({
     async function load() {
       setLoading(true);
       async function loadAllAssignments() {
-        const pageSize = 1000,
-          rows: Assignment[] = [];
-        let from = 0;
-        while (true) {
-          const page = await supabase
-            .from("assignments")
-            .select(
-              "id,game_id,official_id,status,published_at,officials(first_name,last_name),sport_positions(name)",
-            )
-            .order("id")
-            .range(from, from + pageSize - 1);
-          if (page.error) return { data: rows, error: page.error };
-          const next = (page.data || []) as unknown as Assignment[];
-          rows.push(...next);
-          if (next.length < pageSize) return { data: rows, error: null };
-          from += pageSize;
-        }
+        return readAllPages<Assignment>(
+          (from, to) =>
+            supabase
+              .from("assignments")
+              .select(
+                "id,game_id,official_id,status,published_at,officials(first_name,last_name),sport_positions(name)",
+              )
+              .order("id")
+              .range(from, to) as unknown as PromiseLike<{
+              data: Assignment[] | null;
+              error: { message: string } | null;
+            }>,
+        );
       }
       async function loadAllDeclines() {
-        const pageSize = 1000,
-          rows: Decline[] = [];
-        let from = 0;
-        while (true) {
-          const page = await supabase
+        return readAllPages<Decline>((from, to) =>
+          supabase
             .from("assignment_declines")
             .select("id,game_id")
             .order("id")
-            .range(from, from + pageSize - 1);
-          if (page.error) return { data: rows, error: page.error };
-          const next = (page.data || []) as Decline[];
-          rows.push(...next);
-          if (next.length < pageSize) return { data: rows, error: null };
-          from += pageSize;
-        }
+            .range(from, to),
+        );
       }
-      const gameQuery = supabase
-          .from("games")
-          .select(
-            "id,game_number,starts_at,duration_minutes,officials_needed,status,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name),leagues(name),levels(name)",
-          )
-          .order("starts_at"),
-        importQuery = supabase
+      const importQuery = supabase
           .from("import_error_log")
           .select("id,error_message,row_number,created_at")
           .is("resolved_at", null)
@@ -131,24 +146,40 @@ export default function DashboardGames({
           .order("occurred_at", { ascending: false })
           .limit(8);
       const [g, a, d, i, oo, h] = await Promise.all([
-        organizationId
-          ? gameQuery.eq("organization_id", organizationId)
-          : gameQuery,
+        readAllPages<Game>((from, to) => {
+          let query = supabase
+            .from("games")
+            .select(
+              "id,game_number,location_id,starts_at,duration_minutes,officials_needed,status,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name,latitude,longitude),leagues(name),levels(name)",
+            )
+            .order("starts_at")
+            .order("id");
+          if (organizationId)
+            query = query.eq("organization_id", organizationId);
+          return query.range(from, to) as unknown as PromiseLike<{
+            data: Game[] | null;
+            error: { message: string } | null;
+          }>;
+        }),
         loadAllAssignments(),
         loadAllDeclines(),
         organizationId
           ? importQuery.eq("organization_id", organizationId)
           : importQuery,
-        organizationId
-          ? supabase
-              .from("organization_officials")
-              .select("official_id,officials(id,active)")
-              .eq("organization_id", organizationId)
-              .eq("active", true)
-          : supabase
-              .from("organization_officials")
-              .select("official_id,officials(id,active)")
-              .eq("active", true),
+        readAllPages<OrganizationOfficial>((from, to) => {
+          let query = supabase
+            .from("organization_officials")
+            .select("organization_id,official_id,officials(id,active)")
+            .eq("active", true)
+            .order("organization_id")
+            .order("official_id");
+          if (organizationId)
+            query = query.eq("organization_id", organizationId);
+          return query.range(from, to) as unknown as PromiseLike<{
+            data: OrganizationOfficial[] | null;
+            error: { message: string } | null;
+          }>;
+        }),
         organizationId
           ? auditQuery.eq("organization_id", organizationId)
           : auditQuery,
@@ -170,7 +201,7 @@ export default function DashboardGames({
         );
         setImportErrors((i.data || []) as ImportError[]);
         setOfficials(
-          (oo.data || []).flatMap((row) => {
+          (oo.data || []).flatMap((row: OrganizationOfficial) => {
             const value = row.officials as unknown as
               Official | Official[] | null;
             return Array.isArray(value) ? value : value ? [value] : [];
@@ -207,9 +238,7 @@ export default function DashboardGames({
     }),
     declined = declineRows.filter((decline) => {
       const g = map.get(decline.game_id);
-      return (
-        g && new Date(g.starts_at).getTime() >= now
-      );
+      return g && new Date(g.starts_at).getTime() >= now;
     }),
     hold = future.filter((g) => g.status === "suspended"),
     cancelled = future.filter((g) =>
@@ -249,6 +278,41 @@ export default function DashboardGames({
         conflictIds.add(first.id);
         conflictIds.add(second.id);
       }
+
+    const consecutiveGames = list.filter(
+      (assignment, index) =>
+        index === 0 || assignment.game_id !== list[index - 1].game_id,
+    );
+    for (let index = 1; index < consecutiveGames.length; index++) {
+      const first = map.get(consecutiveGames[index - 1].game_id)!,
+        second = map.get(consecutiveGames[index].game_id)!;
+      if (first.id === second.id) continue;
+      const firstEnd =
+          new Date(first.starts_at).getTime() +
+          (first.duration_minutes || 110) * 60000,
+        gapMinutes = Math.floor(
+          (new Date(second.starts_at).getTime() - firstEnd) / 60000,
+        );
+      if (gapMinutes < 0) continue;
+      const directMiles =
+        first.location_id && first.location_id === second.location_id
+          ? 0
+          : milesBetween(
+              first.location?.latitude ?? null,
+              first.location?.longitude ?? null,
+              second.location?.latitude ?? null,
+              second.location?.longitude ?? null,
+            );
+      if (directMiles == null) continue;
+      const travelMinutes =
+        directMiles === 0
+          ? 0
+          : Math.max(10, Math.ceil(((directMiles * 1.2) / 35) * 60 + 10));
+      if (gapMinutes < travelMinutes) {
+        conflictIds.add(first.id);
+        conflictIds.add(second.id);
+      }
+    }
   }
   const unconfirmedIds = new Set(unconfirmed.map((a) => a.game_id)),
     declinedIds = new Set(declined.map((a) => a.game_id));
@@ -531,7 +595,7 @@ export default function DashboardGames({
         <section className="dashboardPanel">
           <div className="dashboardPanelHead">
             <h3>▤ &nbsp; Recent Activity</h3>
-                <button onClick={() => go("Reports")}>View All</button>
+            <button onClick={() => go("Reports")}>View All</button>
           </div>
           <div className="recentActivity">
             {audit.length ? (

@@ -7,6 +7,7 @@ import {
   normalizeGameStatus,
 } from "../lib/game-status";
 import { createClient } from "../lib/supabase/client";
+import { readAllPages } from "../lib/supabase/readAll";
 import { announceUndoAvailable } from "./UndoCenter";
 import SelfAssignOverrideRequests from "./SelfAssignOverrideRequests";
 import {
@@ -508,57 +509,100 @@ export default function AssignmentsManagerV2({
         ),
       );
     } else setCanManage(false);
-    const gamesQuery = supabase
-      .from("games")
-      .select(
-        "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,time_tbd,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,city,state,latitude,longitude)",
-      )
-      .order("starts_at");
     const [g, oo, o, p, a, r, pr, pw, le, ve, bl, lg, lm, sas, ms, ah, at] =
       await Promise.all([
+        readAllPages<Game>((from, to) => {
+          let query = supabase
+            .from("games")
+            .select(
+              "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,time_tbd,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,city,state,latitude,longitude)",
+            )
+            .order("starts_at")
+            .order("id");
+          if (organizationId)
+            query = query.eq("organization_id", organizationId);
+          return query.range(from, to) as unknown as PromiseLike<{
+            data: Game[] | null;
+            error: { message: string } | null;
+          }>;
+        }),
         organizationId
-          ? gamesQuery.eq("organization_id", organizationId)
-          : gamesQuery,
-        organizationId
-          ? supabase
-              .from("organization_officials")
-              .select("official_id")
-              .eq("organization_id", organizationId)
-              .eq("active", true)
+          ? readAllPages<{ official_id: string }>((from, to) =>
+              supabase
+                .from("organization_officials")
+                .select("official_id")
+                .eq("organization_id", organizationId)
+                .eq("active", true)
+                .order("official_id")
+                .range(from, to),
+            )
           : Promise.resolve({ data: null, error: null }),
         organizationId
           ? Promise.resolve({ data: [], error: null })
-          : supabase
-              .from("officials")
-              .select(
-                "id,first_name,last_name,email,phone,sports,active,home_city,home_state,home_latitude,home_longitude",
-              )
-              .eq("active", true)
-              .order("last_name")
-              .order("first_name"),
+          : readAllPages<Official>(
+              (from, to) =>
+                supabase
+                  .from("officials")
+                  .select(
+                    "id,first_name,last_name,email,phone,sports,active,home_city,home_state,home_latitude,home_longitude",
+                  )
+                  .eq("active", true)
+                  .order("last_name")
+                  .order("first_name")
+                  .order("id")
+                  .range(from, to) as unknown as PromiseLike<{
+                  data: Official[] | null;
+                  error: { message: string } | null;
+                }>,
+            ),
         supabase
           .from("sport_positions")
           .select("id,sport_id,name,required,sort_order")
           .order("sort_order"),
-        supabase
-          .from("assignments")
-          .select(
-            "id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at,assignment_source,email_sent_at,email_error,resend_email_id,cancellation_notified_at,cancellation_email_error,cancellation_email_id,game_fee,payment_status",
-          ),
-        supabase.from("my_assignment_rankings").select("official_id,rank"),
-        supabase
-          .from("my_assignment_rankings")
-          .select(
-            "official_id,ref_rank,ar1_rank,ar2_rank,fourth_rank,mentor_certified",
-          ),
-        supabase.from("assignor_team_power_rankings").select("team_id,power"),
+        readAllPages<Assignment>((from, to) =>
+          supabase
+            .from("assignments")
+            .select(
+              "id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at,assignment_source,email_sent_at,email_error,resend_email_id,cancellation_notified_at,cancellation_email_error,cancellation_email_id,game_fee,payment_status",
+            )
+            .order("id")
+            .range(from, to),
+        ),
+        readAllPages<Rank>((from, to) =>
+          supabase
+            .from("my_assignment_rankings")
+            .select("official_id,rank")
+            .order("official_id")
+            .range(from, to),
+        ),
+        readAllPages<PositionRank>((from, to) =>
+          supabase
+            .from("my_assignment_rankings")
+            .select(
+              "official_id,ref_rank,ar1_rank,ar2_rank,fourth_rank,mentor_certified",
+            )
+            .order("official_id")
+            .order("id")
+            .range(from, to),
+        ),
+        readAllPages<Power>((from, to) =>
+          supabase
+            .from("assignor_team_power_rankings")
+            .select("team_id,power")
+            .order("team_id")
+            .range(from, to),
+        ),
         loadAllLeagueEligibility(),
         loadAllLevelEligibility(),
-        supabase
-          .from("official_availability_blocks")
-          .select(
-            "official_id,block_type,start_date,end_date,starts_at,ends_at,location_id,team_id",
-          ),
+        readAllPages<Block>((from, to) =>
+          supabase
+            .from("official_availability_blocks")
+            .select(
+              "official_id,block_type,start_date,end_date,starts_at,ends_at,location_id,team_id",
+            )
+            .order("official_id")
+            .range(from, to),
+        ),
         supabase
           .from("game_link_groups")
           .select("id,name,created_at,organization_id")
@@ -573,10 +617,14 @@ export default function AssignmentsManagerV2({
           .select("id,game_id,position_id,status")
           .eq("status", "open"),
         supabase.from("game_mentor_slots").select("game_id,position_id"),
-        supabase
-          .from("audit_history")
-          .select("game_id,old_data")
-          .eq("action", "unassigned"),
+        readAllPages<UnassignmentAudit>((from, to) =>
+          supabase
+            .from("audit_history")
+            .select("game_id,old_data")
+            .eq("action", "unassigned")
+            .order("id")
+            .range(from, to),
+        ),
         supabase
           .from("assignment_templates")
           .select(
@@ -636,7 +684,11 @@ export default function AssignmentsManagerV2({
         (link) => link.official_id,
       );
       officialRows = [];
-      for (let index = 0; index < organizationOfficialIds.length; index += 200) {
+      for (
+        let index = 0;
+        index < organizationOfficialIds.length;
+        index += 200
+      ) {
         const { data: page, error: pageError } = await supabase
           .from("officials")
           .select(
@@ -661,7 +713,8 @@ export default function AssignmentsManagerV2({
     setOfficials(officialRows);
     setPositions((p.data || []) as Position[]);
     const scopedGames = (g.data || []) as unknown as Game[];
-    const candidateConflictError = await loadCandidateScheduleConflicts(scopedGames);
+    const candidateConflictError =
+      await loadCandidateScheduleConflicts(scopedGames);
     if (candidateConflictError) {
       setError(candidateConflictError.message);
       return;
@@ -687,7 +740,9 @@ export default function AssignmentsManagerV2({
       ),
     );
     setMentorSlots(
-      ((ms.data || []) as MentorSlot[]).filter((slot) => scopedGameIds.has(slot.game_id)),
+      ((ms.data || []) as MentorSlot[]).filter((slot) =>
+        scopedGameIds.has(slot.game_id),
+      ),
     );
     setAssignmentTemplates((at.data || []) as AssignmentTemplate[]);
     setUnassignedSlotKeys([
@@ -746,12 +801,18 @@ export default function AssignmentsManagerV2({
       const previousGame = previousGameId
         ? document.getElementById(`assignment-game-${previousGameId}`)
         : null;
-      (previousGame || document.getElementById("assignment-filtered-games"))
-        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      (
+        previousGame || document.getElementById("assignment-filtered-games")
+      )?.scrollIntoView({ behavior: "smooth", block: "center" });
     }, 0);
   }, [returnToListRequest, selected]);
   useEffect(() => {
-    if (!focusGameId || handledReportFocus.current === focusGameId || !games.some((item) => item.id === focusGameId)) return;
+    if (
+      !focusGameId ||
+      handledReportFocus.current === focusGameId ||
+      !games.some((item) => item.id === focusGameId)
+    )
+      return;
     handledReportFocus.current = focusGameId;
     setRange("all");
     setCustomDate("");
@@ -764,7 +825,10 @@ export default function AssignmentsManagerV2({
     setLevelFilter("");
     setSelected(focusGameId);
     window.setTimeout(
-      () => document.getElementById("selected-game-assignment")?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      () =>
+        document
+          .getElementById("selected-game-assignment")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" }),
       0,
     );
   }, [focusGameId, games]);
@@ -772,24 +836,29 @@ export default function AssignmentsManagerV2({
     void loadSavedViews();
   }, []);
   async function refreshAssignmentState() {
-    const [assignmentResult, selfAssignResult, mentorSlotResult, unassignmentResult, candidateConflictError] =
-      await Promise.all([
-        supabase
-          .from("assignments")
-          .select(
-            "id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at,assignment_source,email_sent_at,email_error,resend_email_id,cancellation_notified_at,cancellation_email_error,cancellation_email_id,game_fee,payment_status",
-          ),
-        supabase
-          .from("assignment_self_assign_slots")
-          .select("id,game_id,position_id,status")
-          .eq("status", "open"),
-        supabase.from("game_mentor_slots").select("game_id,position_id"),
-        supabase
-          .from("audit_history")
-          .select("game_id,old_data")
-          .eq("action", "unassigned"),
-        loadCandidateScheduleConflicts(games),
-      ]);
+    const [
+      assignmentResult,
+      selfAssignResult,
+      mentorSlotResult,
+      unassignmentResult,
+      candidateConflictError,
+    ] = await Promise.all([
+      supabase
+        .from("assignments")
+        .select(
+          "id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at,assignment_source,email_sent_at,email_error,resend_email_id,cancellation_notified_at,cancellation_email_error,cancellation_email_id,game_fee,payment_status",
+        ),
+      supabase
+        .from("assignment_self_assign_slots")
+        .select("id,game_id,position_id,status")
+        .eq("status", "open"),
+      supabase.from("game_mentor_slots").select("game_id,position_id"),
+      supabase
+        .from("audit_history")
+        .select("game_id,old_data")
+        .eq("action", "unassigned"),
+      loadCandidateScheduleConflicts(games),
+    ]);
     const refreshError =
       assignmentResult.error ||
       selfAssignResult.error ||
@@ -812,7 +881,9 @@ export default function AssignmentsManagerV2({
       ),
     );
     setMentorSlots(
-      ((mentorSlotResult.data || []) as MentorSlot[]).filter((slot) => visibleGameIds.has(slot.game_id)),
+      ((mentorSlotResult.data || []) as MentorSlot[]).filter((slot) =>
+        visibleGameIds.has(slot.game_id),
+      ),
     );
     setUnassignedSlotKeys([
       ...new Set(
@@ -978,8 +1049,7 @@ export default function AssignmentsManagerV2({
   }
   function matchesDayFilter(g: Game) {
     return (
-      !dayFilter ||
-      eventTimeParts(g.starts_at, g.location).date === dayFilter
+      !dayFilter || eventTimeParts(g.starts_at, g.location).date === dayFilter
     );
   }
   function matchesTimeFilter(g: Game) {
@@ -1009,17 +1079,15 @@ export default function AssignmentsManagerV2({
     return positions
       .filter((position) => position.sport_id === listedGame.sport_id)
       .slice(0, listedGame.officials_needed)
-      .some((position) =>
-        isReplacementNeeded(listedGame.id, position.id),
-      );
+      .some((position) => isReplacementNeeded(listedGame.id, position.id));
   }
   const hasDirectGameFilter = Boolean(
     locationFilter ||
-      dayFilter ||
-      timeFilter ||
-      officialFilter ||
-      leagueFilter ||
-      levelFilter,
+    dayFilter ||
+    timeFilter ||
+    officialFilter ||
+    leagueFilter ||
+    levelFilter,
   );
   const rangeGames = games.filter((g) => inRange(g, range, customDate));
   const baseFilteredGames = games.filter((g) => {
@@ -1119,12 +1187,16 @@ export default function AssignmentsManagerV2({
             (assignment) =>
               assignment.game_id === selectedGame.id &&
               assignment.position_id === position.id &&
-              !["declined", "cancelled", "canceled"].includes(assignment.status),
+              !["declined", "cancelled", "canceled"].includes(
+                assignment.status,
+              ),
           ),
       ),
   );
   const broadcastOfficials = officials.filter((official) => official.active);
-  const broadcastMissingEmails = broadcastOfficials.filter((official) => !official.email).length;
+  const broadcastMissingEmails = broadcastOfficials.filter(
+    (official) => !official.email,
+  ).length;
   const assignmentSelectionGroupId = assignmentSelection.length
     ? linkGroupByGame.get(assignmentSelection[0].id) || null
     : null;
@@ -1535,10 +1607,22 @@ export default function AssignmentsManagerV2({
         .sort((a, b) => a.sort_order - b.sort_order)
     : [];
   const gamePositions = game
-    ? [...sportPositions.slice(
-        0,
-        Math.max(0, Math.min(game.officials_needed, sportPositions.length)),
-      ), ...sportPositions.filter((position) => mentorSlots.some((slot) => slot.game_id === game.id && slot.position_id === position.id) && !sportPositions.slice(0, game.officials_needed).some((active) => active.id === position.id))]
+    ? [
+        ...sportPositions.slice(
+          0,
+          Math.max(0, Math.min(game.officials_needed, sportPositions.length)),
+        ),
+        ...sportPositions.filter(
+          (position) =>
+            mentorSlots.some(
+              (slot) =>
+                slot.game_id === game.id && slot.position_id === position.id,
+            ) &&
+            !sportPositions
+              .slice(0, game.officials_needed)
+              .some((active) => active.id === position.id),
+        ),
+      ]
     : [];
   const gameAssignments = game
     ? assignments.filter((a) => a.game_id === game.id)
@@ -1772,8 +1856,14 @@ export default function AssignmentsManagerV2({
     ignorePositionId = "",
   ) {
     const reasons: string[] = [];
-    const targetPosition = positions.find((position) => position.id === ignorePositionId);
-    if (targetPosition && isMentor(targetPosition) && !positionRanks[o.id]?.mentor_certified) {
+    const targetPosition = positions.find(
+      (position) => position.id === ignorePositionId,
+    );
+    if (
+      targetPosition &&
+      isMentor(targetPosition) &&
+      !positionRanks[o.id]?.mentor_certified
+    ) {
       reasons.push("Mentor certification required");
     }
     for (const a of assignments) {
@@ -1878,10 +1968,7 @@ export default function AssignmentsManagerV2({
     reasons.push(
       ...assignmentConflictReasonsForGame(o, targetGame, ignorePositionId),
     );
-    const day = eventTimeParts(
-        targetGame.starts_at,
-        targetGame.location,
-      ).date,
+    const day = eventTimeParts(targetGame.starts_at, targetGame.location).date,
       gs = new Date(targetGame.starts_at).getTime(),
       ge = gs + (targetGame.duration_minutes || 110) * 60000;
     for (const b of blocks) {
@@ -2062,7 +2149,10 @@ export default function AssignmentsManagerV2({
     return ranks[officialId] ?? 1;
   }
   function positionRatingText(officialId: string, pos: Position) {
-    if (isMentor(pos)) return positionRanks[officialId]?.mentor_certified ? "Mentor certified" : "Mentor certification required";
+    if (isMentor(pos))
+      return positionRanks[officialId]?.mentor_certified
+        ? "Mentor certified"
+        : "Mentor certification required";
     return `${rankLabel(pos)} ${positionRankFor(officialId, pos).toFixed(1)}`;
   }
   function rankLabel(pos: Position) {
@@ -2317,9 +2407,15 @@ export default function AssignmentsManagerV2({
         .delete()
         .eq("id", existing.id);
     else if (officialId) {
-      const mentorPosition = positions.find((item) => item.id === positionId)?.name.toLowerCase().includes("mentor");
+      const mentorPosition = positions
+        .find((item) => item.id === positionId)
+        ?.name.toLowerCase()
+        .includes("mentor");
       result = mentorPosition
-        ? await supabase.rpc("assign_game_mentor", { p_game_id: targetGame.id, p_official_id: officialId })
+        ? await supabase.rpc("assign_game_mentor", {
+            p_game_id: targetGame.id,
+            p_official_id: officialId,
+          })
         : await supabase.rpc("assign_official_to_linked_games", {
             p_game_id: targetGame.id,
             p_position_id: positionId,
@@ -2366,16 +2462,30 @@ export default function AssignmentsManagerV2({
   }
   async function addMentorSlot() {
     if (!game || !canManage) return;
-    setMentorSlotSaving(game.id); setError(""); setNotice("");
-    const { data: mentorPositionId, error: slotError } = await supabase.rpc("add_game_mentor_slot", { p_game_id: game.id });
+    setMentorSlotSaving(game.id);
+    setError("");
+    setNotice("");
+    const { data: mentorPositionId, error: slotError } = await supabase.rpc(
+      "add_game_mentor_slot",
+      { p_game_id: game.id },
+    );
     if (slotError) setError(slotError.message);
     else {
-      setNotice("Mentor slot added. Select a mentor now or leave it open for later.");
+      setNotice(
+        "Mentor slot added. Select a mentor now or leave it open for later.",
+      );
       setNeedsAssignmentView((current) => ({ ...current, [game.id]: false }));
       setCandidatePositionId(String(mentorPositionId || ""));
     }
     await refreshAssignmentState();
-    if (!slotError && mentorPositionId) window.setTimeout(() => document.getElementById(`assignment-position-${mentorPositionId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
+    if (!slotError && mentorPositionId)
+      window.setTimeout(
+        () =>
+          document
+            .getElementById(`assignment-position-${mentorPositionId}`)
+            ?.scrollIntoView({ behavior: "smooth", block: "center" }),
+        0,
+      );
     setMentorSlotSaving("");
   }
   async function removePosition(position: Position) {
@@ -2403,7 +2513,9 @@ export default function AssignmentsManagerV2({
     );
     if (removeError) setError(removeError.message);
     else {
-      setNotice(`${shortPositionName(position.name)} removed from Game #${game.game_number}.`);
+      setNotice(
+        `${shortPositionName(position.name)} removed from Game #${game.game_number}.`,
+      );
       setCandidatePositionId("");
       announceUndoAvailable(
         `${shortPositionName(position.name)} removed from Game #${game.game_number}.`,
@@ -2805,7 +2917,10 @@ export default function AssignmentsManagerV2({
             !blocking.includes(reason) &&
             reason !== "Already assigned to this game",
         );
-        if (isMentor(position) && positionRanks[official.id]?.mentor_certified !== true)
+        if (
+          isMentor(position) &&
+          positionRanks[official.id]?.mentor_certified !== true
+        )
           blocking.push("Mentor certification required");
         for (const [otherKey, otherOfficialId] of Object.entries(selections)) {
           if (otherKey === key || otherOfficialId !== official.id) continue;
@@ -3536,7 +3651,9 @@ export default function AssignmentsManagerV2({
     }
     const unpublishedGame = filteredGames.find(isUnpublishedGame);
     if (!unpublishedGame) {
-      setError("There are no unpublished assignments in the current filtered list.");
+      setError(
+        "There are no unpublished assignments in the current filtered list.",
+      );
       return;
     }
     setSelected(unpublishedGame.id);
@@ -3579,7 +3696,9 @@ export default function AssignmentsManagerV2({
       await refreshAssignmentState();
       setLinkSelected([]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Unable to send the broadcast.");
+      setError(
+        e instanceof Error ? e.message : "Unable to send the broadcast.",
+      );
     } finally {
       setBroadcasting(false);
     }
@@ -3667,26 +3786,27 @@ export default function AssignmentsManagerV2({
         .filter((p) => p.sport_id === g.sport_id)
         .sort((a, b) => a.sort_order - b.sort_order)
         .slice(0, Math.max(0, g.officials_needed))) {
-        if (!positionNames.includes(position.name)) positionNames.push(position.name);
+        if (!positionNames.includes(position.name))
+          positionNames.push(position.name);
       }
     }
     const data = exportGames.map((g) => {
       const d = new Date(g.starts_at);
       const row: Record<string, string | number> = {
-          "Game ID": g.id,
-          "Game Number": g.game_number,
-          Date: d.toLocaleDateString(),
-          Time: d.toLocaleTimeString([], {
-            hour: "numeric",
-            minute: "2-digit",
-          }),
-          Sport: g.sports?.name || "",
-          League: g.leagues?.name || "",
-          Level: g.levels?.name || "",
-          "Home Team": g.home?.name || "TBD",
-          "Away Team": g.away?.name || "TBD",
-          Location: g.location?.name || "TBD",
-          Power: Number(gamePower(g).toFixed(1)),
+        "Game ID": g.id,
+        "Game Number": g.game_number,
+        Date: d.toLocaleDateString(),
+        Time: d.toLocaleTimeString([], {
+          hour: "numeric",
+          minute: "2-digit",
+        }),
+        Sport: g.sports?.name || "",
+        League: g.leagues?.name || "",
+        Level: g.levels?.name || "",
+        "Home Team": g.home?.name || "TBD",
+        "Away Team": g.away?.name || "TBD",
+        Location: g.location?.name || "TBD",
+        Power: Number(gamePower(g).toFixed(1)),
       };
       for (const name of positionNames) {
         row[`${name} Assignment ID`] = "";
@@ -3717,20 +3837,23 @@ export default function AssignmentsManagerV2({
           name = position.name;
         row[`${name} Assignment ID`] = assignment?.id || "";
         row[`${name} Official`] = official
-            ? `${official.first_name} ${official.last_name}`.trim()
-            : "UNASSIGNED";
+          ? `${official.first_name} ${official.last_name}`.trim()
+          : "UNASSIGNED";
         row[`${name} Email`] = official?.email || "";
         row[`${name} Phone`] = official?.phone || "";
         row[`${name} Status`] = assignment
-            ? assignmentStatus(assignment).label
-            : "Unassigned";
+          ? assignmentStatus(assignment).label
+          : "Unassigned";
         row[`${name} Published`] = assignment?.published_at ? "Yes" : "No";
         row[`${name} Accept By`] = assignment?.accept_by
-            ? new Date(assignment.accept_by).toLocaleString()
-            : "";
-        row[`${name} Game Fee`] = assignment ? Number(assignment.game_fee || 0) : "";
+          ? new Date(assignment.accept_by).toLocaleString()
+          : "";
+        row[`${name} Game Fee`] = assignment
+          ? Number(assignment.game_fee || 0)
+          : "";
         row[`${name} Payment Status`] = assignment?.payment_status || "";
-        row[`${name} Payroll Ready`] = assignment && ["accepted", "confirmed"].includes(assignment.status)
+        row[`${name} Payroll Ready`] =
+          assignment && ["accepted", "confirmed"].includes(assignment.status)
             ? "Yes"
             : "No";
       }
@@ -3739,12 +3862,20 @@ export default function AssignmentsManagerV2({
     const ws = XLSX.utils.json_to_sheet(data),
       wb = XLSX.utils.book_new();
     ws["!cols"] = Object.keys(data[0] || {}).map((header) => ({
-      wch: header.includes("ID") ? 38 : header.includes("Official") || header.includes("Email") ? 28 : header.includes("Accept By") ? 22 : 16,
+      wch: header.includes("ID")
+        ? 38
+        : header.includes("Official") || header.includes("Email")
+          ? 28
+          : header.includes("Accept By")
+            ? 22
+            : 16,
     }));
     XLSX.utils.book_append_sheet(wb, ws, "Assignments");
     XLSX.writeFile(wb, "refassign-game-assignments.xlsx");
   }
-  async function importAssignmentFees(event: React.ChangeEvent<HTMLInputElement>) {
+  async function importAssignmentFees(
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file || !organizationId) return;
@@ -3765,58 +3896,111 @@ export default function AssignmentsManagerV2({
           ]),
         );
         const gameId = String(normalized.game_id || "").trim();
-        const feeRows: Array<{ spreadsheetRow: number; assignmentId: string; gameId: string; gameFee: number }> = [];
+        const feeRows: Array<{
+          spreadsheetRow: number;
+          assignmentId: string;
+          gameId: string;
+          gameFee: number;
+        }> = [];
         const prefixes = Object.keys(normalized)
           .filter((key) => key.endsWith("_assignment_id"))
           .map((key) => key.slice(0, -"_assignment_id".length));
         for (const prefix of prefixes) {
           const position = prefix
             .split("_")
-            .map((word) => word ? word[0].toUpperCase() + word.slice(1) : "")
+            .map((word) => (word ? word[0].toUpperCase() + word.slice(1) : ""))
             .join(" ");
-          const assignmentId = String(normalized[`${prefix}_assignment_id`] || "").trim();
+          const assignmentId = String(
+            normalized[`${prefix}_assignment_id`] || "",
+          ).trim();
           const rawFee = normalized[`${prefix}_game_fee`];
           if (!assignmentId && (rawFee === "" || rawFee == null)) continue;
           if (!assignmentId)
-            throw new Error(`Spreadsheet row ${index + 2}: ${position} Game Fee can only be uploaded when that position is assigned.`);
+            throw new Error(
+              `Spreadsheet row ${index + 2}: ${position} Game Fee can only be uploaded when that position is assigned.`,
+            );
           const gameFee = Number(rawFee);
           if (!Number.isFinite(gameFee) || gameFee < 0)
-            throw new Error(`Spreadsheet row ${index + 2}: ${position} Game Fee must be zero or greater.`);
-          feeRows.push({ spreadsheetRow: index + 2, assignmentId, gameId, gameFee });
+            throw new Error(
+              `Spreadsheet row ${index + 2}: ${position} Game Fee must be zero or greater.`,
+            );
+          feeRows.push({
+            spreadsheetRow: index + 2,
+            assignmentId,
+            gameId,
+            gameFee,
+          });
         }
         return feeRows;
       });
       if (!rows.length)
-        throw new Error("No assigned positions with game fees were found in the spreadsheet.");
-      const duplicate = rows.find((row, index) => rows.findIndex((other) => other.assignmentId === row.assignmentId) !== index);
+        throw new Error(
+          "No assigned positions with game fees were found in the spreadsheet.",
+        );
+      const duplicate = rows.find(
+        (row, index) =>
+          rows.findIndex((other) => other.assignmentId === row.assignmentId) !==
+          index,
+      );
       if (duplicate)
-        throw new Error(`Spreadsheet row ${duplicate.spreadsheetRow}: this assignment appears more than once.`);
-      if (!window.confirm(`Upload game fees for ${rows.length} assigned position${rows.length === 1 ? "" : "s"}? The amounts will appear in Payroll as soon as each assignment is accepted or confirmed.`)) return;
+        throw new Error(
+          `Spreadsheet row ${duplicate.spreadsheetRow}: this assignment appears more than once.`,
+        );
+      if (
+        !window.confirm(
+          `Upload game fees for ${rows.length} assigned position${rows.length === 1 ? "" : "s"}? The amounts will appear in Payroll as soon as each assignment is accepted or confirmed.`,
+        )
+      )
+        return;
       setSaving("assignment-fee-import");
-      const response = await fetch(`/api/assignments/import-fees?organizationId=${encodeURIComponent(organizationId)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows }),
-      });
-      const result = (await response.json().catch(() => ({}))) as { updated?: number; error?: string };
-      if (!response.ok) throw new Error(result.error || "Assignment fees could not be imported.");
-      setNotice(`${result.updated || rows.length} assignment fee${(result.updated || rows.length) === 1 ? " was" : "s were"} uploaded and sent to Payroll.`);
+      const response = await fetch(
+        `/api/assignments/import-fees?organizationId=${encodeURIComponent(organizationId)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rows }),
+        },
+      );
+      const result = (await response.json().catch(() => ({}))) as {
+        updated?: number;
+        error?: string;
+      };
+      if (!response.ok)
+        throw new Error(
+          result.error || "Assignment fees could not be imported.",
+        );
+      setNotice(
+        `${result.updated || rows.length} assignment fee${(result.updated || rows.length) === 1 ? " was" : "s were"} uploaded and sent to Payroll.`,
+      );
       await refreshAssignmentState();
     } catch (importError) {
-      setError(importError instanceof Error ? importError.message : "Assignment fees could not be imported.");
+      setError(
+        importError instanceof Error
+          ? importError.message
+          : "Assignment fees could not be imported.",
+      );
     } finally {
       setSaving("");
     }
   }
   function checkInRows(gameIds: string[]) {
-    const selectedAssignments = assignments.filter((assignment) =>
-      gameIds.includes(assignment.game_id) && assignment.status !== "declined",
+    const selectedAssignments = assignments.filter(
+      (assignment) =>
+        gameIds.includes(assignment.game_id) &&
+        assignment.status !== "declined",
     );
-    const byOfficial = new Map<string, { name: string; email: string; phone: string; games: string[] }>();
+    const byOfficial = new Map<
+      string,
+      { name: string; email: string; phone: string; games: string[] }
+    >();
     for (const assignment of selectedAssignments) {
-      const official = officials.find((item) => item.id === assignment.official_id);
+      const official = officials.find(
+        (item) => item.id === assignment.official_id,
+      );
       const listedGame = games.find((item) => item.id === assignment.game_id);
-      const position = positions.find((item) => item.id === assignment.position_id);
+      const position = positions.find(
+        (item) => item.id === assignment.position_id,
+      );
       if (!official || !listedGame) continue;
       const row = byOfficial.get(official.id) || {
         name: `${official.first_name} ${official.last_name}`.trim(),
@@ -3824,10 +4008,14 @@ export default function AssignmentsManagerV2({
         phone: official.phone || "",
         games: [],
       };
-      row.games.push(`#${listedGame.game_number} · ${formatEventDate(listedGame.starts_at, listedGame.location)} ${formatEventTime(listedGame.starts_at, listedGame.location)} · ${position?.name || "Official"} · ${listedGame.location?.name || "Venue TBD"}`);
+      row.games.push(
+        `#${listedGame.game_number} · ${formatEventDate(listedGame.starts_at, listedGame.location)} ${formatEventTime(listedGame.starts_at, listedGame.location)} · ${position?.name || "Official"} · ${listedGame.location?.name || "Venue TBD"}`,
+      );
       byOfficial.set(official.id, row);
     }
-    return [...byOfficial.values()].sort((a, b) => a.name.localeCompare(b.name));
+    return [...byOfficial.values()].sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
   }
   async function downloadCheckInSheet(gameIds: string[]) {
     const XLSX = await import("xlsx");
@@ -3839,17 +4027,39 @@ export default function AssignmentsManagerV2({
       Assignments: row.games.join(" | "),
       Notes: "",
     }));
-    const worksheet = XLSX.utils.json_to_sheet(data), workbook = XLSX.utils.book_new();
-    worksheet["!cols"] = [{ wch: 12 }, { wch: 28 }, { wch: 30 }, { wch: 18 }, { wch: 80 }, { wch: 28 }];
+    const worksheet = XLSX.utils.json_to_sheet(data),
+      workbook = XLSX.utils.book_new();
+    worksheet["!cols"] = [
+      { wch: 12 },
+      { wch: 28 },
+      { wch: 30 },
+      { wch: 18 },
+      { wch: 80 },
+      { wch: 28 },
+    ];
     XLSX.utils.book_append_sheet(workbook, worksheet, "Official Check-In");
     XLSX.writeFile(workbook, "refassign-event-check-in.xlsx");
   }
   function printCheckInSheet(gameIds: string[]) {
     const rows = checkInRows(gameIds);
-    const escape = (value: string) => value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character] || character);
+    const escape = (value: string) =>
+      value.replace(
+        /[&<>"']/g,
+        (character) =>
+          ({
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#39;",
+          })[character] || character,
+      );
     const printWindow = window.open("", "_blank", "noopener,noreferrer");
-    if (!printWindow) return setError("Allow pop-ups to open the printable check-in sheet.");
-    printWindow.document.write(`<!doctype html><html><head><title>Event Official Check-In</title><style>body{font-family:Arial,sans-serif;margin:24px;color:#172033}h1{font-size:22px;margin:0 0 6px}p{margin:0 0 18px;color:#475569}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid #94a3b8;padding:8px;text-align:left;vertical-align:top}th{background:#eaf2ff}.check{width:52px;height:28px}.notes{width:150px}@page{size:landscape;margin:.45in}</style></head><body><h1>Event Official Check-In</h1><p>${gameIds.length} selected game${gameIds.length === 1 ? "" : "s"} · ${rows.length} assigned official${rows.length === 1 ? "" : "s"}</p><table><thead><tr><th>Checked In</th><th>Official</th><th>Contact</th><th>Assignments</th><th>Notes</th></tr></thead><tbody>${rows.map((row) => `<tr><td class="check">☐</td><td><b>${escape(row.name)}</b></td><td>${escape(row.email)}<br>${escape(row.phone)}</td><td>${row.games.map(escape).join("<br>")}</td><td class="notes"></td></tr>`).join("")}</tbody></table><script>window.onload=()=>window.print()<\/script></body></html>`);
+    if (!printWindow)
+      return setError("Allow pop-ups to open the printable check-in sheet.");
+    printWindow.document.write(
+      `<!doctype html><html><head><title>Event Official Check-In</title><style>body{font-family:Arial,sans-serif;margin:24px;color:#172033}h1{font-size:22px;margin:0 0 6px}p{margin:0 0 18px;color:#475569}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid #94a3b8;padding:8px;text-align:left;vertical-align:top}th{background:#eaf2ff}.check{width:52px;height:28px}.notes{width:150px}@page{size:landscape;margin:.45in}</style></head><body><h1>Event Official Check-In</h1><p>${gameIds.length} selected game${gameIds.length === 1 ? "" : "s"} · ${rows.length} assigned official${rows.length === 1 ? "" : "s"}</p><table><thead><tr><th>Checked In</th><th>Official</th><th>Contact</th><th>Assignments</th><th>Notes</th></tr></thead><tbody>${rows.map((row) => `<tr><td class="check">☐</td><td><b>${escape(row.name)}</b></td><td>${escape(row.email)}<br>${escape(row.phone)}</td><td>${row.games.map(escape).join("<br>")}</td><td class="notes"></td></tr>`).join("")}</tbody></table><script>window.onload=()=>window.print()<\/script></body></html>`,
+    );
     printWindow.document.close();
   }
   async function runBulkAction(
@@ -4326,13 +4536,19 @@ export default function AssignmentsManagerV2({
                   </button>
                 </div>
                 {current && canManage && (
-                  <div className="mobileInlinePositionControls" role="group" aria-label={`Move ${official?.first_name || "official"} to another position`}>
+                  <div
+                    className="mobileInlinePositionControls"
+                    role="group"
+                    aria-label={`Move ${official?.first_name || "official"} to another position`}
+                  >
                     <span>Move position</span>
                     {([-1, 1] as const).map((direction) => {
                       const target = gamePositions[index + direction];
                       const label = target
                         ? shortPositionName(target.name)
-                        : direction === -1 ? "Previous" : "Next";
+                        : direction === -1
+                          ? "Previous"
+                          : "Next";
                       return (
                         <button
                           key={direction}
@@ -4340,9 +4556,14 @@ export default function AssignmentsManagerV2({
                           className="secondary"
                           aria-label={`Move official ${direction === -1 ? "up" : "down"}${target ? ` to ${label}` : ""}; swaps officials when occupied`}
                           disabled={!target || movingAssignment !== ""}
-                          onClick={() => void moveAssignment(game.id, current.id, direction)}
+                          onClick={() =>
+                            void moveAssignment(game.id, current.id, direction)
+                          }
                         >
-                          <span aria-hidden="true">{direction === -1 ? "↑" : "↓"}</span>{" "}{label}
+                          <span aria-hidden="true">
+                            {direction === -1 ? "↑" : "↓"}
+                          </span>{" "}
+                          {label}
                         </button>
                       );
                     })}
@@ -4652,9 +4873,7 @@ export default function AssignmentsManagerV2({
             (item) => item.id === assignment.position_id,
           ),
         }))
-        .filter(
-          (row): row is typeof row & { game: Game } => Boolean(row.game),
-        )
+        .filter((row): row is typeof row & { game: Game } => Boolean(row.game))
         .sort(
           (a, b) =>
             new Date(a.game.starts_at).getTime() -
@@ -4740,34 +4959,45 @@ export default function AssignmentsManagerV2({
                   </tr>
                 </thead>
                 <tbody>
-                  {scheduleRows.map(({ assignment, game: rowGame, position }) => (
-                    <tr key={assignment.id}>
-                      <td>
-                        {new Date(rowGame.starts_at).toLocaleDateString()}
-                        <small>
-                          {new Date(rowGame.starts_at).toLocaleTimeString([], {
-                            hour: "numeric",
-                            minute: "2-digit",
-                          })}
-                        </small>
-                      </td>
-                      <td>
-                        <b>
-                          {rowGame.home?.name || "TBD"} vs {rowGame.away?.name || "TBD"}
-                        </b>
-                        <small>Game #{rowGame.game_number}</small>
-                      </td>
-                      <td>
-                        {rowGame.leagues?.name || "League not set"}
-                        <small>{rowGame.location?.name || "Venue TBD"}</small>
-                      </td>
-                      <td>{position ? shortPositionName(position.name) : "—"}</td>
-                      <td>{assignment.status.replaceAll("_", " ")}</td>
-                    </tr>
-                  ))}
+                  {scheduleRows.map(
+                    ({ assignment, game: rowGame, position }) => (
+                      <tr key={assignment.id}>
+                        <td>
+                          {new Date(rowGame.starts_at).toLocaleDateString()}
+                          <small>
+                            {new Date(rowGame.starts_at).toLocaleTimeString(
+                              [],
+                              {
+                                hour: "numeric",
+                                minute: "2-digit",
+                              },
+                            )}
+                          </small>
+                        </td>
+                        <td>
+                          <b>
+                            {rowGame.home?.name || "TBD"} vs{" "}
+                            {rowGame.away?.name || "TBD"}
+                          </b>
+                          <small>Game #{rowGame.game_number}</small>
+                        </td>
+                        <td>
+                          {rowGame.leagues?.name || "League not set"}
+                          <small>{rowGame.location?.name || "Venue TBD"}</small>
+                        </td>
+                        <td>
+                          {position ? shortPositionName(position.name) : "—"}
+                        </td>
+                        <td>{assignment.status.replaceAll("_", " ")}</td>
+                      </tr>
+                    ),
+                  )}
                   {!scheduleRows.length && (
                     <tr>
-                      <td colSpan={5}>No assignments are currently on this official’s schedule.</td>
+                      <td colSpan={5}>
+                        No assignments are currently on this official’s
+                        schedule.
+                      </td>
                     </tr>
                   )}
                 </tbody>
@@ -5240,10 +5470,7 @@ export default function AssignmentsManagerV2({
                               </small>
                               <em>
                                 {roleRatings
-                                  .map(
-                                    (rating) =>
-                                      rating.text,
-                                  )
+                                  .map((rating) => rating.text)
                                   .join(" · ")}
                               </em>
                             </span>
@@ -5561,7 +5788,10 @@ export default function AssignmentsManagerV2({
                                     {index === 0 ? "★ " : ""}
                                     {candidate.official.last_name},{" "}
                                     {candidate.official.first_name} —{" "}
-                                    {positionRatingText(candidate.official.id, slot.position)}
+                                    {positionRatingText(
+                                      candidate.official.id,
+                                      slot.position,
+                                    )}
                                     {candidate.distance != null
                                       ? ` — ${candidate.distance.toFixed(1)} mi`
                                       : ""}{" "}
@@ -5601,7 +5831,10 @@ export default function AssignmentsManagerV2({
                           <small className="recommendation">
                             Recommended: {recommendation.official.first_name}{" "}
                             {recommendation.official.last_name} ·{" "}
-                            {positionRatingText(recommendation.official.id, slot.position)}
+                            {positionRatingText(
+                              recommendation.official.id,
+                              slot.position,
+                            )}
                             {recommendation.distance != null
                               ? ` · ${recommendation.distance.toFixed(1)} mi`
                               : ""}
@@ -5789,7 +6022,8 @@ export default function AssignmentsManagerV2({
                   className="primary"
                   disabled={
                     publishing ||
-                    (!unpublishedCount && !filteredGames.some(isUnpublishedGame))
+                    (!unpublishedCount &&
+                      !filteredGames.some(isUnpublishedGame))
                   }
                   onClick={openPublishReview}
                 >
@@ -5844,7 +6078,9 @@ export default function AssignmentsManagerV2({
                       disabled={saving === "assignment-fee-import"}
                       onClick={() => assignmentFeeImportInput.current?.click()}
                     >
-                      {saving === "assignment-fee-import" ? "Uploading Fees…" : "Upload Game Fees"}
+                      {saving === "assignment-fee-import"
+                        ? "Uploading Fees…"
+                        : "Upload Game Fees"}
                     </button>
                     <button
                       type="button"
@@ -5909,7 +6145,9 @@ export default function AssignmentsManagerV2({
                 disabled={saving === "assignment-fee-import"}
                 onClick={() => assignmentFeeImportInput.current?.click()}
               >
-                {saving === "assignment-fee-import" ? "Uploading Fees…" : "Upload Game Fees"}
+                {saving === "assignment-fee-import"
+                  ? "Uploading Fees…"
+                  : "Upload Game Fees"}
               </button>
               <button
                 type="button"
@@ -6645,8 +6883,8 @@ export default function AssignmentsManagerV2({
                             candidate.conflictingGames.length
                               ? "candidateBlocked"
                               : candidate.reasons.length
-                              ? "candidateWarning"
-                              : "candidateEligible"
+                                ? "candidateWarning"
+                                : "candidateEligible"
                           }
                         >
                           <div>
@@ -6656,7 +6894,10 @@ export default function AssignmentsManagerV2({
                               <ScheduleLink officialId={candidate.id} />
                             </b>
                             <span>
-                              {positionRatingText(candidate.id, candidatePosition)}
+                              {positionRatingText(
+                                candidate.id,
+                                candidatePosition,
+                              )}
                               {candidate.distance != null
                                 ? ` • ${candidate.distance.toFixed(1)} mi`
                                 : ""}{" "}
@@ -6709,8 +6950,8 @@ export default function AssignmentsManagerV2({
                                 : candidate.conflictingGames.length
                                   ? `View Game #${candidate.conflictingGames[0].game_number}`
                                   : candidate.reasons.length
-                                  ? "Override"
-                                  : "Assign"}
+                                    ? "Override"
+                                    : "Assign"}
                             </button>
                             {candidate.conflictingGames.length === 0 &&
                               !game.time_tbd &&
@@ -6910,124 +7151,129 @@ export default function AssignmentsManagerV2({
               </div>
             </div>
           )}
-          {showPublishReview && game && !game.time_tbd &&
+          {showPublishReview &&
+            game &&
+            !game.time_tbd &&
             createPortal(
-            <div
-              className="assignmentDialogBackdrop"
-              role="presentation"
-              onMouseDown={() => !publishing && setShowPublishReview(false)}
-            >
               <div
-                className="assignmentDialog assignmentPublishReview"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="publishReviewTitle"
-                onMouseDown={(event) => event.stopPropagation()}
+                className="assignmentDialogBackdrop"
+                role="presentation"
+                onMouseDown={() => !publishing && setShowPublishReview(false)}
               >
-                <div className="assignmentDialogHead">
-                  <div>
-                    <h3 id="publishReviewTitle">Review Before Publishing</h3>
-                    <p>
-                      Game #{game.game_number} — {game.home?.name || "TBD"} vs{" "}
-                      {game.away?.name || "TBD"}
-                    </p>
+                <div
+                  className="assignmentDialog assignmentPublishReview"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="publishReviewTitle"
+                  onMouseDown={(event) => event.stopPropagation()}
+                >
+                  <div className="assignmentDialogHead">
+                    <div>
+                      <h3 id="publishReviewTitle">Review Before Publishing</h3>
+                      <p>
+                        Game #{game.game_number} — {game.home?.name || "TBD"} vs{" "}
+                        {game.away?.name || "TBD"}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      aria-label="Close"
+                      disabled={publishing}
+                      onClick={() => setShowPublishReview(false)}
+                    >
+                      ×
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    aria-label="Close"
-                    disabled={publishing}
-                    onClick={() => setShowPublishReview(false)}
-                  >
-                    ×
-                  </button>
+                  <div className="publishReviewSummary">
+                    <span>
+                      <b>{unpublishedCount}</b> official
+                      {unpublishedCount === 1 ? "" : "s"} will be notified
+                    </span>
+                    <span className={openPositionCount ? "warning" : "ready"}>
+                      <b>{openPositionCount}</b> open position
+                      {openPositionCount === 1 ? "" : "s"}
+                    </span>
+                    <span
+                      className={publishMissingEmails ? "warning" : "ready"}
+                    >
+                      <b>{publishMissingEmails}</b> missing email
+                      {publishMissingEmails === 1 ? "" : "s"}
+                    </span>
+                    <span>
+                      <b>{publishAcceptanceHours}h</b> response window
+                    </span>
+                  </div>
+                  <div className="publishRecipientList">
+                    {unpublishedAssignments.map((assignment) => {
+                      const official = officials.find(
+                        (item) => item.id === assignment.official_id,
+                      );
+                      const position = positions.find(
+                        (item) => item.id === assignment.position_id,
+                      );
+                      return (
+                        <div key={assignment.id}>
+                          <span>
+                            <b>
+                              {official
+                                ? `${official.first_name} ${official.last_name}`
+                                : "Unknown official"}
+                            </b>
+                            <small>
+                              {position
+                                ? shortPositionName(position.name)
+                                : "Official"}
+                            </small>
+                          </span>
+                          <span
+                            className={
+                              official?.email
+                                ? "recipientReady"
+                                : "recipientMissing"
+                            }
+                          >
+                            {official?.email || "Email missing"}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="publishReviewNote">
+                    Publishing sends each listed official an assignment email
+                    with the league response deadline. Open positions are not
+                    included.
+                    {publishMissingEmails
+                      ? " Add the missing email before publishing."
+                      : " Recipient checks passed."}
+                  </p>
+                  <div className="assignmentDialogFooter">
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={publishing}
+                      onClick={() => setShowPublishReview(false)}
+                    >
+                      Go Back
+                    </button>
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={
+                        publishing ||
+                        !unpublishedCount ||
+                        Boolean(publishMissingEmails)
+                      }
+                      onClick={() => void publishAssignments()}
+                    >
+                      {publishing
+                        ? "Publishing & Sending…"
+                        : `Publish ${unpublishedCount} Assignment${unpublishedCount === 1 ? "" : "s"}`}
+                    </button>
+                  </div>
                 </div>
-                <div className="publishReviewSummary">
-                  <span>
-                    <b>{unpublishedCount}</b> official
-                    {unpublishedCount === 1 ? "" : "s"} will be notified
-                  </span>
-                  <span className={openPositionCount ? "warning" : "ready"}>
-                    <b>{openPositionCount}</b> open position
-                    {openPositionCount === 1 ? "" : "s"}
-                  </span>
-                  <span className={publishMissingEmails ? "warning" : "ready"}>
-                    <b>{publishMissingEmails}</b> missing email
-                    {publishMissingEmails === 1 ? "" : "s"}
-                  </span>
-                  <span>
-                    <b>{publishAcceptanceHours}h</b> response window
-                  </span>
-                </div>
-                <div className="publishRecipientList">
-                  {unpublishedAssignments.map((assignment) => {
-                    const official = officials.find(
-                      (item) => item.id === assignment.official_id,
-                    );
-                    const position = positions.find(
-                      (item) => item.id === assignment.position_id,
-                    );
-                    return (
-                      <div key={assignment.id}>
-                        <span>
-                          <b>
-                            {official
-                              ? `${official.first_name} ${official.last_name}`
-                              : "Unknown official"}
-                          </b>
-                          <small>
-                            {position
-                              ? shortPositionName(position.name)
-                              : "Official"}
-                          </small>
-                        </span>
-                        <span
-                          className={
-                            official?.email
-                              ? "recipientReady"
-                              : "recipientMissing"
-                          }
-                        >
-                          {official?.email || "Email missing"}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-                <p className="publishReviewNote">
-                  Publishing sends each listed official an assignment email with
-                  the league response deadline. Open positions are not included.
-                  {publishMissingEmails
-                    ? " Add the missing email before publishing."
-                    : " Recipient checks passed."}
-                </p>
-                <div className="assignmentDialogFooter">
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={publishing}
-                    onClick={() => setShowPublishReview(false)}
-                  >
-                    Go Back
-                  </button>
-                  <button
-                    type="button"
-                    className="primary"
-                    disabled={
-                      publishing ||
-                      !unpublishedCount ||
-                      Boolean(publishMissingEmails)
-                    }
-                    onClick={() => void publishAssignments()}
-                  >
-                    {publishing
-                      ? "Publishing & Sending…"
-                      : `Publish ${unpublishedCount} Assignment${unpublishedCount === 1 ? "" : "s"}`}
-                  </button>
-                </div>
-              </div>
-            </div>,
-            document.body,
-          )}
+              </div>,
+              document.body,
+            )}
           {showActivityTimeline && game && (
             <div
               className="assignmentDialogBackdrop"
@@ -7501,7 +7747,11 @@ export default function AssignmentsManagerV2({
                 </button>
                 <button
                   className="dangerButton"
-                  style={{ backgroundColor: "#b91c1c", borderColor: "#b91c1c", color: "#ffffff" }}
+                  style={{
+                    backgroundColor: "#b91c1c",
+                    borderColor: "#b91c1c",
+                    color: "#ffffff",
+                  }}
                   disabled={overdueResolving || overdueSelected.length === 0}
                   onClick={() => void resolveOverdue("remove")}
                 >
@@ -8038,7 +8288,9 @@ export default function AssignmentsManagerV2({
               )}
               <button
                 className="primary assignmentBroadcastButton"
-                disabled={bulkWorking || broadcasting || !broadcastOpenPositions.length}
+                disabled={
+                  bulkWorking || broadcasting || !broadcastOpenPositions.length
+                }
                 onClick={() => setShowBroadcastReview(true)}
               >
                 Broadcast
@@ -8108,10 +8360,18 @@ export default function AssignmentsManagerV2({
                   >
                     Export Selected
                   </button>
-                  <button className="secondary" disabled={bulkWorking} onClick={() => void downloadCheckInSheet(linkSelected)}>
+                  <button
+                    className="secondary"
+                    disabled={bulkWorking}
+                    onClick={() => void downloadCheckInSheet(linkSelected)}
+                  >
                     Download Check-In Sheet
                   </button>
-                  <button className="secondary" disabled={bulkWorking} onClick={() => printCheckInSheet(linkSelected)}>
+                  <button
+                    className="secondary"
+                    disabled={bulkWorking}
+                    onClick={() => printCheckInSheet(linkSelected)}
+                  >
                     Print Check-In Sheet
                   </button>
                 </div>
@@ -8206,79 +8466,110 @@ export default function AssignmentsManagerV2({
               </div>
             )}
             {showBroadcastReview && (
-            <div
-              className="assignmentDialogBackdrop"
-              role="presentation"
-              onMouseDown={() => !broadcasting && setShowBroadcastReview(false)}
-            >
               <div
-                className="assignmentDialog assignmentPublishReview"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="broadcastReviewTitle"
-                onMouseDown={(event) => event.stopPropagation()}
+                className="assignmentDialogBackdrop"
+                role="presentation"
+                onMouseDown={() =>
+                  !broadcasting && setShowBroadcastReview(false)
+                }
               >
-                <div className="assignmentDialogHead">
-                  <div>
-                    <h3 id="broadcastReviewTitle">Review Broadcast</h3>
-                    <p>
-                      Email active officials a link to review and claim the selected open games.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    aria-label="Close"
-                    disabled={broadcasting}
-                    onClick={() => setShowBroadcastReview(false)}
-                  >
-                    ×
-                  </button>
-                </div>
-                <div className="publishReviewSummary">
-                  <span><b>{linkSelected.length}</b> selected game{linkSelected.length === 1 ? "" : "s"}</span>
-                  <span><b>{broadcastOfficials.length}</b> active official{broadcastOfficials.length === 1 ? "" : "s"}</span>
-                  <span><b>{broadcastOpenPositions.length}</b> open position{broadcastOpenPositions.length === 1 ? "" : "s"}</span>
-                  <span className={broadcastMissingEmails ? "warning" : "ready"}>
-                    <b>{broadcastMissingEmails}</b> missing email{broadcastMissingEmails === 1 ? "" : "s"}
-                  </span>
-                </div>
-                <div className="publishRecipientList">
-                  {broadcastOfficials.map((official) => (
-                    <div key={official.id}>
-                      <span>
-                        <b>{official.first_name} {official.last_name}</b>
-                        <small>Self-assign invitation</small>
-                      </span>
-                      <span className={official.email ? "recipientReady" : "recipientMissing"}>
-                        {official.email || "Email missing"}
-                      </span>
+                <div
+                  className="assignmentDialog assignmentPublishReview"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="broadcastReviewTitle"
+                  onMouseDown={(event) => event.stopPropagation()}
+                >
+                  <div className="assignmentDialogHead">
+                    <div>
+                      <h3 id="broadcastReviewTitle">Review Broadcast</h3>
+                      <p>
+                        Email active officials a link to review and claim the
+                        selected open games.
+                      </p>
                     </div>
-                  ))}
+                    <button
+                      type="button"
+                      aria-label="Close"
+                      disabled={broadcasting}
+                      onClick={() => setShowBroadcastReview(false)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <div className="publishReviewSummary">
+                    <span>
+                      <b>{linkSelected.length}</b> selected game
+                      {linkSelected.length === 1 ? "" : "s"}
+                    </span>
+                    <span>
+                      <b>{broadcastOfficials.length}</b> active official
+                      {broadcastOfficials.length === 1 ? "" : "s"}
+                    </span>
+                    <span>
+                      <b>{broadcastOpenPositions.length}</b> open position
+                      {broadcastOpenPositions.length === 1 ? "" : "s"}
+                    </span>
+                    <span
+                      className={broadcastMissingEmails ? "warning" : "ready"}
+                    >
+                      <b>{broadcastMissingEmails}</b> missing email
+                      {broadcastMissingEmails === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                  <div className="publishRecipientList">
+                    {broadcastOfficials.map((official) => (
+                      <div key={official.id}>
+                        <span>
+                          <b>
+                            {official.first_name} {official.last_name}
+                          </b>
+                          <small>Self-assign invitation</small>
+                        </span>
+                        <span
+                          className={
+                            official.email
+                              ? "recipientReady"
+                              : "recipientMissing"
+                          }
+                        >
+                          {official.email || "Email missing"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="publishReviewNote">
+                    Eligible officials can immediately self-assign and confirm.
+                    Officials who do not meet league or level eligibility can
+                    request the position; the assignor will be notified and may
+                    approve an override. Schedule conflicts cannot be
+                    overridden.
+                  </p>
+                  <div className="assignmentDialogFooter">
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={broadcasting}
+                      onClick={() => setShowBroadcastReview(false)}
+                    >
+                      Go Back
+                    </button>
+                    <button
+                      type="button"
+                      className="primary assignmentBroadcastButton"
+                      disabled={
+                        broadcasting ||
+                        !broadcastOfficials.length ||
+                        Boolean(broadcastMissingEmails)
+                      }
+                      onClick={() => void broadcastAssignments()}
+                    >
+                      {broadcasting
+                        ? "Sending Broadcast…"
+                        : `Broadcast to ${broadcastOfficials.length} Official${broadcastOfficials.length === 1 ? "" : "s"}`}
+                    </button>
+                  </div>
                 </div>
-                <p className="publishReviewNote">
-                  Eligible officials can immediately self-assign and confirm. Officials who do not
-                  meet league or level eligibility can request the position; the assignor will be
-                  notified and may approve an override. Schedule conflicts cannot be overridden.
-                </p>
-                <div className="assignmentDialogFooter">
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={broadcasting}
-                    onClick={() => setShowBroadcastReview(false)}
-                  >
-                    Go Back
-                  </button>
-                  <button
-                    type="button"
-                    className="primary assignmentBroadcastButton"
-                    disabled={broadcasting || !broadcastOfficials.length || Boolean(broadcastMissingEmails)}
-                    onClick={() => void broadcastAssignments()}
-                  >
-                    {broadcasting ? "Sending Broadcast…" : `Broadcast to ${broadcastOfficials.length} Official${broadcastOfficials.length === 1 ? "" : "s"}`}
-                  </button>
-                </div>
-              </div>
               </div>
             )}
             <div className="assignmentGameTableHeader">
@@ -8815,858 +9106,896 @@ export default function AssignmentsManagerV2({
           filteredGames.some((g) => g.id === game.id) &&
           inlineAssignmentHost &&
           createPortal(
-          <div className={`assignmentLayout selectedGameDetailStandalone${focusGameId === game.id ? " reportActionFocus" : ""}`}>
-            <section
-              id="selected-game-assignment"
-              className="card assignmentMain"
+            <div
+              className={`assignmentLayout selectedGameDetailStandalone${focusGameId === game.id ? " reportActionFocus" : ""}`}
             >
-              <div className="cardHead selectedGameStickyHeader">
-                <div>
-                  <button
-                    type="button"
-                    className="assignmentBackToGames"
-                    onClick={() => {
-                      setSelected("");
-                      setLinkSelected([]);
-                    }}
-                  >
-                    ← Back to games
-                  </button>
-                  <h2>
-                    {game.home?.name || "TBD"} vs {game.away?.name || "TBD"}
-                  </h2>
-                  <div
-                    style={{
-                      fontSize: 12,
-                      color: "#94a3b8",
-                      marginTop: 2,
-                      marginBottom: 5,
-                    }}
-                  >
-                    Game #{game.game_number}
-                  </div>
-                  <p>
-                    {new Date(game.starts_at).toLocaleString()} •{" "}
-                    {game.duration_minutes || 110} min • {game.sports?.name} •{" "}
-                    {game.leagues?.name || "No league"} •{" "}
-                    {game.location?.name || "TBD"} •{" "}
-                    <b>{gamePositions.length} assignment slots</b>
-                  </p>
-                  <div
-                    className="selectedGameSummary"
-                    aria-label="Assignment summary"
-                  >
-                    <span>
-                      <b>
-                        {activeAssignmentCount}/{gamePositions.length}
-                      </b>{" "}
-                      Filled
-                    </span>
-                    <span>
-                      <b>{openPositionCount}</b> Open
-                    </span>
-                    <span>
-                      <b>
-                        {
-                          gameAssignments.filter(
-                            (item) =>
-                              item.status === "proposed" && item.published_at,
-                          ).length
-                        }
-                      </b>{" "}
-                      Awaiting
-                    </span>
-                    <span>
-                      <b>
-                        {
-                          gameAssignments.filter((item) =>
-                            ["accepted", "confirmed"].includes(item.status),
-                          ).length
-                        }
-                      </b>{" "}
-                      Confirmed
-                    </span>
-                  </div>
-                  <div className="selectedGameUtilities">
-                    {canManage && !mentorSlots.some((slot) => slot.game_id === game.id) && (
-                      <button type="button" className="primary" disabled={mentorSlotSaving === game.id} onClick={() => void addMentorSlot()}>
-                        {mentorSlotSaving === game.id ? "Adding Mentor…" : "Add Mentor"}
-                      </button>
-                    )}
+              <section
+                id="selected-game-assignment"
+                className="card assignmentMain"
+              >
+                <div className="cardHead selectedGameStickyHeader">
+                  <div>
                     <button
                       type="button"
-                      className="assignmentActivityLink"
-                      onClick={() => void openActivityTimeline()}
+                      className="assignmentBackToGames"
+                      onClick={() => {
+                        setSelected("");
+                        setLinkSelected([]);
+                      }}
                     >
-                      Activity timeline
+                      ← Back to games
                     </button>
-                    {canManage && (
+                    <h2>
+                      {game.home?.name || "TBD"} vs {game.away?.name || "TBD"}
+                    </h2>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: "#94a3b8",
+                        marginTop: 2,
+                        marginBottom: 5,
+                      }}
+                    >
+                      Game #{game.game_number}
+                    </div>
+                    <p>
+                      {new Date(game.starts_at).toLocaleString()} •{" "}
+                      {game.duration_minutes || 110} min • {game.sports?.name} •{" "}
+                      {game.leagues?.name || "No league"} •{" "}
+                      {game.location?.name || "TBD"} •{" "}
+                      <b>{gamePositions.length} assignment slots</b>
+                    </p>
+                    <div
+                      className="selectedGameSummary"
+                      aria-label="Assignment summary"
+                    >
+                      <span>
+                        <b>
+                          {activeAssignmentCount}/{gamePositions.length}
+                        </b>{" "}
+                        Filled
+                      </span>
+                      <span>
+                        <b>{openPositionCount}</b> Open
+                      </span>
+                      <span>
+                        <b>
+                          {
+                            gameAssignments.filter(
+                              (item) =>
+                                item.status === "proposed" && item.published_at,
+                            ).length
+                          }
+                        </b>{" "}
+                        Awaiting
+                      </span>
+                      <span>
+                        <b>
+                          {
+                            gameAssignments.filter((item) =>
+                              ["accepted", "confirmed"].includes(item.status),
+                            ).length
+                          }
+                        </b>{" "}
+                        Confirmed
+                      </span>
+                    </div>
+                    <div className="selectedGameUtilities">
+                      {canManage &&
+                        !mentorSlots.some(
+                          (slot) => slot.game_id === game.id,
+                        ) && (
+                          <button
+                            type="button"
+                            className="primary"
+                            disabled={mentorSlotSaving === game.id}
+                            onClick={() => void addMentorSlot()}
+                          >
+                            {mentorSlotSaving === game.id
+                              ? "Adding Mentor…"
+                              : "Add Mentor"}
+                          </button>
+                        )}
                       <button
                         type="button"
                         className="assignmentActivityLink"
-                        onClick={openCrewTemplateTools}
+                        onClick={() => void openActivityTimeline()}
                       >
-                        Crew templates
+                        Activity timeline
                       </button>
-                    )}
-                    <div
-                      className="assignmentConfirmMessage"
-                      aria-label="Notification history"
-                    >
-                      <b>Notifications:</b>{" "}
-                      {["canceled", "rained_out"].includes(game.status)
-                        ? `${cancellationEmailsSent} cancellation notice${cancellationEmailsSent === 1 ? "" : "s"} sent`
-                        : `${assignmentEmailsSent} assignment email${assignmentEmailsSent === 1 ? "" : "s"} sent`}
-                      {(cancellationEmailIssues || assignmentEmailIssues) >
-                        0 && (
-                        <>
-                          {" • "}
-                          <b style={{ color: "#b91c1c" }}>
-                            {["canceled", "rained_out"].includes(game.status)
-                              ? cancellationEmailIssues
-                              : assignmentEmailIssues}{" "}
-                            need attention
-                          </b>
-                          <button
-                            type="button"
-                            className="secondary"
-                            disabled={retryingNotifications}
-                            onClick={() => void retryNotificationIssues()}
-                          >
-                            {retryingNotifications ? "Retrying…" : "Retry"}
-                          </button>
-                        </>
+                      {canManage && (
+                        <button
+                          type="button"
+                          className="assignmentActivityLink"
+                          onClick={openCrewTemplateTools}
+                        >
+                          Crew templates
+                        </button>
                       )}
+                      <div
+                        className="assignmentConfirmMessage"
+                        aria-label="Notification history"
+                      >
+                        <b>Notifications:</b>{" "}
+                        {["canceled", "rained_out"].includes(game.status)
+                          ? `${cancellationEmailsSent} cancellation notice${cancellationEmailsSent === 1 ? "" : "s"} sent`
+                          : `${assignmentEmailsSent} assignment email${assignmentEmailsSent === 1 ? "" : "s"} sent`}
+                        {(cancellationEmailIssues || assignmentEmailIssues) >
+                          0 && (
+                          <>
+                            {" • "}
+                            <b style={{ color: "#b91c1c" }}>
+                              {["canceled", "rained_out"].includes(game.status)
+                                ? cancellationEmailIssues
+                                : assignmentEmailIssues}{" "}
+                              need attention
+                            </b>
+                            <button
+                              type="button"
+                              className="secondary"
+                              disabled={retryingNotifications}
+                              onClick={() => void retryNotificationIssues()}
+                            >
+                              {retryingNotifications ? "Retrying…" : "Retry"}
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-              {gamePositions.length === 0 ? (
-                <div className="errorBox">
-                  No assignment positions are configured for this sport.
-                </div>
-              ) : (
-                <>
-                  <div
-                    className="positionFocusToggle desktopPositionFocus"
-                    role="group"
-                    aria-label="Positions shown"
-                  >
-                    <button
-                      type="button"
-                      className={!needsAssignmentOnly ? "active" : ""}
-                      onClick={() =>
-                        setNeedsAssignmentView((current) => ({
-                          ...current,
-                          [game.id]: false,
-                        }))
-                      }
-                    >
-                      All Positions
-                    </button>
-                    <button
-                      type="button"
-                      className={needsAssignmentOnly ? "active" : ""}
-                      onClick={() =>
-                        setNeedsAssignmentView((current) => ({
-                          ...current,
-                          [game.id]: true,
-                        }))
-                      }
-                    >
-                      Needs Assignment ({openPositionCount})
-                    </button>
+                {gamePositions.length === 0 ? (
+                  <div className="errorBox">
+                    No assignment positions are configured for this sport.
                   </div>
-                  {visibleGamePositions.length ? (
-                    <div className="tableWrap assignmentPositionsScroll" role="region" aria-label="Game assignment positions" tabIndex={0}>
-                      <table className="assignmentPositionsTable">
-                        <thead>
-                          <tr>
-                            <th>Self Assign</th>
-                            <th>Position</th>
-                            <th>Assigned Official</th>
-                            <th>Status</th>
-                            <th>Assign</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {visibleGamePositions.map((pos) => {
-                            const index = gamePositions.findIndex(
-                              (position) => position.id === pos.id,
-                            );
-                            const current = assignments.find(
-                                (a) =>
-                                  a.game_id === game.id &&
-                                  a.position_id === pos.id &&
-                                  a.status !== "declined",
-                              ),
-                              declined = assignments.find(
-                                (a) =>
-                                  a.game_id === game.id &&
-                                  a.position_id === pos.id &&
-                                  a.status === "declined",
-                              ),
-                              replacementNeeded = isReplacementNeeded(
-                                game.id,
-                                pos.id,
-                              ),
-                              list = candidates(pos),
-                              label = rankLabel(pos),
-                              status = current
-                                ? assignmentStatus(current)
-                                : null;
-                            return (
-                              <tr
-                                key={pos.id}
-                                id={`assignment-position-${pos.id}`}
-                                style={{
-                                  background:
-                                    declined && !current
-                                      ? "#fff1f2"
-                                      : undefined,
-                                }}
-                              >
-                                <td>
-                                  {!current &&
-                                  !isSelfAssignOpen(game.id, pos.id) ? (
-                                    <input
-                                      type="checkbox"
-                                      checked={selfAssignSelected.includes(
-                                        selfAssignKey(game.id, pos.id),
-                                      )}
-                                      disabled={!canManage || selfAssignSaving}
-                                      aria-label={`Select ${pos.name} for Self Assign`}
-                                      onChange={() =>
-                                        toggleSelfAssignSelection(
-                                          game.id,
-                                          pos.id,
-                                        )
-                                      }
-                                    />
-                                  ) : !current ? (
-                                    <div className="selfAssignOpenControls">
-                                      <button
-                                        type="button"
-                                        className="secondary selfAssignCloseButton"
+                ) : (
+                  <>
+                    <div
+                      className="positionFocusToggle desktopPositionFocus"
+                      role="group"
+                      aria-label="Positions shown"
+                    >
+                      <button
+                        type="button"
+                        className={!needsAssignmentOnly ? "active" : ""}
+                        onClick={() =>
+                          setNeedsAssignmentView((current) => ({
+                            ...current,
+                            [game.id]: false,
+                          }))
+                        }
+                      >
+                        All Positions
+                      </button>
+                      <button
+                        type="button"
+                        className={needsAssignmentOnly ? "active" : ""}
+                        onClick={() =>
+                          setNeedsAssignmentView((current) => ({
+                            ...current,
+                            [game.id]: true,
+                          }))
+                        }
+                      >
+                        Needs Assignment ({openPositionCount})
+                      </button>
+                    </div>
+                    {visibleGamePositions.length ? (
+                      <div
+                        className="tableWrap assignmentPositionsScroll"
+                        role="region"
+                        aria-label="Game assignment positions"
+                        tabIndex={0}
+                      >
+                        <table className="assignmentPositionsTable">
+                          <thead>
+                            <tr>
+                              <th>Self Assign</th>
+                              <th>Position</th>
+                              <th>Assigned Official</th>
+                              <th>Status</th>
+                              <th>Assign</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {visibleGamePositions.map((pos) => {
+                              const index = gamePositions.findIndex(
+                                (position) => position.id === pos.id,
+                              );
+                              const current = assignments.find(
+                                  (a) =>
+                                    a.game_id === game.id &&
+                                    a.position_id === pos.id &&
+                                    a.status !== "declined",
+                                ),
+                                declined = assignments.find(
+                                  (a) =>
+                                    a.game_id === game.id &&
+                                    a.position_id === pos.id &&
+                                    a.status === "declined",
+                                ),
+                                replacementNeeded = isReplacementNeeded(
+                                  game.id,
+                                  pos.id,
+                                ),
+                                list = candidates(pos),
+                                label = rankLabel(pos),
+                                status = current
+                                  ? assignmentStatus(current)
+                                  : null;
+                              return (
+                                <tr
+                                  key={pos.id}
+                                  id={`assignment-position-${pos.id}`}
+                                  style={{
+                                    background:
+                                      declined && !current
+                                        ? "#fff1f2"
+                                        : undefined,
+                                  }}
+                                >
+                                  <td>
+                                    {!current &&
+                                    !isSelfAssignOpen(game.id, pos.id) ? (
+                                      <input
+                                        type="checkbox"
+                                        checked={selfAssignSelected.includes(
+                                          selfAssignKey(game.id, pos.id),
+                                        )}
                                         disabled={
                                           !canManage || selfAssignSaving
                                         }
-                                        aria-label={`Close Self Assign for ${pos.name}`}
-                                        title="Close Self Assign"
-                                        onClick={() =>
-                                          void withdrawSelfAssignPosition(
+                                        aria-label={`Select ${pos.name} for Self Assign`}
+                                        onChange={() =>
+                                          toggleSelfAssignSelection(
                                             game.id,
                                             pos.id,
                                           )
                                         }
-                                      >
-                                        Open <span aria-hidden="true">×</span>
-                                      </button>
-                                    </div>
-                                  ) : (
-                                    <span>—</span>
-                                  )}
-                                </td>
-                                <td>
-                                  <div
-                                    className="assignmentPositionSummary"
-                                    style={{
-                                      display: "flex",
-                                      alignItems: "center",
-                                      gap: 8,
-                                    }}
-                                  >
-                                    {current && canManage && (
-                                      <button
-                                        className="primary"
-                                        style={{
-                                          padding: "5px 8px",
-                                          fontSize: 11,
-                                        }}
-                                        disabled={saving === pos.id}
-                                        onClick={() =>
-                                          void unassign(current.id, pos.id)
-                                        }
-                                      >
-                                        Unassign
-                                      </button>
-                                    )}
-                                    <div>
-                                      <b>{shortPositionName(pos.name)}</b>
-                                      <small>
-                                        Slot {index + 1} of{" "}
-                                        {gamePositions.length}
-                                      </small>
-                                    </div>
-                                    {canManage &&
-                                      (mentorSlots.some(
-                                        (slot) =>
-                                          slot.game_id === game.id &&
-                                          slot.position_id === pos.id,
-                                      ) ||
-                                        (game.officials_needed > 1 &&
-                                          index ===
-                                            game.officials_needed - 1)) && (
+                                      />
+                                    ) : !current ? (
+                                      <div className="selfAssignOpenControls">
                                         <button
                                           type="button"
-                                          className="secondary"
+                                          className="secondary selfAssignCloseButton"
+                                          disabled={
+                                            !canManage || selfAssignSaving
+                                          }
+                                          aria-label={`Close Self Assign for ${pos.name}`}
+                                          title="Close Self Assign"
+                                          onClick={() =>
+                                            void withdrawSelfAssignPosition(
+                                              game.id,
+                                              pos.id,
+                                            )
+                                          }
+                                        >
+                                          Open <span aria-hidden="true">×</span>
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <span>—</span>
+                                    )}
+                                  </td>
+                                  <td>
+                                    <div
+                                      className="assignmentPositionSummary"
+                                      style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: 8,
+                                      }}
+                                    >
+                                      {current && canManage && (
+                                        <button
+                                          className="primary"
                                           style={{
                                             padding: "5px 8px",
                                             fontSize: 11,
-                                            color: "#b91c1c",
                                           }}
                                           disabled={saving === pos.id}
-                                          onClick={() => void removePosition(pos)}
+                                          onClick={() =>
+                                            void unassign(current.id, pos.id)
+                                          }
                                         >
-                                          {saving === pos.id
-                                            ? "Removing…"
-                                            : "Remove Position"}
+                                          Unassign
                                         </button>
                                       )}
-                                  </div>
-                                </td>
-                                <td>
-                                  {current ? (
-                                    <div>
-                                      {officials.find(
-                                        (o) => o.id === current.official_id,
-                                      )?.first_name +
-                                        " " +
-                                        officials.find(
-                                          (o) => o.id === current.official_id,
-                                        )?.last_name}
-                                      {futureBadge(current.official_id)}
-                                      {canManage && (
-                                        <span
-                                          className="assignmentPositionControls"
-                                          style={{
-                                            display: "inline-flex",
-                                            gap: 4,
-                                            marginLeft: 8,
-                                            alignItems: "center",
-                                          }}
-                                        >
-                                          <small
-                                            style={{
-                                              color: "#2563eb",
-                                              fontWeight: 900,
-                                            }}
-                                          >
-                                            Position
-                                          </small>
-                                          <button
-                                            type="button"
-                                            title="Move up one position; swaps officials when occupied"
-                                            aria-label="Move official up one position"
-                                            disabled={
-                                              index === 0 ||
-                                              movingAssignment === current.id
-                                            }
-                                            onClick={() =>
-                                              void moveAssignment(
-                                                game.id,
-                                                current.id,
-                                                -1,
-                                              )
-                                            }
-                                            style={{
-                                              padding: "5px 9px",
-                                              border: "1px solid #1d4ed8",
-                                              borderRadius: 6,
-                                              background:
-                                                index === 0
-                                                  ? "#cbd5e1"
-                                                  : "#2563eb",
-                                              color: "#fff",
-                                              fontSize: 14,
-                                              fontWeight: 900,
-                                            }}
-                                          >
-                                            ↑
-                                          </button>
-                                          <button
-                                            type="button"
-                                            title="Move down one position; swaps officials when occupied"
-                                            aria-label="Move official down one position"
-                                            disabled={
-                                              index ===
-                                                gamePositions.length - 1 ||
-                                              movingAssignment === current.id
-                                            }
-                                            onClick={() =>
-                                              void moveAssignment(
-                                                game.id,
-                                                current.id,
-                                                1,
-                                              )
-                                            }
-                                            style={{
-                                              padding: "5px 9px",
-                                              border: "1px solid #1d4ed8",
-                                              borderRadius: 6,
-                                              background:
-                                                index ===
-                                                gamePositions.length - 1
-                                                  ? "#cbd5e1"
-                                                  : "#2563eb",
-                                              color: "#fff",
-                                              fontSize: 14,
-                                              fontWeight: 900,
-                                            }}
-                                          >
-                                            ↓
-                                          </button>
-                                        </span>
-                                      )}
-                                      {canManage &&
-                                        current.published_at &&
-                                        current.status !== "declined" &&
-                                        current.status !== "confirmed" && (
-                                          <div style={{ marginTop: 6 }}>
-                                            <button
-                                              type="button"
-                                              disabled={
-                                                confirming === current.id
-                                              }
-                                              onClick={() =>
-                                                void confirmAssignment(current)
-                                              }
-                                              style={{
-                                                background: "#facc15",
-                                                color: "#713f12",
-                                                border: "1px solid #eab308",
-                                                borderRadius: 7,
-                                                padding: "6px 10px",
-                                                fontSize: 11,
-                                                fontWeight: 800,
-                                                cursor: "pointer",
-                                              }}
-                                            >
-                                              {confirming === current.id
-                                                ? "Confirming…"
-                                                : "Confirm Official"}
-                                            </button>
-                                          </div>
-                                        )}
-                                    </div>
-                                  ) : replacementNeeded ? (
-                                    <div>
-                                      <b style={{ color: "#b91c1c" }}>
-                                        {declined
-                                          ? "Open — official declined"
-                                          : "Open — replacement needed"}
-                                      </b>
-                                      {declined && (
+                                      <div>
+                                        <b>{shortPositionName(pos.name)}</b>
                                         <small>
-                                          {
-                                            officials.find(
-                                              (o) =>
-                                                o.id === declined.official_id,
-                                            )?.first_name
-                                          }{" "}
-                                          {
-                                            officials.find(
-                                              (o) =>
-                                                o.id === declined.official_id,
-                                            )?.last_name
-                                          }
-                                          {declined.decline_reason
-                                            ? ` • ${declined.decline_reason}`
-                                            : ""}
-                                          {declined.responded_at
-                                            ? ` • ${new Date(declined.responded_at).toLocaleString()}`
-                                            : ""}
+                                          Slot {index + 1} of{" "}
+                                          {gamePositions.length}
                                         </small>
-                                      )}
-                                    </div>
-                                  ) : (
-                                    "Open"
-                                  )}
-                                </td>
-                                <td>
-                                  {current && status ? (
-                                    <>
-                                      <span className={status.className}>
-                                        {status.label}
-                                      </span>
-                                      {current.published_at &&
-                                        current.status === "proposed" && (
-                                          <small>
-                                            Accept By:{" "}
-                                            {formatDeadline(current.accept_by)}
-                                          </small>
-                                        )}
-                                    </>
-                                  ) : replacementNeeded ? (
-                                    <span className="badge red">
-                                      Replacement Needed
-                                    </span>
-                                  ) : (
-                                    <span>—</span>
-                                  )}
-                                </td>
-                                <td>
-                                  <button
-                                    type="button"
-                                    className="primary candidatePanelButton"
-                                    disabled={saving === pos.id}
-                                    onClick={() =>
-                                      setCandidatePositionId(pos.id)
-                                    }
-                                  >
-                                    {current
-                                      ? "Change Official"
-                                      : replacementNeeded
-                                        ? "Find Replacement"
-                                        : "View Candidates"}
-                                    <small>
-                                      {
-                                        list.filter(
-                                          (candidate) =>
-                                            candidate.reasons.length === 0,
-                                        ).length
-                                      }{" "}
-                                      eligible
-                                    </small>
-                                  </button>
-                                  <details className="mobileAssignmentDetails">
-                                    <summary>More Details</summary>
-                                    <div>
-                                      <small>
-                                        Slot {index + 1} of{" "}
-                                        {game.officials_needed} • {label}
-                                      </small>
-                                      <small>
-                                        Self Assign:{" "}
-                                        {isSelfAssignOpen(game.id, pos.id)
-                                          ? "Open"
-                                          : "Closed"}
-                                      </small>
-                                      {!current &&
-                                        isSelfAssignOpen(game.id, pos.id) && (
+                                      </div>
+                                      {canManage &&
+                                        (mentorSlots.some(
+                                          (slot) =>
+                                            slot.game_id === game.id &&
+                                            slot.position_id === pos.id,
+                                        ) ||
+                                          (game.officials_needed > 1 &&
+                                            index ===
+                                              game.officials_needed - 1)) && (
                                           <button
                                             type="button"
                                             className="secondary"
-                                            disabled={
-                                              !canManage || selfAssignSaving
-                                            }
+                                            style={{
+                                              padding: "5px 8px",
+                                              fontSize: 11,
+                                              color: "#b91c1c",
+                                            }}
+                                            disabled={saving === pos.id}
                                             onClick={() =>
-                                              void withdrawSelfAssignPosition(
-                                                game.id,
-                                                pos.id,
-                                              )
+                                              void removePosition(pos)
                                             }
                                           >
-                                            Close Self Assign
+                                            {saving === pos.id
+                                              ? "Removing…"
+                                              : "Remove Position"}
                                           </button>
                                         )}
-                                      {current && canManage && (
-                                        <div className="mobilePositionMove">
-                                          <span>Move official:</span>
-                                          <button
-                                            type="button"
-                                            aria-label="Move official up one position"
-                                            disabled={
-                                              index === 0 ||
-                                              movingAssignment === current.id
-                                            }
-                                            onClick={() =>
-                                              void moveAssignment(
-                                                game.id,
-                                                current.id,
-                                                -1,
-                                              )
-                                            }
+                                    </div>
+                                  </td>
+                                  <td>
+                                    {current ? (
+                                      <div>
+                                        {officials.find(
+                                          (o) => o.id === current.official_id,
+                                        )?.first_name +
+                                          " " +
+                                          officials.find(
+                                            (o) => o.id === current.official_id,
+                                          )?.last_name}
+                                        {futureBadge(current.official_id)}
+                                        {canManage && (
+                                          <span
+                                            className="assignmentPositionControls"
+                                            style={{
+                                              display: "inline-flex",
+                                              gap: 4,
+                                              marginLeft: 8,
+                                              alignItems: "center",
+                                            }}
                                           >
-                                            ↑
-                                          </button>
-                                          <button
-                                            type="button"
-                                            aria-label="Move official down one position"
-                                            disabled={
-                                              index ===
-                                                gamePositions.length - 1 ||
-                                              movingAssignment === current.id
+                                            <small
+                                              style={{
+                                                color: "#2563eb",
+                                                fontWeight: 900,
+                                              }}
+                                            >
+                                              Position
+                                            </small>
+                                            <button
+                                              type="button"
+                                              title="Move up one position; swaps officials when occupied"
+                                              aria-label="Move official up one position"
+                                              disabled={
+                                                index === 0 ||
+                                                movingAssignment === current.id
+                                              }
+                                              onClick={() =>
+                                                void moveAssignment(
+                                                  game.id,
+                                                  current.id,
+                                                  -1,
+                                                )
+                                              }
+                                              style={{
+                                                padding: "5px 9px",
+                                                border: "1px solid #1d4ed8",
+                                                borderRadius: 6,
+                                                background:
+                                                  index === 0
+                                                    ? "#cbd5e1"
+                                                    : "#2563eb",
+                                                color: "#fff",
+                                                fontSize: 14,
+                                                fontWeight: 900,
+                                              }}
+                                            >
+                                              ↑
+                                            </button>
+                                            <button
+                                              type="button"
+                                              title="Move down one position; swaps officials when occupied"
+                                              aria-label="Move official down one position"
+                                              disabled={
+                                                index ===
+                                                  gamePositions.length - 1 ||
+                                                movingAssignment === current.id
+                                              }
+                                              onClick={() =>
+                                                void moveAssignment(
+                                                  game.id,
+                                                  current.id,
+                                                  1,
+                                                )
+                                              }
+                                              style={{
+                                                padding: "5px 9px",
+                                                border: "1px solid #1d4ed8",
+                                                borderRadius: 6,
+                                                background:
+                                                  index ===
+                                                  gamePositions.length - 1
+                                                    ? "#cbd5e1"
+                                                    : "#2563eb",
+                                                color: "#fff",
+                                                fontSize: 14,
+                                                fontWeight: 900,
+                                              }}
+                                            >
+                                              ↓
+                                            </button>
+                                          </span>
+                                        )}
+                                        {canManage &&
+                                          current.published_at &&
+                                          current.status !== "declined" &&
+                                          current.status !== "confirmed" && (
+                                            <div style={{ marginTop: 6 }}>
+                                              <button
+                                                type="button"
+                                                disabled={
+                                                  confirming === current.id
+                                                }
+                                                onClick={() =>
+                                                  void confirmAssignment(
+                                                    current,
+                                                  )
+                                                }
+                                                style={{
+                                                  background: "#facc15",
+                                                  color: "#713f12",
+                                                  border: "1px solid #eab308",
+                                                  borderRadius: 7,
+                                                  padding: "6px 10px",
+                                                  fontSize: 11,
+                                                  fontWeight: 800,
+                                                  cursor: "pointer",
+                                                }}
+                                              >
+                                                {confirming === current.id
+                                                  ? "Confirming…"
+                                                  : "Confirm Official"}
+                                              </button>
+                                            </div>
+                                          )}
+                                      </div>
+                                    ) : replacementNeeded ? (
+                                      <div>
+                                        <b style={{ color: "#b91c1c" }}>
+                                          {declined
+                                            ? "Open — official declined"
+                                            : "Open — replacement needed"}
+                                        </b>
+                                        {declined && (
+                                          <small>
+                                            {
+                                              officials.find(
+                                                (o) =>
+                                                  o.id === declined.official_id,
+                                              )?.first_name
+                                            }{" "}
+                                            {
+                                              officials.find(
+                                                (o) =>
+                                                  o.id === declined.official_id,
+                                              )?.last_name
                                             }
-                                            onClick={() =>
-                                              void moveAssignment(
-                                                game.id,
-                                                current.id,
-                                                1,
-                                              )
-                                            }
+                                            {declined.decline_reason
+                                              ? ` • ${declined.decline_reason}`
+                                              : ""}
+                                            {declined.responded_at
+                                              ? ` • ${new Date(declined.responded_at).toLocaleString()}`
+                                              : ""}
+                                          </small>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      "Open"
+                                    )}
+                                  </td>
+                                  <td>
+                                    {current && status ? (
+                                      <>
+                                        <span className={status.className}>
+                                          {status.label}
+                                        </span>
+                                        {current.published_at &&
+                                          current.status === "proposed" && (
+                                            <small>
+                                              Accept By:{" "}
+                                              {formatDeadline(
+                                                current.accept_by,
+                                              )}
+                                            </small>
+                                          )}
+                                      </>
+                                    ) : replacementNeeded ? (
+                                      <span className="badge red">
+                                        Replacement Needed
+                                      </span>
+                                    ) : (
+                                      <span>—</span>
+                                    )}
+                                  </td>
+                                  <td>
+                                    <button
+                                      type="button"
+                                      className="primary candidatePanelButton"
+                                      disabled={saving === pos.id}
+                                      onClick={() =>
+                                        setCandidatePositionId(pos.id)
+                                      }
+                                    >
+                                      {current
+                                        ? "Change Official"
+                                        : replacementNeeded
+                                          ? "Find Replacement"
+                                          : "View Candidates"}
+                                      <small>
+                                        {
+                                          list.filter(
+                                            (candidate) =>
+                                              candidate.reasons.length === 0,
+                                          ).length
+                                        }{" "}
+                                        eligible
+                                      </small>
+                                    </button>
+                                    <details className="mobileAssignmentDetails">
+                                      <summary>More Details</summary>
+                                      <div>
+                                        <small>
+                                          Slot {index + 1} of{" "}
+                                          {game.officials_needed} • {label}
+                                        </small>
+                                        <small>
+                                          Self Assign:{" "}
+                                          {isSelfAssignOpen(game.id, pos.id)
+                                            ? "Open"
+                                            : "Closed"}
+                                        </small>
+                                        {!current &&
+                                          isSelfAssignOpen(game.id, pos.id) && (
+                                            <button
+                                              type="button"
+                                              className="secondary"
+                                              disabled={
+                                                !canManage || selfAssignSaving
+                                              }
+                                              onClick={() =>
+                                                void withdrawSelfAssignPosition(
+                                                  game.id,
+                                                  pos.id,
+                                                )
+                                              }
+                                            >
+                                              Close Self Assign
+                                            </button>
+                                          )}
+                                        {current && canManage && (
+                                          <div className="mobilePositionMove">
+                                            <span>Move official:</span>
+                                            <button
+                                              type="button"
+                                              aria-label="Move official up one position"
+                                              disabled={
+                                                index === 0 ||
+                                                movingAssignment === current.id
+                                              }
+                                              onClick={() =>
+                                                void moveAssignment(
+                                                  game.id,
+                                                  current.id,
+                                                  -1,
+                                                )
+                                              }
+                                            >
+                                              ↑
+                                            </button>
+                                            <button
+                                              type="button"
+                                              aria-label="Move official down one position"
+                                              disabled={
+                                                index ===
+                                                  gamePositions.length - 1 ||
+                                                movingAssignment === current.id
+                                              }
+                                              onClick={() =>
+                                                void moveAssignment(
+                                                  game.id,
+                                                  current.id,
+                                                  1,
+                                                )
+                                              }
+                                            >
+                                              ↓
+                                            </button>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </details>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="positionsFilledMessage">
+                        <b>Every position is filled</b>
+                        <span>
+                          Switch to All Positions to review or change the crew.
+                        </span>
+                      </div>
+                    )}
+                  </>
+                )}
+                <p>
+                  <small>
+                    <b>Future+</b> means the official already has a later
+                    non-declined assignment involving the home or away team in
+                    this game. <b>⚠ OVERRIDE</b> options are ineligible
+                    officials that an Administrator or Assignor may manually
+                    assign after confirming the warning. Officials already
+                    working during this game time are hidden and cannot be
+                    overridden.
+                  </small>
+                </p>
+              </section>
+              <aside className="availableOfficialsPanel">
+                <div className="availableOfficialsHead">
+                  <h3>Officials</h3>
+                  <span className="badge blue">
+                    {availableOfficials.length} Available
+                  </span>
+                </div>
+                <p>
+                  Select an official, then choose a game to fill its next open
+                  position. Ineligible officials remain visible in red and
+                  require an override; overlapping assignments cannot be
+                  overridden.
+                </p>
+                <div className="officialListTools">
+                  <input
+                    type="search"
+                    value={officialListSearch}
+                    onChange={(event) =>
+                      setOfficialListSearch(event.target.value)
+                    }
+                    placeholder="Search officials"
+                    aria-label="Search available officials"
+                  />
+                  <select
+                    value={officialListSort}
+                    onChange={(event) =>
+                      setOfficialListSort(
+                        event.target.value as typeof officialListSort,
+                      )
+                    }
+                    aria-label="Sort available officials"
+                  >
+                    <option value="best">Best qualified</option>
+                    <option value="distance">Closest</option>
+                    <option value="rank">Highest rank</option>
+                    <option value="leastRecent">Least recently assigned</option>
+                    <option value="name">Name</option>
+                  </select>
+                </div>
+                <div className="availableOfficialsList">
+                  {availableOfficials.map((o, i) => (
+                    <div className="availableOfficial" key={o.id}>
+                      <span className="availableOrder">{i + 1}</span>
+                      <div>
+                        <b>
+                          {o.first_name} {o.last_name}
+                          <ScheduleLink officialId={o.id} />
+                        </b>
+                        {futureBadge(o.id)}
+                        <small>
+                          My General Rank {o.rank.toFixed(1)}
+                          {teamRecencyLabel(o.id)}
+                          {o.distance != null
+                            ? ` • ${o.distance.toFixed(1)} mi`
+                            : ""}
+                        </small>
+                        {canManage && (
+                          <button
+                            type="button"
+                            className="pickOfficialButton"
+                            aria-pressed={pickedOfficial === o.id}
+                            onClick={() => chooseOfficialToAssign(o.id)}
+                          >
+                            {pickedOfficial === o.id
+                              ? "Selected"
+                              : "Select to Assign"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {ineligibleOfficials.length > 0 && (
+                    <div className="ineligibleOfficialsSection">
+                      <button
+                        type="button"
+                        className="ineligibleOfficialsToggle"
+                        aria-expanded={showIneligibleOfficials}
+                        onClick={() =>
+                          setShowIneligibleOfficials((visible) => !visible)
+                        }
+                      >
+                        <span>INELIGIBLE ({ineligibleOfficials.length})</span>
+                        <span>{showIneligibleOfficials ? "Hide" : "Show"}</span>
+                      </button>
+                      {showIneligibleOfficials && (
+                        <>
+                          <div className="ineligibleOfficialFilters">
+                            <input
+                              type="search"
+                              value={ineligibleSearch}
+                              onChange={(event) =>
+                                setIneligibleSearch(event.target.value)
+                              }
+                              placeholder="Search official"
+                              aria-label="Search ineligible officials"
+                            />
+                            <select
+                              value={ineligibleReasonFilter}
+                              onChange={(event) =>
+                                setIneligibleReasonFilter(event.target.value)
+                              }
+                              aria-label="Filter ineligible officials by reason"
+                            >
+                              <option value="all">All reasons</option>
+                              <option value="eligibility">
+                                League or level
+                              </option>
+                              <option value="availability">Unavailable</option>
+                              <option value="conflict">
+                                Assignment conflict
+                              </option>
+                            </select>
+                          </div>
+                          {visibleIneligibleOfficials.map((o) => (
+                            <div
+                              className="availableOfficial ineligibleOfficial"
+                              key={o.id}
+                              style={{
+                                background: "#fef2f2",
+                                border: "1px solid #fecaca",
+                                color: "#b91c1c",
+                              }}
+                            >
+                              <span
+                                className="availableOrder"
+                                style={{ background: "#dc2626", color: "#fff" }}
+                              >
+                                !
+                              </span>
+                              <div style={{ flex: 1 }}>
+                                <b>
+                                  {o.first_name} {o.last_name}
+                                  <ScheduleLink officialId={o.id} />
+                                </b>
+                                <small
+                                  style={{ color: "#b91c1c", fontWeight: 700 }}
+                                >
+                                  {o.reasons.join(" • ")}
+                                </small>
+                                {canManage && (
+                                  <button
+                                    type="button"
+                                    className="pickOfficialButton ineligiblePick"
+                                    aria-pressed={pickedOfficial === o.id}
+                                    onClick={() => chooseOfficialToAssign(o.id)}
+                                  >
+                                    {pickedOfficial === o.id
+                                      ? "Selected"
+                                      : "Select to Assign"}
+                                  </button>
+                                )}
+                                {canManage &&
+                                  !o.reasons.some((reason) =>
+                                    reason.startsWith("Overlaps Game #"),
+                                  ) && (
+                                    <div style={{ marginTop: 6 }}>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setOverrideOfficial(
+                                            overrideOfficial === o.id
+                                              ? ""
+                                              : o.id,
+                                          )
+                                        }
+                                        style={{
+                                          background: "#fff",
+                                          color: "#b91c1c",
+                                          border: "1px solid #dc2626",
+                                          borderRadius: 6,
+                                          padding: "4px 8px",
+                                          fontSize: 11,
+                                          fontWeight: 800,
+                                          cursor: "pointer",
+                                        }}
+                                      >
+                                        {overrideOfficial === o.id
+                                          ? "Cancel Override"
+                                          : "Override Eligibility"}
+                                      </button>
+                                      {overrideOfficial === o.id && (
+                                        <div style={{ marginTop: 6 }}>
+                                          <small
+                                            style={{
+                                              display: "block",
+                                              marginBottom: 4,
+                                              color: "#7f1d1d",
+                                            }}
                                           >
-                                            ↓
-                                          </button>
+                                            Assign to position:
+                                          </small>
+                                          <select
+                                            value=""
+                                            onChange={(e) => {
+                                              if (e.target.value)
+                                                void assign(
+                                                  e.target.value,
+                                                  o.id,
+                                                );
+                                            }}
+                                          >
+                                            <option value="">
+                                              Select position…
+                                            </option>
+                                            {gamePositions.map((p) => (
+                                              <option key={p.id} value={p.id}>
+                                                {p.name}
+                                              </option>
+                                            ))}
+                                          </select>
                                         </div>
                                       )}
                                     </div>
-                                  </details>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <div className="positionsFilledMessage">
-                      <b>Every position is filled</b>
-                      <span>
-                        Switch to All Positions to review or change the crew.
-                      </span>
-                    </div>
-                  )}
-                </>
-              )}
-              <p>
-                <small>
-                  <b>Future+</b> means the official already has a later
-                  non-declined assignment involving the home or away team in
-                  this game. <b>⚠ OVERRIDE</b> options are ineligible officials
-                  that an Administrator or Assignor may manually assign after
-                  confirming the warning. Officials already working during this
-                  game time are hidden and cannot be overridden.
-                </small>
-              </p>
-            </section>
-            <aside className="availableOfficialsPanel">
-              <div className="availableOfficialsHead">
-                <h3>Officials</h3>
-                <span className="badge blue">
-                  {availableOfficials.length} Available
-                </span>
-              </div>
-              <p>
-                Select an official, then choose a game to fill its next open
-                position. Ineligible officials remain visible in red and require
-                an override; overlapping assignments cannot be overridden.
-              </p>
-              <div className="officialListTools">
-                <input
-                  type="search"
-                  value={officialListSearch}
-                  onChange={(event) =>
-                    setOfficialListSearch(event.target.value)
-                  }
-                  placeholder="Search officials"
-                  aria-label="Search available officials"
-                />
-                <select
-                  value={officialListSort}
-                  onChange={(event) =>
-                    setOfficialListSort(
-                      event.target.value as typeof officialListSort,
-                    )
-                  }
-                  aria-label="Sort available officials"
-                >
-                  <option value="best">Best qualified</option>
-                  <option value="distance">Closest</option>
-                  <option value="rank">Highest rank</option>
-                  <option value="leastRecent">Least recently assigned</option>
-                  <option value="name">Name</option>
-                </select>
-              </div>
-              <div className="availableOfficialsList">
-                {availableOfficials.map((o, i) => (
-                  <div className="availableOfficial" key={o.id}>
-                    <span className="availableOrder">{i + 1}</span>
-                    <div>
-                      <b>
-                        {o.first_name} {o.last_name}
-                        <ScheduleLink officialId={o.id} />
-                      </b>
-                      {futureBadge(o.id)}
-                      <small>
-                        My General Rank {o.rank.toFixed(1)}
-                        {teamRecencyLabel(o.id)}
-                        {o.distance != null
-                          ? ` • ${o.distance.toFixed(1)} mi`
-                          : ""}
-                      </small>
-                      {canManage && (
-                        <button
-                          type="button"
-                          className="pickOfficialButton"
-                          aria-pressed={pickedOfficial === o.id}
-                          onClick={() => chooseOfficialToAssign(o.id)}
-                        >
-                          {pickedOfficial === o.id
-                            ? "Selected"
-                            : "Select to Assign"}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-                {ineligibleOfficials.length > 0 && (
-                  <div className="ineligibleOfficialsSection">
-                    <button
-                      type="button"
-                      className="ineligibleOfficialsToggle"
-                      aria-expanded={showIneligibleOfficials}
-                      onClick={() =>
-                        setShowIneligibleOfficials((visible) => !visible)
-                      }
-                    >
-                      <span>INELIGIBLE ({ineligibleOfficials.length})</span>
-                      <span>{showIneligibleOfficials ? "Hide" : "Show"}</span>
-                    </button>
-                    {showIneligibleOfficials && (
-                      <>
-                        <div className="ineligibleOfficialFilters">
-                          <input
-                            type="search"
-                            value={ineligibleSearch}
-                            onChange={(event) =>
-                              setIneligibleSearch(event.target.value)
-                            }
-                            placeholder="Search official"
-                            aria-label="Search ineligible officials"
-                          />
-                          <select
-                            value={ineligibleReasonFilter}
-                            onChange={(event) =>
-                              setIneligibleReasonFilter(event.target.value)
-                            }
-                            aria-label="Filter ineligible officials by reason"
-                          >
-                            <option value="all">All reasons</option>
-                            <option value="eligibility">League or level</option>
-                            <option value="availability">Unavailable</option>
-                            <option value="conflict">
-                              Assignment conflict
-                            </option>
-                          </select>
-                        </div>
-                        {visibleIneligibleOfficials.map((o) => (
-                          <div
-                            className="availableOfficial ineligibleOfficial"
-                            key={o.id}
-                            style={{
-                              background: "#fef2f2",
-                              border: "1px solid #fecaca",
-                              color: "#b91c1c",
-                            }}
-                          >
-                            <span
-                              className="availableOrder"
-                              style={{ background: "#dc2626", color: "#fff" }}
-                            >
-                              !
-                            </span>
-                            <div style={{ flex: 1 }}>
-                              <b>
-                                {o.first_name} {o.last_name}
-                                <ScheduleLink officialId={o.id} />
-                              </b>
-                              <small
-                                style={{ color: "#b91c1c", fontWeight: 700 }}
-                              >
-                                {o.reasons.join(" • ")}
-                              </small>
-                              {canManage && (
-                                <button
-                                  type="button"
-                                  className="pickOfficialButton ineligiblePick"
-                                  aria-pressed={pickedOfficial === o.id}
-                                  onClick={() => chooseOfficialToAssign(o.id)}
-                                >
-                                  {pickedOfficial === o.id
-                                    ? "Selected"
-                                    : "Select to Assign"}
-                                </button>
-                              )}
-                              {canManage &&
-                                !o.reasons.some((reason) =>
+                                  )}
+                                {o.reasons.some((reason) =>
                                   reason.startsWith("Overlaps Game #"),
                                 ) && (
-                                  <div style={{ marginTop: 6 }}>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        setOverrideOfficial(
-                                          overrideOfficial === o.id ? "" : o.id,
-                                        )
-                                      }
-                                      style={{
-                                        background: "#fff",
-                                        color: "#b91c1c",
-                                        border: "1px solid #dc2626",
-                                        borderRadius: 6,
-                                        padding: "4px 8px",
-                                        fontSize: 11,
-                                        fontWeight: 800,
-                                        cursor: "pointer",
-                                      }}
-                                    >
-                                      {overrideOfficial === o.id
-                                        ? "Cancel Override"
-                                        : "Override Eligibility"}
-                                    </button>
-                                    {overrideOfficial === o.id && (
-                                      <div style={{ marginTop: 6 }}>
-                                        <small
-                                          style={{
-                                            display: "block",
-                                            marginBottom: 4,
-                                            color: "#7f1d1d",
-                                          }}
-                                        >
-                                          Assign to position:
-                                        </small>
-                                        <select
-                                          value=""
-                                          onChange={(e) => {
-                                            if (e.target.value)
-                                              void assign(e.target.value, o.id);
-                                          }}
-                                        >
-                                          <option value="">
-                                            Select position…
-                                          </option>
-                                          {gamePositions.map((p) => (
-                                            <option key={p.id} value={p.id}>
-                                              {p.name}
-                                            </option>
-                                          ))}
-                                        </select>
-                                      </div>
-                                    )}
-                                  </div>
+                                  <small
+                                    style={{
+                                      color: "#7f1d1d",
+                                      fontWeight: 900,
+                                    }}
+                                  >
+                                    Cannot override an overlapping assignment
+                                  </small>
                                 )}
-                              {o.reasons.some((reason) =>
-                                reason.startsWith("Overlaps Game #"),
-                              ) && (
-                                <small
-                                  style={{ color: "#7f1d1d", fontWeight: 900 }}
-                                >
-                                  Cannot override an overlapping assignment
-                                </small>
-                              )}
+                              </div>
                             </div>
-                          </div>
-                        ))}
-                        {!visibleIneligibleOfficials.length && (
-                          <div className="emptyState">
-                            <p>No ineligible officials match the filters.</p>
-                          </div>
-                        )}
-                      </>
+                          ))}
+                          {!visibleIneligibleOfficials.length && (
+                            <div className="emptyState">
+                              <p>No ineligible officials match the filters.</p>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                  {!availableOfficials.length &&
+                    !ineligibleOfficials.length && (
+                      <div className="emptyState">
+                        <p>No officials found.</p>
+                      </div>
                     )}
-                  </div>
-                )}
-                {!availableOfficials.length && !ineligibleOfficials.length && (
-                  <div className="emptyState">
-                    <p>No officials found.</p>
-                  </div>
-                )}
-              </div>
-            </aside>
-          </div>,
-          inlineAssignmentHost,
-        )}
+                </div>
+              </aside>
+            </div>,
+            inlineAssignmentHost,
+          )}
       </div>
     </>
   );

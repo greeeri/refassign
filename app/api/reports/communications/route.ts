@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "../../../../lib/supabase/admin";
 import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
+import { readAllPages } from "../../../../lib/supabase/readAll";
 
 export async function GET(request: NextRequest) {
   const scope = await requireManagedOrganization(request);
@@ -25,11 +26,16 @@ export async function GET(request: NextRequest) {
   let organizations: Array<{ id: string; name: string }> = [];
   if (organizationIds.length) {
     const [links, organizationRows] = await Promise.all([
-      service
-        .from("organization_officials")
-        .select("organization_id,official_id")
-        .in("organization_id", organizationIds)
-        .eq("active", true),
+      readAllPages<{ organization_id: string; official_id: string }>(
+        (from, to) =>
+          service
+            .from("organization_officials")
+            .select("organization_id,official_id")
+            .in("organization_id", organizationIds)
+            .eq("active", true)
+            .order("official_id")
+            .range(from, to),
+      ),
       service
         .from("organizations")
         .select("id,name")
@@ -50,12 +56,16 @@ export async function GET(request: NextRequest) {
   ];
   let officials: Array<Record<string, unknown>> = [];
   if (officialIds.length) {
-    const result = await service
-      .from("officials")
-      .select("id,first_name,last_name,email,phone,active")
-      .in("id", officialIds)
-      .order("last_name")
-      .order("first_name");
+    const result = await readAllPages<Record<string, unknown>>((from, to) =>
+      service
+        .from("officials")
+        .select("id,first_name,last_name,email,phone,active")
+        .in("id", officialIds)
+        .order("last_name")
+        .order("first_name")
+        .order("id")
+        .range(from, to),
+    );
     if (result.error)
       return NextResponse.json(
         { error: result.error.message },
@@ -63,11 +73,15 @@ export async function GET(request: NextRequest) {
       );
     officials = result.data || [];
   } else if (!organizationIds.length) {
-    const result = await supabase
-      .from("officials")
-      .select("id,first_name,last_name,email,phone,active")
-      .order("last_name")
-      .order("first_name");
+    const result = await readAllPages<Record<string, unknown>>((from, to) =>
+      supabase
+        .from("officials")
+        .select("id,first_name,last_name,email,phone,active")
+        .order("last_name")
+        .order("first_name")
+        .order("id")
+        .range(from, to),
+    );
     if (result.error)
       return NextResponse.json(
         { error: result.error.message },
@@ -89,10 +103,14 @@ export async function GET(request: NextRequest) {
   if (!officialIds.length) return NextResponse.json(empty);
 
   // The signed-in client keeps game access inside the current manager's RLS scope.
-  const gamesResult = await supabase
-    .from("games")
-    .select("id")
-    .eq("organization_id", organizationId);
+  const gamesResult = await readAllPages<{ id: string }>((from, to) =>
+    supabase
+      .from("games")
+      .select("id")
+      .eq("organization_id", organizationId)
+      .order("id")
+      .range(from, to),
+  );
   if (gamesResult.error)
     return NextResponse.json(
       { error: gamesResult.error.message },
@@ -103,33 +121,45 @@ export async function GET(request: NextRequest) {
   const [communications, assignments, developmentCommunications] =
     await Promise.all([
       gameIds.length
-        ? service
-            .from("official_communications")
-            .select(
-              "id,assignment_id,game_id,official_id,channel,message_type,delivery_status,error_message,sent_at,delivered_at,opened_at,created_at,assignments(status,responded_at),games(organization_id,leagues(name),levels(name))",
-            )
-            .in("official_id", officialIds)
-            .in("game_id", gameIds)
-            .order("created_at", { ascending: false })
+        ? readAllPages<Record<string, any>>((from, to) =>
+            service
+              .from("official_communications")
+              .select(
+                "id,assignment_id,game_id,official_id,channel,message_type,delivery_status,error_message,sent_at,delivered_at,opened_at,created_at,assignments(status,responded_at),games(organization_id,leagues(name),levels(name))",
+              )
+              .in("official_id", officialIds)
+              .in("game_id", gameIds)
+              .order("created_at", { ascending: false })
+              .order("id")
+              .range(from, to),
+          )
         : Promise.resolve({ data: [], error: null }),
-      supabase
-        .from("assignments")
-        .select(
-          "id,game_id,official_id,status,published_at,email_sent_at,email_error,reminder_sent_at,responded_at,games!inner(organization_id,leagues(name),levels(name))",
-        )
-        .in("official_id", officialIds)
-        .eq("games.organization_id", organizationId)
-        .or(
-          "email_sent_at.not.is.null,reminder_sent_at.not.is.null,email_error.not.is.null",
-        )
-        .order("published_at", { ascending: false }),
-      supabase
-        .from("development_communications")
-        .select(
-          "id,program_id,official_id,channel,delivery_status,error_message,sent_at,created_at,registration_programs(name)",
-        )
-        .in("official_id", officialIds)
-        .order("created_at", { ascending: false }),
+      readAllPages<Record<string, any>>((from, to) =>
+        supabase
+          .from("assignments")
+          .select(
+            "id,game_id,official_id,status,published_at,email_sent_at,email_error,reminder_sent_at,responded_at,games!inner(organization_id,leagues(name),levels(name))",
+          )
+          .in("official_id", officialIds)
+          .eq("games.organization_id", organizationId)
+          .or(
+            "email_sent_at.not.is.null,reminder_sent_at.not.is.null,email_error.not.is.null",
+          )
+          .order("published_at", { ascending: false })
+          .order("id")
+          .range(from, to),
+      ),
+      readAllPages<Record<string, any>>((from, to) =>
+        supabase
+          .from("development_communications")
+          .select(
+            "id,program_id,official_id,channel,delivery_status,error_message,sent_at,created_at,registration_programs(name)",
+          )
+          .in("official_id", officialIds)
+          .order("created_at", { ascending: false })
+          .order("id")
+          .range(from, to),
+      ),
     ]);
   const error =
     communications.error ||

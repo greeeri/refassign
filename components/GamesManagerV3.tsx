@@ -1,6 +1,7 @@
 "use client";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import { createClient } from "../lib/supabase/client";
+import { readAllPages } from "../lib/supabase/readAll";
 import { announceUndoAvailable } from "./UndoCenter";
 import { resolveImportTeam } from "../lib/game-import-team";
 import { eventLocalToIso, eventTimeParts, formatEventDate, formatEventTime } from "../lib/event-time";
@@ -352,15 +353,6 @@ export default function GamesManagerV3({
           .eq("active", true)
           .order("name");
 
-    const gamesQuery = sb
-      .from("games")
-      .select(
-        "id,game_number,status,sport_id,league_id,level_id,home_team_id,away_team_id,location_id,bill_to_id,archived_at,starts_at,time_tbd,field_tbd,duration_minutes,officials_needed,notes,sports(name),leagues(name),levels(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(id,name,city,state)",
-      )
-      .order("starts_at");
-    const visibleGamesQuery = showArchived
-      ? gamesQuery.not("archived_at", "is", null)
-      : gamesQuery.is("archived_at", null);
     const [s, lg, lv, t, lo, g, billToResponse] = await Promise.all([
       sb
         .from("sports")
@@ -369,11 +361,32 @@ export default function GamesManagerV3({
         .order("name"),
       sb.from("leagues").select("id,name").eq("active", true).order("name"),
       sb.from("levels").select("id,name").eq("active", true).order("name"),
-      sb.from("teams").select("id,name,level_id,sport_id").order("name"),
+      readAllPages<Team>((from, to) =>
+        sb.from("teams")
+          .select("id,name,level_id,sport_id")
+          .order("name")
+          .order("id")
+          .range(from, to),
+      ),
       locationRequest,
-      organizationId
-        ? visibleGamesQuery.eq("organization_id", organizationId)
-        : visibleGamesQuery,
+      readAllPages<Game>((from, to) => {
+        let query = sb
+          .from("games")
+          .select(
+            "id,game_number,status,sport_id,league_id,level_id,home_team_id,away_team_id,location_id,bill_to_id,archived_at,starts_at,time_tbd,field_tbd,duration_minutes,officials_needed,notes,sports(name),leagues(name),levels(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(id,name,city,state)",
+          )
+          .order("starts_at")
+          .order("id");
+        query = showArchived
+          ? query.not("archived_at", "is", null)
+          : query.is("archived_at", null);
+        if (organizationId)
+          query = query.eq("organization_id", organizationId);
+        return query.range(from, to) as unknown as PromiseLike<{
+          data: Game[] | null;
+          error: { message: string } | null;
+        }>;
+      }),
       organizationId
         ? fetch(
             `/api/bill-tos?organizationId=${encodeURIComponent(organizationId)}`,

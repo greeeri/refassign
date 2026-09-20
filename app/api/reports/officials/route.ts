@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "../../../../lib/supabase/admin";
 import { createServerSupabaseClient } from "../../../../lib/supabase/server";
+import { readAllPages } from "../../../../lib/supabase/readAll";
 
 export async function GET(request: NextRequest) {
   const session = await createServerSupabaseClient();
@@ -82,12 +83,14 @@ export async function GET(request: NextRequest) {
   }
 
   const [{ data: organizationOfficials, error: organizationOfficialError }, { data: organizationGames, error: organizationGameError }] = await Promise.all([
-    service
+    readAllPages<{ official_id: string }>((from, to) => service
       .from("organization_officials")
       .select("official_id")
       .eq("organization_id", organizationId)
-      .eq("active", true),
-    service.from("games").select("id").eq("organization_id", organizationId),
+      .eq("active", true)
+      .order("official_id")
+      .range(from, to)),
+    readAllPages<{ id: string }>((from, to) => service.from("games").select("id").eq("organization_id", organizationId).order("id").range(from, to)),
   ]);
   if (organizationOfficialError || organizationGameError)
     return NextResponse.json(
@@ -127,9 +130,9 @@ export async function GET(request: NextRequest) {
   if (officialId) originsQuery = originsQuery.eq("official_id", officialId);
 
   const [officialResult, assignmentResult, originResult] = await Promise.all([
-    officialsQuery,
-    assignmentsQuery,
-    originsQuery,
+    readAllPages<Record<string, any>>((from, to) => officialsQuery.order("id").range(from, to)),
+    readAllPages<Record<string, any>>((from, to) => assignmentsQuery.order("id").range(from, to)),
+    readAllPages<Record<string, any>>((from, to) => originsQuery.order("official_id").order("weekday").range(from, to)),
   ]);
   const error =
     officialResult.error || assignmentResult.error || originResult.error;

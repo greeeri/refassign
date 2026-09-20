@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "../../../../lib/supabase/admin";
 import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
+import { readAllPages } from "../../../../lib/supabase/readAll";
 
 export async function GET(request: NextRequest) {
   const scope = await requireManagedOrganization(request);
@@ -20,22 +21,30 @@ export async function GET(request: NextRequest) {
   // The signed-in client keeps all finance records inside the organizations
   // and leagues granted by the current RLS policies.
   const [assignmentsResult, gamesResult] = await Promise.all([
-    supabase
-      .from("assignments")
-      .select(
-        "id,game_id,official_id,status,game_fee,mileage_miles,mileage_rate,payment_status,paid_at,officials(id,first_name,last_name),sport_positions(name),games!inner(id,organization_id,game_number,status,starts_at,officials_needed,leagues(id,name),levels(name),location:locations(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name))",
-      )
-      .eq("games.organization_id", organizationId)
-      .not("official_id", "is", null),
+    readAllPages<Record<string, any>>((from, to) =>
+      supabase
+        .from("assignments")
+        .select(
+          "id,game_id,official_id,status,game_fee,mileage_miles,mileage_rate,payment_status,paid_at,officials(id,first_name,last_name),sport_positions(name),games!inner(id,organization_id,game_number,status,starts_at,officials_needed,leagues(id,name),levels(name),location:locations(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name))",
+        )
+        .eq("games.organization_id", organizationId)
+        .not("official_id", "is", null)
+        .order("id")
+        .range(from, to),
+    ),
     reportingAccess === "premium"
-      ? supabase
-          .from("games")
-          .select(
-            "id,game_number,status,starts_at,officials_needed,leagues(id,name),levels(name),location:locations(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name)",
-          )
-          .eq("organization_id", organizationId)
-          .gte("starts_at", new Date().toISOString())
-          .order("starts_at")
+      ? readAllPages<Record<string, any>>((from, to) =>
+          supabase
+            .from("games")
+            .select(
+              "id,game_number,status,starts_at,officials_needed,leagues(id,name),levels(name),location:locations(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name)",
+            )
+            .eq("organization_id", organizationId)
+            .gte("starts_at", new Date().toISOString())
+            .order("starts_at")
+            .order("id")
+            .range(from, to),
+        )
       : Promise.resolve({ data: [], error: null }),
   ]);
   const error = assignmentsResult.error || gamesResult.error;
@@ -58,7 +67,9 @@ export async function GET(request: NextRequest) {
       : null;
   };
   const now = Date.now();
-  const assignments = (assignmentsResult.data || []).map((row) => ({
+  const assignments: Array<Record<string, any>> = (
+    assignmentsResult.data || []
+  ).map((row: Record<string, any>) => ({
     ...row,
     officials: one(row.officials),
     sport_positions: one(row.sport_positions),

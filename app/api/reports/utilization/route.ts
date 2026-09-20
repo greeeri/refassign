@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "../../../../lib/supabase/admin";
 import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
+import { readAllPages } from "../../../../lib/supabase/readAll";
 
 const stringValue = (value: unknown) =>
   typeof value === "string" ? value : null;
@@ -19,11 +20,17 @@ export async function GET(request: NextRequest) {
   const { data: subscription } = await subscriptionQuery.maybeSingle();
   const reportingAccess =
     subscription?.reporting_access === "standard" ? "standard" : "premium";
-  const { data: officialLinks, error: officialLinkError } = await service
-    .from("organization_officials")
-    .select("official_id")
-    .eq("organization_id", organizationId)
-    .eq("active", true);
+  const { data: officialLinks, error: officialLinkError } = await readAllPages<{
+    official_id: string;
+  }>((from, to) =>
+    service
+      .from("organization_officials")
+      .select("official_id")
+      .eq("organization_id", organizationId)
+      .eq("active", true)
+      .order("official_id")
+      .range(from, to),
+  );
   if (officialLinkError)
     return NextResponse.json(
       { error: officialLinkError.message },
@@ -34,24 +41,36 @@ export async function GET(request: NextRequest) {
   // The signed-in client keeps officials, assignments, games, and audit rows
   // inside the organizations and leagues permitted by the current RLS rules.
   const [officialsResult, assignmentsResult, auditResult] = await Promise.all([
-    supabase
-      .from("officials")
-      .select("id,first_name,last_name,active,max_games_per_day")
-      .in("id", officialIds)
-      .order("last_name")
-      .order("first_name"),
-    supabase
-      .from("assignments")
-      .select(
-        "id,game_id,official_id,status,assigned_at,published_at,responded_at,game_fee,mileage_miles,mileage_rate,payment_status,officials(id,first_name,last_name),sport_positions(name),games!inner(id,organization_id,game_number,starts_at,status,leagues(id,name),levels(name),location:locations(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name))",
-      )
-      .eq("games.organization_id", organizationId)
-      .not("official_id", "is", null)
-      .order("assigned_at", { ascending: false }),
-    supabase
-      .from("audit_history")
-      .select("game_id,action,occurred_at,old_data,new_data")
-      .eq("action", "assignment_changed"),
+    readAllPages<Record<string, any>>((from, to) =>
+      supabase
+        .from("officials")
+        .select("id,first_name,last_name,active,max_games_per_day")
+        .in("id", officialIds)
+        .order("last_name")
+        .order("first_name")
+        .order("id")
+        .range(from, to),
+    ),
+    readAllPages<Record<string, any>>((from, to) =>
+      supabase
+        .from("assignments")
+        .select(
+          "id,game_id,official_id,status,assigned_at,published_at,responded_at,game_fee,mileage_miles,mileage_rate,payment_status,officials(id,first_name,last_name),sport_positions(name),games!inner(id,organization_id,game_number,starts_at,status,leagues(id,name),levels(name),location:locations(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name))",
+        )
+        .eq("games.organization_id", organizationId)
+        .not("official_id", "is", null)
+        .order("assigned_at", { ascending: false })
+        .order("id")
+        .range(from, to),
+    ),
+    readAllPages<Record<string, any>>((from, to) =>
+      supabase
+        .from("audit_history")
+        .select("game_id,action,occurred_at,old_data,new_data")
+        .eq("action", "assignment_changed")
+        .order("id")
+        .range(from, to),
+    ),
   ]);
   const error =
     officialsResult.error || assignmentsResult.error || auditResult.error;

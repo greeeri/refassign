@@ -1,25 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
+import { readAllPages } from "../../../../lib/supabase/readAll";
 
 type ReportRow = Record<string, any>;
-type ReportError = { message: string };
-
-async function readAllPages(
-  loadPage: (
-    from: number,
-    to: number,
-  ) => PromiseLike<{ data: ReportRow[] | null; error: ReportError | null }>,
-) {
-  const pageSize = 1000,
-    data: ReportRow[] = [];
-  for (let from = 0; ; from += pageSize) {
-    const page = await loadPage(from, from + pageSize - 1);
-    if (page.error) return { data, error: page.error };
-    const rows = page.data || [];
-    data.push(...rows);
-    if (rows.length < pageSize) return { data, error: null };
-  }
-}
 
 export async function GET(request: NextRequest) {
   const scope = await requireManagedOrganization(request);
@@ -40,48 +23,51 @@ export async function GET(request: NextRequest) {
   // organization and league RLS policies determine the report's boundaries.
   const [gamesResult, assignmentsResult, declinesResult, auditResult] =
     await Promise.all([
-    readAllPages((from, to) =>
-      supabase
-        .from("games")
-        .select(
-          "id,game_number,status,starts_at,officials_needed,leagues(id,name),levels(name),location:locations(name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name)",
-        )
-        .eq("organization_id", organizationId)
-        .order("starts_at", { ascending: false })
-        .order("id")
-        .range(from, to),
-    ),
-    readAllPages((from, to) =>
-      supabase
-        .from("assignments")
-        .select(
-          "id,game_id,official_id,status,game_fee,mileage_miles,mileage_rate,payment_status,published_at,accept_by,responded_at,officials(id,first_name,last_name),sport_positions(name),games!inner(organization_id)",
-        )
-        .eq("games.organization_id", organizationId)
-        .order("assigned_at", { ascending: false })
-        .order("id")
-        .range(from, to),
-    ),
-    readAllPages((from, to) =>
-      supabase
-        .from("assignment_declines")
-        .select("id,game_id,official_id,position_id,declined_at,decline_reason,games!inner(organization_id)")
-        .eq("games.organization_id", organizationId)
-        .order("declined_at", { ascending: false })
-        .order("id")
-        .range(from, to),
-    ),
-    readAllPages((from, to) =>
-      supabase
-        .from("audit_history")
-        .select("id,game_id,action,occurred_at")
-        .in("action", ["assignment_changed", "unassigned"])
-        .order("occurred_at", { ascending: false })
-        .order("id", { ascending: false })
-        .range(from, to),
-    ),
-  ]);
-  const error = gamesResult.error ||
+      readAllPages<ReportRow>((from, to) =>
+        supabase
+          .from("games")
+          .select(
+            "id,game_number,status,starts_at,officials_needed,leagues(id,name),levels(name),location:locations(name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name)",
+          )
+          .eq("organization_id", organizationId)
+          .order("starts_at", { ascending: false })
+          .order("id")
+          .range(from, to),
+      ),
+      readAllPages<ReportRow>((from, to) =>
+        supabase
+          .from("assignments")
+          .select(
+            "id,game_id,official_id,status,game_fee,mileage_miles,mileage_rate,payment_status,published_at,accept_by,responded_at,officials(id,first_name,last_name),sport_positions(name),games!inner(organization_id)",
+          )
+          .eq("games.organization_id", organizationId)
+          .order("assigned_at", { ascending: false })
+          .order("id")
+          .range(from, to),
+      ),
+      readAllPages<ReportRow>((from, to) =>
+        supabase
+          .from("assignment_declines")
+          .select(
+            "id,game_id,official_id,position_id,declined_at,decline_reason,games!inner(organization_id)",
+          )
+          .eq("games.organization_id", organizationId)
+          .order("declined_at", { ascending: false })
+          .order("id")
+          .range(from, to),
+      ),
+      readAllPages<ReportRow>((from, to) =>
+        supabase
+          .from("audit_history")
+          .select("id,game_id,action,occurred_at")
+          .in("action", ["assignment_changed", "unassigned"])
+          .order("occurred_at", { ascending: false })
+          .order("id", { ascending: false })
+          .range(from, to),
+      ),
+    ]);
+  const error =
+    gamesResult.error ||
     assignmentsResult.error ||
     declinesResult.error ||
     auditResult.error;

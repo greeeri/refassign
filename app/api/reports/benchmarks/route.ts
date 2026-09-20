@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
+import { readAllPages } from "../../../../lib/supabase/readAll";
 
 export async function GET(request: NextRequest) {
   const scope = await requireManagedOrganization(request);
@@ -52,19 +53,27 @@ export async function GET(request: NextRequest) {
       .select("id,name")
       .in("id", premiumOrganizationIds)
       .order("name"),
-    service
-      .from("games")
-      .select(
-        "id,organization_id,game_number,status,starts_at,officials_needed,leagues(id,name),levels(id,name),location:locations(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name)",
-      )
-      .in("organization_id", premiumOrganizationIds)
-      .gte("starts_at", earliest)
-      .lte("starts_at", latest)
-      .order("starts_at", { ascending: false }),
-    service
-      .from("organization_officials")
-      .select("organization_id,official_id,active")
-      .in("organization_id", premiumOrganizationIds),
+    readAllPages<Record<string, any>>((from, to) =>
+      service
+        .from("games")
+        .select(
+          "id,organization_id,game_number,status,starts_at,officials_needed,leagues(id,name),levels(id,name),location:locations(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name)",
+        )
+        .in("organization_id", premiumOrganizationIds)
+        .gte("starts_at", earliest)
+        .lte("starts_at", latest)
+        .order("starts_at", { ascending: false })
+        .order("id")
+        .range(from, to),
+    ),
+    readAllPages<Record<string, any>>((from, to) =>
+      service
+        .from("organization_officials")
+        .select("organization_id,official_id,active")
+        .in("organization_id", premiumOrganizationIds)
+        .order("official_id")
+        .range(from, to),
+    ),
   ]);
   const firstError =
     organizationsResult.error || gamesResult.error || rosterResult.error;
@@ -73,12 +82,16 @@ export async function GET(request: NextRequest) {
 
   const gameIds = (gamesResult.data || []).map((game) => game.id);
   const assignmentsResult = gameIds.length
-    ? await service
-        .from("assignments")
-        .select(
-          "id,game_id,official_id,status,game_fee,mileage_miles,mileage_rate,payment_status,assigned_at,responded_at",
-        )
-        .in("game_id", gameIds)
+    ? await readAllPages<Record<string, any>>((from, to) =>
+        service
+          .from("assignments")
+          .select(
+            "id,game_id,official_id,status,game_fee,mileage_miles,mileage_rate,payment_status,assigned_at,responded_at",
+          )
+          .in("game_id", gameIds)
+          .order("id")
+          .range(from, to),
+      )
     : { data: [], error: null };
   if (assignmentsResult.error)
     return NextResponse.json(
