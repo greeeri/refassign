@@ -34,9 +34,7 @@ Deno.serve(async (request) => {
 
   const url = Deno.env.get("SUPABASE_URL") ?? "";
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   const userClient = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } });
-  const adminClient = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
 
   try {
     const token = authorization.replace("Bearer ", "");
@@ -65,32 +63,12 @@ Deno.serve(async (request) => {
     });
     if (invitationError) return json(request, { error: invitationError.message }, 403);
 
+    // Keep the emailed invitation independent from Supabase's short-lived OTP.
+    // The recipient requests a fresh authentication link only after opening this
+    // durable, revocable invitation URL.
     const origin = requestOrigin(request);
-    const destination = origin === "https://test.ref-assign.com"
-      ? "/tier-test"
-      : "/workspace";
-    const redirectTo = `${origin}/set-password?next=${encodeURIComponent(destination)}`;
-    let existingAccount = false;
-    let { data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
-      type: "invite",
-      email,
-      options: { redirectTo, data: { refassign_organization_id: organizationId, refassign_role: role } },
-    });
-    if (linkError && /already|registered|exists/i.test(linkError.message)) {
-      existingAccount = true;
-      ({ data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
-        type: "magiclink",
-        email,
-        options: { redirectTo: `${origin}${destination}` },
-      }));
-    }
-
-    if (linkError || !linkData.properties?.action_link) {
-      await userClient.rpc("revoke_organization_invitation", { p_invitation_id: invitationId });
-      return json(request, { error: `The invitation link could not be created: ${linkError?.message ?? "unknown error"}` }, 400);
-    }
-
-    return json(request, { invitationId, existingAccount, actionLink: linkData.properties.action_link });
+    const actionLink = `${origin}/login?team_invite=${encodeURIComponent(invitationId)}&team=${encodeURIComponent(email)}`;
+    return json(request, { invitationId, actionLink });
   } catch (error) {
     return json(request, { error: error instanceof Error ? error.message : "Unable to send invitation." }, 400);
   }
