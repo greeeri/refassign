@@ -20,6 +20,7 @@ export default function LoginPage() {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [officialInvitationId, setOfficialInvitationId] = useState("");
+  const [teamInvitationId, setTeamInvitationId] = useState("");
   const [organizationSignup, setOrganizationSignup] = useState(false);
   const [nextPath, setNextPath] = useState("/workspace");
 
@@ -36,6 +37,7 @@ export default function LoginPage() {
     if (query.get("account") === "official") setCreatingOfficial(true);
     const hash = new URLSearchParams(window.location.hash.slice(1));
     const invitedEmail = query.get("official") || hash.get("official");
+    const teamInvitedEmail = query.get("team") || hash.get("team");
     const invitationId =
       query.get("official_invite") || hash.get("official_invite");
     if (invitationId) {
@@ -46,6 +48,12 @@ export default function LoginPage() {
       setEmail(invitedEmail);
       setCreatingOfficial(true);
     }
+    const teamInvite = query.get("team_invite") || hash.get("team_invite");
+    if (teamInvite) {
+      setTeamInvitationId(teamInvite);
+      localStorage.setItem("refassign-team-invitation", teamInvite);
+    }
+    if (teamInvitedEmail) setEmail(teamInvitedEmail);
   }, []);
 
   async function signIn(event: FormEvent) {
@@ -111,6 +119,32 @@ export default function LoginPage() {
       );
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Unable to create the official account.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function acceptTeamInvitation(event: FormEvent) {
+    event.preventDefault();
+    setLoading(true);
+    setMessage("");
+    try {
+      const supabase = createClient();
+      const destination = testMode ? "/tier-test" : "/workspace";
+      const emailRedirectTo = testMode
+        ? `${window.location.origin}${destination}`
+        : `${window.location.origin}/auth/complete?next=${encodeURIComponent(destination)}`;
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo,
+          shouldCreateUser: true,
+          data: { team_invitation_id: teamInvitationId },
+        },
+      });
+      setMessage(error ? error.message : "A fresh secure sign-in link was sent. Open it to accept the organization invitation.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Unable to continue this invitation.");
     } finally {
       setLoading(false);
     }
@@ -235,9 +269,9 @@ export default function LoginPage() {
           Ref Pro <span>Group</span>
         </div>
         <p>Sports Officials Management</p>
-        <h1>{creatingOfficial ? "Create official account" : organizationSignup ? "Create organization account" : "Sign in"}</h1>
-        <p>{creatingOfficial ? "Use the same email address your organization invited." : organizationSignup ? "Create the owner login for your new Ref Pro Group organization." : "Enter your email address and password."}</p>
-        <form onSubmit={creatingOfficial ? createOfficialAccount : organizationSignup ? createOrganizationAccount : signIn}>
+        <h1>{creatingOfficial ? "Create official account" : teamInvitationId ? "Accept organization invitation" : organizationSignup ? "Create organization account" : "Sign in"}</h1>
+        <p>{creatingOfficial ? "Use the same email address your organization invited." : teamInvitationId ? "Request a fresh secure sign-in link to activate your workspace access." : organizationSignup ? "Create the owner login for your new Ref Pro Group organization." : "Enter your email address and password."}</p>
+        <form onSubmit={creatingOfficial ? createOfficialAccount : teamInvitationId ? acceptTeamInvitation : organizationSignup ? createOrganizationAccount : signIn}>
           {creatingOfficial && <>
             <label>First name<input required autoComplete="given-name" value={firstName} onChange={(e) => setFirstName(e.target.value)} /></label>
             <label>Last name<input required autoComplete="family-name" value={lastName} onChange={(e) => setLastName(e.target.value)} /></label>
@@ -250,11 +284,11 @@ export default function LoginPage() {
               autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              readOnly={creatingOfficial && Boolean(officialInvitationId)}
+              readOnly={(creatingOfficial && Boolean(officialInvitationId)) || Boolean(teamInvitationId)}
               placeholder="you@example.com"
             />
           </label>
-          {!creatingOfficial && <label>
+          {!creatingOfficial && !teamInvitationId && <label>
             Password
             <input
               type="password"
@@ -267,7 +301,7 @@ export default function LoginPage() {
             />
           </label>}
           <button className="primary loginButton" disabled={loading}>
-            {loading ? "Please wait…" : creatingOfficial ? "Email my secure account link" : organizationSignup ? "Create account and continue" : "Sign in"}
+            {loading ? "Please wait…" : creatingOfficial ? "Email my secure account link" : teamInvitationId ? "Email my secure acceptance link" : organizationSignup ? "Create account and continue" : "Sign in"}
           </button>
         </form>
         {organizationSignup && <button type="button" className="secondary" style={{marginTop:10,width:"100%"}} onClick={()=>{setOrganizationSignup(false);setMessage("")}}>Already have an account? Sign in</button>}
@@ -277,7 +311,7 @@ export default function LoginPage() {
         <p style={{ textAlign: "center", marginTop: 16 }}>
           <a href="/register">New official? Start registration</a>
         </p>
-        {!creatingOfficial && !organizationSignup && <button
+        {!creatingOfficial && !teamInvitationId && !organizationSignup && <button
           type="button"
           className="secondary"
           style={{ marginTop: 10, width: "100%" }}
@@ -286,7 +320,7 @@ export default function LoginPage() {
         >
           {sendingLink ? "Sending…" : "Email me a secure sign-in link"}
         </button>}
-        {!creatingOfficial && !organizationSignup && <button
+        {!creatingOfficial && !teamInvitationId && !organizationSignup && <button
           type="button"
           className="secondary"
           style={{ marginTop: 10, width: "100%" }}
