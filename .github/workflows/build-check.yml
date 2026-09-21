@@ -12,6 +12,7 @@ jobs:
         with:
           node-version: 20
       - run: npm install
+      - run: npm run test:data-access
       - run: npm run build
         env:
           NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co

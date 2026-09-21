@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../lib/supabase/client";
-import { readAllPages } from "../lib/supabase/readAll";
+const assignmentPageSize = 100;
 type Assignment = {
   id: string;
   status: string;
@@ -63,6 +63,8 @@ export default function CommunicationCenter({
     [messageType, setMessageType] = useState("confirmation_request"),
     [note, setNote] = useState(""),
     [loading, setLoading] = useState(true),
+    [assignmentPage, setAssignmentPage] = useState(0),
+    [assignmentTotal, setAssignmentTotal] = useState(0),
     [sending, setSending] = useState(false),
     [canText, setCanText] = useState(false),
     [error, setError] = useState(""),
@@ -72,17 +74,21 @@ export default function CommunicationCenter({
     setError("");
     const [role, a, c] = await Promise.all([
       supabase.rpc("current_user_roles"),
-      readAllPages<Assignment>((from, to) => supabase
+      supabase
         .from("assignments")
         .select(
           "id,status,game_id,official_id,published_at,officials(first_name,last_name,email,phone),sport_positions(name),games!inner(game_number,starts_at,status,organization_id,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name))",
+          { count: "exact" },
         )
         .not("published_at", "is", null)
         .gte("games.starts_at", new Date().toISOString())
         .eq("games.organization_id", organizationId || "")
         .order("starts_at", { referencedTable: "games", ascending: true })
         .order("id")
-        .range(from, to)),
+        .range(
+          assignmentPage * assignmentPageSize,
+          assignmentPage * assignmentPageSize + assignmentPageSize - 1,
+        ),
       supabase
         .from("official_communications")
         .select(
@@ -101,12 +107,17 @@ export default function CommunicationCenter({
       setError((role.error || a.error || c.error)!.message);
     else {
       setAssignments((a.data || []) as unknown as Assignment[]);
+      setAssignmentTotal(a.count || 0);
       setCommunications((c.data || []) as unknown as Communication[]);
     }
     setLoading(false);
   }
   useEffect(() => {
     void load();
+  }, [organizationId, assignmentPage]);
+  useEffect(() => {
+    setAssignmentPage(0);
+    setSelected([]);
   }, [organizationId]);
   function toggle(id: string) {
     setSelected((x) =>
@@ -233,16 +244,18 @@ export default function CommunicationCenter({
             className="secondary"
             disabled={!assignments.length || sending}
             onClick={() =>
-              setSelected(
-                selected.length === assignments.length
-                  ? []
-                  : assignments.map((a) => a.id),
-              )
+              setSelected((current) => {
+                const pageIds = assignments.map((assignment) => assignment.id),
+                  allPageSelected = pageIds.every((id) => current.includes(id));
+                return allPageSelected
+                  ? current.filter((id) => !pageIds.includes(id))
+                  : [...new Set([...current, ...pageIds])];
+              })
             }
           >
-            {selected.length === assignments.length
-              ? "Clear All"
-              : "Select All"}
+            {assignments.every((assignment) => selected.includes(assignment.id))
+              ? "Clear Page"
+              : "Select Page"}
           </button>
           <button
             className="primary"
@@ -312,6 +325,32 @@ export default function CommunicationCenter({
             </tbody>
           </table>
         </div>
+        {assignmentTotal > assignmentPageSize && (
+          <div className="headerActions" style={{ marginTop: 12 }}>
+            <button
+              className="secondary"
+              disabled={assignmentPage === 0 || loading}
+              onClick={() => setAssignmentPage((page) => Math.max(0, page - 1))}
+            >
+              Previous
+            </button>
+            <span>
+              {assignmentPage * assignmentPageSize + 1}–
+              {Math.min((assignmentPage + 1) * assignmentPageSize, assignmentTotal)} of{" "}
+              {assignmentTotal}
+            </span>
+            <button
+              className="secondary"
+              disabled={
+                loading ||
+                (assignmentPage + 1) * assignmentPageSize >= assignmentTotal
+              }
+              onClick={() => setAssignmentPage((page) => page + 1)}
+            >
+              Next
+            </button>
+          </div>
+        )}
       </section>
       <section className="card">
         <h2>Communication History</h2>
