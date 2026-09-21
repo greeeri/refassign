@@ -35,12 +35,20 @@ export default function LeagueConnectionPage() {
 
   useEffect(() => {
     async function load() {
-      const [{ data: userData }, { data, error: linkError }] =
-        await Promise.all([
-          supabase.auth.getUser(),
-          supabase.rpc("get_league_connection_link", { p_token: token }),
-        ]);
-      setSignedIn(Boolean(userData.user));
+      // Let the browser client restore/refresh its session before deciding
+      // whether this visitor can claim the link. Running getUser and the RPC
+      // concurrently can race on mobile browsers opened from email: getUser
+      // succeeds after refreshing the session while the RPC has already been
+      // sent with the anon role.
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      setSignedIn(Boolean(session?.user));
+
+      const { data, error: linkError } = await supabase.rpc(
+        "get_league_connection_link",
+        { p_token: token },
+      );
       if (linkError) setError(linkError.message);
       else {
         const row = ((data || []) as LinkDetails[])[0];
@@ -56,12 +64,49 @@ export default function LeagueConnectionPage() {
   async function connect() {
     setConnecting(true);
     setError("");
-    const { data, error: claimError } = await supabase.rpc(
+
+    const {
+      data: { session: currentSession },
+    } = await supabase.auth.getSession();
+    let session = currentSession;
+    const expiresSoon =
+      !session?.expires_at || session.expires_at <= Date.now() / 1000 + 60;
+
+    if (expiresSoon && session) {
+      const { data: refreshed } = await supabase.auth.refreshSession();
+      session = refreshed.session;
+    }
+
+    if (!session?.access_token) {
+      setSignedIn(false);
+      setConnecting(false);
+      window.location.assign(loginPath);
+      return;
+    }
+
+    let { data, error: claimError } = await supabase.rpc(
       "claim_league_connection_link",
       { p_token: token },
     );
+
+    // A browser resumed from the background can retain a stale auth display
+    // while the first request reaches PostgREST without a usable JWT. Refresh
+    // once and retry instead of exposing a database permission error.
+    if (claimError?.message.includes("permission denied")) {
+      const { data: refreshed } = await supabase.auth.refreshSession();
+      if (refreshed.session?.access_token) {
+        ({ data, error: claimError } = await supabase.rpc(
+          "claim_league_connection_link",
+          { p_token: token },
+        ));
+      }
+    }
+
     setConnecting(false);
-    if (claimError) setError(claimError.message);
+    if (claimError?.message.includes("permission denied")) {
+      setSignedIn(false);
+      window.location.assign(loginPath);
+    } else if (claimError) setError(claimError.message);
     else setResult(data as ClaimResult);
   }
 
