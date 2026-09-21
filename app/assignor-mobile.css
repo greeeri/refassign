@@ -1177,3 +1177,26 @@
     margin: 15px 16px;
   }
 }
+
+
+/* Keep undo details and action clear of the fixed mobile navigation. */
+@media (max-width: 760px) {
+  .undoCenter {
+    right: 12px !important;
+    bottom: calc(72px + env(safe-area-inset-bottom)) !important;
+    left: 12px !important;
+    z-index: 1120 !important;
+    box-sizing: border-box;
+    max-width: none !important;
+    align-items: flex-start !important;
+  }
+
+  .undoCenter > div {
+    min-width: 0;
+  }
+
+  .undoCenter > button {
+    min-height: 44px;
+    flex: 0 0 auto;
+  }
+}
