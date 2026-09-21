@@ -111,7 +111,7 @@ export default function LeagueConnectionPage() {
                   Sign in to connect
                 </Link>
                 <Link className="secondary loginButton" href={signupPath}>
-                  Create free official account
+                  Create your free account
                 </Link>
               </>
             )}

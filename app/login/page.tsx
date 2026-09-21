@@ -23,6 +23,7 @@ export default function LoginPage() {
   const [teamInvitationId, setTeamInvitationId] = useState("");
   const [organizationSignup, setOrganizationSignup] = useState(false);
   const [nextPath, setNextPath] = useState("/workspace");
+  const connectingToLeague = nextPath.startsWith("/join/league/");
 
   useEffect(() => {
     setTestMode(window.location.hostname === "test.ref-assign.com");
@@ -308,9 +309,9 @@ export default function LoginPage() {
         {testMode && <button type="button" className="secondary" style={{ marginTop: 10, width: "100%" }} onClick={() => { setCreatingOfficial((value) => !value); setMessage(""); }}>
           {creatingOfficial ? "Back to sign in" : "Invited official? Create test account"}
         </button>}
-        <p style={{ textAlign: "center", marginTop: 16 }}>
+        {!connectingToLeague && <p style={{ textAlign: "center", marginTop: 16 }}>
           <a href="/register">New official? Start registration</a>
-        </p>
+        </p>}
         {!creatingOfficial && !teamInvitationId && !organizationSignup && <button
           type="button"
           className="secondary"
