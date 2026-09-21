@@ -3633,29 +3633,14 @@ export default function AssignmentsManagerV2({
     setError("");
     setNotice("");
     try {
-      const response = await fetch(
-        `/api/assignments/publish?organizationId=${encodeURIComponent(organizationId || "")}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ gameId: game.id }),
-        },
-      );
-      const result = (await response.json()) as {
-        sent?: number;
-        failed?: number;
-        failures?: string[];
-        error?: string;
-      };
-      if (!response.ok)
-        throw new Error(result.error || "Unable to publish assignments.");
+      const result = await requestAssignmentPublish(game.id);
       if (result.failed)
         setError(
           `${result.sent || 0} assignment email${result.sent === 1 ? "" : "s"} sent. ${result.failed} failed: ${(result.failures || []).join("; ")}`,
         );
       else
         setNotice(
-          `${result.sent || 0} assignment email${result.sent === 1 ? "" : "s"} sent successfully.`,
+          `${result.sent || 0} assignment email${result.sent === 1 ? "" : "s"} sent successfully.${result.recovered ? " Publishing was verified after the browser lost its response." : ""}`,
         );
     } catch (e) {
       setError(
@@ -3664,6 +3649,66 @@ export default function AssignmentsManagerV2({
     }
     await refreshAssignmentState();
     setPublishing(false);
+  }
+
+  async function requestAssignmentPublish(gameId: string) {
+    const targetIds = assignments
+      .filter(
+        (assignment) =>
+          assignment.game_id === gameId && !assignment.published_at,
+      )
+      .map((assignment) => assignment.id);
+    try {
+      const response = await fetch(
+        `/api/assignments/publish?organizationId=${encodeURIComponent(organizationId || "")}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ gameId }),
+        },
+      );
+      const result = (await response.json().catch(() => ({}))) as {
+        sent?: number;
+        failed?: number;
+        failures?: string[];
+        error?: string;
+        recovered?: boolean;
+      };
+      if (!response.ok)
+        throw new Error(result.error || "Unable to publish assignments.");
+      return result;
+    } catch (publishError) {
+      const message =
+        publishError instanceof Error
+          ? publishError.message
+          : String(publishError);
+      const isLostResponse =
+        /load failed|failed to fetch|network(?: error| request failed)/i.test(
+          message,
+        );
+      if (!isLostResponse || !targetIds.length) throw publishError;
+      const { data: verification, error: verificationError } = await supabase
+        .from("assignments")
+        .select("id,published_at,email_sent_at,email_error")
+        .in("id", targetIds);
+      if (verificationError) throw publishError;
+      const verifiedRows = verification || [];
+      if (
+        verifiedRows.length !== targetIds.length ||
+        verifiedRows.some((assignment) => !assignment.published_at)
+      )
+        throw publishError;
+      const failures = verifiedRows
+        .filter((assignment) => assignment.email_error)
+        .map((assignment) => assignment.email_error as string);
+      return {
+        sent: verifiedRows.filter((assignment) => assignment.email_sent_at)
+          .length,
+        failed: failures.length,
+        failures,
+        recovered: true,
+      };
+    }
   }
   function openPublishReview() {
     if (publishing) return;
@@ -4226,24 +4271,17 @@ export default function AssignmentsManagerV2({
         }
       } else if (action === "publish") {
         for (const gameId of selectedIds) {
-          const response = await fetch(
-            `/api/assignments/publish?organizationId=${encodeURIComponent(organizationId || "")}`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ gameId }),
-            },
-          );
-          const body = (await response.json().catch(() => ({}))) as {
-            error?: string;
-            failed?: number;
-            failures?: string[];
-          };
-          if (response.ok) {
+          try {
+            const body = await requestAssignmentPublish(gameId);
             succeeded++;
             if (body.failed) failures.push(...(body.failures || []));
-          } else
-            failures.push(body.error || `Could not publish game ${gameId}`);
+          } catch (publishError) {
+            failures.push(
+              publishError instanceof Error
+                ? publishError.message
+                : `Could not publish game ${gameId}`,
+            );
+          }
         }
       } else if (action === "confirm") {
         const eligible = selectedAssignments.filter(
