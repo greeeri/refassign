@@ -122,7 +122,9 @@ export default function SuperAdminManager() {
     if (
       !selected ||
       selected.protected ||
-      !window.confirm(`Permanently delete ${selected.email}?`)
+      !window.confirm(
+        `Permanently delete ${selected.email}'s login and remove them from active organization directories? Historical official records will be preserved.`,
+      )
     )
       return;
     setBusy(true);
@@ -135,7 +137,7 @@ export default function SuperAdminManager() {
     if (!response.ok) setError(result.error);
     else {
       setSelected(null);
-      setNotice("Account deleted.");
+      setNotice("Account deleted and removed from active directories.");
       await load();
     }
     setBusy(false);
