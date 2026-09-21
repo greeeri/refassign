@@ -873,6 +873,13 @@ export default function OfficialsDirectory({
     });
     setShowForm(true);
     setError("");
+    window.setTimeout(
+      () =>
+        document
+          .getElementById("focused-official-form")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      0,
+    );
   }
 
   async function saveOnlyMyRankings() {
