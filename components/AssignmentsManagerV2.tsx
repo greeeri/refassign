@@ -1993,13 +1993,14 @@ export default function AssignmentsManagerV2({
     for (const b of blocks) {
       if (b.official_id !== o.id) continue;
       if (
+        b.block_type === "time" &&
         b.starts_at &&
         b.ends_at &&
         new Date(b.starts_at).getTime() < ge &&
         new Date(b.ends_at).getTime() > gs
       )
         reasons.push(
-          `Unavailable from ${new Date(b.starts_at).toLocaleString()} to ${new Date(b.ends_at).toLocaleString()}`,
+          `Availability block: ${formatEventDateTime(b.starts_at, targetGame.location)} to ${formatEventDateTime(b.ends_at, targetGame.location)} (game location time)`,
         );
       else if (
         b.block_type === "date" &&
