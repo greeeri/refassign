@@ -1,6 +1,7 @@
 import { sendOfficialNotification } from "../../../../lib/communications/officialCc";
 import { NextRequest, NextResponse } from "next/server";
 import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
+import { eventLocalToIso } from "../../../../lib/event-time";
 
 function esc(v: unknown) {
   return String(v ?? "").replace(
@@ -16,12 +17,18 @@ export async function POST(req: NextRequest) {
   const context = await requireManagedOrganization(req);
   if (context.error) return context.error;
   const { session: supabase, service, organizationId } = context;
-  const body = (await req.json().catch(() => ({}))) as { gameId?: string };
+  const body = (await req.json().catch(() => ({}))) as {
+    gameId?: string;
+    responseByLocal?: string;
+    retryFailed?: boolean;
+  };
   if (!body.gameId)
     return NextResponse.json({ error: "Game is required." }, { status: 400 });
   const { data: ownedGame, error: ownedGameError } = await service
     .from("games")
-    .select("id,time_tbd")
+    .select(
+      "id,time_tbd,starts_at,location:locations(state),leagues(assignment_acceptance_hours)",
+    )
     .eq("id", body.gameId)
     .eq("organization_id", organizationId)
     .maybeSingle();
@@ -40,50 +47,87 @@ export async function POST(req: NextRequest) {
       { error: "Enter the game time before publishing assignments." },
       { status: 400 },
     );
-  const { error: publishError } = await supabase.rpc(
-    "publish_game_assignments",
-    { p_game_id: body.gameId },
+  const assignmentQuery = service
+    .from("assignments")
+    .select("id")
+    .eq("game_id", body.gameId)
+    .not("official_id", "is", null);
+  const { data: targetAssignments, error: targetError } = body.retryFailed
+    ? await assignmentQuery
+        .not("published_at", "is", null)
+        .is("email_sent_at", null)
+        .not("email_error", "is", null)
+    : await assignmentQuery.is("published_at", null);
+  if (targetError)
+    return NextResponse.json({ error: targetError.message }, { status: 400 });
+  const targetIds = (targetAssignments || []).map(
+    (assignment) => assignment.id,
   );
-  if (publishError)
-    return NextResponse.json({ error: publishError.message }, { status: 400 });
-  const { data: deadlineGame } = await service
-    .from("games")
-    .select("starts_at,leagues(assignment_acceptance_hours)")
-    .eq("id", body.gameId)
-    .single();
-  const deadlineLeague = Array.isArray((deadlineGame as any)?.leagues)
-    ? (deadlineGame as any).leagues[0]
-    : (deadlineGame as any)?.leagues;
+  if (!targetIds.length)
+    return NextResponse.json({ sent: 0, failed: 0, failures: [] });
+  const deadlineLeague = Array.isArray((ownedGame as any)?.leagues)
+    ? (ownedGame as any).leagues[0]
+    : (ownedGame as any)?.leagues;
+  const gameLocation = Array.isArray((ownedGame as any)?.location)
+    ? (ownedGame as any).location[0]
+    : (ownedGame as any)?.location;
   const responseHours = Number(
     deadlineLeague?.assignment_acceptance_hours || 24,
   );
-  const responseAt = new Date(
-    Math.max(
-      Date.now() + 300000,
-      Math.min(
-        Date.now() + responseHours * 3600000,
-        new Date(
-          (deadlineGame as any)?.starts_at ||
-            Date.now() + responseHours * 3600000,
-        ).getTime() - 3600000,
+  let responseAt: string | null = null;
+  if (!body.retryFailed && body.responseByLocal) {
+    const match = body.responseByLocal.match(
+      /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})$/,
+    );
+    if (!match)
+      return NextResponse.json(
+        { error: "Choose a valid response date and time." },
+        { status: 400 },
+      );
+    responseAt = eventLocalToIso(match[1], match[2], gameLocation);
+    const responseTime = new Date(responseAt).getTime();
+    const gameTime = new Date(ownedGame.starts_at).getTime();
+    if (responseTime < Date.now() + 300000)
+      return NextResponse.json(
+        { error: "The response deadline must be at least five minutes from now." },
+        { status: 400 },
+      );
+    if (responseTime >= gameTime)
+      return NextResponse.json(
+        { error: "The response deadline must be before the game starts." },
+        { status: 400 },
+      );
+  } else if (!body.retryFailed) {
+    responseAt = new Date(
+      Math.max(
+        Date.now() + 300000,
+        Math.min(
+          Date.now() + responseHours * 3600000,
+          new Date(ownedGame.starts_at).getTime() - 3600000,
+        ),
       ),
-    ),
-  ).toISOString();
-  const { error: deadlineError } = await service
-    .from("assignments")
-    .update({ accept_by: responseAt })
-    .eq("game_id", body.gameId)
-    .not("published_at", "is", null)
-    .eq("status", "proposed");
-  if (deadlineError)
-    return NextResponse.json({ error: deadlineError.message }, { status: 400 });
+    ).toISOString();
+  }
+  if (!body.retryFailed) {
+    const { error: publishError } = await supabase.rpc(
+      "publish_game_assignments",
+      { p_game_id: body.gameId },
+    );
+    if (publishError)
+      return NextResponse.json({ error: publishError.message }, { status: 400 });
+    const { error: deadlineError } = await service
+      .from("assignments")
+      .update({ accept_by: responseAt })
+      .in("id", targetIds);
+    if (deadlineError)
+      return NextResponse.json({ error: deadlineError.message }, { status: 400 });
+  }
   const { data: rows, error: loadError } = await service
     .from("assignments")
     .select(
       "id,official_id,status,published_at,accept_by,response_token,email_sent_at,officials(first_name,last_name,email),sport_positions(name),games(starts_at,notes,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name,address,city,state),leagues(name),levels(name))",
     )
-    .eq("game_id", body.gameId)
-    .not("published_at", "is", null)
+    .in("id", targetIds)
     .is("email_sent_at", null);
   if (loadError)
     return NextResponse.json({ error: loadError.message }, { status: 400 });

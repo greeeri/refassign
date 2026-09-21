@@ -412,6 +412,9 @@ export default function AssignmentsManagerV2({
     [overdueResolving, setOverdueResolving] = useState(false),
     [overdueSelected, setOverdueSelected] = useState<string[]>([]),
     [showPublishReview, setShowPublishReview] = useState(false),
+    [publishResponseBy, setPublishResponseBy] = useState(""),
+    [showBulkPublishReview, setShowBulkPublishReview] = useState(false),
+    [bulkPublishResponseBy, setBulkPublishResponseBy] = useState(""),
     [showBroadcastReview, setShowBroadcastReview] = useState(false),
     [broadcasting, setBroadcasting] = useState(false),
     [showActivityTimeline, setShowActivityTimeline] = useState(false),
@@ -3621,13 +3624,22 @@ export default function AssignmentsManagerV2({
     setGameStatusSaving("");
   }
   async function publishAssignments() {
-    if (!game || game.time_tbd || unpublishedCount === 0) return;
+    if (
+      !game ||
+      game.time_tbd ||
+      unpublishedCount === 0 ||
+      !publishResponseBy
+    )
+      return;
     setShowPublishReview(false);
     setPublishing(true);
     setError("");
     setNotice("");
     try {
-      const result = await requestAssignmentPublish(game.id);
+      const result = await requestAssignmentPublish(
+        game.id,
+        publishResponseBy,
+      );
       if (result.failed)
         setError(
           `${result.sent || 0} assignment email${result.sent === 1 ? "" : "s"} sent. ${result.failed} failed: ${(result.failures || []).join("; ")}`,
@@ -3645,7 +3657,10 @@ export default function AssignmentsManagerV2({
     setPublishing(false);
   }
 
-  async function requestAssignmentPublish(gameId: string) {
+  async function requestAssignmentPublish(
+    gameId: string,
+    responseByLocal?: string,
+  ) {
     const targetIds = assignments
       .filter(
         (assignment) =>
@@ -3658,7 +3673,7 @@ export default function AssignmentsManagerV2({
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ gameId }),
+          body: JSON.stringify({ gameId, responseByLocal }),
         },
       );
       const result = (await response.json().catch(() => ({}))) as {
@@ -3707,6 +3722,7 @@ export default function AssignmentsManagerV2({
   function openPublishReview() {
     if (publishing) return;
     if (game && unpublishedCount > 0) {
+      setPublishResponseBy(defaultPublishResponseBy(game));
       setShowPublishReview(true);
       return;
     }
@@ -3718,7 +3734,32 @@ export default function AssignmentsManagerV2({
       return;
     }
     setSelected(unpublishedGame.id);
+    setPublishResponseBy(defaultPublishResponseBy(unpublishedGame));
     setShowPublishReview(true);
+  }
+
+  function defaultPublishResponseBy(targetGame: Game) {
+    const acceptanceHours =
+      targetGame.leagues?.assignment_acceptance_hours ?? 24;
+    const deadline = new Date(
+      Math.max(
+        Date.now() + 300000,
+        Math.min(
+          Date.now() + acceptanceHours * 3600000,
+          new Date(targetGame.starts_at).getTime() - 3600000,
+        ),
+      ),
+    );
+    const parts = eventTimeParts(deadline, targetGame.location);
+    return `${parts.date}T${parts.time}`;
+  }
+
+  function openBulkPublishReview() {
+    if (!linkSelected.length || bulkWorking) return;
+    const firstGame = games.find((item) => item.id === linkSelected[0]);
+    if (!firstGame) return;
+    setBulkPublishResponseBy(defaultPublishResponseBy(firstGame));
+    setShowBulkPublishReview(true);
   }
   async function broadcastAssignments() {
     if (!linkSelected.length || broadcasting) return;
@@ -3794,7 +3835,7 @@ export default function AssignmentsManagerV2({
           body: JSON.stringify(
             cancellation
               ? { gameId: game.id, status: game.status }
-              : { gameId: game.id },
+              : { gameId: game.id, retryFailed: true },
           ),
         },
       );
@@ -4174,6 +4215,7 @@ export default function AssignmentsManagerV2({
   }
   async function runBulkAction(
     action: "publish" | "confirm" | "unassign" | "status" | "closeSelfAssign",
+    responseByLocal?: string,
   ) {
     if (!canManage || !linkSelected.length || bulkWorking) return;
     const selectedIds = [...linkSelected];
@@ -4192,6 +4234,7 @@ export default function AssignmentsManagerV2({
         ? "\n\nAssigned officials will be notified of this change."
         : "";
     if (
+      action !== "publish" &&
       !window.confirm(
         `${labels[action]} ${selectedIds.length} selected game${selectedIds.length === 1 ? "" : "s"}?${officialNotificationWarning}`,
       )
@@ -4262,7 +4305,10 @@ export default function AssignmentsManagerV2({
       } else if (action === "publish") {
         for (const gameId of selectedIds) {
           try {
-            const body = await requestAssignmentPublish(gameId);
+            const body = await requestAssignmentPublish(
+              gameId,
+              responseByLocal,
+            );
             succeeded++;
             if (body.failed) failures.push(...(body.failures || []));
           } catch (publishError) {
@@ -4306,6 +4352,7 @@ export default function AssignmentsManagerV2({
         succeeded,
         failures: [...failures],
       });
+      if (action === "publish") setShowBulkPublishReview(false);
       if (succeeded && (action === "status" || action === "unassign")) {
         await supabase.rpc("group_undo_operations", {
           p_operation_ids: undoOperationIds,
@@ -7472,6 +7519,20 @@ export default function AssignmentsManagerV2({
                       );
                     })}
                   </div>
+                  <label className="publishResponseDeadline">
+                    Response required by
+                    <input
+                      type="datetime-local"
+                      value={publishResponseBy}
+                      disabled={publishing}
+                      onChange={(event) =>
+                        setPublishResponseBy(event.target.value)
+                      }
+                    />
+                    <small>
+                      Uses the game location&apos;s local date and time.
+                    </small>
+                  </label>
                   <p className="publishReviewNote">
                     Publishing sends each listed official an assignment email
                     with the league response deadline. Open positions are not
@@ -7495,6 +7556,7 @@ export default function AssignmentsManagerV2({
                       disabled={
                         publishing ||
                         !unpublishedCount ||
+                        !publishResponseBy ||
                         Boolean(publishMissingEmails)
                       }
                       onClick={() => void publishAssignments()}
@@ -7502,6 +7564,81 @@ export default function AssignmentsManagerV2({
                       {publishing
                         ? "Publishing & Sending…"
                         : `Publish ${unpublishedCount} Assignment${unpublishedCount === 1 ? "" : "s"}`}
+                    </button>
+                  </div>
+                </div>
+              </div>,
+              document.body,
+            )}
+          {showBulkPublishReview &&
+            createPortal(
+              <div
+                className="assignmentDialogBackdrop"
+                role="presentation"
+                onMouseDown={() =>
+                  !bulkWorking && setShowBulkPublishReview(false)
+                }
+              >
+                <div
+                  className="assignmentDialog assignmentPublishReview"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="bulkPublishReviewTitle"
+                  onMouseDown={(event) => event.stopPropagation()}
+                >
+                  <div className="assignmentDialogHead">
+                    <div>
+                      <h3 id="bulkPublishReviewTitle">
+                        Review Bulk Publishing
+                      </h3>
+                      <p>
+                        {linkSelected.length} selected game
+                        {linkSelected.length === 1 ? "" : "s"}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      aria-label="Close"
+                      disabled={bulkWorking}
+                      onClick={() => setShowBulkPublishReview(false)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <label className="publishResponseDeadline">
+                    Response required by
+                    <input
+                      type="datetime-local"
+                      value={bulkPublishResponseBy}
+                      disabled={bulkWorking}
+                      onChange={(event) =>
+                        setBulkPublishResponseBy(event.target.value)
+                      }
+                    />
+                    <small>
+                      The same local deadline is applied in each game&apos;s
+                      location time zone. Only newly published assignments are
+                      emailed.
+                    </small>
+                  </label>
+                  <div className="assignmentDialogFooter">
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={bulkWorking}
+                      onClick={() => setShowBulkPublishReview(false)}
+                    >
+                      Go Back
+                    </button>
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={bulkWorking || !bulkPublishResponseBy}
+                      onClick={() =>
+                        void runBulkAction("publish", bulkPublishResponseBy)
+                      }
+                    >
+                      {bulkWorking ? "Publishing & Sending…" : "Publish Selected"}
                     </button>
                   </div>
                 </div>
@@ -8512,7 +8649,7 @@ export default function AssignmentsManagerV2({
                 <button
                   className="secondary"
                   disabled={bulkWorking}
-                  onClick={() => void runBulkAction("publish")}
+                  onClick={openBulkPublishReview}
                 >
                   Publish
                 </button>
