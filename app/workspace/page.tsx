@@ -36,7 +36,6 @@ import SupportCenter from "../../components/SupportCenter";
 import TaxDocumentsManager from "../../components/TaxDocumentsManager";
 import type { ReportActionTarget } from "../../lib/reportActions";
 const setupNav = ["Leagues", "Levels", "Teams", "Locations"] as const;
-const ALL_ORGANIZATIONS = "all";
 type SetupView = (typeof setupNav)[number];
 type Role =
   | "admin"
@@ -119,12 +118,13 @@ export default function Workspace() {
     [testWorkspaces, setTestWorkspaces] = useState<TestWorkspace[]>([]),
     [testWorkspace, setTestWorkspace] = useState<TestWorkspace | null>(null),
     [reportAction, setReportAction] = useState<ReportActionTarget | null>(null),
-    [invitationClaimError, setInvitationClaimError] = useState(""),
-    [officialOrganizationScope, setOfficialOrganizationScope] = useState("");
+    [invitationClaimError, setInvitationClaimError] = useState("");
   const officialWorkspaces = useMemo(
     () =>
       testWorkspaces.filter(
-        (item) => item.role === "official" || item.roles?.includes("official"),
+        (item) =>
+          (item.role === "official" || item.roles?.includes("official")) &&
+          item.name.trim().toLowerCase() !== "test",
       ),
     [testWorkspaces],
   );
@@ -136,15 +136,8 @@ export default function Workspace() {
     [officialWorkspaces],
   );
   const officialScopeIds = useMemo(
-    () =>
-      officialOrganizationScope === ALL_ORGANIZATIONS
-        ? officialWorkspaces.map((item) => item.organization_id)
-        : officialOrganizationScope
-          ? [officialOrganizationScope]
-          : testWorkspace
-            ? [testWorkspace.organization_id]
-            : [],
-    [officialOrganizationScope, officialWorkspaces, testWorkspace],
+    () => officialWorkspaces.map((item) => item.organization_id),
+    [officialWorkspaces],
   );
   useEffect(() => {
     const requestedSection = new URLSearchParams(window.location.search).get("section");
@@ -276,22 +269,6 @@ export default function Workspace() {
         null;
       setTestWorkspaces(availableWorkspaces);
       setTestWorkspace(selectedWorkspace);
-      const savedOfficialScope = localStorage.getItem(
-        "refassign-official-organization-scope",
-      );
-      const officialIds = availableWorkspaces
-        .filter(
-          (item) =>
-            item.role === "official" || item.roles?.includes("official"),
-        )
-        .map((item) => item.organization_id);
-      setOfficialOrganizationScope(
-        savedOfficialScope === ALL_ORGANIZATIONS && officialIds.length > 1
-          ? ALL_ORGANIZATIONS
-          : officialIds.includes(savedOfficialScope || "")
-            ? savedOfficialScope!
-            : selectedWorkspace?.organization_id || "",
-      );
       if (selectedWorkspace)
         localStorage.setItem(
           "refassign-last-test-workspace",
@@ -480,11 +457,6 @@ export default function Workspace() {
     if (!next) return;
     localStorage.setItem("refassign-last-test-workspace", next.organization_id);
     window.location.assign(`/workspace?organization=${next.organization_id}`);
-  }
-  function switchOfficialWorkspace(value: string) {
-    setOfficialOrganizationScope(value);
-    localStorage.setItem("refassign-official-organization-scope", value);
-    if (value !== ALL_ORGANIZATIONS) switchTestWorkspace(value);
   }
   if (!ready)
     return (
@@ -900,29 +872,15 @@ export default function Workspace() {
             <button className="secondary" onClick={signOut}>
               Sign out
             </button>
-            {testWorkspace && (
+            {testWorkspace && viewRole !== "official" && (
               <label style={{ fontSize: 12, fontWeight: 800 }}>
                 Organization
                 <select
-                  value={
-                    viewRole === "official"
-                      ? officialOrganizationScope
-                      : testWorkspace.organization_id
-                  }
-                  onChange={(event) =>
-                    viewRole === "official"
-                      ? switchOfficialWorkspace(event.target.value)
-                      : switchTestWorkspace(event.target.value)
-                  }
+                  value={testWorkspace.organization_id}
+                  onChange={(event) => switchTestWorkspace(event.target.value)}
                   style={{ marginLeft: 8, width: "auto", minWidth: 150 }}
                 >
-                  {viewRole === "official" && officialWorkspaces.length > 1 && (
-                    <option value={ALL_ORGANIZATIONS}>All organizations</option>
-                  )}
-                  {(viewRole === "official"
-                    ? officialWorkspaces
-                    : testWorkspaces
-                  ).map((item) => (
+                  {testWorkspaces.map((item) => (
                     <option
                       key={item.organization_id}
                       value={item.organization_id}
@@ -932,6 +890,9 @@ export default function Workspace() {
                   ))}
                 </select>
               </label>
+            )}
+            {viewRole === "official" && officialWorkspaces.length > 0 && (
+              <span className="badge">All organizations</span>
             )}
             <label style={{ fontSize: 12, fontWeight: 800 }}>
               Viewing as
@@ -1056,49 +1017,19 @@ export default function Workspace() {
                   <p className="eyebrow">My organizations</p>
                   <h2>Officiating organizations</h2>
                   <p>
-                    Select one organization or combine every organization’s
-                    upcoming games and calendar.
+                    Your dashboard and schedule automatically combine every
+                    officiating organization.
                   </p>
                 </div>
                 <div className="officialOrganizationChoices">
-                  {officialWorkspaces.length > 1 && (
-                    <button
-                      type="button"
-                      className={
-                        officialOrganizationScope === ALL_ORGANIZATIONS
-                          ? "officialOrganizationChoice active"
-                          : "officialOrganizationChoice"
-                      }
-                      onClick={() => switchOfficialWorkspace(ALL_ORGANIZATIONS)}
-                    >
-                      <span>All organizations</span>
-                      <small>
-                        {officialOrganizationScope === ALL_ORGANIZATIONS
-                          ? "Currently viewing"
-                          : "Combine schedules"}
-                      </small>
-                    </button>
-                  )}
                   {officialWorkspaces.map((item) => (
-                    <button
-                      type="button"
+                    <div
                       key={item.organization_id}
-                      className={
-                        item.organization_id === officialOrganizationScope
-                          ? "officialOrganizationChoice active"
-                          : "officialOrganizationChoice"
-                      }
-                      onClick={() =>
-                        switchOfficialWorkspace(item.organization_id)
-                      }
+                      className="officialOrganizationChoice active"
                     >
                       <span>{item.name}</span>
-                      <small>
-                        {item.organization_id === officialOrganizationScope
-                          ? "Currently viewing"
-                          : "Open organization"}
-                      </small>
-                    </button>
+                      <small>Included in schedule</small>
+                    </div>
                   ))}
                 </div>
                 {officialWorkspaces.length === 1 && (
@@ -1233,10 +1164,7 @@ export default function Workspace() {
         {section === "Support" && (
           <SupportCenter
             organizationId={
-              viewRole === "official" &&
-              officialOrganizationScope === ALL_ORGANIZATIONS
-                ? undefined
-                : testWorkspace?.organization_id
+              viewRole === "official" ? undefined : testWorkspace?.organization_id
             }
           />
         )}
