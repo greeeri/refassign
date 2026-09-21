@@ -306,8 +306,16 @@ export default function LoginPage() {
           </button>
         </form>
         {organizationSignup && <button type="button" className="secondary" style={{marginTop:10,width:"100%"}} onClick={()=>{setOrganizationSignup(false);setMessage("")}}>Already have an account? Sign in</button>}
-        {testMode && <button type="button" className="secondary" style={{ marginTop: 10, width: "100%" }} onClick={() => { setCreatingOfficial((value) => !value); setMessage(""); }}>
-          {creatingOfficial ? "Back to sign in" : "Invited official? Create test account"}
+        {!teamInvitationId && !organizationSignup && <button
+          type="button"
+          className="secondary"
+          style={{ marginTop: 10, width: "100%" }}
+          onClick={() => {
+            setCreatingOfficial((value) => !value);
+            setMessage("");
+          }}
+        >
+          {creatingOfficial ? "Back to sign in" : "Create your free account"}
         </button>}
         {!connectingToLeague && <p style={{ textAlign: "center", marginTop: 16 }}>
           <a href="/register">New official? Start registration</a>
