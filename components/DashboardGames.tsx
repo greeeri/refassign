@@ -385,7 +385,12 @@ export default function DashboardGames({
   }
   function activityTone(action: string) {
     if (action.includes("cancel") || action === "unassigned") return "red";
-    if (action === "assigned" || action === "confirmed") return "green";
+    if (
+      action === "assigned" ||
+      action === "confirmed" ||
+      action === "official_connected"
+    )
+      return "green";
     return "blue";
   }
   return (
@@ -600,11 +605,23 @@ export default function DashboardGames({
           <div className="recentActivity">
             {audit.length ? (
               audit.slice(0, 5).map((item) => (
-                <div className="activityRow" key={item.id}>
+                <div
+                  className={`activityRow${item.action === "official_connected" ? " activityRowAction" : ""}`}
+                  key={item.id}
+                  role={item.action === "official_connected" ? "button" : undefined}
+                  tabIndex={item.action === "official_connected" ? 0 : undefined}
+                  onClick={item.action === "official_connected" ? () => go("Officials") : undefined}
+                  onKeyDown={item.action === "official_connected" ? (event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      go("Officials");
+                    }
+                  } : undefined}
+                >
                   <i className={`dot ${activityTone(item.action)}`}></i>
                   <div>
                     <strong>{item.summary}</strong>
-                    <span>{item.actor_name || "System"}</span>
+                    <span>{item.actor_name || "System"}{item.action === "official_connected" ? " · Open Officials" : ""}</span>
                   </div>
                   <time>{ago(item.occurred_at)}</time>
                 </div>
