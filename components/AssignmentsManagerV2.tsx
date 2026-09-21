@@ -7,7 +7,7 @@ import {
   normalizeGameStatus,
 } from "../lib/game-status";
 import { createClient } from "../lib/supabase/client";
-import { readAllPages } from "../lib/supabase/readAll";
+import { readAllForChunks, readAllPages } from "../lib/supabase/readAll";
 import { announceUndoAvailable } from "./UndoCenter";
 import SelfAssignOverrideRequests from "./SelfAssignOverrideRequests";
 import {
@@ -434,6 +434,11 @@ export default function AssignmentsManagerV2({
     }),
     [deadlineSaving, setDeadlineSaving] = useState(false),
     [showCoverageForecast, setShowCoverageForecast] = useState(false),
+    [checkInGameIds, setCheckInGameIds] = useState<string[]>([]),
+    [checkedInAssignmentIds, setCheckedInAssignmentIds] = useState<Set<string>>(
+      new Set(),
+    ),
+    [checkInSaving, setCheckInSaving] = useState(""),
     [candidatePositionId, setCandidatePositionId] = useState(""),
     [scheduleOfficialId, setScheduleOfficialId] = useState(""),
     [replacementPublishing, setReplacementPublishing] = useState(""),
@@ -712,18 +717,36 @@ export default function AssignmentsManagerV2({
     setOfficials(officialRows);
     setPositions((p.data || []) as Position[]);
     const scopedGames = (g.data || []) as unknown as Game[];
+    const scopedGameIds = new Set(scopedGames.map((listedGame) => listedGame.id));
+    const scopedAssignments = ((a.data || []) as Assignment[]).filter(
+      (assignment) => scopedGameIds.has(assignment.game_id),
+    );
+    const checkInResult = scopedAssignments.length
+      ? await readAllForChunks<{ assignment_id: string }, string>(
+          scopedAssignments.map((assignment) => assignment.id),
+          (assignmentIds, from, to) =>
+            supabase
+              .from("assignment_check_ins")
+              .select("assignment_id")
+              .in("assignment_id", assignmentIds)
+              .order("assignment_id")
+              .range(from, to),
+        )
+      : { data: [], error: null };
+    if (checkInResult.error) {
+      setError(checkInResult.error.message);
+      return;
+    }
+    setCheckedInAssignmentIds(
+      new Set((checkInResult.data || []).map((row) => row.assignment_id)),
+    );
     const candidateConflictError =
       await loadCandidateScheduleConflicts(scopedGames);
     if (candidateConflictError) {
       setError(candidateConflictError.message);
       return;
     }
-    const scopedGameIds = new Set(scopedGames.map((game) => game.id));
-    setAssignments(
-      ((a.data || []) as Assignment[]).filter((assignment) =>
-        scopedGameIds.has(assignment.game_id),
-      ),
-    );
+    setAssignments(scopedAssignments);
     setLeagueElig((le.data || []) as EligL[]);
     setLevelElig((ve.data || []) as EligV[]);
     setBlocks((bl.data || []) as Block[]);
@@ -3990,7 +4013,14 @@ export default function AssignmentsManagerV2({
     );
     const byOfficial = new Map<
       string,
-      { name: string; email: string; phone: string; games: string[] }
+      {
+        officialId: string;
+        name: string;
+        email: string;
+        phone: string;
+        games: string[];
+        assignmentIds: string[];
+      }
     >();
     for (const assignment of selectedAssignments) {
       const official = officials.find(
@@ -4002,19 +4032,65 @@ export default function AssignmentsManagerV2({
       );
       if (!official || !listedGame) continue;
       const row = byOfficial.get(official.id) || {
+        officialId: official.id,
         name: `${official.first_name} ${official.last_name}`.trim(),
         email: official.email || "",
         phone: official.phone || "",
         games: [],
+        assignmentIds: [],
       };
       row.games.push(
         `#${listedGame.game_number} · ${formatEventDate(listedGame.starts_at, listedGame.location)} ${formatEventTime(listedGame.starts_at, listedGame.location)} · ${position?.name || "Official"} · ${listedGame.location?.name || "Venue TBD"}`,
       );
+      row.assignmentIds.push(assignment.id);
       byOfficial.set(official.id, row);
     }
     return [...byOfficial.values()].sort((a, b) =>
       a.name.localeCompare(b.name),
     );
+  }
+  async function saveElectronicCheckIns(
+    assignmentIds: string[],
+    checkedIn: boolean,
+    savingKey: string,
+  ) {
+    if (!assignmentIds.length || checkInSaving) return;
+    setCheckInSaving(savingKey);
+    setError("");
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      setError("Sign in again to save electronic check-in.");
+      setCheckInSaving("");
+      return;
+    }
+    const result = checkedIn
+      ? await supabase.from("assignment_check_ins").upsert(
+          assignmentIds.map((assignmentId) => ({
+            assignment_id: assignmentId,
+            checked_in_at: new Date().toISOString(),
+            checked_in_by: user.id,
+          })),
+          { onConflict: "assignment_id" },
+        )
+      : await supabase
+          .from("assignment_check_ins")
+          .delete()
+          .in("assignment_id", assignmentIds);
+    if (result.error) {
+      setError(result.error.message);
+    } else {
+      setCheckedInAssignmentIds((current) => {
+        const next = new Set(current);
+        for (const assignmentId of assignmentIds) {
+          if (checkedIn) next.add(assignmentId);
+          else next.delete(assignmentId);
+        }
+        return next;
+      });
+    }
+    setCheckInSaving("");
   }
   async function downloadCheckInSheet(gameIds: string[]) {
     const XLSX = await import("xlsx");
@@ -5995,6 +6071,163 @@ export default function AssignmentsManagerV2({
                     className="primary"
                     disabled={Boolean(bulkRetryingGame)}
                     onClick={() => setBulkAssignmentResult(null)}
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+      {checkInGameIds.length > 0 &&
+        (() => {
+          const rows = checkInRows(checkInGameIds);
+          const allAssignmentIds = [
+            ...new Set(rows.flatMap((row) => row.assignmentIds)),
+          ];
+          const checkedOfficialCount = rows.filter((row) =>
+            row.assignmentIds.every((assignmentId) =>
+              checkedInAssignmentIds.has(assignmentId),
+            ),
+          ).length;
+          return (
+            <div
+              className="assignmentDialogBackdrop"
+              onMouseDown={() => {
+                if (!checkInSaving) setCheckInGameIds([]);
+              }}
+            >
+              <div
+                className="assignmentDialog electronicCheckInDialog"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="electronicCheckInTitle"
+                onMouseDown={(event) => event.stopPropagation()}
+              >
+                <div className="assignmentDialogHeader">
+                  <div>
+                    <h3 id="electronicCheckInTitle">Electronic Check-In</h3>
+                    <p>
+                      {checkInGameIds.length} selected game
+                      {checkInGameIds.length === 1 ? "" : "s"} · {rows.length}{" "}
+                      official{rows.length === 1 ? "" : "s"} ·{" "}
+                      {checkedOfficialCount} checked in
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="Close electronic check-in"
+                    disabled={Boolean(checkInSaving)}
+                    onClick={() => setCheckInGameIds([])}
+                  >
+                    ×
+                  </button>
+                </div>
+                <div className="electronicCheckInActions">
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={
+                      Boolean(checkInSaving) ||
+                      !allAssignmentIds.length ||
+                      allAssignmentIds.every((assignmentId) =>
+                        checkedInAssignmentIds.has(assignmentId),
+                      )
+                    }
+                    onClick={() =>
+                      void saveElectronicCheckIns(
+                        allAssignmentIds,
+                        true,
+                        "all",
+                      )
+                    }
+                  >
+                    {checkInSaving === "all"
+                      ? "Checking In…"
+                      : "Check In Everyone"}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={
+                      Boolean(checkInSaving) ||
+                      !allAssignmentIds.some((assignmentId) =>
+                        checkedInAssignmentIds.has(assignmentId),
+                      )
+                    }
+                    onClick={() =>
+                      void saveElectronicCheckIns(
+                        allAssignmentIds,
+                        false,
+                        "clear",
+                      )
+                    }
+                  >
+                    {checkInSaving === "clear" ? "Clearing…" : "Clear All"}
+                  </button>
+                </div>
+                <div className="electronicCheckInList">
+                  {rows.length ? (
+                    rows.map((row) => {
+                      const fullyCheckedIn = row.assignmentIds.every(
+                        (assignmentId) =>
+                          checkedInAssignmentIds.has(assignmentId),
+                      );
+                      const partiallyCheckedIn =
+                        !fullyCheckedIn &&
+                        row.assignmentIds.some((assignmentId) =>
+                          checkedInAssignmentIds.has(assignmentId),
+                        );
+                      return (
+                        <label
+                          key={row.officialId}
+                          className={fullyCheckedIn ? "checkedIn" : ""}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={fullyCheckedIn}
+                            disabled={Boolean(checkInSaving)}
+                            onChange={(event) =>
+                              void saveElectronicCheckIns(
+                                row.assignmentIds,
+                                event.target.checked,
+                                row.officialId,
+                              )
+                            }
+                          />
+                          <span>
+                            <b>{row.name}</b>
+                            <small>
+                              {partiallyCheckedIn
+                                ? "Partially checked in — select to check in for every selected game"
+                                : row.email || row.phone || "No contact listed"}
+                            </small>
+                            {row.games.map((assignment) => (
+                              <em key={assignment}>{assignment}</em>
+                            ))}
+                          </span>
+                          <strong>
+                            {checkInSaving === row.officialId
+                              ? "Saving…"
+                              : fullyCheckedIn
+                                ? "Checked In"
+                                : "Not Checked In"}
+                          </strong>
+                        </label>
+                      );
+                    })
+                  ) : (
+                    <p className="muted">
+                      None of the selected games have assigned officials.
+                    </p>
+                  )}
+                </div>
+                <div className="assignmentDialogFooter">
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={Boolean(checkInSaving)}
+                    onClick={() => setCheckInGameIds([])}
                   >
                     Done
                   </button>
@@ -8293,6 +8526,13 @@ export default function AssignmentsManagerV2({
                 onClick={() => setShowBroadcastReview(true)}
               >
                 Broadcast
+              </button>
+              <button
+                className="secondary"
+                disabled={bulkWorking || !checkInRows(linkSelected).length}
+                onClick={() => setCheckInGameIds([...linkSelected])}
+              >
+                Electronic Check-In
               </button>
               <button
                 className="secondary"
