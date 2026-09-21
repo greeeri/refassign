@@ -8,6 +8,7 @@
     "start": "next start",
     "test:game-status": "node --test --experimental-strip-types tests/game-status.test.mjs",
     "test:game-import-team": "node --test --experimental-strip-types tests/game-import-team.test.mjs",
+    "test:login-links": "node --test tests/login-account-links.test.cjs",
     "test:data-access": "node scripts/check-supabase-reads.mjs && node --test --experimental-strip-types tests/read-all-pages.test.mjs"
   },
   "dependencies": {
