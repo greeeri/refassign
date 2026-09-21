@@ -24,6 +24,7 @@ export default function LoginPage() {
   const [organizationSignup, setOrganizationSignup] = useState(false);
   const [nextPath, setNextPath] = useState("/workspace");
   const connectingToLeague = nextPath.startsWith("/join/league/");
+  const tournamentTrainingSignup = nextPath === "/training/tournament-ar";
 
   useEffect(() => {
     setTestMode(window.location.hostname === "test.ref-assign.com");
@@ -271,7 +272,7 @@ export default function LoginPage() {
         </div>
         <p>Sports Officials Management</p>
         <h1>{creatingOfficial ? "Create official account" : teamInvitationId ? "Accept organization invitation" : organizationSignup ? "Create organization account" : "Sign in"}</h1>
-        <p>{creatingOfficial ? "Use the same email address your organization invited." : teamInvitationId ? "Request a fresh secure sign-in link to activate your workspace access." : organizationSignup ? "Create the owner login for your new Ref Pro Group organization." : "Enter your email address and password."}</p>
+        <p>{creatingOfficial ? tournamentTrainingSignup ? "Create a free official account to take Tournament AR training. No program registration fee is required." : "Use the same email address your organization invited." : teamInvitationId ? "Request a fresh secure sign-in link to activate your workspace access." : organizationSignup ? "Create the owner login for your new Ref Pro Group organization." : "Enter your email address and password."}</p>
         <form onSubmit={creatingOfficial ? createOfficialAccount : teamInvitationId ? acceptTeamInvitation : organizationSignup ? createOrganizationAccount : signIn}>
           {creatingOfficial && <>
             <label>First name<input required autoComplete="given-name" value={firstName} onChange={(e) => setFirstName(e.target.value)} /></label>

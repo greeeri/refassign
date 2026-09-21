@@ -9,10 +9,12 @@ async function context(moduleId:string){
  if(!user)return{error:NextResponse.json({error:"Please sign in to open this quiz."},{status:401})};
  const service=createServiceClient(),{data:official}=await service.from("officials").select("id").eq("auth_user_id",user.id).eq("active",true).maybeSingle();
  if(!official)return{error:NextResponse.json({error:"Your official profile could not be found."},{status:403})};
- const{data:module}=await service.from("development_modules").select("id,program_id,quiz_id,active").eq("id",moduleId).maybeSingle();
+ const{data:module}=await service.from("development_modules").select("id,program_id,quiz_id,active,level_key").eq("id",moduleId).maybeSingle();
  if(!module?.active||!module.quiz_id)return{error:NextResponse.json({error:"This training card does not have an active quiz attached."},{status:404})};
- const{data:membership}=await service.from("registration_program_officials").select("official_id").eq("program_id",module.program_id).eq("official_id",official.id).maybeSingle();
- if(!membership)return{error:NextResponse.json({error:"Training access is required."},{status:403})};
+ if(module.level_key!=="tournament_ar"){
+  const{data:membership}=await service.from("registration_program_officials").select("official_id").eq("program_id",module.program_id).eq("official_id",official.id).maybeSingle();
+  if(!membership)return{error:NextResponse.json({error:"Training access is required."},{status:403})};
+ }
  const[{data:quiz},{data:questions}]=await Promise.all([
   service.from("training_quizzes").select("id,title,description,passing_percent,allow_retakes,active").eq("id",module.quiz_id).eq("program_id",module.program_id).maybeSingle(),
   service.from("training_quiz_questions").select("id,question_text,options,correct_option,explanation,sort_order").eq("quiz_id",module.quiz_id).order("sort_order")
