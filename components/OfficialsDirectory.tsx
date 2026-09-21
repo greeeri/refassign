@@ -64,6 +64,17 @@ type PositionRank = {
 
 type Choice = { id: string; name: string };
 
+function leagueInitials(name: string) {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "?";
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return words
+    .slice(0, 3)
+    .map((word) => word[0])
+    .join("")
+    .toUpperCase();
+}
+
 type OfficialForm = {
   first_name: string;
   last_name: string;
@@ -198,6 +209,9 @@ export default function OfficialsDirectory({
     Record<string, PositionRank>
   >({});
   const [leagues, setLeagues] = useState<Choice[]>([]);
+  const [officialLeagueIds, setOfficialLeagueIds] = useState<
+    Record<string, string[]>
+  >({});
   const [levels, setLevels] = useState<Choice[]>([]);
   const [canManage, setCanManage] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -628,8 +642,56 @@ export default function OfficialsDirectory({
       setLoading(false);
       return;
     }
+    const loadedOfficialIds = (o.data || []).map((official) => official.id);
+    const eligibilityRows: { official_id: string; league_id: string }[] = [];
+    const officialChunkSize = 200;
+    const pageSize = 1000;
+    let eligibilityError: { message: string } | null = null;
+    for (
+      let offset = 0;
+      offset < loadedOfficialIds.length &&
+      (!organizationId || leagueIds.length > 0) &&
+      !eligibilityError;
+      offset += officialChunkSize
+    ) {
+      const officialIdChunk = loadedOfficialIds.slice(
+        offset,
+        offset + officialChunkSize,
+      );
+      for (let from = 0; ; from += pageSize) {
+        let request = supabase
+          .from("official_league_eligibility")
+          .select("official_id,league_id")
+          .in("official_id", officialIdChunk)
+          .range(from, from + pageSize - 1);
+        if (organizationId && leagueIds.length) {
+          request = request.in("league_id", leagueIds);
+        }
+        const page = await request;
+        if (page.error) {
+          eligibilityError = page.error;
+          break;
+        }
+        const rows = (page.data || []) as {
+          official_id: string;
+          league_id: string;
+        }[];
+        eligibilityRows.push(...rows);
+        if (rows.length < pageSize) break;
+      }
+    }
+    if (eligibilityError) {
+      setError(eligibilityError.message);
+      setLoading(false);
+      return;
+    }
+    const nextOfficialLeagueIds: Record<string, string[]> = {};
+    for (const row of eligibilityRows) {
+      (nextOfficialLeagueIds[row.official_id] ||= []).push(row.league_id);
+    }
     setOfficials((o.data || []) as Official[]);
     setLeagues((lg.data || []) as Choice[]);
+    setOfficialLeagueIds(nextOfficialLeagueIds);
     setLevels((lv.data || []) as Choice[]);
     if (organizationId) {
       const { data: invitations, error: invitationError } = await supabase
@@ -1106,11 +1168,19 @@ export default function OfficialsDirectory({
     else await load();
   }
 
+  const leagueById = useMemo(
+    () => new Map(leagues.map((league) => [league.id, league])),
+    [leagues],
+  );
+
   const visible = officials.filter((o) => {
     const q = query.toLowerCase().trim();
+    const connectedLeagueNames = (officialLeagueIds[o.id] || [])
+      .map((leagueId) => leagueById.get(leagueId)?.name || "")
+      .join(" ");
     const matchesSearch =
       !q ||
-      `${o.first_name} ${o.last_name} ${o.email || ""} ${o.phone || ""}`
+      `${o.first_name} ${o.last_name} ${o.email || ""} ${o.phone || ""} ${connectedLeagueNames}`
         .toLowerCase()
         .includes(q);
     return (
@@ -2222,6 +2292,10 @@ export default function OfficialsDirectory({
                 <tbody>
                   {visible.map((o) => {
                     const pr = positionRanks[o.id];
+                    const connectedLeagues = (officialLeagueIds[o.id] || [])
+                      .map((leagueId) => leagueById.get(leagueId))
+                      .filter((league): league is Choice => Boolean(league))
+                      .sort((a, b) => a.name.localeCompare(b.name));
                     return (
                       <tr key={o.id}>
                         {canManage && (
@@ -2239,6 +2313,25 @@ export default function OfficialsDirectory({
                           <b>
                             {o.first_name} {o.last_name}
                           </b>
+                          {connectedLeagues.length > 0 && (
+                            <span
+                              className="officialLeagueIcons"
+                              aria-label={`Connected leagues: ${connectedLeagues
+                                .map((league) => league.name)
+                                .join(", ")}`}
+                            >
+                              {connectedLeagues.map((league) => (
+                                <span
+                                  key={league.id}
+                                  className="officialLeagueIcon"
+                                  title={league.name}
+                                  aria-label={league.name}
+                                >
+                                  {leagueInitials(league.name)}
+                                </span>
+                              ))}
+                            </span>
+                          )}
                           <small>{o.email || "No email"}</small>
                           <small>{o.phone || "No phone"}</small>
                         </td>
