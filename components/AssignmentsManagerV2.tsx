@@ -13,6 +13,7 @@ import SelfAssignOverrideRequests from "./SelfAssignOverrideRequests";
 import {
   eventTimeParts,
   formatEventDate,
+  formatEventDateTime,
   formatEventTime,
 } from "../lib/event-time";
 type Team = { id: string; name: string };
@@ -263,30 +264,26 @@ function startWeek(d: Date) {
   return x;
 }
 function inRange(g: Game, r: Range, customDate = "") {
-  const t = new Date(g.starts_at);
   if (r === "all") return true;
-  if (r === "custom") {
-    if (!customDate) return false;
-    const start = new Date(`${customDate}T00:00:00`),
-      end = new Date(start);
-    end.setDate(start.getDate() + 1);
-    return t >= start && t < end;
-  }
-  const now = new Date(),
-    today = startDay(now),
-    tomorrow = new Date(today);
-  tomorrow.setDate(today.getDate() + 1);
-  const afterTomorrow = new Date(today);
-  afterTomorrow.setDate(today.getDate() + 2);
-  const week = startWeek(now),
-    next = new Date(week);
-  next.setDate(week.getDate() + 7);
-  const afterNext = new Date(week);
-  afterNext.setDate(week.getDate() + 14);
-  if (r === "today") return t >= today && t < tomorrow;
-  if (r === "tomorrow") return t >= tomorrow && t < afterTomorrow;
-  if (r === "thisWeek") return t >= week && t < next;
-  return t >= next && t < afterNext;
+  const gameDate = eventTimeParts(g.starts_at, g.location).date;
+  if (r === "custom") return Boolean(customDate && gameDate === customDate);
+  const todayKey = eventTimeParts(new Date(), g.location).date;
+  const dateAtNoonUtc = (value: string) => new Date(`${value}T12:00:00Z`);
+  const addDays = (value: string, days: number) => {
+    const date = dateAtNoonUtc(value);
+    date.setUTCDate(date.getUTCDate() + days);
+    return date.toISOString().slice(0, 10);
+  };
+  const weekday = dateAtNoonUtc(todayKey).getUTCDay();
+  const weekStart = addDays(todayKey, -(weekday === 0 ? 6 : weekday - 1));
+  const tomorrowKey = addDays(todayKey, 1);
+  const afterTomorrowKey = addDays(todayKey, 2);
+  const nextWeekKey = addDays(weekStart, 7);
+  const afterNextWeekKey = addDays(weekStart, 14);
+  if (r === "today") return gameDate === todayKey;
+  if (r === "tomorrow") return gameDate === tomorrowKey;
+  if (r === "thisWeek") return gameDate >= weekStart && gameDate < nextWeekKey;
+  return gameDate >= nextWeekKey && gameDate < afterNextWeekKey;
 }
 export default function AssignmentsManagerV2({
   organizationId,
@@ -3858,15 +3855,11 @@ export default function AssignmentsManagerV2({
       }
     }
     const data = exportGames.map((g) => {
-      const d = new Date(g.starts_at);
       const row: Record<string, string | number> = {
         "Game ID": g.id,
         "Game Number": g.game_number,
-        Date: d.toLocaleDateString(),
-        Time: d.toLocaleTimeString([], {
-          hour: "numeric",
-          minute: "2-digit",
-        }),
+        Date: formatEventDate(g.starts_at, g.location),
+        Time: formatEventTime(g.starts_at, g.location),
         Sport: g.sports?.name || "",
         League: g.leagues?.name || "",
         Level: g.levels?.name || "",
@@ -4511,7 +4504,7 @@ export default function AssignmentsManagerV2({
             </h2>
             <p>
               Game #{game.game_number} •{" "}
-              {new Date(game.starts_at).toLocaleString()}
+              {formatEventDateTime(game.starts_at, game.location)}
             </p>
           </div>
           <button
@@ -4738,7 +4731,6 @@ export default function AssignmentsManagerV2({
     );
   }
   function renderGameRow(g: Game, linked: boolean, showChain: boolean) {
-    const d = new Date(g.starts_at);
     const completeness = assignmentCompleteness(g);
     const staffing = staffingCounts(g);
     const normalizedStatus = normalizeGameStatus(g.status);
@@ -4875,14 +4867,10 @@ export default function AssignmentsManagerV2({
           style={{ color: isRainOut ? "#fff" : undefined }}
         >
           <span>
-            {d.toLocaleDateString([], {
-              month: "short",
-              day: "numeric",
-              year: "numeric",
-            })}
+            {formatEventDate(g.starts_at, g.location)}
           </span>
           <small>
-            {d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+            {formatEventTime(g.starts_at, g.location)}
           </small>
         </span>
         <span
@@ -9370,7 +9358,7 @@ export default function AssignmentsManagerV2({
               </div>
               {filteredGames.map((g) => (
                 <option key={g.id} value={g.id}>
-                  {g.game_number} — {new Date(g.starts_at).toLocaleDateString()}{" "}
+                  {g.game_number} — {formatEventDate(g.starts_at, g.location)}{" "}
                   — {g.home?.name || "TBD"} vs {g.away?.name || "TBD"} —{" "}
                   {g.duration_minutes || 110} min — Power{" "}
                   {gamePower(g).toFixed(1)}
@@ -9416,7 +9404,7 @@ export default function AssignmentsManagerV2({
                       Game #{game.game_number}
                     </div>
                     <p>
-                      {new Date(game.starts_at).toLocaleString()} •{" "}
+                      {formatEventDateTime(game.starts_at, game.location)} •{" "}
                       {game.duration_minutes || 110} min • {game.sports?.name} •{" "}
                       {game.leagues?.name || "No league"} •{" "}
                       {game.location?.name || "TBD"} •{" "}

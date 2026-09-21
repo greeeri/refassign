@@ -50,3 +50,14 @@ export function formatEventDate(value: string | Date, location: EventLocation) {
 export function formatEventTime(value: string | Date, location: EventLocation) {
   return new Intl.DateTimeFormat("en-US", { timeZone: eventTimeZone(location), hour: "numeric", minute: "2-digit" }).format(new Date(value));
 }
+
+export function formatEventDateTime(value: string | Date, location: EventLocation) {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: eventTimeZone(location),
+    month: "numeric",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
