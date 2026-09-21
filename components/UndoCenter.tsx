@@ -67,7 +67,7 @@ export default function UndoCenter({ organizationId }: { organizationId?: string
   }
   if (!operation && !error) return null;
   return (
-    <div role="status" style={{position:"fixed",right:20,bottom:20,zIndex:1000,maxWidth:390,padding:"12px 14px",borderRadius:10,background:"#172033",color:"#fff",boxShadow:"0 12px 35px rgba(15,23,42,.3)",display:"flex",alignItems:"center",gap:12}}>
+    <div className="undoCenter" role="status" style={{position:"fixed",right:20,bottom:20,zIndex:1000,maxWidth:390,padding:"12px 14px",borderRadius:10,background:"#172033",color:"#fff",boxShadow:"0 12px 35px rgba(15,23,42,.3)",display:"flex",alignItems:"center",gap:12}}>
       <div style={{ flex: 1 }}>
         <b>{error || announcement || operation?.description}</b>
         {!error && <small style={{display:"block",color:"#cbd5e1"}}>Undo is available for 15 minutes.</small>}
