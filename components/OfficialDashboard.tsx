@@ -242,7 +242,6 @@ export default function OfficialDashboard({
     );
   return (
     <>
-      <OfficialPaymentSetup />
     <div className="officialMobileExperience">
       {error && <div className="errorBox">{error}</div>}
       {notice && <div className="loginMessage">{notice}</div>}
@@ -454,6 +453,7 @@ export default function OfficialDashboard({
       </button>
       <CalendarSync />
     </div>
+    <OfficialPaymentSetup />
     </>
   );
 }
