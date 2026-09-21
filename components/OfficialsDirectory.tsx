@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { FormEvent } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent, ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { createClient } from "../lib/supabase/client";
 import OfficialCcContact from "./OfficialCcContact";
 import OfficialsRosterManager from "./OfficialsRosterManager";
@@ -1315,6 +1316,17 @@ export default function OfficialsDirectory({
   const allLevelsSelected =
     levels.length > 0 && levels.every((x) => form.level_ids.includes(x.id));
 
+  function placeOfficialEditor(content: ReactNode) {
+    if (editingId && typeof document !== "undefined") {
+      const rowHost = document.getElementById(
+        `official-editor-host-${editingId}`,
+      );
+      if (rowHost) return createPortal(content, rowHost);
+    }
+
+    return content;
+  }
+
   return (
     <>
       {canManage && (
@@ -1713,8 +1725,10 @@ export default function OfficialsDirectory({
               ))}
             </select>
           </div>
-          {showForm && (
-            <form
+          {showForm &&
+            placeOfficialEditor(
+              <>
+                <form
               id="focused-official-form"
               className={
                 focusOfficialId === editingId
@@ -2250,11 +2264,12 @@ export default function OfficialsDirectory({
                       : "Save Official"}
                 </button>
               </div>
-            </form>
-          )}
-          {showForm && editingId && (
-            <OfficialCcContact key={editingId} officialId={editingId} />
-          )}
+                </form>
+                {editingId && (
+                  <OfficialCcContact key={editingId} officialId={editingId} />
+                )}
+              </>,
+            )}
           {error && <div className="errorBox">{error}</div>}
           {loading ? (
             <p>Loading officials…</p>
@@ -2304,7 +2319,8 @@ export default function OfficialsDirectory({
                       .filter((league): league is Choice => Boolean(league))
                       .sort((a, b) => a.name.localeCompare(b.name));
                     return (
-                      <tr key={o.id}>
+                      <Fragment key={o.id}>
+                      <tr>
                         {canManage && (
                           <td>
                             <input
@@ -2417,6 +2433,18 @@ export default function OfficialsDirectory({
                           </button>
                         </td>
                       </tr>
+                      <tr
+                        aria-hidden={editingId !== o.id}
+                        style={editingId === o.id ? undefined : { display: "none" }}
+                      >
+                        <td
+                          colSpan={canManage ? 12 : 5}
+                          style={{ padding: 0, borderBottom: 0 }}
+                        >
+                          <div id={`official-editor-host-${o.id}`} />
+                        </td>
+                      </tr>
+                      </Fragment>
                     );
                   })}
                 </tbody>
