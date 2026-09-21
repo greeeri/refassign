@@ -1907,10 +1907,7 @@ export default function AssignmentsManagerV2({
           other.duration_minutes || 110,
         )
       ) {
-        const when = new Date(other.starts_at).toLocaleString([], {
-          dateStyle: "short",
-          timeStyle: "short",
-        });
+        const when = formatEventDateTime(other.starts_at, other.location);
         reasons.push(
           `Overlaps Game #${other.game_number} (${other.home?.name || "TBD"} vs ${other.away?.name || "TBD"}) at ${when}`,
         );
@@ -5064,15 +5061,9 @@ export default function AssignmentsManagerV2({
                     ({ assignment, game: rowGame, position }) => (
                       <tr key={assignment.id}>
                         <td>
-                          {new Date(rowGame.starts_at).toLocaleDateString()}
+                          {formatEventDate(rowGame.starts_at, rowGame.location)}
                           <small>
-                            {new Date(rowGame.starts_at).toLocaleTimeString(
-                              [],
-                              {
-                                hour: "numeric",
-                                minute: "2-digit",
-                              },
-                            )}
+                            {formatEventTime(rowGame.starts_at, rowGame.location)}
                           </small>
                         </td>
                         <td>
@@ -5191,14 +5182,8 @@ export default function AssignmentsManagerV2({
                   </b>
                   <span>
                     Game #{targetGame.game_number} ·{" "}
-                    {new Date(targetGame.starts_at).toLocaleDateString([], {
-                      month: "short",
-                      day: "numeric",
-                    })}{" "}
-                    {new Date(targetGame.starts_at).toLocaleTimeString([], {
-                      hour: "numeric",
-                      minute: "2-digit",
-                    })}
+                    {formatEventDate(targetGame.starts_at, targetGame.location)}{" "}
+                    {formatEventTime(targetGame.starts_at, targetGame.location)}
                   </span>
                   <small>
                     {openPosition
@@ -5279,10 +5264,7 @@ export default function AssignmentsManagerV2({
                   </b>
                   <span>
                     Game #{targetGame.game_number} ·{" "}
-                    {new Date(targetGame.starts_at).toLocaleString([], {
-                      dateStyle: "medium",
-                      timeStyle: "short",
-                    })}
+                    {formatEventDateTime(targetGame.starts_at, targetGame.location)}
                   </span>
                   <span>
                     {targetGame.location?.name || "Location TBD"} ·{" "}
@@ -5632,10 +5614,7 @@ export default function AssignmentsManagerV2({
                           </b>
                           <span>
                             Game #{target.game_number} ·{" "}
-                            {new Date(target.starts_at).toLocaleString([], {
-                              dateStyle: "short",
-                              timeStyle: "short",
-                            })}
+                            {formatEventDateTime(target.starts_at, target.location)}
                           </span>
                         </div>
                         <label>
@@ -5854,10 +5833,7 @@ export default function AssignmentsManagerV2({
                           </b>
                           <span>
                             Game #{slot.target.game_number} ·{" "}
-                            {new Date(slot.target.starts_at).toLocaleString(
-                              [],
-                              { dateStyle: "short", timeStyle: "short" },
-                            )}
+                            {formatEventDateTime(slot.target.starts_at, slot.target.location)}
                           </span>
                         </div>
                         <div className="bulkCrewPosition">
@@ -7967,13 +7943,10 @@ export default function AssignmentsManagerV2({
                           {overdueGame.away?.name || "TBD"}
                         </b>
                         <small>
-                          {new Date(overdueGame.starts_at).toLocaleString([], {
-                            month: "short",
-                            day: "numeric",
-                            year: "numeric",
-                            hour: "numeric",
-                            minute: "2-digit",
-                          })}
+                          {formatEventDateTime(
+                            overdueGame.starts_at,
+                            overdueGame.location,
+                          )}
                           {" • "}
                           {position
                             ? shortPositionName(position.name)
