@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../lib/supabase/client";
+import OfficialEmailGroups from "./OfficialEmailGroups";
 const assignmentPageSize = 100;
 type Assignment = {
   id: string;
@@ -181,6 +182,7 @@ export default function CommunicationCenter({
   }
   return (
     <>
+      <OfficialEmailGroups organizationId={organizationId} />
       <section className="card">
         <div className="cardHead">
           <div>
