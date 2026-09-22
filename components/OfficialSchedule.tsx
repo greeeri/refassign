@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../lib/supabase/client";
+import { respondToAssignment } from "../lib/client/respondToAssignment";
 import GameReport from "./GameReport";
 import LocationContactLink from "./LocationContactLink";
 import CrewChatButton from "./CrewChatButton";
@@ -185,17 +186,14 @@ export default function OfficialSchedule({ organizationId,organizationIds,organi
     }
     setWorking(r.assignment_id);
     setError("");
-    const { error: e } = await sb.rpc("respond_to_assignment", {
-      p_token: r.response_token,
-      p_response: response,
-      p_decline_reason: why,
-    });
-    if (e) setError(e.message);
-    else {
+    try {
+      await respondToAssignment({ token: r.response_token, response, declineReason: why });
       setDeclining(null);
       setReason(reasons[0]);
       setOther("");
       await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "The assignment response could not be saved.");
     }
     setWorking("");
   }

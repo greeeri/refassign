@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "../lib/supabase/client";
+import { respondToAssignment } from "../lib/client/respondToAssignment";
 import { crewPositionLabel, orderedCrew } from "../lib/crewDisplay";
 import CrewChatButton from "./CrewChatButton";
 import CalendarSync from "./CalendarSync";
@@ -162,16 +163,8 @@ export default function OfficialDashboard({
     setWorking(true);
     setError("");
     setNotice("");
-    const { error: responseError } = await supabase.rpc(
-      "respond_to_assignment",
-      {
-        p_token: next.response_token,
-        p_response: response,
-        p_decline_reason: why,
-      },
-    );
-    if (responseError) setError(responseError.message);
-    else {
+    try {
+      await respondToAssignment({ token: next.response_token, response, declineReason: why });
       setNotice(
         response === "accepted"
           ? "Assignment accepted."
@@ -181,6 +174,8 @@ export default function OfficialDashboard({
       setOtherReason("");
       setReason(declineReasons[0]);
       await load();
+    } catch (responseError) {
+      setError(responseError instanceof Error ? responseError.message : "The assignment response could not be saved.");
     }
     setWorking(false);
   }

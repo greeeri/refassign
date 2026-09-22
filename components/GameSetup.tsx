@@ -9,7 +9,12 @@ import SharedDirectorySearch from "./SharedDirectorySearch";
 type Sport = { id: string; name: string };
 type Level = { id: string; name: string; officials_needed: number };
 type MileagePlan = "one_way" | "round_trip" | "actual" | "none";
-type League = { id: string; name: string; mileage_plan: MileagePlan };
+type League = {
+  id: string;
+  name: string;
+  mileage_plan: MileagePlan;
+  email_assignor_on_decline: boolean;
+};
 const mileagePlans: ReadonlyArray<[MileagePlan, string]> = [
   ["one_way", "One-way mileage"],
   ["round_trip", "Round-trip mileage"],
@@ -92,6 +97,9 @@ export default function GameSetup({
       null,
     ),
     [leagueDrafts, setLeagueDrafts] = useState<Record<string, MileagePlan>>({}),
+    [declineEmailDrafts, setDeclineEmailDrafts] = useState<
+      Record<string, boolean>
+    >({}),
     [savingLeagueId, setSavingLeagueId] = useState(""),
     [copyingLeagueId, setCopyingLeagueId] = useState(""),
     [leagueMessage, setLeagueMessage] = useState(""),
@@ -124,7 +132,10 @@ export default function GameSetup({
       },
     );
     if (linkError || !data) {
-      setError(linkError?.message || "The league connection link could not be created.");
+      setError(
+        linkError?.message ||
+          "The league connection link could not be created.",
+      );
       setCopyingLeagueId("");
       return;
     }
@@ -334,6 +345,14 @@ export default function GameSetup({
           visibleLeagues.map((league) => [league.id, league.mileage_plan]),
         ),
       );
+      setDeclineEmailDrafts(
+        Object.fromEntries(
+          visibleLeagues.map((league) => [
+            league.id,
+            Boolean(league.email_assignor_on_decline),
+          ]),
+        ),
+      );
       setTeams(visibleTeams);
       setPowers(powerMap);
       setSavedPowers(savedPowerMap);
@@ -417,6 +436,32 @@ export default function GameSetup({
       setLeagues((current) =>
         current.map((league) =>
           league.id === id ? { ...league, mileage_plan: mileagePlan } : league,
+        ),
+      );
+      setLeagueMessage("League changes saved.");
+    }
+  }
+  async function updateDeclineEmailCopy(id: string, enabled: boolean) {
+    if (!organizationId) return;
+    setError("");
+    setLeagueMessage("");
+    setSavingLeagueId(id);
+    const { error: updateError } = await supabase.rpc(
+      "update_organization_league_decline_email_copy",
+      {
+        p_organization_id: organizationId,
+        p_league_id: id,
+        p_enabled: enabled,
+      },
+    );
+    setSavingLeagueId("");
+    if (updateError) setError(updateError.message);
+    else {
+      setLeagues((current) =>
+        current.map((league) =>
+          league.id === id
+            ? { ...league, email_assignor_on_decline: enabled }
+            : league,
         ),
       );
       setLeagueMessage("League changes saved.");
@@ -619,8 +664,10 @@ export default function GameSetup({
   );
   const matchingRankedTeams = rankedTeams
     .map((rankedTeam, index) => ({ team: rankedTeam, rank: index + 1 }))
-    .filter(({ team: rankedTeam }) =>
-      !teamNameFilter || rankedTeam.name.toLowerCase().includes(teamNameFilter),
+    .filter(
+      ({ team: rankedTeam }) =>
+        !teamNameFilter ||
+        rankedTeam.name.toLowerCase().includes(teamNameFilter),
     )
     .filter(
       ({ team: rankedTeam }) =>
@@ -680,6 +727,7 @@ export default function GameSetup({
               <thead>
                 <tr>
                   <th>League</th>
+                  <th>Decline Notifications</th>
                   <th>Mileage Plan</th>
                   <th>Official Connection</th>
                   <th>Documents &amp; Policies</th>
@@ -692,6 +740,29 @@ export default function GameSetup({
                     <tr>
                       <td>
                         <b>{l.name}</b>
+                      </td>
+                      <td>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={
+                              declineEmailDrafts[l.id] ??
+                              l.email_assignor_on_decline
+                            }
+                            onChange={(e) => {
+                              const enabled = e.target.checked;
+                              setDeclineEmailDrafts((current) => ({
+                                ...current,
+                                [l.id]: enabled,
+                              }));
+                              void updateDeclineEmailCopy(l.id, enabled);
+                            }}
+                            disabled={
+                              !organizationId || savingLeagueId === l.id
+                            }
+                          />{" "}
+                          Email assignor when an official declines
+                        </label>
                       </td>
                       <td>
                         <div className="headerActions">
@@ -957,7 +1028,8 @@ export default function GameSetup({
               </p>
             </div>
             <span className="badge blue">
-              {matchingRankedTeams.length} {matchingRankedTeams.length === 1 ? "team" : "teams"}
+              {matchingRankedTeams.length}{" "}
+              {matchingRankedTeams.length === 1 ? "team" : "teams"}
             </span>
           </div>
           <div className="tableWrap">
