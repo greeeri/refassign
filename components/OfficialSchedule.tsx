@@ -2,13 +2,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../lib/supabase/client";
 import GameReport from "./GameReport";
-import CrewProfileLink from "./CrewProfileLink";
 import LocationContactLink from "./LocationContactLink";
 import CrewChatButton from "./CrewChatButton";
 import VenueDetailsButton from "./VenueDetailsButton";
 import TournamentRulesLink from "./TournamentRulesLink";
 import { crewPositionLabel, orderedCrew } from "../lib/crewDisplay";
 import { readAllPages } from "../lib/supabase/readAll";
+import OfficialCrewList, { OfficialCrewMember } from "./OfficialCrewList";
 type Assignment = {
   assignment_id: string;
   game_id: string;
@@ -89,7 +89,7 @@ export default function OfficialSchedule({ organizationId,organizationIds,organi
     [observations, setObservations] = useState<MentorObservation[]>([]),
     [locations, setLocations] = useState<Choice[]>([]),
     [teams, setTeams] = useState<Choice[]>([]),
-    [crew, setCrew] = useState<Record<string, any[]>>({}),
+    [crew, setCrew] = useState<Record<string, OfficialCrewMember[]>>({}),
     [filter, setFilter] = useState<Filter>("All"),
     [view, setView] = useState<View>("List"),
     [month, setMonth] = useState(
@@ -159,10 +159,10 @@ export default function OfficialSchedule({ organizationId,organizationIds,organi
       const ids = [...new Set(rows.map((x) => x.game_id).filter(Boolean))];
       const bundles = await Promise.all(
         ids.map(async (id) => {
-          const { data } = await sb.rpc("get_game_report_bundle", {
+          const { data } = await sb.rpc("get_my_game_crew", {
             p_game_id: id,
           });
-          return [id, orderedCrew(data?.crew || [])] as const;
+          return [id, orderedCrew((data || []) as OfficialCrewMember[])] as const;
         }),
       );
       setCrew(Object.fromEntries(bundles));
@@ -412,12 +412,7 @@ export default function OfficialSchedule({ organizationId,organizationIds,organi
                     </small>
                   </div>
                   <div className="officialScheduleCrew">
-                    {(crew[e.a.game_id] || []).map((c: any) => (
-                      <small key={c.assignment_id} style={{ display: "block" }}>
-                        <b>{crewPositionLabel(c.position)}:</b>{" "}
-                        <CrewProfileLink member={c} />
-                      </small>
-                    ))}
+                    <OfficialCrewList crew={crew[e.a.game_id] || []} />
                   </div>
                   <div className="officialScheduleControls">
                     <span

@@ -7,6 +7,7 @@ import CalendarSync from "./CalendarSync";
 import VenueDetailsButton from "./VenueDetailsButton";
 import OfficialPaymentSetup from "./OfficialPaymentSetup";
 import TournamentRulesLink from "./TournamentRulesLink";
+import OfficialCrewList, { OfficialCrewMember } from "./OfficialCrewList";
 type Assignment = {
   assignment_id: string;
   game_id: string;
@@ -30,13 +31,6 @@ type Assignment = {
   decline_reason: string | null;
   response_token: string;
   organization_name?: string;
-};
-type Crew = {
-  assignment_id: string;
-  position: string | null;
-  name: string;
-  phone?: string | null;
-  email?: string | null;
 };
 const declineReasons = [
     "Schedule Conflict",
@@ -82,7 +76,7 @@ export default function OfficialDashboard({
 }) {
   const supabase = useMemo(() => createClient(), []),
     [rows, setRows] = useState<Assignment[]>([]),
-    [crew, setCrew] = useState<Crew[]>([]),
+    [crew, setCrew] = useState<OfficialCrewMember[]>([]),
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [loading, setLoading] = useState(true),
@@ -146,10 +140,10 @@ export default function OfficialDashboard({
         setCrew([]);
         return;
       }
-      const { data } = await supabase.rpc("get_game_report_bundle", {
+      const { data } = await supabase.rpc("get_my_game_crew", {
         p_game_id: next.game_id,
       });
-      setCrew(orderedCrew((data?.crew || []) as Crew[]));
+      setCrew(orderedCrew((data || []) as OfficialCrewMember[]));
     }
     void loadCrew();
   }, [next?.game_id, supabase]);
@@ -400,34 +394,7 @@ export default function OfficialDashboard({
           <div className="mobileInfoSection">
             <h3>Crew Contacts</h3>
             {crew.length ? (
-              <div className="crewContactList">
-                {crew.map((member) => (
-                  <div key={member.assignment_id}>
-                    <div>
-                      <b>{crewPositionLabel(member.position)}</b>
-                      <span>{member.name}</span>
-                    </div>
-                    <div>
-                      {member.phone && (
-                        <a
-                          aria-label={`Call ${member.name}`}
-                          href={`tel:${member.phone}`}
-                        >
-                          Call
-                        </a>
-                      )}
-                      {member.email && (
-                        <a
-                          aria-label={`Email ${member.name}`}
-                          href={`mailto:${member.email}`}
-                        >
-                          Email
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <OfficialCrewList crew={crew} contacts />
             ) : (
               <p>Crew contacts are not available yet.</p>
             )}

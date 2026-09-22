@@ -500,6 +500,39 @@ td small {
   font-size: 10px;
   font-weight: 700;
 }
+
+.officialCrewList,
+.crewContactList {
+  display: grid;
+  gap: 6px;
+}
+
+.officialCrewMember {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.officialCrewMember > div:first-child {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.officialCrewMemberActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.officialCrewMember .badge {
+  white-space: nowrap;
+}
 .green {
   background: #dcfce7;
   color: #166534;
