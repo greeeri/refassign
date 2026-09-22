@@ -4406,13 +4406,19 @@ export default function AssignmentsManagerV2({
     ).length,
     unpublished: rangeGames.filter(isUnpublishedGame).length,
   };
+  type CoveragePeriod = "morning" | "afternoon" | "evening";
+  const coveragePeriodLabels: { key: CoveragePeriod; label: string }[] = [
+    { key: "morning", label: "Morning" },
+    { key: "afternoon", label: "Afternoon" },
+    { key: "evening", label: "Evening" },
+  ];
   const coverageForecast = Array.from({ length: 14 }, (_, index) => {
     const date = startDay(new Date());
     date.setDate(date.getDate() + index);
     const key = localDateKey(date),
       dayGames = games.filter(
         (listedGame) =>
-          localDateKey(new Date(listedGame.starts_at)) === key &&
+          eventTimeParts(listedGame.starts_at, listedGame.location).date === key &&
           !["canceled", "rained_out"].includes(listedGame.status),
       ),
       slots = dayGames.reduce(
@@ -4431,8 +4437,44 @@ export default function AssignmentsManagerV2({
         ).size;
         return total + Math.min(listedGame.officials_needed, assigned);
       }, 0),
-      percent = slots ? Math.round((filled / slots) * 100) : 100;
-    return { date, key, games: dayGames.length, slots, filled, percent };
+      percent = slots ? Math.round((filled / slots) * 100) : 100,
+      periods = coveragePeriodLabels.map(({ key: period, label }) => {
+        const periodGames = dayGames.filter((listedGame) => {
+          const hour = Number(
+            eventTimeParts(listedGame.starts_at, listedGame.location).time.split(":")[0],
+          );
+          if (period === "morning") return hour < 12;
+          if (period === "afternoon") return hour < 17;
+          return true;
+        });
+        const periodSlots = periodGames.reduce(
+          (total, listedGame) => total + listedGame.officials_needed,
+          0,
+        );
+        const periodFilled = periodGames.reduce((total, listedGame) => {
+          const assigned = new Set(
+            assignments
+              .filter(
+                (assignment) =>
+                  assignment.game_id === listedGame.id &&
+                  !["declined", "cancelled"].includes(assignment.status),
+              )
+              .map((assignment) => assignment.position_id),
+          ).size;
+          return total + Math.min(listedGame.officials_needed, assigned);
+        }, 0);
+        return {
+          key: period,
+          label,
+          games: periodGames.length,
+          slots: periodSlots,
+          filled: periodFilled,
+          percent: periodSlots
+            ? Math.round((periodFilled / periodSlots) * 100)
+            : null,
+        };
+      });
+    return { date, key, games: dayGames.length, slots, filled, percent, periods };
   });
   function shortPositionName(name: string) {
     const normalized = name
@@ -7347,6 +7389,20 @@ export default function AssignmentsManagerV2({
                         {day.filled}/{day.slots} positions • {day.games} game
                         {day.games === 1 ? "" : "s"}
                       </small>
+                      <span className="coveragePeriods">
+                        {day.periods.map((period) => (
+                          <span className="coveragePeriod" key={period.key}>
+                            <b>{period.label}</b>
+                            <strong>
+                              {period.percent == null ? "—" : `${period.percent}%`}
+                            </strong>
+                            <small>
+                              {period.filled}/{period.slots} • {period.games} game
+                              {period.games === 1 ? "" : "s"}
+                            </small>
+                          </span>
+                        ))}
+                      </span>
                     </button>
                   ))}
                 </div>
