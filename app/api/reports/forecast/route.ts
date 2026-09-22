@@ -98,7 +98,7 @@ export async function GET(request: NextRequest) {
     readAllPages<Record<string, any>>((from, to) =>
       supabase
         .from("official_level_eligibility")
-        .select("official_id,level_id")
+        .select("official_id,level_id,center_eligible,ar_eligible")
         .in("official_id", officialIds)
         .order("official_id")
         .order("level_id")

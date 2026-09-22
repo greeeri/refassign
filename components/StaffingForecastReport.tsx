@@ -45,7 +45,7 @@ type Official = {
   home_longitude: number | null;
 };
 type Position = { id: string; sport_id: string; name: string; sort_order: number; required: boolean };
-type Eligibility = { official_id: string; league_id?: string; level_id?: string };
+type Eligibility = { official_id: string; league_id?: string; level_id?: string; center_eligible?: boolean; ar_eligible?: boolean };
 type Block = { official_id: string; block_type: string; start_date: string | null; end_date: string | null; starts_at: string | null; ends_at: string | null; location_id: string | null; team_id: string | null };
 type Horizon = "7" | "14" | "30" | "60" | "all";
 type RiskFilter = "all" | "critical" | "high" | "shortage" | "deadline";
@@ -153,12 +153,18 @@ export default function StaffingForecastReport({ organizationId }: { organizatio
 
   const forecast = useMemo(() => {
     const activeAssignments = assignments.filter((item) => !inactiveAssignments.has(item.status));
-    const qualifiedFor = (official: Official, game: Game) => {
+    const qualifiedFor = (official: Official, game: Game, openSlots: Position[]) => {
       if (!official.sports.some((sport) => sport.toLowerCase() === game.sports?.name.toLowerCase())) return false;
       const leagues = leagueEligibility.filter((item) => item.official_id === official.id);
       if (game.league_id && leagues.length && !leagues.some((item) => item.league_id === game.league_id)) return false;
       const levels = levelEligibility.filter((item) => item.official_id === official.id);
-      return !(game.level_id && levels.length && !levels.some((item) => item.level_id === game.level_id));
+      if (!game.level_id) return true;
+      const eligibility = levels.find((item) => item.level_id === game.level_id);
+      if (!eligibility) return false;
+      return openSlots.some((slot) => {
+        const name = slot.name.toLowerCase(), isAr = name === "ar1" || name === "ar2" || name.includes("assistant referee"), isCenter = name.includes("center") || (name.includes("referee") && !isAr);
+        return isAr ? eligibility.ar_eligible : isCenter ? eligibility.center_eligible : true;
+      });
     };
     const blockedFor = (official: Official, game: Game) => {
       const start = new Date(game.starts_at).getTime(), end = start + (game.duration_minutes || 110) * 60000, day = localDay(game.starts_at);
@@ -181,11 +187,12 @@ export default function StaffingForecastReport({ organizationId }: { organizatio
         const slots = positions.filter((item) => item.sport_id === game.sport_id).sort((a, b) => a.sort_order - b.sort_order).slice(0, Math.max(0, game.officials_needed)),
           gameAssignments = activeAssignments.filter((item) => item.game_id === game.id && slots.some((slot) => slot.id === item.position_id)),
           filledPositions = new Set(gameAssignments.map((item) => item.position_id)),
-          openPositions = slots.filter((slot) => !filledPositions.has(slot.id)).map((slot) => slot.name),
+          openSlots = slots.filter((slot) => !filledPositions.has(slot.id)),
+          openPositions = openSlots.map((slot) => slot.name),
           day = localDay(game.starts_at), weekStart = new Date(game.starts_at);
         weekStart.setDate(weekStart.getDate() - 7);
         const candidates = officials.filter((official) => {
-          if (!qualifiedFor(official, game) || blockedFor(official, game) || gameAssignments.some((item) => item.official_id === official.id)) return false;
+          if (!qualifiedFor(official, game, openSlots) || blockedFor(official, game) || gameAssignments.some((item) => item.official_id === official.id)) return false;
           const scheduled = activeAssignments.filter((item) => item.official_id === official.id && item.games);
           if (scheduled.some((item) => overlaps(game.starts_at, game.duration_minutes || 110, item.games!.starts_at, item.games!.duration_minutes || 110))) return false;
           return scheduled.filter((item) => localDay(item.games!.starts_at) === day).length < Number(official.max_games_per_day || 2);

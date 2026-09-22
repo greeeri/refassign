@@ -149,7 +149,7 @@ export async function GET(request: NextRequest) {
     readAllPages<Record<string, any>>((from, to) =>
       service
         .from("official_level_eligibility")
-        .select("official_id,level_id,levels(id,name)")
+        .select("official_id,level_id,center_eligible,ar_eligible,levels(id,name)")
         .in("official_id", officialIds)
         .order("official_id")
         .order("level_id")

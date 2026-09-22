@@ -101,7 +101,7 @@ type PositionRank = {
 };
 type Power = { team_id: string; power: number };
 type EligL = { official_id: string; league_id: string };
-type EligV = { official_id: string; level_id: string };
+type EligV = { official_id: string; level_id: string; center_eligible: boolean; ar_eligible: boolean };
 type Block = {
   official_id: string;
   block_type: "date" | "location" | "team" | "time";
@@ -494,7 +494,7 @@ export default function AssignmentsManagerV2({
       for (let from = 0; ; from += pageSize) {
         const page = await supabase
           .from("official_level_eligibility")
-          .select("official_id,level_id")
+          .select("official_id,level_id,center_eligible,ar_eligible")
           .order("official_id")
           .order("level_id")
           .range(from, from + pageSize - 1);
@@ -1981,11 +1981,11 @@ export default function AssignmentsManagerV2({
   function ineligibleReasonsForGame(
     o: Official,
     targetGame: Game,
-    ignorePositionId = "",
+    targetPositionId = "",
   ) {
     const reasons: string[] = [];
     reasons.push(
-      ...assignmentConflictReasonsForGame(o, targetGame, ignorePositionId),
+      ...assignmentConflictReasonsForGame(o, targetGame, targetPositionId),
     );
     const day = eventTimeParts(targetGame.starts_at, targetGame.location).date,
       gs = new Date(targetGame.starts_at).getTime(),
@@ -2041,12 +2041,14 @@ export default function AssignmentsManagerV2({
       reasons.push(
         `Not eligible for league ${targetGame.leagues?.name || "selected league"}`,
       );
-    if (
-      targetGame.level_id &&
-      !ov.some((x) => x.level_id === targetGame.level_id)
-    )
+    const targetPosition = positions.find((x) => x.id === targetPositionId);
+    const positionName = targetPosition?.name.toLowerCase() || "";
+    const isArPosition = positionName === "ar1" || positionName === "ar2" || positionName.includes("assistant referee");
+    const isCenterPosition = positionName.includes("center") || (positionName.includes("referee") && !isArPosition);
+    const matchingLevelEligibility = ov.find((x) => x.level_id === targetGame.level_id);
+    if (targetGame.level_id && (!matchingLevelEligibility || (isCenterPosition && !matchingLevelEligibility.center_eligible) || (isArPosition && !matchingLevelEligibility.ar_eligible)))
       reasons.push(
-        `Not eligible for level ${targetGame.levels?.name || "selected level"}`,
+        `Not eligible as ${isArPosition ? "AR" : "Center"} for level ${targetGame.levels?.name || "selected level"}`,
       );
     if (
       assignments.some(
@@ -2054,7 +2056,7 @@ export default function AssignmentsManagerV2({
           a.game_id === targetGame.id &&
           a.official_id === o.id &&
           a.status !== "declined" &&
-          !(ignorePositionId && a.position_id === ignorePositionId),
+          !(targetPositionId && a.position_id === targetPositionId),
       )
     )
       reasons.push("Already assigned to this game");

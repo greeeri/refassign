@@ -95,7 +95,8 @@ type OfficialForm = {
   fourth_rank: string;
   mentor_certified: boolean;
   league_ids: string[];
-  level_ids: string[];
+  center_level_ids: string[];
+  ar_level_ids: string[];
   date_of_birth: string;
   is_minor: boolean;
   gender: string;
@@ -154,7 +155,8 @@ function newForm(): OfficialForm {
     fourth_rank: "1.0",
     mentor_certified: false,
     league_ids: [],
-    level_ids: [],
+    center_level_ids: [],
+    ar_level_ids: [],
     date_of_birth: "",
     is_minor: false,
     gender: "",
@@ -775,7 +777,7 @@ export default function OfficialsDirectory({
     }));
   }
 
-  function toggleChoice(field: "league_ids" | "level_ids", id: string) {
+  function toggleChoice(field: "league_ids" | "center_level_ids" | "ar_level_ids", id: string) {
     setForm((current) => ({
       ...current,
       [field]: current[field].includes(id)
@@ -785,7 +787,7 @@ export default function OfficialsDirectory({
   }
 
   function toggleAllChoices(
-    field: "league_ids" | "level_ids",
+    field: "league_ids" | "center_level_ids" | "ar_level_ids",
     choices: Choice[],
   ) {
     setForm((current) => {
@@ -814,7 +816,7 @@ export default function OfficialsDirectory({
         .eq("official_id", o.id),
       supabase
         .from("official_level_eligibility")
-        .select("level_id")
+        .select("level_id,center_eligible,ar_eligible")
         .eq("official_id", o.id),
     ]);
     const pr = positionRanks[o.id];
@@ -839,7 +841,10 @@ export default function OfficialsDirectory({
       league_ids: (lg.data || [])
         .map((x) => x.league_id)
         .filter((id) => leagues.some((league) => league.id === id)),
-      level_ids: (lv.data || [])
+      center_level_ids: (lv.data || []).filter((x) => x.center_eligible)
+        .map((x) => x.level_id)
+        .filter((id) => levels.some((level) => level.id === id)),
+      ar_level_ids: (lv.data || []).filter((x) => x.ar_eligible)
         .map((x) => x.level_id)
         .filter((id) => levels.some((level) => level.id === id)),
       date_of_birth: o.date_of_birth || "",
@@ -1084,12 +1089,13 @@ export default function OfficialsDirectory({
 
       if (organizationId) {
         const eligibilityResult = await supabase.rpc(
-          "set_organization_official_eligibility",
+          "set_organization_official_position_eligibility",
           {
             p_organization_id: organizationId,
             p_official_id: officialId,
             p_league_ids: form.league_ids,
-            p_level_ids: form.level_ids,
+            p_center_level_ids: form.center_level_ids,
+            p_ar_level_ids: form.ar_level_ids,
           },
         );
         if (eligibilityResult.error) {
@@ -1139,11 +1145,14 @@ export default function OfficialsDirectory({
         setError(leagueInsert.error.message);
         return;
       }
-      const levelInsert = form.level_ids.length
+      const selectedLevelIds = [...new Set([...form.center_level_ids, ...form.ar_level_ids])];
+      const levelInsert = selectedLevelIds.length
         ? await supabase.from("official_level_eligibility").insert(
-          form.level_ids.map((level_id) => ({
+          selectedLevelIds.map((level_id) => ({
             official_id: officialId!,
             level_id,
+            center_eligible: form.center_level_ids.includes(level_id),
+            ar_eligible: form.ar_level_ids.includes(level_id),
           })),
         )
         : { error: null };
@@ -1313,8 +1322,8 @@ export default function OfficialsDirectory({
 
   const allLeaguesSelected =
     leagues.length > 0 && leagues.every((x) => form.league_ids.includes(x.id));
-  const allLevelsSelected =
-    levels.length > 0 && levels.every((x) => form.level_ids.includes(x.id));
+  const allCenterLevelsSelected = levels.length > 0 && levels.every((x) => form.center_level_ids.includes(x.id));
+  const allArLevelsSelected = levels.length > 0 && levels.every((x) => form.ar_level_ids.includes(x.id));
 
   function placeOfficialEditor(content: ReactNode) {
     if (editingId && typeof document !== "undefined") {
@@ -2220,30 +2229,32 @@ export default function OfficialsDirectory({
                     </div>
                   </fieldset>
                   <fieldset>
-                    <legend>Eligible Levels</legend>
+                    <legend>Eligible Levels by Position</legend>
                     <div className="sportChecks">
                       <label>
                         <input
                           type="checkbox"
-                          checked={allLevelsSelected}
-                          onChange={() => toggleAllChoices("level_ids", levels)}
+                          checked={allCenterLevelsSelected}
+                          onChange={() => toggleAllChoices("center_level_ids", levels)}
                         />
                         <b>
-                          {allLevelsSelected
-                            ? "Clear All Levels"
-                            : "Select All Levels"}
+                          {allCenterLevelsSelected ? "Clear All Center Levels" : "Select All Center Levels"}
                         </b>
                       </label>
                       {levels.map((x) => (
-                        <label key={x.id}>
+                        <label key={`center-${x.id}`}>
                           <input
                             type="checkbox"
-                            checked={form.level_ids.includes(x.id)}
-                            onChange={() => toggleChoice("level_ids", x.id)}
+                            checked={form.center_level_ids.includes(x.id)}
+                            onChange={() => toggleChoice("center_level_ids", x.id)}
                           />
-                          {x.name}
+                          {x.name} — Center
                         </label>
                       ))}
+                    </div>
+                    <div className="sportChecks">
+                      <label><input type="checkbox" checked={allArLevelsSelected} onChange={() => toggleAllChoices("ar_level_ids", levels)} /><b>{allArLevelsSelected ? "Clear All AR Levels" : "Select All AR Levels"}</b></label>
+                      {levels.map((x) => <label key={`ar-${x.id}`}><input type="checkbox" checked={form.ar_level_ids.includes(x.id)} onChange={() => toggleChoice("ar_level_ids", x.id)} />{x.name} — AR</label>)}
                     </div>
                   </fieldset>
                 </>
