@@ -4444,34 +4444,13 @@ export default function AssignmentsManagerV2({
             eventTimeParts(listedGame.starts_at, listedGame.location).time.split(":")[0],
           );
           if (period === "morning") return hour < 12;
-          if (period === "afternoon") return hour < 17;
-          return true;
+          if (period === "afternoon") return hour >= 12 && hour < 17;
+          return hour >= 17;
         });
-        const periodSlots = periodGames.reduce(
-          (total, listedGame) => total + listedGame.officials_needed,
-          0,
-        );
-        const periodFilled = periodGames.reduce((total, listedGame) => {
-          const assigned = new Set(
-            assignments
-              .filter(
-                (assignment) =>
-                  assignment.game_id === listedGame.id &&
-                  !["declined", "cancelled"].includes(assignment.status),
-              )
-              .map((assignment) => assignment.position_id),
-          ).size;
-          return total + Math.min(listedGame.officials_needed, assigned);
-        }, 0);
         return {
           key: period,
           label,
           games: periodGames.length,
-          slots: periodSlots,
-          filled: periodFilled,
-          percent: periodSlots
-            ? Math.round((periodFilled / periodSlots) * 100)
-            : null,
         };
       });
     return { date, key, games: dayGames.length, slots, filled, percent, periods };
@@ -7394,12 +7373,8 @@ export default function AssignmentsManagerV2({
                           <span className="coveragePeriod" key={period.key}>
                             <b>{period.label}</b>
                             <strong>
-                              {period.percent == null ? "—" : `${period.percent}%`}
+                              {period.games} game{period.games === 1 ? "" : "s"}
                             </strong>
-                            <small>
-                              {period.filled}/{period.slots} • {period.games} game
-                              {period.games === 1 ? "" : "s"}
-                            </small>
                           </span>
                         ))}
                       </span>
