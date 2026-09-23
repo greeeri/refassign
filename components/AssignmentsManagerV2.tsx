@@ -162,13 +162,13 @@ type SavedAssignmentView = {
   name: string;
   range: Range;
   customDate: string;
-  dayFilter?: string;
-  timeFilter?: string;
-  locationFilter: string;
+  dayFilter?: string | string[];
+  timeFilter?: string | string[];
+  locationFilter: string | string[];
   officialFilter: string;
   leagueFilter?: string;
   levelFilter?: string;
-  completenessFilter: Completeness;
+  completenessFilter: Completeness | Completeness[];
   unpublishedOnly: boolean;
   selfAssignOnly: boolean;
 };
@@ -209,6 +209,40 @@ type Completeness =
   | "awaiting"
   | "confirmed"
   | "attention";
+function normalizeMultiFilter(value: string | string[] | undefined): string[] {
+  return Array.isArray(value) ? value : value ? [value] : [];
+}
+function MultiSelectGameFilter({
+  label, allLabel, values, options, onChange,
+}: {
+  label: string;
+  allLabel: string;
+  values: string[];
+  options: [string, string][];
+  onChange: (values: string[]) => void;
+}) {
+  return (
+    <div className="assignmentToolbarField assignmentMultiFilter">
+      <span>{label}</span>
+      <details>
+        <summary aria-label={`Filter by ${label.toLowerCase()}`}>
+          {values.length === 0 ? allLabel : values.length === 1
+            ? options.find(([value]) => value === values[0])?.[1] || allLabel
+            : `${values.length} selected`}
+        </summary>
+        <div className="assignmentMultiFilterOptions">
+          <label><input type="checkbox" checked={values.length === 0} onChange={() => onChange([])} />{allLabel}</label>
+          {options.map(([value, name]) => (
+            <label key={value}>
+              <input type="checkbox" checked={values.includes(value)} onChange={() => onChange(values.includes(value) ? values.filter((item) => item !== value) : [...values, value])} />
+              {name}
+            </label>
+          ))}
+        </div>
+      </details>
+    </div>
+  );
+}
 type GameSort =
   "default" | "game" | "location" | "time" | "power" | "status" | "assignments";
 const gameStatusOptions = [
@@ -323,11 +357,11 @@ export default function AssignmentsManagerV2({
     [unpublishedOnly, setUnpublishedOnly] = useState(false),
     [selfAssignOnly, setSelfAssignOnly] = useState(false),
     [replacementOnly, setReplacementOnly] = useState(false),
-    [completenessFilter, setCompletenessFilter] = useState<Completeness>("all"),
+    [completenessFilter, setCompletenessFilter] = useState<Completeness[]>([]),
     [officialFilter, setOfficialFilter] = useState(""),
-    [locationFilter, setLocationFilter] = useState(""),
-    [dayFilter, setDayFilter] = useState(""),
-    [timeFilter, setTimeFilter] = useState(""),
+    [locationFilter, setLocationFilter] = useState<string[]>([]),
+    [dayFilter, setDayFilter] = useState<string[]>([]),
+    [timeFilter, setTimeFilter] = useState<string[]>([]),
     [leagueFilter, setLeagueFilter] = useState(""),
     [levelFilter, setLevelFilter] = useState(""),
     [error, setError] = useState(""),
@@ -840,9 +874,9 @@ export default function AssignmentsManagerV2({
     setCustomDate("");
     setUnpublishedOnly(false);
     setSelfAssignOnly(false);
-    setCompletenessFilter("all");
+    setCompletenessFilter([]);
     setOfficialFilter("");
-    setLocationFilter("");
+    setLocationFilter([]);
     setLeagueFilter("");
     setLevelFilter("");
     setSelected(focusGameId);
@@ -1067,18 +1101,18 @@ export default function AssignmentsManagerV2({
     );
   }
   function matchesLocationFilter(g: Game) {
-    return !locationFilter || g.location_id === locationFilter;
+    return locationFilter.length === 0 || locationFilter.includes(g.location_id || "");
   }
   function matchesDayFilter(g: Game) {
     return (
-      !dayFilter || eventTimeParts(g.starts_at, g.location).date === dayFilter
+      dayFilter.length === 0 || dayFilter.includes(eventTimeParts(g.starts_at, g.location).date)
     );
   }
   function matchesTimeFilter(g: Game) {
     return (
-      !timeFilter ||
+      timeFilter.length === 0 ||
       (!g.time_tbd &&
-        eventTimeParts(g.starts_at, g.location).time === timeFilter)
+        timeFilter.includes(eventTimeParts(g.starts_at, g.location).time))
     );
   }
   function matchesLeagueFilter(g: Game) {
@@ -1104,9 +1138,9 @@ export default function AssignmentsManagerV2({
       .some((position) => isReplacementNeeded(listedGame.id, position.id));
   }
   const hasDirectGameFilter = Boolean(
-    locationFilter ||
-    dayFilter ||
-    timeFilter ||
+    locationFilter.length ||
+    dayFilter.length ||
+    timeFilter.length ||
     officialFilter ||
     leagueFilter ||
     levelFilter,
@@ -1124,15 +1158,17 @@ export default function AssignmentsManagerV2({
         matchesLeagueFilter(g) &&
         matchesLevelFilter(g) &&
         matchesSelfAssign &&
-        matchesReplacement
+        matchesReplacement &&
+        (completenessFilter.length === 0 ||
+          completenessFilter.includes(assignmentCompleteness(g).key))
       );
     return (
       inRange(g, range, customDate) &&
       matchesSelfAssign &&
       matchesReplacement &&
       (!unpublishedOnly || isUnpublishedGame(g)) &&
-      (completenessFilter === "all" ||
-        assignmentCompleteness(g).key === completenessFilter)
+      (completenessFilter.length === 0 ||
+        completenessFilter.includes(assignmentCompleteness(g).key))
     );
   });
   function compareGames(a: Game, b: Game) {
@@ -1751,7 +1787,18 @@ export default function AssignmentsManagerV2({
     setLinkSelected([]);
   }
   function chooseCompleteness(value: Completeness) {
-    setCompletenessFilter(value);
+    setCompletenessFilter(value === "all" ? [] : [value]);
+    setReplacementOnly(false);
+    setOverrideOfficial("");
+    setSelected("");
+    setLinkSelected([]);
+  }
+  function toggleCompleteness(value: Completeness) {
+    setCompletenessFilter((current) =>
+      current.includes(value)
+        ? current.filter((selected) => selected !== value)
+        : [...current, value],
+    );
     setReplacementOnly(false);
     setOverrideOfficial("");
     setSelected("");
@@ -1764,11 +1811,11 @@ export default function AssignmentsManagerV2({
     setUnpublishedOnly(false);
     setSelfAssignOnly(false);
     setReplacementOnly(false);
-    setCompletenessFilter("all");
+    setCompletenessFilter([]);
     setOfficialFilter("");
-    setLocationFilter("");
-    setDayFilter("");
-    setTimeFilter("");
+    setLocationFilter([]);
+    setDayFilter([]);
+    setTimeFilter([]);
     setLeagueFilter("");
     setLevelFilter("");
     setSelected("");
@@ -1824,13 +1871,17 @@ export default function AssignmentsManagerV2({
   function applySavedView(view: SavedAssignmentView) {
     setRange(view.range);
     setCustomDate(view.customDate);
-    setDayFilter(view.dayFilter || "");
-    setTimeFilter(view.timeFilter || "");
-    setLocationFilter(view.locationFilter);
+    setDayFilter(normalizeMultiFilter(view.dayFilter));
+    setTimeFilter(normalizeMultiFilter(view.timeFilter));
+    setLocationFilter(normalizeMultiFilter(view.locationFilter));
     setOfficialFilter(view.officialFilter);
     setLeagueFilter(view.leagueFilter || "");
     setLevelFilter(view.levelFilter || "");
-    setCompletenessFilter(view.completenessFilter);
+    setCompletenessFilter(
+      Array.isArray(view.completenessFilter)
+        ? view.completenessFilter.filter((value) => value !== "all")
+        : view.completenessFilter === "all" ? [] : [view.completenessFilter],
+    );
     setReplacementOnly(false);
     setUnpublishedOnly(view.unpublishedOnly);
     setSelfAssignOnly(view.selfAssignOnly);
@@ -2571,9 +2622,9 @@ export default function AssignmentsManagerV2({
     setCustomDate("");
     setUnpublishedOnly(false);
     setSelfAssignOnly(false);
-    setCompletenessFilter("all");
+    setCompletenessFilter([]);
     setOfficialFilter("");
-    setLocationFilter("");
+    setLocationFilter([]);
     setLeagueFilter("");
     setLevelFilter("");
     setSelected(targetGameId);
@@ -8192,7 +8243,7 @@ export default function AssignmentsManagerV2({
                 aria-pressed={replacementOnly}
                 onClick={() => {
                   setReplacementOnly(true);
-                  setCompletenessFilter("all");
+                  setCompletenessFilter([]);
                   setUnpublishedOnly(false);
                   setSelfAssignOnly(false);
                   setOverrideOfficial("");
@@ -8206,12 +8257,12 @@ export default function AssignmentsManagerV2({
               <button
                 type="button"
                 className={
-                  !replacementOnly && completenessFilter === "unassigned"
+                  !replacementOnly && completenessFilter.length === 1 && completenessFilter.includes("unassigned")
                     ? "selected"
                     : ""
                 }
                 aria-pressed={
-                  !replacementOnly && completenessFilter === "unassigned"
+                  !replacementOnly && completenessFilter.length === 1 && completenessFilter.includes("unassigned")
                 }
                 onClick={() => chooseCompleteness("unassigned")}
               >
@@ -8221,12 +8272,12 @@ export default function AssignmentsManagerV2({
               <button
                 type="button"
                 className={
-                  !replacementOnly && completenessFilter === "awaiting"
+                  !replacementOnly && completenessFilter.length === 1 && completenessFilter.includes("awaiting")
                     ? "selected"
                     : ""
                 }
                 aria-pressed={
-                  !replacementOnly && completenessFilter === "awaiting"
+                  !replacementOnly && completenessFilter.length === 1 && completenessFilter.includes("awaiting")
                 }
                 onClick={() => chooseCompleteness("awaiting")}
               >
@@ -8240,7 +8291,7 @@ export default function AssignmentsManagerV2({
                 onClick={() => {
                   setUnpublishedOnly(true);
                   setReplacementOnly(false);
-                  setCompletenessFilter("all");
+                  setCompletenessFilter([]);
                   setSelected("");
                 }}
               >
@@ -8297,109 +8348,27 @@ export default function AssignmentsManagerV2({
                 <option value="custom">Choose a Date</option>
               </select>
             </label>
-            <label className="assignmentToolbarField">
-              <span>Field</span>
-              <select
-                aria-label="Show games on field"
-                value={locationFilter}
-                onChange={(event) => {
-                  setLocationFilter(event.target.value);
-                  setLinkSelected([]);
-                  setSelected("");
-                }}
-              >
-                <option value="">All Fields</option>
-                {Array.from(
-                  new Map(
-                    games
-                      .filter((listedGame) => listedGame.location)
-                      .map((listedGame) => [
-                        listedGame.location!.id,
-                        listedGame.location!.name,
-                      ]),
-                  ).entries(),
-                )
-                  .sort((a, b) => a[1].localeCompare(b[1]))
-                  .map(([id, name]) => (
-                    <option key={id} value={id}>
-                      {name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label className="assignmentToolbarField">
-              <span>Day</span>
-              <select
-                aria-label="Show games on day"
-                value={dayFilter}
-                onChange={(event) => {
-                  setDayFilter(event.target.value);
-                  setLinkSelected([]);
-                  setSelected("");
-                }}
-              >
-                <option value="">All Days</option>
-                {Array.from(
-                  new Set(
-                    games.map(
-                      (listedGame) =>
-                        eventTimeParts(
-                          listedGame.starts_at,
-                          listedGame.location,
-                        ).date,
-                    ),
-                  ),
-                )
-                  .sort()
-                  .map((date) => (
-                    <option key={date} value={date}>
-                      {new Intl.DateTimeFormat("en-US", {
-                        weekday: "short",
-                        month: "short",
-                        day: "numeric",
-                        timeZone: "UTC",
-                      }).format(new Date(`${date}T12:00:00Z`))}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label className="assignmentToolbarField">
-              <span>Time</span>
-              <select
-                aria-label="Show games at time"
-                value={timeFilter}
-                onChange={(event) => {
-                  setTimeFilter(event.target.value);
-                  setLinkSelected([]);
-                  setSelected("");
-                }}
-              >
-                <option value="">All Times</option>
-                {Array.from(
-                  new Set(
-                    games
-                      .filter((listedGame) => !listedGame.time_tbd)
-                      .map(
-                        (listedGame) =>
-                          eventTimeParts(
-                            listedGame.starts_at,
-                            listedGame.location,
-                          ).time,
-                      ),
-                  ),
-                )
-                  .sort()
-                  .map((time) => (
-                    <option key={time} value={time}>
-                      {new Intl.DateTimeFormat("en-US", {
-                        hour: "numeric",
-                        minute: "2-digit",
-                        timeZone: "UTC",
-                      }).format(new Date(`2000-01-01T${time}:00Z`))}
-                    </option>
-                  ))}
-              </select>
-            </label>
+            <MultiSelectGameFilter
+              label="Field"
+              allLabel="All Fields"
+              values={locationFilter}
+              onChange={(values) => { setLocationFilter(values); setLinkSelected([]); setSelected(""); }}
+              options={Array.from(new Map(games.filter((listedGame) => listedGame.location).map((listedGame) => [listedGame.location!.id, listedGame.location!.name])).entries()).sort((a, b) => a[1].localeCompare(b[1]))}
+            />
+            <MultiSelectGameFilter
+              label="Day"
+              allLabel="All Days"
+              values={dayFilter}
+              onChange={(values) => { setDayFilter(values); setLinkSelected([]); setSelected(""); }}
+              options={Array.from(new Set(games.map((listedGame) => eventTimeParts(listedGame.starts_at, listedGame.location).date))).sort().map((date): [string, string] => [date, new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${date}T12:00:00Z`))])}
+            />
+            <MultiSelectGameFilter
+              label="Time"
+              allLabel="All Times"
+              values={timeFilter}
+              onChange={(values) => { setTimeFilter(values); setLinkSelected([]); setSelected(""); }}
+              options={Array.from(new Set(games.filter((listedGame) => !listedGame.time_tbd).map((listedGame) => eventTimeParts(listedGame.starts_at, listedGame.location).time))).sort().map((time): [string, string] => [time, new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "UTC" }).format(new Date(`2000-01-01T${time}:00Z`))])}
+            />
             {canManage && (
               <label className="assignmentToolbarField assignmentSavedViewField">
                 <span>Saved View</span>
@@ -8535,26 +8504,27 @@ export default function AssignmentsManagerV2({
                         ))}
                     </select>
                   </label>
-                  <label>
-                    Assignment Status
-                    <select
-                      aria-label="Filter by assignment status"
-                      value={completenessFilter}
-                      onChange={(event) =>
-                        chooseCompleteness(event.target.value as Completeness)
-                      }
-                    >
-                      <option value="all">
-                        All Assignment Statuses ({rangeGames.length})
-                      </option>
-                      <option value="unassigned">Unassigned</option>
-                      <option value="partial">Partially Assigned</option>
-                      <option value="full">Fully Assigned</option>
-                      <option value="awaiting">Awaiting Confirmation</option>
-                      <option value="confirmed">Confirmed</option>
-                      <option value="attention">Needs Attention</option>
-                    </select>
-                  </label>
+                  <div className="assignmentStatusFilter">
+                    <span>Assignment Status</span>
+                    <details>
+                      <summary>{completenessFilter.length === 0
+                        ? `All Assignment Statuses (${rangeGames.length})`
+                        : `${completenessFilter.length} status${completenessFilter.length === 1 ? "" : "es"} selected`}</summary>
+                      <div className="assignmentStatusFilterOptions">
+                        <label><input type="checkbox" checked={completenessFilter.length === 0} onChange={() => chooseCompleteness("all")} />All Assignment Statuses</label>
+                        {([
+                          ["unassigned", "Unassigned"],
+                          ["partial", "Partially Assigned"],
+                          ["full", "Fully Assigned"],
+                          ["awaiting", "Awaiting Confirmation"],
+                          ["confirmed", "Confirmed"],
+                          ["attention", "Needs Attention"],
+                        ] as const).map(([value, label]) => (
+                          <label key={value}><input type="checkbox" checked={completenessFilter.includes(value)} onChange={() => toggleCompleteness(value)} />{label}</label>
+                        ))}
+                      </div>
+                    </details>
+                  </div>
                   <label className="assignmentCheckboxFilter">
                     <input
                       type="checkbox"
@@ -8566,8 +8536,8 @@ export default function AssignmentsManagerV2({
                   </label>
                   {hasDirectGameFilter && (
                     <span>
-                      Showing matching games across all dates and assignment
-                      statuses.
+                      Showing matching games across all dates and selected
+                      assignment statuses.
                     </span>
                   )}
                   {savedViews.length > 0 && (
