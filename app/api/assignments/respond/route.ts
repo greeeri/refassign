@@ -31,13 +31,24 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   const service = createServiceClient(),
-    { error: responseError } = await service.rpc("respond_to_assignment", {
-      p_token: body.token,
-      p_response: body.response,
-      p_decline_reason: reason,
-    });
+    { data: savedResponse, error: responseError } = await service.rpc(
+      "respond_to_assignment",
+      {
+        p_token: body.token,
+        p_response: body.response,
+        p_decline_reason: reason,
+      },
+    );
   if (responseError)
     return NextResponse.json({ error: responseError.message }, { status: 400 });
+  if (savedResponse !== body.response)
+    return NextResponse.json(
+      {
+        error:
+          "This assignment was already recorded with a different response. Reload the assignment before trying again.",
+      },
+      { status: 409 },
+    );
   if (body.response !== "declined") return NextResponse.json({ ok: true });
   const { data: raw, error: loadError } = await service
     .from("assignments")
