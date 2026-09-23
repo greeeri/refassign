@@ -1,6 +1,6 @@
 'use client'
 
-import {useEffect,useMemo,useState} from 'react'
+import {useEffect,useMemo,useRef,useState} from 'react'
 import {createClient} from '../lib/supabase/client'
 import TournamentRulesLink from './TournamentRulesLink'
 import {respondToAssignment} from '../lib/client/respondToAssignment'
@@ -8,9 +8,86 @@ import {respondToAssignment} from '../lib/client/respondToAssignment'
 type Detail={assignment_id:string;official_name:string;official_email:string|null;position_name:string|null;starts_at:string;home_team:string|null;away_team:string|null;location_name:string|null;location_address:string|null;location_city:string|null;location_state:string|null;league_name:string|null;level_name:string|null;notes:string|null;status:string;published_at:string;accept_by:string|null;responded_at:string|null;decline_reason:string|null}
 const reasons=['Schedule Conflict','Travel / Distance','Team Conflict','Injury / Illness','Already Assigned','Other']
 
-export default function AssignmentResponse({token}:{token:string}){const supabase=useMemo(()=>createClient(),[]);const [detail,setDetail]=useState<Detail|null>(null),[loading,setLoading]=useState(true),[error,setError]=useState(''),[working,setWorking]=useState(false),[declining,setDeclining]=useState(false),[reason,setReason]=useState('Schedule Conflict'),[other,setOther]=useState('')
-async function load(){setLoading(true);setError('');const {data,error:e}=await supabase.rpc('get_assignment_by_token',{p_token:token});if(e)setError(e.message);else setDetail((data?.[0]||null) as Detail|null);setLoading(false)}useEffect(()=>{void load()},[token])
-async function respond(response:'accepted'|'declined'){const why=response==='declined'?(reason==='Other'?other.trim():reason):null;if(response==='declined'&&!why){setError('Please enter a decline reason.');return}setWorking(true);setError('');try{await respondToAssignment({token,response,declineReason:why});setDeclining(false);await load()}catch(e){setError(e instanceof Error?e.message:'The assignment response could not be saved.')}setWorking(false)}
-if(loading)return <main className="publicAssignment"><section className="card"><p>Loading assignment…</p></section></main>;if(error&&!detail)return <main className="publicAssignment"><section className="card"><h1>Assignment unavailable</h1><div className="errorBox">{error}</div></section></main>;if(!detail)return <main className="publicAssignment"><section className="card"><h1>Assignment not found</h1></section></main>
-const done=['accepted','confirmed','declined'].includes(detail.status);const unavailable=!['proposed','accepted','confirmed','declined'].includes(detail.status);const address=[detail.location_address,detail.location_city,detail.location_state].filter(Boolean).join(', ')
-return <main className="publicAssignment"><section className="card assignmentResponseCard"><div className="responseBrand"><b>REF PRO GROUP</b><span>Game Assignment</span></div><h1>{detail.home_team||'TBD'} <span>vs</span> {detail.away_team||'TBD'}</h1><p className="responseGreeting">{detail.official_name}, you have been assigned to this game.</p><div className="assignmentDetailGrid"><div><small>Date & Time</small><b>{new Date(detail.starts_at).toLocaleString()}</b></div><div><small>Position</small><b>{detail.position_name||'Official'}</b></div><div><small>Location</small><b>{detail.location_name||'TBD'}</b><span>{address}</span></div><div><small>League / Level</small><b>{detail.league_name||'—'}{detail.level_name?` • ${detail.level_name}`:''}</b></div></div><div className="responseActions"><TournamentRulesLink leagueName={detail.league_name}/></div>{detail.notes&&<div className="responseNotes"><small>Game Information</small><p>{detail.notes}</p></div>}{detail.accept_by&&!done&&<div className="deadlineBox"><b>Requested response by</b><span>{new Date(detail.accept_by).toLocaleString()}</span></div>}{error&&<div className="errorBox">{error}</div>}{done?<div className={`responseResult ${detail.status==='declined'?'declined':'accepted'}`}><h2>{detail.status==='declined'?'Assignment Declined':'Assignment Accepted'}</h2><p>{detail.status==='declined'?(detail.decline_reason||'Your decline has been recorded.'):'You are confirmed for this assignment.'}</p></div>:unavailable?<div className="errorBox">This assignment is no longer available. Please contact your assignor.</div>:declining?<div className="declinePanel"><h3>Why are you declining?</h3><select value={reason} onChange={e=>setReason(e.target.value)}>{reasons.map(x=><option key={x}>{x}</option>)}</select>{reason==='Other'&&<textarea placeholder="Enter reason" value={other} onChange={e=>setOther(e.target.value)}/>}<div className="responseActions"><button className="secondary" onClick={()=>setDeclining(false)}>Cancel</button><button className="dangerButton" disabled={working} onClick={()=>void respond('declined')}>{working?'Submitting…':'Confirm Decline'}</button></div></div>:<div className="responseActions"><button className="acceptButton" disabled={working} onClick={()=>void respond('accepted')}>{working?'Submitting…':'Accept Assignment'}</button><button className="dangerButton" disabled={working} onClick={()=>setDeclining(true)}>Decline Assignment</button></div>}<p className="responseFooter">© 2026 Ref Pro Group, LLC. All rights reserved.</p></section></main>}
+export default function AssignmentResponse({token}:{token:string}){
+  const supabase=useMemo(()=>createClient(),[])
+  const [detail,setDetail]=useState<Detail|null>(null)
+  const [loading,setLoading]=useState(true)
+  const [error,setError]=useState('')
+  const [working,setWorking]=useState(false)
+  const [declining,setDeclining]=useState(false)
+  const [reason,setReason]=useState('Schedule Conflict')
+  const [other,setOther]=useState('')
+  const declineIntentRef=useRef(false)
+  const submissionRef=useRef(false)
+
+  async function load(){
+    setLoading(true)
+    setError('')
+    const {data,error:e}=await supabase.rpc('get_assignment_by_token',{p_token:token})
+    if(e)setError(e.message)
+    else setDetail((data?.[0]||null) as Detail|null)
+    setLoading(false)
+  }
+
+  useEffect(()=>{void load()},[token])
+
+  function beginDecline(event:React.MouseEvent<HTMLButtonElement>){
+    event.preventDefault()
+    event.stopPropagation()
+    if(submissionRef.current)return
+    // Set this synchronously before React replaces the action buttons. This
+    // prevents a delayed/retargeted mobile click from reaching Accept.
+    declineIntentRef.current=true
+    setError('')
+    setDeclining(true)
+  }
+
+  function cancelDecline(event:React.MouseEvent<HTMLButtonElement>){
+    event.preventDefault()
+    event.stopPropagation()
+    if(submissionRef.current)return
+    declineIntentRef.current=false
+    setDeclining(false)
+  }
+
+  async function respond(response:'accepted'|'declined'){
+    if(submissionRef.current)return
+    if(response==='accepted'&&declineIntentRef.current){
+      setError('Finish or cancel the decline before accepting this assignment.')
+      return
+    }
+    if(response==='declined'&&!declineIntentRef.current){
+      setError('Choose Decline Assignment before submitting a decline.')
+      return
+    }
+    const why=response==='declined'?(reason==='Other'?other.trim():reason):null
+    if(response==='declined'&&!why){
+      setError('Please enter a decline reason.')
+      return
+    }
+    submissionRef.current=true
+    setWorking(true)
+    setError('')
+    try{
+      await respondToAssignment({token,response,declineReason:why})
+      declineIntentRef.current=false
+      setDeclining(false)
+      await load()
+    }catch(e){
+      setError(e instanceof Error?e.message:'The assignment response could not be saved.')
+    }finally{
+      submissionRef.current=false
+      setWorking(false)
+    }
+  }
+
+  if(loading)return <main className="publicAssignment"><section className="card"><p>Loading assignment…</p></section></main>
+  if(error&&!detail)return <main className="publicAssignment"><section className="card"><h1>Assignment unavailable</h1><div className="errorBox">{error}</div></section></main>
+  if(!detail)return <main className="publicAssignment"><section className="card"><h1>Assignment not found</h1></section></main>
+
+  const done=['accepted','confirmed','declined'].includes(detail.status)
+  const unavailable=!['proposed','accepted','confirmed','declined'].includes(detail.status)
+  const address=[detail.location_address,detail.location_city,detail.location_state].filter(Boolean).join(', ')
+
+  return <main className="publicAssignment"><section className="card assignmentResponseCard"><div className="responseBrand"><b>REF PRO GROUP</b><span>Game Assignment</span></div><h1>{detail.home_team||'TBD'} <span>vs</span> {detail.away_team||'TBD'}</h1><p className="responseGreeting">{detail.official_name}, you have been assigned to this game.</p><div className="assignmentDetailGrid"><div><small>Date & Time</small><b>{new Date(detail.starts_at).toLocaleString()}</b></div><div><small>Position</small><b>{detail.position_name||'Official'}</b></div><div><small>Location</small><b>{detail.location_name||'TBD'}</b><span>{address}</span></div><div><small>League / Level</small><b>{detail.league_name||'—'}{detail.level_name?` • ${detail.level_name}`:''}</b></div></div><div className="responseActions"><TournamentRulesLink leagueName={detail.league_name}/></div>{detail.notes&&<div className="responseNotes"><small>Game Information</small><p>{detail.notes}</p></div>}{detail.accept_by&&!done&&<div className="deadlineBox"><b>Requested response by</b><span>{new Date(detail.accept_by).toLocaleString()}</span></div>}{error&&<div className="errorBox">{error}</div>}{done?<div className={`responseResult ${detail.status==='declined'?'declined':'accepted'}`}><h2>{detail.status==='declined'?'Assignment Declined':'Assignment Accepted'}</h2><p>{detail.status==='declined'?(detail.decline_reason||'Your decline has been recorded.'):'You are confirmed for this assignment.'}</p></div>:unavailable?<div className="errorBox">This assignment is no longer available. Please contact your assignor.</div>:declining?<div className="declinePanel"><h3>Why are you declining?</h3><select value={reason} onChange={e=>setReason(e.target.value)} disabled={working}>{reasons.map(x=><option key={x}>{x}</option>)}</select>{reason==='Other'&&<textarea placeholder="Enter reason" value={other} onChange={e=>setOther(e.target.value)} disabled={working}/>}<div className="responseActions"><button type="button" className="secondary" disabled={working} onClick={cancelDecline}>Cancel</button><button type="button" className="dangerButton" disabled={working} onClick={event=>{event.preventDefault();event.stopPropagation();void respond('declined')}}>{working?'Submitting…':'Confirm Decline'}</button></div></div>:<div className="responseActions"><button type="button" className="acceptButton" disabled={working} onClick={event=>{event.preventDefault();event.stopPropagation();void respond('accepted')}}>{working?'Submitting…':'Accept Assignment'}</button><button type="button" className="dangerButton" disabled={working} onClick={beginDecline}>Decline Assignment</button></div>}<p className="responseFooter">© 2026 Ref Pro Group, LLC. All rights reserved.</p></section></main>
+}
