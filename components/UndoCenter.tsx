@@ -63,7 +63,7 @@ export default function UndoCenter({ organizationId }: { organizationId?: string
     }
     setOperation(null);
     setAnnouncement("");
-    window.setTimeout(() => window.location.reload(), 350);
+    window.dispatchEvent(new Event("refassign:undo-completed"));
   }
   if (!operation && !error) return null;
   return (

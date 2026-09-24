@@ -419,6 +419,11 @@ export default function GamesManagerV3({
   useEffect(() => {
     void load();
   }, [organizationId, showArchived]);
+  useEffect(() => {
+    const refreshAfterUndo = () => { void load(); };
+    window.addEventListener("refassign:undo-completed", refreshAfterUndo);
+    return () => window.removeEventListener("refassign:undo-completed", refreshAfterUndo);
+  }, [organizationId, showArchived]);
   function requestStatusChange(gameId: string, status: string) {
     if (["canceled", "rained_out"].includes(status)) {
       setPendingStatus({ gameId, status });

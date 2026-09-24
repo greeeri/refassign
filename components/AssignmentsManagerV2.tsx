@@ -836,6 +836,11 @@ export default function AssignmentsManagerV2({
     void load();
   }, [organizationId]);
   useEffect(() => {
+    const refreshAfterUndo = () => { void load(); };
+    window.addEventListener("refassign:undo-completed", refreshAfterUndo);
+    return () => window.removeEventListener("refassign:undo-completed", refreshAfterUndo);
+  }, [organizationId]);
+  useEffect(() => {
     if (handledListReturnRequest.current === returnToListRequest) return;
     handledListReturnRequest.current = returnToListRequest;
     const previousGameId = selected;
