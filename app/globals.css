@@ -1998,6 +1998,22 @@ td small {
 .responseResult p {
   color: inherit;
 }
+.scheduleResponseLink {
+  display: inline-block;
+  margin-top: 12px;
+  padding: 12px 18px;
+  border-radius: 8px;
+  background: #166534;
+  color: white;
+  font-weight: 700;
+  text-decoration: none;
+}
+.scheduleResponseLink:hover,
+.scheduleResponseLink:focus-visible {
+  background: #14532d;
+  color: white;
+  text-decoration: underline;
+}
 .responseFooter {
   text-align: center;
   margin-top: 28px;
