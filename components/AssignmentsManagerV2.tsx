@@ -344,6 +344,8 @@ export default function AssignmentsManagerV2({
       {},
     ),
     [powers, setPowers] = useState<Record<string, number>>({}),
+    [teamSuggestions, setTeamSuggestions] = useState<{team_id: string; official_id: string}[]>([]),
+    [teamSuggestionSaving, setTeamSuggestionSaving] = useState(""),
     [leagueElig, setLeagueElig] = useState<EligL[]>([]),
     [levelElig, setLevelElig] = useState<EligV[]>([]),
     [blocks, setBlocks] = useState<Block[]>([]),
@@ -671,7 +673,16 @@ export default function AssignmentsManagerV2({
           .eq("organization_id", organizationId || "")
           .order("updated_at", { ascending: false }),
       ]);
+    const suggestions = organizationId
+      ? await readAllPages<{team_id: string; official_id: string}>((from, to) =>
+          supabase.from("team_quick_assign_officials")
+            .select("team_id,official_id")
+            .eq("organization_id", organizationId)
+            .order("team_id").order("official_id").range(from, to),
+        )
+      : {data: [], error: null};
     const err =
+      suggestions.error ||
       g.error ||
       oo.error ||
       o.error ||
@@ -716,6 +727,7 @@ export default function AssignmentsManagerV2({
     setRanks(rm);
     setPositionRanks(prm);
     setPowers(pm);
+    setTeamSuggestions(suggestions.data || []);
     let officialRows = (o.data || []) as Official[];
     if (organizationId) {
       const organizationOfficialIds = (oo.data || []).map(
@@ -2305,6 +2317,32 @@ export default function AssignmentsManagerV2({
           b.rank - a.rank ||
           (a.distance ?? 9999) - (b.distance ?? 9999),
       );
+  }
+  function suggestedTeams(officialId: string) {
+    if (!game) return [];
+    return [game.home, game.away].filter(
+      (team): team is Team => Boolean(team && teamSuggestions.some(
+        (link) => link.team_id === team.id && link.official_id === officialId,
+      )),
+    );
+  }
+  async function toggleTeamSuggestion(teamId: string, officialId: string) {
+    if (!organizationId || !canManage) return;
+    const key = `${teamId}:${officialId}`;
+    const existing = teamSuggestions.some(
+      (link) => link.team_id === teamId && link.official_id === officialId,
+    );
+    setTeamSuggestionSaving(key);
+    setError("");
+    const query = supabase.from("team_quick_assign_officials");
+    const {error: saveError} = existing
+      ? await query.delete().eq("organization_id", organizationId).eq("team_id", teamId).eq("official_id", officialId)
+      : await query.insert({organization_id: organizationId, team_id: teamId, official_id: officialId});
+    if (saveError) setError(saveError.message);
+    else setTeamSuggestions((current) => existing
+      ? current.filter((link) => link.team_id !== teamId || link.official_id !== officialId)
+      : [...current, {team_id: teamId, official_id: officialId}]);
+    setTeamSuggestionSaving("");
   }
   function lastAssignmentTime(officialId: string) {
     if (!game) return 0;
@@ -7115,7 +7153,7 @@ export default function AssignmentsManagerV2({
                     .includes(candidateQuery),
                 ),
                 candidateSort,
-              );
+              ).sort((a, b) => Number(suggestedTeams(b.id).length > 0) - Number(suggestedTeams(a.id).length > 0));
               const current = assignments.find(
                 (item) =>
                   item.game_id === game.id &&
@@ -7254,6 +7292,19 @@ export default function AssignmentsManagerV2({
                               {candidate.last_name}
                               <ScheduleLink officialId={candidate.id} />
                             </b>
+                            {suggestedTeams(candidate.id).length > 0 && (
+                              <small>Quick assign: {suggestedTeams(candidate.id).map((team) => team.name).join(", ")}</small>
+                            )}
+                            {canManage && organizationId && (
+                              <div style={{display: "flex", gap: 8, flexWrap: "wrap"}}>
+                                {[game.home, game.away].filter((team): team is Team => Boolean(team)).filter((team, index, all) => all.findIndex((item) => item.id === team.id) === index).map((team) => {
+                                  const linked = teamSuggestions.some((link) => link.team_id === team.id && link.official_id === candidate.id);
+                                  return <button key={team.id} type="button" className="secondary" style={{padding: "3px 8px", fontSize: 12}} disabled={Boolean(teamSuggestionSaving)} onClick={() => void toggleTeamSuggestion(team.id, candidate.id)} aria-pressed={linked} title={`${linked ? "Remove" : "Add"} ${candidate.first_name} ${candidate.last_name} ${linked ? "from" : "to"} ${team.name} quick assign`}>
+                                    {linked ? "✓" : "+"} {team.name}
+                                  </button>;
+                                })}
+                              </div>
+                            )}
                             <span>
                               {positionRatingText(
                                 candidate.id,
