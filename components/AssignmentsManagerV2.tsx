@@ -4624,32 +4624,42 @@ export default function AssignmentsManagerV2({
     setOverdueResolving(true);
     setError("");
     setNotice("");
-    const { data, error: resolveError } = await supabase.rpc(
-      "resolve_overdue_assignments",
-      {
-        p_assignment_ids: overdueSelected,
-        p_action: action,
-      },
-    );
-    if (resolveError) setError(resolveError.message);
-    else {
+    let resolved = 0;
+    let blocksCreated = 0;
+    let failure = "";
+    // Give each game its own short transaction. A blocked delete must not roll
+    // back other games in the review, and Undo can then track each change.
+    for (const assignmentId of overdueSelected) {
+      const { data, error: resolveError } = await supabase.rpc(
+        "resolve_overdue_assignments",
+        { p_assignment_ids: [assignmentId], p_action: action },
+      );
+      if (resolveError) {
+        failure = resolveError.message;
+        break;
+      }
       const result = data as {
         assignments_resolved?: number;
         blocks_created?: number;
       } | null;
+      resolved += result?.assignments_resolved ?? 1;
+      blocksCreated += result?.blocks_created ?? 0;
+    }
+    if (resolved > 0) {
       const official = officials.find((item) => item.id === overdueGroup[0]);
       const name = official
         ? `${official.first_name} ${official.last_name}`
         : "Official";
       setNotice(
         action === "keep"
-          ? `${name} was kept on ${result?.assignments_resolved || overdueSelected.length} selected overdue game assignment(s).`
-          : `${name} was removed from ${result?.assignments_resolved || overdueSelected.length} selected unaccepted game(s)${action === "remove_and_block" ? ` and ${result?.blocks_created || 0} time block(s) were created` : " without creating blocks"}.`,
+          ? `${name} was kept on ${resolved} selected overdue game assignment(s).`
+          : `${name} was removed from ${resolved} selected unaccepted game(s)${action === "remove_and_block" ? ` and ${blocksCreated} time block(s) were created` : " without creating blocks"}.`,
       );
       setOverduePromptClosed(false);
-      await load();
       if (action !== "keep") announceUndoAvailable();
     }
+    if (resolved > 0 || failure) await load();
+    if (failure) setError(`${failure} ${resolved} of ${overdueSelected.length} selected games were updated. The remaining games are still listed below.`);
     setOverdueResolving(false);
   }
   function renderMobileInlineAssignment() {
