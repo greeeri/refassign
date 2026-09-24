@@ -139,10 +139,8 @@ export default function Workspace() {
     () => officialWorkspaces.map((item) => item.organization_id),
     [officialWorkspaces],
   );
-  useEffect(() => {
-    const requestedSection = new URLSearchParams(window.location.search).get("section");
-    if (requestedSection) setSection(requestedSection);
-  }, []);
+  const scheduleRequested = () =>
+    new URLSearchParams(window.location.search).get("section") === "My Schedule";
   useEffect(() => {
     async function load() {
       const {
@@ -307,7 +305,9 @@ export default function Workspace() {
           "refassign-view-role",
         ) as Role | null;
         const mapped =
-          (savedRole && workspaceRoles.includes(savedRole)
+          (scheduleRequested() && workspaceRoles.includes("official")
+            ? "official"
+            : savedRole && workspaceRoles.includes(savedRole)
             ? savedRole
             : null) ||
           workspaceRoles[0] ||
@@ -318,7 +318,7 @@ export default function Workspace() {
           !resolvedName
             ? "Account"
             : mapped === "official"
-              ? "Official Dashboard"
+              ? scheduleRequested() ? "My Schedule" : "Official Dashboard"
               : "Dashboard",
         );
         setReady(true);
@@ -354,7 +354,9 @@ export default function Workspace() {
       setRoles(available);
       const saved = localStorage.getItem("refassign-view-role") as Role | null,
         initial =
-          saved && available.includes(saved)
+          scheduleRequested() && available.includes("official")
+            ? "official"
+            : saved && available.includes(saved)
             ? saved
             : available[0] || "official";
       setViewRole(initial);
@@ -362,7 +364,7 @@ export default function Workspace() {
         !resolvedName
           ? "Account"
           : initial === "official"
-            ? "Official Dashboard"
+            ? scheduleRequested() ? "My Schedule" : "Official Dashboard"
             : initial === "mentor"
               ? "Development Mentors"
               : initial === "billing"
