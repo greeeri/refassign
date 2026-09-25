@@ -7305,19 +7305,7 @@ export default function AssignmentsManagerV2({
                               {candidate.last_name}
                               <ScheduleLink officialId={candidate.id} />
                             </b>
-                            {suggestedTeams(candidate.id).length > 0 && (
-                              <small>Quick assign: {suggestedTeams(candidate.id).map((team) => team.name).join(", ")}</small>
-                            )}
-                            {canManage && organizationId && (
-                              <div style={{display: "flex", gap: 8, flexWrap: "wrap"}}>
-                                {[game.home, game.away].filter((team): team is Team => Boolean(team)).filter((team, index, all) => all.findIndex((item) => item.id === team.id) === index).map((team) => {
-                                  const linked = teamSuggestions.some((link) => link.team_id === team.id && link.official_id === candidate.id);
-                                  return <button key={team.id} type="button" className="secondary" style={{padding: "3px 8px", fontSize: 12}} disabled={Boolean(teamSuggestionSaving)} onClick={() => void toggleTeamSuggestion(team.id, candidate.id)} aria-pressed={linked} title={`${linked ? "Remove" : "Add"} ${candidate.first_name} ${candidate.last_name} ${linked ? "from" : "to"} ${team.name} quick assign`}>
-                                    {linked ? "✓" : "+"} {team.name}
-                                  </button>;
-                                })}
-                              </div>
-                            )}
+                            {futureBadge(candidate.id)}
                             <span>
                               {positionRatingText(
                                 candidate.id,
@@ -7336,6 +7324,19 @@ export default function AssignmentsManagerV2({
                             </small>
                             <details className="candidateDetails">
                               <summary>View details</summary>
+                            {suggestedTeams(candidate.id).length > 0 && (
+                              <small>Quick assign: {suggestedTeams(candidate.id).map((team) => team.name).join(", ")}</small>
+                            )}
+                            {canManage && organizationId && (
+                              <div style={{display: "flex", gap: 8, flexWrap: "wrap"}}>
+                                {[game.home, game.away].filter((team): team is Team => Boolean(team)).filter((team, index, all) => all.findIndex((item) => item.id === team.id) === index).map((team) => {
+                                  const linked = teamSuggestions.some((link) => link.team_id === team.id && link.official_id === candidate.id);
+                                  return <button key={team.id} type="button" className="secondary" style={{padding: "3px 8px", fontSize: 12}} disabled={Boolean(teamSuggestionSaving)} onClick={() => void toggleTeamSuggestion(team.id, candidate.id)} aria-pressed={linked} title={`${linked ? "Remove" : "Add"} ${candidate.first_name} ${candidate.last_name} ${linked ? "from" : "to"} ${team.name} quick assign`}>
+                                    {linked ? "✓" : "+"} {team.name}
+                                  </button>;
+                                })}
+                              </div>
+                            )}
                               <span>
                                 {teamRecencyLabel(candidate.id).replace(
                                   /^ • /,
