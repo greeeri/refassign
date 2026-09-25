@@ -6,6 +6,7 @@ import TeamsRosterManager from "./TeamsRosterManager";
 import LocationsRosterManager from "./LocationsRosterManager";
 import LeagueDocumentsManager from "./LeagueDocumentsManager";
 import SharedDirectorySearch from "./SharedDirectorySearch";
+import TeamOfficialLinks from "./TeamOfficialLinks";
 type Sport = { id: string; name: string };
 type Level = { id: string; name: string; officials_needed: number };
 type MileagePlan = "one_way" | "round_trip" | "actual" | "none";
@@ -105,6 +106,7 @@ export default function GameSetup({
     [leagueMessage, setLeagueMessage] = useState(""),
     [savingPower, setSavingPower] = useState(""),
     [showTeamImport, setShowTeamImport] = useState(false),
+    [linkTeamId, setLinkTeamId] = useState<string | null>(null),
     [showLocationImport, setShowLocationImport] = useState(false),
     [error, setError] = useState("");
   const [locationQuery, setLocationQuery] = useState(""),
@@ -1046,7 +1048,8 @@ export default function GameSetup({
               </thead>
               <tbody>
                 {matchingRankedTeams.map(({ team: t, rank }) => (
-                  <tr key={t.id}>
+                  <Fragment key={t.id}>
+                  <tr>
                     <td>
                       <b>#{rank}</b>
                     </td>
@@ -1079,6 +1082,9 @@ export default function GameSetup({
                       />
                     </td>
                     <td>
+                      {organizationId && <><button type="button" className="tableButton" onClick={() => setLinkTeamId((current) => current === t.id ? null : t.id)}>
+                        {linkTeamId === t.id ? "Close officials" : "Link officials"}
+                      </button>{" "}</>}
                       <button
                         className="tableButton"
                         onClick={() => editTeam(t)}
@@ -1093,6 +1099,10 @@ export default function GameSetup({
                       </button>
                     </td>
                   </tr>
+                  {organizationId && linkTeamId === t.id && <tr><td colSpan={6}>
+                    <TeamOfficialLinks key={t.id} organizationId={organizationId} teamId={t.id} />
+                  </td></tr>}
+                  </Fragment>
                 ))}
                 {matchingRankedTeams.length === 0 && (
                   <tr>

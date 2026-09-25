@@ -8,6 +8,7 @@ import OfficialCcContact from "./OfficialCcContact";
 import OfficialsRosterManager from "./OfficialsRosterManager";
 import CommunicationCenter from "./CommunicationCenter";
 import SharedDirectorySearch from "./SharedDirectorySearch";
+import TeamOfficialLinks from "./TeamOfficialLinks";
 
 type Official = {
   id: string;
@@ -2276,6 +2277,9 @@ export default function OfficialsDirectory({
                 </button>
               </div>
                 </form>
+                {organizationId && editingId && canManage && (
+                  <TeamOfficialLinks key={`${organizationId}:${editingId}`} organizationId={organizationId} officialId={editingId} />
+                )}
                 {editingId && (
                   <OfficialCcContact key={editingId} officialId={editingId} />
                 )}
