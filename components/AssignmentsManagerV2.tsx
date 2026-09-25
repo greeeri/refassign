@@ -386,6 +386,7 @@ export default function AssignmentsManagerV2({
     [linkGroups, setLinkGroups] = useState<LinkGroup[]>([]),
     [linkMembers, setLinkMembers] = useState<LinkMember[]>([]),
     [linkSelected, setLinkSelected] = useState<string[]>([]),
+    [showSelectedDetails, setShowSelectedDetails] = useState(false),
     [linking, setLinking] = useState(false),
     [draggingGame, setDraggingGame] = useState(""),
     [draggingOfficial, setDraggingOfficial] = useState(""),
@@ -8870,6 +8871,15 @@ export default function AssignmentsManagerV2({
                 <button
                   type="button"
                   className="secondary"
+                  disabled={!linkSelected.some((id) => filteredGames.some((g) => g.id === id))}
+                  aria-expanded={showSelectedDetails}
+                  onClick={() => setShowSelectedDetails((current) => !current)}
+                >
+                  {showSelectedDetails ? "Close Selected Details" : "Open Selected Details"}
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
                   disabled={!filteredGames.length || bulkWorking}
                   onClick={() =>
                     setLinkSelected(
@@ -9302,6 +9312,24 @@ export default function AssignmentsManagerV2({
                               listedGame,
                               Boolean(unit.groupId),
                               Boolean(unit.groupId) && index > 0,
+                            )}
+                            {showSelectedDetails && linkSelected.includes(listedGame.id) && (
+                              <div className="assignmentSelectedDetails" style={{ padding: "12px 16px", borderBottom: "1px solid #cbd5e1", background: "#f8fafc" }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                                  <strong>Game #{listedGame.game_number} · {listedGame.home?.name || "TBD"} vs {listedGame.away?.name || "TBD"}</strong>
+                                  <button type="button" className="secondary" onClick={() => requestSelectedGame(listedGame.id)}>Open Full Game Details</button>
+                                </div>
+                                <div style={{ marginTop: 8 }}>
+                                  {listedGame.leagues?.name || "League TBD"} · {listedGame.levels?.name || "Level TBD"} · {formatEventDate(listedGame.starts_at, listedGame.location)} {listedGame.time_tbd ? "Time TBD" : formatEventTime(listedGame.starts_at, listedGame.location)} · {listedGame.location?.name || "Location TBD"} · {inactiveGameStatusLabel(listedGame.status) || "Active"}
+                                </div>
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 16px", marginTop: 8 }}>
+                                  {positions.filter((position) => position.sport_id === listedGame.sport_id).sort((a, b) => a.sort_order - b.sort_order).slice(0, Math.max(0, listedGame.officials_needed)).map((position) => {
+                                    const assignment = assignments.find((item) => item.game_id === listedGame.id && item.position_id === position.id && item.status !== "declined");
+                                    const official = assignment && officials.find((item) => item.id === assignment.official_id);
+                                    return <span key={position.id}><b>{shortPositionName(position.name)}:</b> {official ? `${official.first_name} ${official.last_name} (${assignment.status})` : "Open"}</span>;
+                                  })}
+                                </div>
+                              </div>
                             )}
                             {selected === listedGame.id && (
                               <>
