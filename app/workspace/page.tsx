@@ -139,15 +139,17 @@ export default function Workspace() {
     () => officialWorkspaces.map((item) => item.organization_id),
     [officialWorkspaces],
   );
-  const scheduleRequested = () =>
-    new URLSearchParams(window.location.search).get("section") === "My Schedule";
+  const requestedOfficialSection = () => {
+    const section = new URLSearchParams(window.location.search).get("section");
+    return section === "My Schedule" || section === "Self Assign" ? section : null;
+  };
   useEffect(() => {
     async function load() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) {
-        window.location.replace("/login");
+        window.location.replace(`/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
         return;
       }
       const signedInEmail = user.email || "";
@@ -296,6 +298,8 @@ export default function Workspace() {
           ).map(mapWorkspaceRole),
         ),
       );
+      const overrideRequested = new URLSearchParams(window.location.search).has("override") &&
+        workspaceRoles.some((role) => role === "admin" || role === "assignor");
       if (tierRuntime) {
         if (workspaceError) {
           setReady(true);
@@ -305,7 +309,9 @@ export default function Workspace() {
           "refassign-view-role",
         ) as Role | null;
         const mapped =
-          (scheduleRequested() && workspaceRoles.includes("official")
+          (overrideRequested
+            ? workspaceRoles.find((role) => role === "admin" || role === "assignor")!
+            : requestedOfficialSection() && workspaceRoles.includes("official")
             ? "official"
             : savedRole && workspaceRoles.includes(savedRole)
             ? savedRole
@@ -318,8 +324,8 @@ export default function Workspace() {
           !resolvedName
             ? "Account"
             : mapped === "official"
-              ? scheduleRequested() ? "My Schedule" : "Official Dashboard"
-              : "Dashboard",
+              ? requestedOfficialSection() || "Official Dashboard"
+              : overrideRequested ? "Assignments" : "Dashboard",
         );
         setReady(true);
         return;
@@ -354,7 +360,9 @@ export default function Workspace() {
       setRoles(available);
       const saved = localStorage.getItem("refassign-view-role") as Role | null,
         initial =
-          scheduleRequested() && available.includes("official")
+          overrideRequested
+            ? available.find((role) => role === "admin" || role === "assignor")!
+            : requestedOfficialSection() && available.includes("official")
             ? "official"
             : saved && available.includes(saved)
             ? saved
@@ -364,14 +372,14 @@ export default function Workspace() {
         !resolvedName
           ? "Account"
           : initial === "official"
-            ? scheduleRequested() ? "My Schedule" : "Official Dashboard"
+            ? requestedOfficialSection() || "Official Dashboard"
             : initial === "mentor"
               ? "Development Mentors"
               : initial === "billing"
                 ? "Payroll"
                 : initial === "registrar" || initial === "league_admin"
                   ? "Registrar"
-                  : "Dashboard",
+                : overrideRequested ? "Assignments" : "Dashboard",
       );
       setReady(true);
     }

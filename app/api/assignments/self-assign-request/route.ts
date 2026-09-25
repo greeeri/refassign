@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
   const position: any = Array.isArray(slot?.sport_positions) ? slot.sport_positions[0] : slot?.sport_positions;
   const home: any = Array.isArray(game?.home) ? game.home[0] : game?.home;
   const away: any = Array.isArray(game?.away) ? game.away[0] : game?.away;
-  const manageUrl = `${request.nextUrl.origin}/workspace?organization=${encodeURIComponent(body.organizationId)}&section=Assignments`;
+  const manageUrl = `${request.nextUrl.origin}/workspace?${new URLSearchParams({ organization: body.organizationId, section: "Assignments", override: String(requestId) })}`;
   await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", "Idempotency-Key": `self-assign-request-${requestId}` },
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
       to: recipients,
       reply_to: "assignments@ref-assign.com",
       subject: `Assignment override requested for Game #${game?.game_number || "—"}`,
-      html: `<div style="font-family:Arial,sans-serif;padding:24px"><h2>Eligibility Override Requested</h2><p><b>${esc(official?.first_name)} ${esc(official?.last_name)}</b> requested ${esc(position?.name || "an open position")} for Game #${esc(game?.game_number || "—")} — ${esc(home?.name || "TBD")} vs ${esc(away?.name || "TBD")}.</p><p><b>Eligibility issue:</b> ${esc((detail as any)?.eligibility_reason)}</p><p><a href="${manageUrl}" style="display:inline-block;background:#2563eb;color:white;text-decoration:none;font-weight:700;padding:12px 18px;border-radius:8px">Review in Assignment Center</a></p></div>`,
+      html: `<div style="font-family:Arial,sans-serif;padding:24px"><h2>Eligibility Override Requested</h2><p><b>${esc(official?.first_name)} ${esc(official?.last_name)}</b> requested ${esc(position?.name || "an open position")} for Game #${esc(game?.game_number || "—")} — ${esc(home?.name || "TBD")} vs ${esc(away?.name || "TBD")}.</p><p><b>Eligibility issue:</b> ${esc((detail as any)?.eligibility_reason)}</p><p><a href="${esc(manageUrl)}" style="display:inline-block;background:#2563eb;color:white;text-decoration:none;font-weight:700;padding:12px 18px;border-radius:8px">Approve Override</a></p><p style="color:#475569;font-size:13px">Sign in and confirm the approval on the request page.</p></div>`,
     }),
   });
   return NextResponse.json({ requestId, notified: recipients.length });

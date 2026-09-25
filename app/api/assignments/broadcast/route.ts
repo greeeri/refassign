@@ -155,6 +155,14 @@ export async function POST(request: NextRequest) {
     games: gameIds.join(","),
   });
   const reviewUrl = `${request.nextUrl.origin}/workspace?${query.toString()}`;
+  const gameReviewUrl = (gameId: string) => {
+    const gameQuery = new URLSearchParams({
+      organization: organizationId,
+      section: "Self Assign",
+      games: gameId,
+    });
+    return `${request.nextUrl.origin}/workspace?${gameQuery.toString()}`;
+  };
   const gameList = (games || [])
     .sort(
       (a, b) =>
@@ -162,7 +170,7 @@ export async function POST(request: NextRequest) {
     )
     .map(
       (game: any) =>
-        `<li style="margin:8px 0"><b>Game #${esc(game.game_number)}</b> — ${esc(game.home?.name || "TBD")} vs ${esc(game.away?.name || "TBD")}<br><span style="color:#64748b">${esc(new Date(game.starts_at).toLocaleString("en-US", { timeZone: "America/Chicago", dateStyle: "medium", timeStyle: "short" }))}</span></li>`,
+        `<li style="margin:8px 0"><a href="${esc(gameReviewUrl(game.id))}" style="color:#2563eb;font-weight:700;text-decoration:underline">Game #${esc(game.game_number)}</a> — ${esc(game.home?.name || "TBD")} vs ${esc(game.away?.name || "TBD")}<br><span style="color:#64748b">${esc(new Date(game.starts_at).toLocaleString("en-US", { timeZone: "America/Chicago", dateStyle: "medium", timeStyle: "short" }))}</span></li>`,
     )
     .join("");
   const broadcastKey = body.requestId?.trim() || randomUUID();
