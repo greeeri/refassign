@@ -1163,7 +1163,7 @@ export default function AssignmentsManagerV2({
     levelFilter,
   );
   const rangeGames = games.filter((g) => inRange(g, range, customDate));
-  const baseFilteredGames = games.filter((g) => {
+  const eligibleFilteredGames = games.filter((g) => {
     const matchesSelfAssign = !selfAssignOnly || selfAssignOpenCount(g.id) > 0;
     const matchesReplacement = !replacementOnly || gameNeedsReplacement(g);
     if (hasDirectGameFilter)
@@ -1183,11 +1183,14 @@ export default function AssignmentsManagerV2({
       inRange(g, range, customDate) &&
       matchesSelfAssign &&
       matchesReplacement &&
-      (!unpublishedOnly || isUnpublishedGame(g)) &&
       (completenessFilter.length === 0 ||
         completenessFilter.includes(assignmentCompleteness(g).key))
     );
   });
+  const baseFilteredGames = unpublishedOnly
+    ? eligibleFilteredGames.filter(isUnpublishedGame)
+    : eligibleFilteredGames;
+  const unpublishedFilteredCount = eligibleFilteredGames.filter(isUnpublishedGame).length;
   function compareGames(a: Game, b: Game) {
     let n = 0;
     if (gameSort === "game")
@@ -8598,7 +8601,7 @@ export default function AssignmentsManagerV2({
                       onChange={toggleUnpublished}
                     />
                     Show not published only (
-                    {rangeGames.filter(isUnpublishedGame).length})
+                    {unpublishedFilteredCount})
                   </label>
                   {hasDirectGameFilter && (
                     <span>
