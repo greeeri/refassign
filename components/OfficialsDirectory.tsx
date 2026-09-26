@@ -9,6 +9,7 @@ import OfficialsRosterManager from "./OfficialsRosterManager";
 import CommunicationCenter from "./CommunicationCenter";
 import SharedDirectorySearch from "./SharedDirectorySearch";
 import TeamOfficialLinks from "./TeamOfficialLinks";
+import DirectoryOfficialSchedule from "./DirectoryOfficialSchedule";
 
 type Official = {
   id: string;
@@ -230,6 +231,7 @@ export default function OfficialsDirectory({
   const [saving, setSaving] = useState(false);
   const [rankMessage, setRankMessage] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [scheduleOfficial, setScheduleOfficial] = useState<Official | null>(null);
   const [query, setQuery] = useState("");
   const [sportFilter, setSportFilter] = useState("All");
   const [form, setForm] = useState<OfficialForm>(newForm());
@@ -1339,6 +1341,13 @@ export default function OfficialsDirectory({
 
   return (
     <>
+      {scheduleOfficial && (
+        <DirectoryOfficialSchedule
+          official={scheduleOfficial}
+          organizationId={organizationId}
+          onClose={() => setScheduleOfficial(null)}
+        />
+      )}
       {canManage && (
         <div className="actionbar">
           <div>
@@ -2439,6 +2448,14 @@ export default function OfficialsDirectory({
                             onClick={() => void startEdit(o)}
                           >
                             Edit
+                          </button>{" "}
+                          <button
+                            type="button"
+                            className="tableButton"
+                            onClick={() => setScheduleOfficial(o)}
+                            aria-label={`View schedule for ${o.first_name} ${o.last_name}`}
+                          >
+                            Schedule
                           </button>{" "}
                           <button
                             className="tableButton"
