@@ -227,6 +227,7 @@ export default function PayrollManager({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState("");
   const [error, setError] = useState("");
+  const [addressWarning, setAddressWarning] = useState("");
   const [notice, setNotice] = useState("");
 
   async function load() {
@@ -348,14 +349,14 @@ export default function PayrollManager({
           await load();
         }
         if (result.failed)
-          setError(
-            `${result.failed} address${result.failed === 1 ? " could" : "es could"} not be located. Check those street addresses, cities, and states.`,
+          setAddressWarning(
+            `${result.failed} address${result.failed === 1 ? " could" : "es could"} not be located for automatic mileage. Payroll imports can still proceed; enter mileage manually where needed.`,
           );
       } catch (backfillError) {
-        setError(
+        setAddressWarning(
           backfillError instanceof Error
-            ? backfillError.message
-            : "Existing addresses could not be located automatically.",
+            ? `Automatic mileage lookup failed: ${backfillError.message}. Payroll imports can still proceed.`
+            : "Automatic mileage lookup failed. Payroll imports can still proceed.",
         );
       }
     })();
@@ -1013,6 +1014,7 @@ export default function PayrollManager({
         </div>
       </div>
       {error && <div className="errorBox">{error}</div>}
+      {addressWarning && <p role="status">{addressWarning}</p>}
       {notice && <div className="loginMessage">{notice}</div>}
       {canManageBillTos && (
         <div className="formGrid payrollFilters">
