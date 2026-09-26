@@ -230,6 +230,7 @@ export default function PayrollManager({
   const [importFile, setImportFile] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState("");
+  const [dirtyIds, setDirtyIds] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [addressWarning, setAddressWarning] = useState("");
   const [addressFailures, setAddressFailures] = useState<Array<{ type: "location" | "official" | "alternate"; id: string; message: string }>>([]);
@@ -449,10 +450,12 @@ export default function PayrollManager({
     !row.officials || row.payment_status === "void"
       ? 0
       : Number(row.game_fee || 0) + mileagePay(row);
-  const patch = (id: string, values: Partial<PayrollRow>) =>
+  const patch = (id: string, values: Partial<PayrollRow>) => {
+    setDirtyIds((current) => current.includes(id) ? current : [...current, id]);
     setRows((current) =>
       current.map((row) => (row.id === id ? { ...row, ...values } : row)),
     );
+  };
 
   function sortValue(row: PayrollRow, key: SortKey): string | number {
     if (key === "date") return row.games?.starts_at || "";
@@ -522,10 +525,7 @@ export default function PayrollManager({
     { fees: 0, mileage: 0, total: 0 },
   );
 
-  async function save(row: PayrollRow) {
-    setSaving(row.id);
-    setError("");
-    setNotice("");
+  async function saveRecord(row: PayrollRow): Promise<void> {
     const response = await fetch(
       `/api/payroll?organizationId=${encodeURIComponent(organizationId || "")}`,
       {
@@ -543,16 +543,52 @@ export default function PayrollManager({
       },
     );
     const result = (await response.json()) as { error?: string };
-    if (!response.ok)
-      setError(result.error || "Payroll record could not be saved.");
-    else {
+    if (!response.ok) throw new Error(result.error || "Payroll record could not be saved.");
+  }
+
+  async function save(row: PayrollRow) {
+    if (saving) return;
+    setSaving(row.id);
+    setError("");
+    setNotice("");
+    try {
+      await saveRecord(row);
+      setDirtyIds((current) => current.filter((id) => id !== row.id));
       setNotice("Payroll record saved.");
-      await load();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Payroll record could not be saved.");
+    } finally {
+      setSaving("");
     }
+  }
+
+  async function saveAll() {
+    if (saving || !dirtyIds.length) return;
+    const changed = rows.filter((row) => dirtyIds.includes(row.id));
+    setSaving("all");
+    setError("");
+    setNotice("");
+    const failures: Array<{ id: string; message: string }> = [];
+    const succeeded: string[] = [];
+    for (let index = 0; index < changed.length; index += 4) {
+      await Promise.all(changed.slice(index, index + 4).map(async (row) => {
+        try {
+          await saveRecord(row);
+          succeeded.push(row.id);
+        } catch (error) {
+          failures.push({ id: row.id, message: error instanceof Error ? error.message : "Could not save." });
+        }
+      }));
+    }
+    setDirtyIds((current) => current.filter((id) => !succeeded.includes(id)));
+    setNotice(`${succeeded.length} payroll row${succeeded.length === 1 ? "" : "s"} saved.`);
+    if (failures.length)
+      setError(`${failures.length} row${failures.length === 1 ? "" : "s"} could not be saved: ${failures.slice(0, 5).map(({ id, message }) => `${changed.find((row) => row.id === id)?.games?.game_number || id}: ${message}`).join("; ")}`);
     setSaving("");
   }
 
   function patchGameBillTo(gameId: string, billToId: string) {
+    setDirtyIds((current) => Array.from(new Set([...current, ...rows.filter((row) => row.games?.id === gameId).map((row) => row.id)])));
     setRows((current) =>
       current.map((row) =>
         row.games?.id === gameId
@@ -1033,6 +1069,13 @@ export default function PayrollManager({
             onClick={() => fileInput.current?.click()}
           >
             Import Payroll
+          </button>
+          <button
+            className="primary"
+            disabled={!dirtyIds.length || Boolean(saving)}
+            onClick={() => void saveAll()}
+          >
+            {saving === "all" ? "Saving…" : `Save All${dirtyIds.length ? ` (${dirtyIds.length})` : ""}`}
           </button>
           <button className="primary" onClick={() => void exportPayroll()}>
             Export {selectedRows.length ? "Selected" : "Payroll"}
@@ -1621,7 +1664,7 @@ export default function PayrollManager({
                       <td>
                         <button
                           className="primary"
-                          disabled={saving === row.id}
+                          disabled={Boolean(saving)}
                           onClick={() => void save(row)}
                         >
                           {saving === row.id ? "Saving…" : "Save"}
