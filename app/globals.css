@@ -2235,7 +2235,7 @@ td small {
 
 .payrollTable {
   width: 100%;
-  min-width: 0;
+  min-width: 1500px;
   table-layout: fixed;
 }
 
@@ -2260,8 +2260,24 @@ td small {
 
 .payrollTable .primary {
   width: 100%;
-  padding: 6px 2px;
-  font-size: 10px;
+  padding: 7px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.payrollTable th:last-child,
+.payrollTable td:last-child {
+  position: sticky;
+  right: 0;
+  width: 86px;
+  min-width: 86px;
+  background: #fff;
+  box-shadow: -5px 0 10px -8px #334155;
+}
+
+.payrollTable th:last-child {
+  z-index: 1;
+  background: #f1f5f9;
 }
 
 .payrollSelectCol {
@@ -2272,6 +2288,9 @@ td small {
 }
 .payrollGameCol {
   width: 11%;
+}
+.payrollLevelCol {
+  width: 7%;
 }
 .payrollLocationCol {
   width: 7.5%;
@@ -2307,7 +2326,7 @@ td small {
   width: 8%;
 }
 .payrollActionCol {
-  width: 5%;
+  width: 86px;
 }
 
 .payrollSlicers {
