@@ -313,6 +313,8 @@ export default function GamesManagerV3({
     [canManageBillTos, setCanManageBillTos] = useState(false),
     [newBillToName, setNewBillToName] = useState(""),
     [form, setForm] = useState(blank),
+    [payPositions, setPayPositions] = useState<Array<{ id: string; sport_id: string; name: string; sort_order: number }>>([]),
+    [payRates, setPayRates] = useState<Record<string, number>>({}),
     [editing, setEditing] = useState<string | null>(null),
     [show, setShow] = useState(false),
     [showImport, setShowImport] = useState(false),
@@ -343,6 +345,14 @@ export default function GamesManagerV3({
     [error, setError] = useState(""),
     [message, setMessage] = useState("");
   async function load() {
+    if (organizationId) {
+      const response = await fetch(`/api/games/pay?organizationId=${encodeURIComponent(organizationId)}`, { cache: "no-store" });
+      if (response.ok) {
+        const result = await response.json();
+        setPayPositions(result.positions || []);
+        setPayRates(Object.fromEntries((result.rates || []).map((rate: { game_id: string; position_id: string; amount: number }) => [`${rate.game_id}:${rate.position_id}`, Number(rate.amount)])));
+      }
+    }
     const locationRequest = organizationId
       ? sb.rpc("get_organization_locations", {
           p_organization_id: organizationId,
@@ -568,7 +578,7 @@ export default function GamesManagerV3({
       const q = editing
         ? sb.from("games").update(payload).eq("id", editing)
         : sb.from("games").insert({ ...payload, status: "active" });
-      const { error: e2 } = await q;
+      const { data: savedGame, error: e2 } = await q.select("id").single();
       if (e2) {
         const databaseMessage = [e2.message, e2.details, e2.hint]
           .filter(Boolean)
@@ -589,6 +599,14 @@ export default function GamesManagerV3({
               : databaseMessage) ||
             "Unable to save game",
         );
+      }
+      if (organizationId && savedGame && Object.keys(payRates).some((key) => key.startsWith("draft:") || key.startsWith(`${editing}:`))) {
+        const positions = payPositions.filter((position) => position.sport_id === form.sport_id).slice(0, form.officials_needed);
+        const response = await fetch(`/api/games/pay?organizationId=${encodeURIComponent(organizationId)}`, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ gameId: savedGame.id, rates: positions.map((position) => ({ positionId: position.id, amount: payRates[`${editing || "draft"}:${position.id}`] ?? 0 })) }),
+        });
+        if (!response.ok) throw new Error((await response.json()).error || "Game saved, but pay could not be saved.");
       }
       setMessage(editing ? "Game updated." : "Game added.");
       setEditing(null);
@@ -1426,6 +1444,13 @@ export default function GamesManagerV3({
               }
             />
           </label>
+          {organizationId && payPositions.filter((position) => position.sport_id === form.sport_id).slice(0, form.officials_needed).map((position) => (
+            <label key={position.id}>
+              {position.name} pay
+              <input type="number" min="0" step="0.01" value={payRates[`${editing || "draft"}:${position.id}`] ?? ""}
+                placeholder="0.00" onChange={(event) => setPayRates((current) => ({ ...current, [`${editing || "draft"}:${position.id}`]: Number(event.target.value) }))} />
+            </label>
+          ))}
           <label>
             Notes
             <input

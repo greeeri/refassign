@@ -121,7 +121,7 @@ const mileagePlanLabels: Record<MileagePlan, string> = {
 const money = (value: number) =>
   value.toLocaleString("en-US", { style: "currency", currency: "USD" });
 const officialName = (row: PayrollRow) =>
-  `${row.officials?.first_name || ""} ${row.officials?.last_name || ""}`.trim();
+  `${row.officials?.first_name || ""} ${row.officials?.last_name || ""}`.trim() || "No payee";
 const gameName = (row: PayrollRow) =>
   `${row.games?.home?.name || "TBD"} vs ${row.games?.away?.name || "TBD"}`;
 
@@ -446,7 +446,7 @@ export default function PayrollManager({
       ? 0
       : Number(row.mileage_miles || 0) * Number(row.mileage_rate || 0);
   const total = (row: PayrollRow) =>
-    row.payment_status === "void"
+    !row.officials || row.payment_status === "void"
       ? 0
       : Number(row.game_fee || 0) + mileagePay(row);
   const patch = (id: string, values: Partial<PayrollRow>) =>
@@ -514,9 +514,9 @@ export default function PayrollManager({
     (sum, row) => ({
       fees:
         sum.fees +
-        (row.payment_status === "void" ? 0 : Number(row.game_fee || 0)),
+        (!row.officials || row.payment_status === "void" ? 0 : Number(row.game_fee || 0)),
       mileage:
-        sum.mileage + (row.payment_status === "void" ? 0 : mileagePay(row)),
+        sum.mileage + (!row.officials || row.payment_status === "void" ? 0 : mileagePay(row)),
       total: sum.total + total(row),
     }),
     { fees: 0, mileage: 0, total: 0 },
@@ -1438,9 +1438,9 @@ export default function PayrollManager({
                           type="checkbox"
                           aria-label={`Select payroll record for ${officialName(row)}`}
                           checked={selected.includes(row.id)}
-                          disabled={!row.stripe_payment_ready}
+                          disabled={!row.officials || !row.stripe_payment_ready}
                           title={
-                            !row.stripe_payment_ready
+                            !row.officials ? "No payee: this position cannot be paid." : !row.stripe_payment_ready
                               ? "Official must complete Stripe payment setup before payroll."
                               : undefined
                           }
@@ -1479,12 +1479,12 @@ export default function PayrollManager({
                           </small>
                         ))}
                         <small>
-                          {row.status === "confirmed"
+                          {row.status === "unassigned" ? "No payee" : row.status === "confirmed"
                             ? "Confirmed"
                             : "Accepted"}
                         </small>
                         <small>
-                          {row.stripe_payment_ready
+                          {!row.officials ? (row.payment_status === "void" ? "Voided" : "Not payable until accepted") : row.stripe_payment_ready
                             ? "Stripe ready"
                             : `Stripe: ${row.stripe_payment_status.replaceAll("_", " ")}`}
                         </small>
@@ -1497,6 +1497,7 @@ export default function PayrollManager({
                           min="0"
                           step="0.01"
                           value={row.game_fee}
+                          disabled={!row.officials}
                           onChange={(event) =>
                             patch(row.id, {
                               game_fee: Number(event.target.value),
@@ -1602,7 +1603,7 @@ export default function PayrollManager({
                           }
                         >
                           {statuses.map(([value, label]) => (
-                            <option key={value} value={value}>
+                            <option key={value} value={value} disabled={!row.officials && (value === "approved" || value === "paid")}>
                               {label}
                             </option>
                           ))}
