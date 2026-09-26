@@ -224,6 +224,7 @@ export default function PayrollManager({
     { key: "date", direction: "asc" },
   );
   const [importRows, setImportRows] = useState<ImportRow[]>([]);
+  const [importErrors, setImportErrors] = useState<Array<{ row: number; message: string }>>([]);
   const [importFile, setImportFile] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState("");
@@ -869,6 +870,7 @@ export default function PayrollManager({
     setError("");
     setNotice("");
     setImportRows([]);
+    setImportErrors([]);
     try {
       const XLSX = await import("xlsx");
       const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
@@ -878,7 +880,10 @@ export default function PayrollManager({
       );
       if (!records.length)
         throw new Error("The payroll spreadsheet has no data rows.");
-      const preview = records.map((raw, index) => {
+      const errors: Array<{ row: number; message: string }> = [];
+      const seen = new Set<string>();
+      const preview = records.flatMap((raw, index) => {
+        try {
         const record = normalizedRecord(raw),
           assignmentId = String(record.assignment_id || "").trim(),
           gameNumber = String(record.game_number || "").trim(),
@@ -915,7 +920,9 @@ export default function PayrollManager({
           throw new Error(
             `Spreadsheet row ${index + 2}: Payment Status must be Unpaid, Approved, Paid, or Void.`,
           );
-        return {
+        if (seen.has(matches[0].id))
+          throw new Error("Duplicate assignment in import.");
+        const parsed = {
           spreadsheetRow: index + 2,
           assignmentId: matches[0].id,
           label: `${matches[0].games?.game_number} — ${officialName(matches[0])} — ${matches[0].sport_positions?.name || "Official"}`,
@@ -931,21 +938,18 @@ export default function PayrollManager({
           paymentStatus: paymentStatus as PaymentStatus,
           notes: String(record.notes ?? matches[0].payroll_notes ?? "").trim(),
         };
+        seen.add(matches[0].id);
+        return [parsed];
+        } catch (error) {
+          errors.push({ row: index + 2, message: error instanceof Error ? error.message : "Invalid payroll row." });
+          return [];
+        }
       });
-      const duplicate = preview.find(
-        (row, index) =>
-          preview.findIndex(
-            (other) => other.assignmentId === row.assignmentId,
-          ) !== index,
-      );
-      if (duplicate)
-        throw new Error(
-          `Spreadsheet row ${duplicate.spreadsheetRow}: duplicate assignment in import.`,
-        );
+      setImportErrors(errors);
       setImportRows(preview);
       setImportFile(file.name);
       setNotice(
-        `${preview.length} payroll rows validated. Review the preview, then apply the import.`,
+        `${preview.length} payroll rows ready; ${errors.length} row${errors.length === 1 ? " has" : "s have"} errors. Review the preview, then apply valid rows.`,
       );
     } catch (importError) {
       setImportFile("");
@@ -961,10 +965,7 @@ export default function PayrollManager({
     if (!importRows.length) return;
     setSaving("import");
     setError("");
-    const { data, error: importError } = await supabase.rpc(
-      "import_payroll_rows",
-      {
-        p_rows: importRows.map((row) => ({
+    const payload = importRows.map((row) => ({
           organization_id: organizationId,
           assignment_id: row.assignmentId,
           spreadsheet_row: row.spreadsheetRow,
@@ -973,18 +974,33 @@ export default function PayrollManager({
           mileage_rate: row.mileageRate,
           payment_status: row.paymentStatus,
           payroll_notes: row.notes || null,
-        })),
-      },
-    );
-    if (importError) setError(importError.message);
-    else {
-      setNotice(
-        `${Number(data || importRows.length)} payroll records imported from ${importFile}.`,
-      );
-      setImportRows([]);
-      setImportFile("");
-      await load();
+        }));
+    const failures = [...importErrors];
+    const saved = new Set<number>();
+    async function applyChunk(chunk: typeof payload): Promise<void> {
+      const { error } = await supabase.rpc("import_payroll_rows", { p_rows: chunk });
+      if (!error) {
+        chunk.forEach((row) => saved.add(row.spreadsheet_row));
+      } else if (error.code === "42501" || error.code === "PGRST301") {
+        throw new Error(error.message);
+      } else if (chunk.length === 1) {
+        failures.push({ row: chunk[0].spreadsheet_row, message: error.message });
+      } else {
+        const middle = Math.floor(chunk.length / 2);
+        await applyChunk(chunk.slice(0, middle));
+        await applyChunk(chunk.slice(middle));
+      }
     }
+    try {
+      for (let index = 0; index < payload.length; index += 50)
+        await applyChunk(payload.slice(index, index + 50));
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Payroll import stopped.");
+    }
+    setImportErrors(failures.sort((a, b) => a.row - b.row));
+    setImportRows((current) => current.filter((row) => !saved.has(row.spreadsheetRow)));
+    setNotice(`${saved.size} payroll records imported from ${importFile}; ${failures.length} row${failures.length === 1 ? " needs" : "s need"} review.`);
+    await load();
     setSaving("");
   }
 
@@ -1171,12 +1187,12 @@ export default function PayrollManager({
           <span>Unpaid assignments</span>
         </div>
       </div>
-      {importRows.length > 0 && (
+      {(importRows.length > 0 || importErrors.length > 0) && (
         <div className="payrollImportPreview">
           <div className="cardHead">
             <div>
               <h3>Import Preview</h3>
-              <p>{importFile} — no changes have been applied.</p>
+              <p>{importFile} — review valid rows and errors below.</p>
             </div>
             <div className="headerActions">
               <button
@@ -1184,13 +1200,14 @@ export default function PayrollManager({
                 onClick={() => {
                   setImportRows([]);
                   setImportFile("");
+                  setImportErrors([]);
                 }}
               >
                 Cancel
               </button>
               <button
                 className="primary"
-                disabled={saving === "import"}
+                disabled={saving === "import" || !importRows.length}
                 onClick={() => void applyImport()}
               >
                 {saving === "import"
@@ -1199,6 +1216,12 @@ export default function PayrollManager({
               </button>
             </div>
           </div>
+          {importErrors.length > 0 && (
+            <div className="errorBox" role="status">
+              <b>{importErrors.length} row{importErrors.length === 1 ? "" : "s"} need review:</b>
+              <ul>{importErrors.map((item) => <li key={item.row}>Row {item.row}: {item.message}</li>)}</ul>
+            </div>
+          )}
           <div className="tableWrap">
             <table>
               <thead>
