@@ -5,7 +5,7 @@ import { createClient } from "../lib/supabase/client";
 
 type PaymentStatus = "unpaid" | "approved" | "paid" | "void";
 type MileagePlan = "one_way" | "round_trip" | "actual" | "none";
-type Period = "all" | "past" | "week" | "future";
+type Period = "all" | "past" | "week" | "future" | "custom";
 type PaymentMethod = "stripe" | "outside_stripe";
 type SortKey =
   | "date"
@@ -217,6 +217,8 @@ export default function PayrollManager({
   const [weekdayOrigins, setWeekdayOrigins] = useState<WeekdayOrigin[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [period, setPeriod] = useState<Period>("all");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [leagueFilter, setLeagueFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("stripe");
@@ -375,6 +377,8 @@ export default function PayrollManager({
       return;
     handledReportFocus.current = focusAssignmentId;
     setPeriod("all");
+    setStartDate("");
+    setEndDate("");
     setStatusFilter("all");
     setSelected([focusAssignmentId]);
     window.setTimeout(
@@ -481,11 +485,13 @@ export default function PayrollManager({
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const { start, end } = weekBounds();
+      const localGameDate = `${gameDate.getFullYear()}-${String(gameDate.getMonth() + 1).padStart(2, "0")}-${String(gameDate.getDate()).padStart(2, "0")}`;
       const periodMatch =
         period === "all" ||
         (period === "past" && gameDate < today) ||
         (period === "week" && gameDate >= start && gameDate < end) ||
-        (period === "future" && gameDate >= end);
+        (period === "future" && gameDate >= end) ||
+        (period === "custom" && (!startDate || localGameDate >= startDate) && (!endDate || localGameDate <= endDate));
       return (
         periodMatch &&
         (leagueFilter === "all" || row.games?.leagues?.id === leagueFilter) &&
@@ -1117,7 +1123,7 @@ export default function PayrollManager({
         </div>
       )}
       <div className="payrollSlicers" aria-label="Game date filters">
-        {(["all", "past", "week", "future"] as Period[]).map((value) => (
+        {(["all", "past", "week", "future", "custom"] as Period[]).map((value) => (
           <button
             key={value}
             className={period === value ? "active" : ""}
@@ -1129,10 +1135,24 @@ export default function PayrollManager({
                 ? "Past Games"
                 : value === "week"
                   ? "This Week"
-                  : "Future"}
+                  : value === "future"
+                    ? "Future"
+                    : "Choose Dates"}
           </button>
         ))}
       </div>
+      {period === "custom" && (
+        <div className="formGrid payrollFilters">
+          <label>
+            From game date
+            <input type="date" value={startDate} max={endDate || undefined} onChange={(event) => setStartDate(event.target.value)} />
+          </label>
+          <label>
+            Through game date
+            <input type="date" value={endDate} min={startDate || undefined} onChange={(event) => setEndDate(event.target.value)} />
+          </label>
+        </div>
+      )}
       <div className="formGrid payrollFilters">
         <label>
           League
