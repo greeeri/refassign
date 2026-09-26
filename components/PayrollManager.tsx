@@ -220,6 +220,7 @@ export default function PayrollManager({
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [leagueFilter, setLeagueFilter] = useState("all");
+  const [officialFilter, setOfficialFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("stripe");
   const [sort, setSort] = useState<{ key: SortKey; direction: "asc" | "desc" }>(
@@ -482,6 +483,14 @@ export default function PayrollManager({
   const sortLabel = (label: string, key: SortKey) =>
     `${label}${sort.key === key ? (sort.direction === "asc" ? " ▲" : " ▼") : ""}`;
 
+  const officialOptions = Array.from(
+    new Map(
+      rows.filter((row) => row.officials).map((row) => [
+        row.officials!.id,
+        officialName(row),
+      ]),
+    ),
+  ).sort((a, b) => a[1].localeCompare(b[1]));
   const visible = rows
     .filter((row) => {
       const gameDate = new Date(row.games?.starts_at || 0);
@@ -498,6 +507,10 @@ export default function PayrollManager({
       return (
         periodMatch &&
         (leagueFilter === "all" || row.games?.leagues?.id === leagueFilter) &&
+        (officialFilter === "all" ||
+          (officialFilter === "no-payee"
+            ? !row.officials
+            : row.officials?.id === officialFilter)) &&
         (statusFilter === "all" || row.payment_status === statusFilter)
       );
     })
@@ -1209,6 +1222,21 @@ export default function PayrollManager({
                 {league.name}
               </option>
             ))}
+          </select>
+        </label>
+        <label>
+          Official
+          <select
+            value={officialFilter}
+            onChange={(event) => setOfficialFilter(event.target.value)}
+          >
+            <option value="all">All Officials</option>
+            {officialOptions.map(([id, name]) => (
+              <option key={id} value={id}>{name}</option>
+            ))}
+            {rows.some((row) => !row.officials) && (
+              <option value="no-payee">No payee</option>
+            )}
           </select>
         </label>
         <label>
