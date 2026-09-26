@@ -3980,6 +3980,14 @@ export default function AssignmentsManagerV2({
   }
   async function exportAssignments(gameIds?: string[]) {
     const XLSX = await import("xlsx");
+    const payResponse = await fetch(`/api/games/pay?organizationId=${encodeURIComponent(organizationId || "")}`, { cache: "no-store" });
+    if (!payResponse.ok) {
+      const detail = await payResponse.json().catch(() => ({}));
+      setError(detail.error || "Game position pay could not be loaded for export.");
+      return;
+    }
+    const payData = await payResponse.json() as { rates: Array<{ game_id: string; position_id: string; amount: number; payment_status: string }> };
+    const quotedPay = new Map(payData.rates.map((rate) => [`${rate.game_id}:${rate.position_id}`, rate]));
     const exportGames = gameIds?.length
       ? filteredGames.filter((listedGame) => gameIds.includes(listedGame.id))
       : filteredGames;
@@ -4047,10 +4055,10 @@ export default function AssignmentsManagerV2({
         row[`${name} Accept By`] = assignment?.accept_by
           ? new Date(assignment.accept_by).toLocaleString()
           : "";
-        row[`${name} Game Fee`] = assignment
-          ? Number(assignment.game_fee || 0)
-          : "";
-        row[`${name} Payment Status`] = assignment?.payment_status || "";
+        const quote = quotedPay.get(`${g.id}:${position.id}`);
+        row[`${name} Game Fee`] = quote ? Number(quote.amount) : assignment ? Number(assignment.game_fee || 0) : "";
+        row[`${name} Payment Status`] = assignment && ["accepted", "confirmed"].includes(assignment.status)
+          ? assignment.payment_status : quote?.payment_status || "";
         row[`${name} Payroll Ready`] =
           assignment && ["accepted", "confirmed"].includes(assignment.status)
             ? "Yes"
@@ -4097,27 +4105,24 @@ export default function AssignmentsManagerV2({
         const gameId = String(normalized.game_id || "").trim();
         const feeRows: Array<{
           spreadsheetRow: number;
-          assignmentId: string;
           gameId: string;
+          positionId: string;
           gameFee: number;
         }> = [];
         const prefixes = Object.keys(normalized)
-          .filter((key) => key.endsWith("_assignment_id"))
-          .map((key) => key.slice(0, -"_assignment_id".length));
+          .filter((key) => key.endsWith("_game_fee"))
+          .map((key) => key.slice(0, -"_game_fee".length));
         for (const prefix of prefixes) {
           const position = prefix
             .split("_")
             .map((word) => (word ? word[0].toUpperCase() + word.slice(1) : ""))
             .join(" ");
-          const assignmentId = String(
-            normalized[`${prefix}_assignment_id`] || "",
-          ).trim();
           const rawFee = normalized[`${prefix}_game_fee`];
-          if (!assignmentId && (rawFee === "" || rawFee == null)) continue;
-          if (!assignmentId)
-            throw new Error(
-              `Spreadsheet row ${index + 2}: ${position} Game Fee can only be uploaded when that position is assigned.`,
-            );
+          if (rawFee === "" || rawFee == null) continue;
+          const game = games.find((item) => item.id === gameId);
+          const match = positions.find((item) => item.sport_id === game?.sport_id && item.name.toLowerCase() === position.toLowerCase());
+          if (!game || !match)
+            throw new Error(`Spreadsheet row ${index + 2}: Game ID or ${position} position is not available.`);
           const gameFee = Number(rawFee);
           if (!Number.isFinite(gameFee) || gameFee < 0)
             throw new Error(
@@ -4125,8 +4130,8 @@ export default function AssignmentsManagerV2({
             );
           feeRows.push({
             spreadsheetRow: index + 2,
-            assignmentId,
             gameId,
+            positionId: match.id,
             gameFee,
           });
         }
@@ -4134,26 +4139,26 @@ export default function AssignmentsManagerV2({
       });
       if (!rows.length)
         throw new Error(
-          "No assigned positions with game fees were found in the spreadsheet.",
+          "No game positions with fees were found in the spreadsheet.",
         );
       const duplicate = rows.find(
         (row, index) =>
-          rows.findIndex((other) => other.assignmentId === row.assignmentId) !==
+          rows.findIndex((other) => other.gameId === row.gameId && other.positionId === row.positionId) !==
           index,
       );
       if (duplicate)
         throw new Error(
-          `Spreadsheet row ${duplicate.spreadsheetRow}: this assignment appears more than once.`,
+          `Spreadsheet row ${duplicate.spreadsheetRow}: this game position appears more than once.`,
         );
       if (
         !window.confirm(
-          `Upload game fees for ${rows.length} assigned position${rows.length === 1 ? "" : "s"}? The amounts will appear in Payroll as soon as each assignment is accepted or confirmed.`,
+          `Upload game fees for ${rows.length} game position${rows.length === 1 ? "" : "s"}? Unfilled positions will appear in Payroll without a payee.`,
         )
       )
         return;
       setSaving("assignment-fee-import");
       const response = await fetch(
-        `/api/assignments/import-fees?organizationId=${encodeURIComponent(organizationId)}`,
+        `/api/games/pay/import?organizationId=${encodeURIComponent(organizationId)}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -4169,7 +4174,7 @@ export default function AssignmentsManagerV2({
           result.error || "Assignment fees could not be imported.",
         );
       setNotice(
-        `${result.updated || rows.length} assignment fee${(result.updated || rows.length) === 1 ? " was" : "s were"} uploaded and sent to Payroll.`,
+        `${result.updated || rows.length} game position fee${(result.updated || rows.length) === 1 ? " was" : "s were"} uploaded and sent to Payroll.`,
       );
       await refreshAssignmentState();
     } catch (importError) {
