@@ -7,6 +7,7 @@ export default function SelfAssignOverrideRequests({ organizationId }: { organiz
   const [requests, setRequests] = useState<any[]>([]);
   const [working, setWorking] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const requestedId = typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("override") || "";
   async function load() {
     const { data, error: loadError } = await supabase.from("self_assign_override_requests").select(
@@ -22,7 +23,7 @@ export default function SelfAssignOverrideRequests({ organizationId }: { organiz
   }, [requestedId, requests]);
   async function review(id: string, approve: boolean) {
     if (approve && !window.confirm("Approve this eligibility override and confirm the official on the assignment?")) return;
-    setWorking(id); setError("");
+    setWorking(id); setError(""); setNotice("");
     try {
       const response = await fetch("/api/assignments/self-assign-review", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requestId: id, approve }) });
       const result = await response.json();
@@ -31,10 +32,41 @@ export default function SelfAssignOverrideRequests({ organizationId }: { organiz
     } catch { setError("Unable to review the request. Please try again."); }
     setWorking("");
   }
-  if (!requests.length && !error) return null;
+  async function reviewAll(approve: boolean) {
+    const count = requests.length;
+    if (count < 2 || !window.confirm(approve
+      ? `Accept all ${count} override requests? Each successful approval will assign and notify that official. Requests for a filled position may fail individually.`
+      : `Decline all ${count} override requests?`)) return;
+    setWorking("bulk"); setError(""); setNotice("");
+    let reviewed = 0;
+    const issues: string[] = [];
+    for (const request of requests) {
+      try {
+        const response = await fetch("/api/assignments/self-assign-review", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ requestId: request.id, approve }),
+        });
+        const result = await response.json();
+        if (!response.ok) issues.push(`Request ${request.id}: ${result.error || "Could not review."}`);
+        else {
+          reviewed++;
+          if (result.warning) issues.push(`Request ${request.id}: ${result.warning}`);
+        }
+      } catch {
+        issues.push(`Request ${request.id}: Could not review. Please try again.`);
+      }
+    }
+    await load();
+    setNotice(`${reviewed} override request${reviewed === 1 ? "" : "s"} ${approve ? "accepted" : "declined"}.`);
+    if (issues.length) setError(issues.join(" "));
+    setWorking("");
+  }
+  if (!requests.length && !error && !notice) return null;
   return <section className="card" style={{ borderColor: "#f59e0b", marginBottom: 14 }}>
-    <div className="cardHead"><div><h3>Eligibility Override Requests</h3><p>Review officials who requested an open position they are not currently eligible for.</p></div><span className="badge yellow">{requests.length} pending</span></div>
+    <div className="cardHead"><div><h3>Eligibility Override Requests</h3><p>Review officials who requested an open position they are not currently eligible for.</p></div><div className="headerActions">{requests.length > 1 && <><button className="secondary" disabled={Boolean(working)} onClick={() => void reviewAll(false)}>Decline All</button><button className="success" disabled={Boolean(working)} onClick={() => void reviewAll(true)}>{working === "bulk" ? "Reviewing…" : "Accept All"}</button></>}<span className="badge yellow">{requests.length} pending</span></div></div>
     {error && <div className="errorBox">{error}</div>}
+    {notice && <p role="status">{notice}</p>}
     <div style={{ display: "grid", gap: 8 }}>
       {requests.map((request) => {
         const official = Array.isArray(request.officials) ? request.officials[0] : request.officials;
@@ -45,7 +77,7 @@ export default function SelfAssignOverrideRequests({ organizationId }: { organiz
         const away = Array.isArray(game?.away) ? game.away[0] : game?.away;
         return <article key={request.id} id={`override-${request.id}`} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: 12, alignItems: "center", padding: 12, border: requestedId === request.id ? "2px solid #2563eb" : "1px solid #fde68a", borderRadius: 9, background: "#fffbeb" }}>
           <div><b>{official?.first_name} {official?.last_name}</b><small style={{ display: "block" }}>Game #{game?.game_number} · {home?.name || "TBD"} vs {away?.name || "TBD"} · {position?.name || "Position"}</small><small style={{ display: "block", color: "#92400e" }}>{request.eligibility_reason}</small></div>
-          <div style={{ display: "flex", gap: 7 }}><button className="secondary" disabled={working === request.id} onClick={() => void review(request.id, false)}>Deny</button><button className="success" disabled={working === request.id} onClick={() => void review(request.id, true)}>{working === request.id ? "Working…" : "Approve Override"}</button></div>
+          <div style={{ display: "flex", gap: 7 }}><button className="secondary" disabled={Boolean(working)} onClick={() => void review(request.id, false)}>Deny</button><button className="success" disabled={Boolean(working)} onClick={() => void review(request.id, true)}>{working === request.id ? "Working…" : "Approve Override"}</button></div>
         </article>;
       })}
     </div>
