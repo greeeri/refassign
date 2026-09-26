@@ -41,6 +41,7 @@ type PayrollRow = {
   games: {
     id: string;
     game_number: string;
+    level: string | null;
     starts_at: string;
     bill_to_id: string | null;
     bill_to: { name: string; email: string | null } | null;
@@ -812,6 +813,7 @@ export default function PayrollManager({
       "Game Number": row.games?.game_number || "",
       League: row.games?.leagues?.name || "",
       Game: gameName(row),
+      Level: row.games?.level || "",
       Location: row.games?.location?.name || "",
       "Bill To": row.games?.bill_to?.name || "",
       Official: officialName(row),
@@ -834,6 +836,7 @@ export default function PayrollManager({
       { wch: 16 },
       { wch: 20 },
       { wch: 32 },
+      { wch: 18 },
       { wch: 24 },
       { wch: 24 },
       { wch: 18 },
@@ -1405,6 +1408,7 @@ export default function PayrollManager({
                       </td>
                       <td>
                         <b>{gameName(row)}</b>
+                        <small>Level: {row.games?.level || "Not assigned"}</small>
                         <small>{row.games?.game_number}</small>
                         <small className="payrollLeagueName">
                           League: {row.games?.leagues?.name || "Not assigned"}
