@@ -1336,6 +1336,7 @@ export default function PayrollManager({
               <col className="payrollSelectCol" />
               <col className="payrollDateCol" />
               <col className="payrollGameCol" />
+              <col className="payrollLevelCol" />
               <col className="payrollLocationCol" />
               <col className="payrollOfficialCol" />
               <col className="payrollPositionCol" />
