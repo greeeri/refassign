@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: queryError.message }, { status: 400 });
 
   let updated = 0;
-  const failures: string[] = [];
+  const failures: Array<{ type: "location" | "official" | "alternate"; id: string; message: string }> = [];
 
   const locationTasks = ((locationsResult.data || []) as unknown as AddressRow[])
     .filter((row) => {
@@ -90,11 +90,8 @@ export async function POST(request: NextRequest) {
         if (error) throw error;
         updated++;
       } catch (error) {
-        failures.push(
-          error instanceof Error
-            ? error.message
-            : `Venue could not be located: ${row.name || addressText(row)}`,
-        );
+        failures.push({ type: "location", id: row.id, message: error instanceof Error
+          ? error.message : `Venue could not be located: ${row.name || addressText(row)}` });
       }
     });
 
@@ -113,11 +110,8 @@ export async function POST(request: NextRequest) {
       if (error) throw error;
       updated++;
     } catch (error) {
-      failures.push(
-        error instanceof Error
-          ? error.message
-          : "Official address could not be located.",
-      );
+      failures.push({ type: "official", id: row.id, message: error instanceof Error
+        ? error.message : "Official address could not be located." });
     }
   });
 
@@ -139,11 +133,8 @@ export async function POST(request: NextRequest) {
       if (error) throw error;
       updated++;
     } catch (error) {
-      failures.push(
-        error instanceof Error
-          ? error.message
-          : "Alternate address could not be located.",
-      );
+      failures.push({ type: "alternate", id: row.id, message: error instanceof Error
+        ? error.message : "Alternate address could not be located." });
     }
   });
 
@@ -152,6 +143,6 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     updated,
     failed: failures.length,
-    failures: failures.slice(0, 10),
+    failures,
   });
 }
