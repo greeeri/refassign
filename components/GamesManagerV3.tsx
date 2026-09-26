@@ -315,6 +315,7 @@ export default function GamesManagerV3({
     [form, setForm] = useState(blank),
     [payPositions, setPayPositions] = useState<Array<{ id: string; sport_id: string; name: string; sort_order: number }>>([]),
     [payRates, setPayRates] = useState<Record<string, number>>({}),
+    [payStatuses, setPayStatuses] = useState<Record<string, string>>({}),
     [editing, setEditing] = useState<string | null>(null),
     [show, setShow] = useState(false),
     [showImport, setShowImport] = useState(false),
@@ -351,6 +352,7 @@ export default function GamesManagerV3({
         const result = await response.json();
         setPayPositions(result.positions || []);
         setPayRates(Object.fromEntries((result.rates || []).map((rate: { game_id: string; position_id: string; amount: number }) => [`${rate.game_id}:${rate.position_id}`, Number(rate.amount)])));
+        setPayStatuses(Object.fromEntries((result.rates || []).map((rate: { game_id: string; position_id: string; payment_status: string }) => [`${rate.game_id}:${rate.position_id}`, rate.payment_status])));
       }
     }
     const locationRequest = organizationId
@@ -1449,6 +1451,7 @@ export default function GamesManagerV3({
               {position.name} pay
               <input type="number" min="0" step="0.01" value={payRates[`${editing || "draft"}:${position.id}`] ?? ""}
                 placeholder="0.00" onChange={(event) => setPayRates((current) => ({ ...current, [`${editing || "draft"}:${position.id}`]: Number(event.target.value) }))} />
+              {editing && payStatuses[`${editing}:${position.id}`] && <small>Position pay: {payStatuses[`${editing}:${position.id}`]}</small>}
             </label>
           ))}
           <label>
