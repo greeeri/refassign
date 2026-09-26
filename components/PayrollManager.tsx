@@ -10,6 +10,7 @@ type PaymentMethod = "stripe" | "outside_stripe";
 type SortKey =
   | "date"
   | "game"
+  | "level"
   | "location"
   | "official"
   | "position"
@@ -446,6 +447,7 @@ export default function PayrollManager({
   function sortValue(row: PayrollRow, key: SortKey): string | number {
     if (key === "date") return row.games?.starts_at || "";
     if (key === "game") return gameName(row);
+    if (key === "level") return row.games?.level || "";
     if (key === "location") return row.games?.location?.name || "";
     if (key === "official") return officialName(row);
     if (key === "position") return row.sport_positions?.name || "";
@@ -830,6 +832,7 @@ export default function PayrollManager({
       Notes: row.payroll_notes || "",
     }));
     const sheet = XLSX.utils.json_to_sheet(data);
+    sheet["!autofilter"] = { ref: sheet["!ref"] || "A1:T1" };
     sheet["!cols"] = [
       { wch: 38 },
       { wch: 12 },
@@ -1334,6 +1337,7 @@ export default function PayrollManager({
                   [
                     ["date", "Date"],
                     ["game", "Game / League"],
+                    ["level", "Level"],
                     ["location", "Location"],
                     ["official", "Accepted Official"],
                     ["position", "Position"],
@@ -1408,12 +1412,12 @@ export default function PayrollManager({
                       </td>
                       <td>
                         <b>{gameName(row)}</b>
-                        <small>Level: {row.games?.level || "Not assigned"}</small>
                         <small>{row.games?.game_number}</small>
                         <small className="payrollLeagueName">
                           League: {row.games?.leagues?.name || "Not assigned"}
                         </small>
                       </td>
+                      <td>{row.games?.level || "Not assigned"}</td>
                       <td>{row.games?.location?.name || "TBD"}</td>
                       <td>
                         <b>{officialName(row)}</b>
@@ -1570,7 +1574,7 @@ export default function PayrollManager({
                 })
               ) : (
                 <tr>
-                  <td colSpan={16}>
+                  <td colSpan={17}>
                     No accepted payroll records match these filters.
                   </td>
                 </tr>
