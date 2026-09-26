@@ -23,8 +23,12 @@ export default function SelfAssignOverrideRequests({ organizationId }: { organiz
   async function review(id: string, approve: boolean) {
     if (approve && !window.confirm("Approve this eligibility override and confirm the official on the assignment?")) return;
     setWorking(id); setError("");
-    const { error: reviewError } = await supabase.rpc("review_self_assign_override", { p_request_id: id, p_approve: approve });
-    if (reviewError) setError(reviewError.message); else await load();
+    try {
+      const response = await fetch("/api/assignments/self-assign-review", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requestId: id, approve }) });
+      const result = await response.json();
+      if (!response.ok) setError(result.error || "Unable to review the request.");
+      else { await load(); if (result.warning) setError(result.warning); }
+    } catch { setError("Unable to review the request. Please try again."); }
     setWorking("");
   }
   if (!requests.length && !error) return null;
