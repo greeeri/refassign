@@ -11,6 +11,7 @@ import TournamentRulesLink from "./TournamentRulesLink";
 import OfficialCrewList, { OfficialCrewMember } from "./OfficialCrewList";
 type Assignment = {
   assignment_id: string;
+  game_fee?: number;
   game_id: string;
   game_number: string | null;
   game_status: string | null;
@@ -129,7 +130,13 @@ export default function OfficialDashboard({
     }));
     const loadError=results.find(result=>result.error)?.error;
     if (loadError) setError(loadError.message);
-    else setRows(results.flatMap(result=>((result.data||[]) as Assignment[]).map(row=>({...row,organization_name:organizationNames[result.organizationId]}))));
+    else {
+      const assignments = results.flatMap(result=>((result.data||[]) as Assignment[]).map(row=>({...row,organization_name:organizationNames[result.organizationId]})));
+      const feeRows = await Promise.all(Array.from({ length: Math.ceil(assignments.length / 200) }, (_, index) =>
+        supabase.from("assignments").select("id,game_fee").in("id", assignments.slice(index * 200, index * 200 + 200).map((row) => row.assignment_id)).limit(200)));
+      const fees = new Map(feeRows.flatMap((result) => result.data || []).map((row) => [row.id, Number(row.game_fee || 0)]));
+      setRows(assignments.map((row) => ({ ...row, game_fee: fees.get(row.assignment_id) })));
+    }
     setLoading(false);
   }, [organizationId, organizationIds?.join("|"), organizationNames, supabase]);
   useEffect(() => {
@@ -276,6 +283,7 @@ export default function OfficialDashboard({
               {next.status === "proposed" ? "Needs Response" : "Accepted"}
             </span>
           </div>
+          {next.game_fee != null && <p>Game pay: ${next.game_fee.toFixed(2)}</p>}
           <div className="nextAssignmentFacts">
             <div>
               <small>DATE & TIME</small>

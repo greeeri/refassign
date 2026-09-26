@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
   let assignmentQuery = service
     .from("assignments")
     .select(
-      "id,status,game_fee,mileage_miles,mileage_rate,payment_status,paid_at,payroll_notes,officials(id,first_name,last_name,home_latitude,home_longitude),sport_positions(name),games!inner(id,game_number,level,starts_at,organization_id,bill_to_id,bill_to:bill_to_accounts(name,email),leagues(id,name,mileage_plan),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(id,name,latitude,longitude))",
+      "id,position_id,status,game_fee,mileage_miles,mileage_rate,payment_status,paid_at,payroll_notes,officials(id,first_name,last_name,home_latitude,home_longitude),sport_positions(name),games!inner(id,game_number,level,starts_at,organization_id,bill_to_id,bill_to:bill_to_accounts(name,email),leagues(id,name,mileage_plan),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(id,name,latitude,longitude))",
     )
     .eq("games.organization_id", organizationId)
     .not("official_id", "is", null)
@@ -47,6 +47,21 @@ export async function GET(request: NextRequest) {
         error: { message: string } | null;
       }>,
   );
+  const quotedResult = await readAllPages<Record<string, any>>((from, to) => {
+    let query = service.from("game_position_pay")
+      .select("game_id,position_id,amount,payment_status,sport_positions(name),games!inner(id,game_number,level,starts_at,organization_id,league_id,bill_to_id,bill_to:bill_to_accounts(name,email),leagues(id,name,mileage_plan),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(id,name,latitude,longitude))")
+      .eq("games.organization_id", organizationId).order("game_id").order("position_id").range(from, to);
+    if (leagueIds) query = query.in("games.league_id", leagueIds);
+    return query;
+  });
+  if (quotedResult.error) return NextResponse.json({ error: quotedResult.error.message }, { status: 400 });
+  const occupied = new Set((assignmentResult.data || []).map((row) => `${row.games?.id}:${row.position_id}`));
+  const vacancies = (quotedResult.data || []).filter((row) => !occupied.has(`${row.game_id}:${row.position_id}`)).map((row) => ({
+    id: `vacant:${row.game_id}:${row.position_id}`, status: "unassigned", game_fee: Number(row.amount),
+    mileage_miles: 0, mileage_rate: 0, payment_status: row.payment_status,
+    paid_at: null, payroll_notes: null, officials: null, sport_positions: row.sport_positions,
+    games: row.games, stripe_payment_status: "not_started", stripe_payment_ready: false,
+  }));
   const officialIds = [
     ...new Set(
       (assignmentResult.data || [])
@@ -119,7 +134,7 @@ export async function GET(request: NextRequest) {
           readiness.transfers_status === "active" &&
           readiness.payouts_status === "active",
       };
-    }),
+    }).concat(vacancies),
     weekdayOrigins: originResult.data || [],
   });
 }
@@ -141,6 +156,18 @@ export async function PATCH(request: NextRequest) {
     paymentStatus?: string;
     payrollNotes?: string | null;
   };
+  if (body.assignmentId?.startsWith("vacant:")) {
+    const [, gameId, positionId] = body.assignmentId.split(":");
+    if (!gameId || !positionId || !["void", "unpaid"].includes(body.paymentStatus || ""))
+      return NextResponse.json({ error: "Only void or unpaid is allowed for a position without a payee." }, { status: 400 });
+    const { data: game } = await service.from("games").select("id,league_id").eq("id", gameId).eq("organization_id", organizationId).maybeSingle();
+    if (!game || (leagueIds && (!game.league_id || !leagueIds.includes(game.league_id))))
+      return NextResponse.json({ error: "Game is not available." }, { status: 404 });
+    const { data: occupied } = await service.from("assignments").select("id").eq("game_id", gameId).eq("position_id", positionId).in("status", ["accepted", "confirmed"]).limit(1);
+    if (occupied?.length) return NextResponse.json({ error: "An official accepted this position. Reload payroll." }, { status: 409 });
+    const { error } = await service.from("game_position_pay").update({ payment_status: body.paymentStatus }).eq("game_id", gameId).eq("position_id", positionId);
+    return error ? NextResponse.json({ error: error.message }, { status: 400 }) : NextResponse.json({ saved: true });
+  }
   if (!body.assignmentId)
     return NextResponse.json(
       { error: "Assignment is required." },

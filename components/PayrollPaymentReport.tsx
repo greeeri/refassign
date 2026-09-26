@@ -33,17 +33,17 @@ const money = (value: number) =>
   value.toLocaleString("en-US", { style: "currency", currency: "USD" });
 const officialName = (row: Row) =>
   `${row.officials?.first_name || ""} ${row.officials?.last_name || ""}`.trim() ||
-  "Unknown official";
+  "No payee";
 const fee = (row: Row) =>
-  row.payment_status === "void" ? 0 : Number(row.game_fee || 0);
+  !row.officials || row.status === "proposed" || row.payment_status === "void" ? 0 : Number(row.game_fee || 0);
 const mileagePay = (row: Row) =>
-  row.payment_status === "void"
+  !row.officials || row.status === "proposed" || row.payment_status === "void"
     ? 0
     : Number(row.mileage_miles || 0) * Number(row.mileage_rate || 0);
 
 export default function PayrollPaymentReport({ organizationId, onOpenAction }: { organizationId?: string; onOpenAction?: (target: ReportActionTarget) => void }) {
   const [rows, setRows] = useState<Row[]>([]),
-    [period, setPeriod] = useState<Period>("90"),
+    [period, setPeriod] = useState<Period>("all"),
     [league, setLeague] = useState("all"),
     [official, setOfficial] = useState("all"),
     [status, setStatus] = useState("all"),
@@ -191,7 +191,7 @@ export default function PayrollPaymentReport({ organizationId, onOpenAction }: {
         row.games?.leagues?.name,
         officialName(row),
         row.sport_positions?.name,
-        fee(row).toFixed(2),
+        Number(row.game_fee || 0).toFixed(2),
         Number(row.mileage_miles || 0).toFixed(1),
         Number(row.mileage_rate || 0).toFixed(3),
         mileagePay(row).toFixed(2),
@@ -464,7 +464,7 @@ export default function PayrollPaymentReport({ organizationId, onOpenAction }: {
             kind="official"
           />
           <div className="drilldownDetailHead" id="payroll-detail"><h3>Payroll detail{detailFocus !== "all" ? ` — ${detailFocus}` : ""}</h3>{detailFocus !== "all" || league !== "all" || official !== "all" ? <button type="button" className="tableButton" onClick={() => { setDetailFocus("all"); setLeague("all"); setOfficial("all"); }}>Clear drill-down</button> : null}</div>
-          <div className="tableWrap"><table className="officialReportTable"><thead><tr><th>Date</th><th>Game</th><th>Official</th><th>Position</th><th>Organization</th><th>Game fee</th><th>Mileage</th><th>Total</th><th>Status</th><th>Action</th></tr></thead><tbody>{detailRows.length ? detailRows.map((row) => <tr key={row.id}><td>{row.games?.starts_at ? new Date(row.games.starts_at).toLocaleDateString() : "—"}</td><td>#{row.games?.game_number || "—"}</td><td><button type="button" className="reportTextAction" onClick={() => row.officials?.id && onOpenAction?.({ section: "Officials", officialId: row.officials.id })}>{officialName(row)}</button></td><td>{row.sport_positions?.name || "—"}</td><td>{row.games?.leagues?.name || "—"}</td><td>{money(fee(row))}</td><td>{money(mileagePay(row))}</td><td><b>{money(fee(row) + mileagePay(row))}</b></td><td>{row.payment_status}</td><td><button type="button" className="tableButton reportActionButton" onClick={() => onOpenAction?.({ section: "Payroll", assignmentId: row.id })}>Open payroll</button></td></tr>) : <tr><td colSpan={10}>No payroll records match this drill-down.</td></tr>}</tbody></table></div>
+          <div className="tableWrap"><table className="officialReportTable"><thead><tr><th>Date</th><th>Game</th><th>Official</th><th>Position</th><th>Organization</th><th>Game fee</th><th>Mileage</th><th>Total</th><th>Status</th><th>Action</th></tr></thead><tbody>{detailRows.length ? detailRows.map((row) => <tr key={row.id}><td>{row.games?.starts_at ? new Date(row.games.starts_at).toLocaleDateString() : "—"}</td><td>#{row.games?.game_number || "—"}</td><td><button type="button" className="reportTextAction" onClick={() => row.officials?.id && onOpenAction?.({ section: "Officials", officialId: row.officials.id })}>{officialName(row)}</button></td><td>{row.sport_positions?.name || "—"}</td><td>{row.games?.leagues?.name || "—"}</td><td>{money(row.officials ? fee(row) : Number(row.game_fee || 0))}{!row.officials && <small> Quoted; no payee</small>}</td><td>{money(mileagePay(row))}</td><td><b>{money(fee(row) + mileagePay(row))}</b></td><td>{row.payment_status}</td><td><button type="button" className="tableButton reportActionButton" onClick={() => onOpenAction?.({ section: "Payroll", assignmentId: row.id })}>Open payroll</button></td></tr>) : <tr><td colSpan={10}>No payroll records match this drill-down.</td></tr>}</tbody></table></div>
         </>
       )}
     </section>
