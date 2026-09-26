@@ -50,6 +50,7 @@ type PayrollRow = {
     home: { name: string } | null;
     away: { name: string } | null;
     location: {
+      id: string;
       name: string;
       latitude: number | null;
       longitude: number | null;
@@ -228,6 +229,7 @@ export default function PayrollManager({
   const [saving, setSaving] = useState("");
   const [error, setError] = useState("");
   const [addressWarning, setAddressWarning] = useState("");
+  const [addressFailures, setAddressFailures] = useState<Array<{ type: "location" | "official" | "alternate"; id: string; message: string }>>([]);
   const [notice, setNotice] = useState("");
 
   async function load() {
@@ -338,10 +340,12 @@ export default function PayrollManager({
         const result = (await response.json()) as {
           updated?: number;
           failed?: number;
+          failures?: Array<{ type: "location" | "official" | "alternate"; id: string; message: string }>;
           error?: string;
         };
         if (!response.ok)
           throw new Error(result.error || "Address backfill failed.");
+        setAddressFailures(result.failures || []);
         if (result.updated) {
           setNotice(
             `${result.updated} saved address${result.updated === 1 ? " was" : "es were"} located automatically. Mileage has been recalculated.`,
@@ -350,7 +354,7 @@ export default function PayrollManager({
         }
         if (result.failed)
           setAddressWarning(
-            `${result.failed} address${result.failed === 1 ? " could" : "es could"} not be located for automatic mileage. Payroll imports can still proceed; enter mileage manually where needed.`,
+            `${result.failed} address${result.failed === 1 ? " could" : "es could"} not be located for automatic mileage. Affected payroll rows are marked below; other records and payroll imports can proceed.`,
           );
       } catch (backfillError) {
         setAddressWarning(
@@ -1423,6 +1427,13 @@ export default function PayrollManager({
                       <td>{row.games?.location?.name || "TBD"}</td>
                       <td>
                         <b>{officialName(row)}</b>
+                        {addressFailures.filter((failure) =>
+                          failure.type === "location" ? failure.id === row.games?.location?.id : failure.id === row.officials?.id
+                        ).map((failure, index) => (
+                          <small key={`${failure.type}-${index}`} title={failure.message}>
+                            Address lookup failed ({failure.type === "location" ? "venue" : failure.type === "alternate" ? "alternate" : "home"}); check mileage
+                          </small>
+                        ))}
                         <small>
                           {row.status === "confirmed"
                             ? "Confirmed"
