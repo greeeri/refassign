@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
   let assignmentQuery = service
     .from("assignments")
     .select(
-      "id,position_id,status,game_fee,mileage_miles,mileage_rate,payment_status,paid_at,payroll_notes,officials(id,first_name,last_name,home_latitude,home_longitude),sport_positions(name),games!inner(id,game_number,level,starts_at,organization_id,bill_to_id,bill_to:bill_to_accounts(name,email),leagues(id,name,mileage_plan),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(id,name,latitude,longitude))",
+      "id,position_id,status,game_fee,mileage_miles,mileage_rate,payment_status,paid_at,payroll_notes,officials(id,first_name,last_name,home_latitude,home_longitude),sport_positions(name),games!inner(id,game_number,level,starts_at,organization_id,bill_to_id,bill_to:bill_to_accounts(name,email),leagues(id,name,mileage_plan),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(id,name,state,latitude,longitude))",
     )
     .eq("games.organization_id", organizationId)
     .not("official_id", "is", null)
@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
   );
   const quotedResult = await readAllPages<Record<string, any>>((from, to) => {
     let query = service.from("game_position_pay")
-      .select("game_id,position_id,amount,payment_status,sport_positions(name),games!inner(id,game_number,level,starts_at,organization_id,league_id,bill_to_id,bill_to:bill_to_accounts(name,email),leagues(id,name,mileage_plan),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(id,name,latitude,longitude))")
+      .select("game_id,position_id,amount,payment_status,sport_positions(name),games!inner(id,game_number,level,starts_at,organization_id,league_id,bill_to_id,bill_to:bill_to_accounts(name,email),leagues(id,name,mileage_plan),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(id,name,state,latitude,longitude))")
       .eq("games.organization_id", organizationId).order("game_id").order("position_id").range(from, to);
     if (leagueIds) query = query.in("games.league_id", leagueIds);
     return query;
