@@ -4119,6 +4119,8 @@ export default function AssignmentsManagerV2({
         workbook.Sheets[workbook.SheetNames[0]],
         { defval: "" },
       );
+      let skippedUnavailableFees = 0;
+      let splitTwoOfficialGames = 0;
       const rows = records.flatMap((record, index) => {
         const normalized = Object.fromEntries(
           Object.entries(record).map(([key, value]) => [
@@ -4127,12 +4129,17 @@ export default function AssignmentsManagerV2({
           ]),
         );
         const gameId = String(normalized.game_id || "").trim();
+        const game = games.find((item) => item.id === gameId);
+        const gamePositions = positions.filter((item) => item.sport_id === game?.sport_id)
+          .sort((a, b) => a.sort_order - b.sort_order || a.id.localeCompare(b.id));
+        const activePositions = gamePositions.slice(0, Math.max(0, game?.officials_needed || 0));
         const feeRows: Array<{
           spreadsheetRow: number;
           gameId: string;
           positionId: string;
           gameFee: number;
         }> = [];
+        const extraFees: Array<{ positionId: string; gameFee: number }> = [];
         const prefixes = Object.keys(normalized)
           .filter((key) => key.endsWith("_game_fee"))
           .map((key) => key.slice(0, -"_game_fee".length));
@@ -4142,8 +4149,7 @@ export default function AssignmentsManagerV2({
             .map((word) => (word ? word[0].toUpperCase() + word.slice(1) : ""))
             .join(" ");
           const rawFee = normalized[`${prefix}_game_fee`];
-          if (rawFee === "" || rawFee == null) continue;
-          const game = games.find((item) => item.id === gameId);
+          if (rawFee === "" || rawFee == null || String(rawFee).trim().toUpperCase() === "N/A") continue;
           const match = positions.find((item) => item.sport_id === game?.sport_id && item.name.toLowerCase() === position.toLowerCase());
           if (!game || !match)
             throw new Error(`Spreadsheet row ${index + 2}: Game ID or ${position} position is not available.`);
@@ -4152,12 +4158,27 @@ export default function AssignmentsManagerV2({
             throw new Error(
               `Spreadsheet row ${index + 2}: ${position} Game Fee must be zero or greater.`,
             );
+          if (!activePositions.some((item) => item.id === match.id)) {
+            extraFees.push({ positionId: match.id, gameFee });
+            continue;
+          }
           feeRows.push({
             spreadsheetRow: index + 2,
             gameId,
             positionId: match.id,
             gameFee,
           });
+        }
+        if (game?.officials_needed === 2 && feeRows.length === 2 && extraFees.length === 1
+          && extraFees[0].positionId === gamePositions[2]?.id) {
+          const totalCents = [...feeRows.map((row) => row.gameFee), extraFees[0].gameFee]
+            .reduce((total, fee) => total + Math.round(fee * 100), 0);
+          const halfCents = Math.floor(totalCents / 2);
+          feeRows[0].gameFee = (halfCents + totalCents % 2) / 100;
+          feeRows[1].gameFee = halfCents / 100;
+          splitTwoOfficialGames++;
+        } else {
+          skippedUnavailableFees += extraFees.length;
         }
         return feeRows;
       });
@@ -4176,7 +4197,7 @@ export default function AssignmentsManagerV2({
         );
       if (
         !window.confirm(
-          `Upload game fees for ${rows.length} game position${rows.length === 1 ? "" : "s"}? Unfilled positions will appear in Payroll without a payee.`,
+          `Upload game fees for ${rows.length} game position${rows.length === 1 ? "" : "s"}? ${splitTwoOfficialGames ? `${splitTwoOfficialGames} two-official game${splitTwoOfficialGames === 1 ? "" : "s"} will split all three entered fees equally. ` : ""}${skippedUnavailableFees ? `${skippedUnavailableFees} fee${skippedUnavailableFees === 1 ? "" : "s"} for unused positions will be skipped. ` : ""}Unfilled positions will appear in Payroll without a payee.`,
         )
       )
         return;
@@ -4198,7 +4219,7 @@ export default function AssignmentsManagerV2({
           result.error || "Assignment fees could not be imported.",
         );
       setNotice(
-        `${result.updated || rows.length} game position fee${(result.updated || rows.length) === 1 ? " was" : "s were"} uploaded and sent to Payroll.`,
+        `${result.updated || rows.length} game position fee${(result.updated || rows.length) === 1 ? " was" : "s were"} uploaded and sent to Payroll.${splitTwoOfficialGames ? ` ${splitTwoOfficialGames} two-official game${splitTwoOfficialGames === 1 ? "" : "s"} split the three fees equally.` : ""}${skippedUnavailableFees ? ` ${skippedUnavailableFees} fee${skippedUnavailableFees === 1 ? "" : "s"} for unused positions skipped.` : ""}`,
       );
       await refreshAssignmentState();
     } catch (importError) {
@@ -4229,12 +4250,28 @@ export default function AssignmentsManagerV2({
       row.Level = listedGame.levels?.name || "";
       row["Home Team"] = listedGame.home?.name || "TBD";
       row["Away Team"] = listedGame.away?.name || "TBD";
+      const activePositions = positions.filter((position) => position.sport_id === listedGame.sport_id)
+        .sort((a, b) => a.sort_order - b.sort_order || a.id.localeCompare(b.id))
+        .slice(0, Math.max(0, listedGame.officials_needed));
+      for (const name of positionNames) {
+        if (!activePositions.some((position) => position.name === name)
+          && !(listedGame.officials_needed === 2 && positions.some((position) => position.sport_id === listedGame.sport_id && position.name === name && position.sort_order === 3)))
+          row[`${name} Game Fee`] = "N/A";
+      }
       return row;
     });
     const sheet = XLSX.utils.json_to_sheet(rows, { header: headers });
     sheet["!cols"] = headers.map((header) => ({ wch: header === "Game ID" ? 38 : header.includes("Game Fee") ? 18 : 22 }));
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, sheet, "Game Fees");
+    const instructions = XLSX.utils.aoa_to_sheet([
+      ["Game fees"],
+      ["Fill the fee columns for each game. Leave fees blank when you do not want to change them."],
+      ["For a game with two officials, enter all three position fees to divide their total equally between the two officials."],
+      ["N/A means that position is not used by the game."],
+    ]);
+    instructions["!cols"] = [{ wch: 105 }];
+    XLSX.utils.book_append_sheet(workbook, instructions, "Instructions");
     XLSX.writeFile(workbook, "refassign-game-fees-template.xlsx");
   }
   function checkInRows(gameIds: string[]) {
