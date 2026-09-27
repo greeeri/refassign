@@ -4211,6 +4211,32 @@ export default function AssignmentsManagerV2({
       setSaving("");
     }
   }
+  async function downloadGameFeeTemplate() {
+    const XLSX = await import("xlsx");
+    const positionNames = [...new Set(filteredGames.flatMap((listedGame) =>
+      positions.filter((position) => position.sport_id === listedGame.sport_id)
+        .sort((a, b) => a.sort_order - b.sort_order)
+        .slice(0, Math.max(0, listedGame.officials_needed))
+        .map((position) => position.name),
+    ))];
+    const headers = ["Game ID", "Game Number", "Date", "League", "Level", "Home Team", "Away Team", ...positionNames.map((name) => `${name} Game Fee`)];
+    const rows = filteredGames.map((listedGame) => {
+      const row: Record<string, string> = Object.fromEntries(headers.map((header) => [header, ""]));
+      row["Game ID"] = listedGame.id;
+      row["Game Number"] = listedGame.game_number || "";
+      row.Date = formatEventDate(listedGame.starts_at, listedGame.location);
+      row.League = listedGame.leagues?.name || "";
+      row.Level = listedGame.levels?.name || "";
+      row["Home Team"] = listedGame.home?.name || "TBD";
+      row["Away Team"] = listedGame.away?.name || "TBD";
+      return row;
+    });
+    const sheet = XLSX.utils.json_to_sheet(rows, { header: headers });
+    sheet["!cols"] = headers.map((header) => ({ wch: header === "Game ID" ? 38 : header.includes("Game Fee") ? 18 : 22 }));
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, "Game Fees");
+    XLSX.writeFile(workbook, "refassign-game-fees-template.xlsx");
+  }
   function checkInRows(gameIds: string[]) {
     const selectedAssignments = assignments.filter(
       (assignment) =>
@@ -6525,6 +6551,9 @@ export default function AssignmentsManagerV2({
                         ? "Uploading Fees…"
                         : "Upload Game Fees"}
                     </button>
+                    <button type="button" disabled={!filteredGames.length} onClick={() => void downloadGameFeeTemplate()}>
+                      Download Game Fees Template
+                    </button>
                     <button
                       type="button"
                       disabled={
@@ -6591,6 +6620,9 @@ export default function AssignmentsManagerV2({
                 {saving === "assignment-fee-import"
                   ? "Uploading Fees…"
                   : "Upload Game Fees"}
+              </button>
+              <button type="button" disabled={!filteredGames.length} onClick={() => void downloadGameFeeTemplate()}>
+                Download Game Fees Template
               </button>
               <button
                 type="button"
