@@ -9,7 +9,7 @@ export async function releasePayrollBatch(service: ServiceClient, batchId: strin
   if (batch.status === "paid") return { paid: true, duplicate: true, paidCount: 0 };
   if (!["settled", "paying", "partially_paid"].includes(batch.status)) throw new Error("Payroll funding has not settled.");
 
-  const { data: items, error: itemError } = await service.from("payroll_batch_items").select("id,assignment_id,official_id,total_cents").eq("payroll_batch_id", batch.id);
+  const { data: items, error: itemError } = await service.from("payroll_batch_items").select("id,assignment_id,fee_correction_id,official_id,total_cents").eq("payroll_batch_id", batch.id);
   if (itemError || !items?.length) throw new Error(itemError?.message || "Payroll batch has no items.");
   const { data: accounts, error: accountError } = await service.from("official_stripe_accounts").select("official_id,stripe_account_id,onboarding_status,transfers_status,payouts_status").eq("stripe_mode", stripeConnectMode()).in("official_id", [...new Set(items.map((item) => item.official_id))]);
   if (accountError) throw new Error(accountError.message);
@@ -40,7 +40,9 @@ export async function releasePayrollBatch(service: ServiceClient, batchId: strin
       await Promise.all([
         service.from("payroll_transfers").update({ stripe_transfer_id: transfer.id, status: "paid", transferred_at: now, paid_at: now }).eq("id", recordResult.data.id),
         service.from("payment_transactions").upsert({ organization_id: batch.organization_id, league_id: batch.league_id, transaction_type: "payroll", related_record_id: item.id, direction: "debit", status: "succeeded", amount_cents: item.total_cents, stripe_object_type: "transfer", stripe_object_id: transfer.id, idempotency_key: transferKey }, { onConflict: "idempotency_key" }),
-        service.from("assignments").update({ payment_status: "paid", paid_at: now, payroll_updated_at: now }).eq("id", item.assignment_id),
+        item.fee_correction_id
+          ? service.from("payroll_fee_corrections").update({ paid_at: now }).eq("id", item.fee_correction_id).eq("status", "approved")
+          : service.from("assignments").update({ payment_status: "paid", paid_at: now, payroll_updated_at: now }).eq("id", item.assignment_id),
       ]);
       paidCount += 1;
     } catch (error) {
