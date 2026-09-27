@@ -2,6 +2,7 @@
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../lib/supabase/client";
+import { formatEventDate, formatEventTime } from "../lib/event-time";
 
 type PaymentStatus = "unpaid" | "approved" | "paid" | "void";
 type MileagePlan = "one_way" | "round_trip" | "actual" | "none";
@@ -68,7 +69,7 @@ type FeeCorrection = {
   assignments: {
     officials: { first_name: string; last_name: string } | null;
     sport_positions: { name: string } | null;
-    games: { game_number: string; starts_at: string; leagues: { name: string } | null } | null;
+    games: { game_number: string; starts_at: string; leagues: { name: string } | null; levels: { name: string } | null; location: { state: string | null } | null } | null;
   } | null;
 };
 type WeekdayOrigin = {
@@ -1188,7 +1189,13 @@ export default function PayrollManager({
           <p>These are separate accounting lines for games marked paid. The original paid amounts are unchanged. Approving a correction records the amount to address; it does not send a payment.</p>
           <div className="tableWrap"><table><thead><tr><th>Game</th><th>Official / Position</th><th>Paid fee</th><th>Corrected fee</th><th>Difference</th><th>Status</th><th>Review</th></tr></thead>
             <tbody>{feeCorrections.map((item) => <tr key={item.id}>
-              <td>{item.assignments?.games?.game_number || "—"}<small>{item.assignments?.games?.leagues?.name || ""}</small></td>
+              <td>{item.assignments?.games?.game_number || "—"}
+                {item.assignments?.games && <>
+                  <small>{formatEventDate(item.assignments.games.starts_at, item.assignments.games.location)} · {formatEventTime(item.assignments.games.starts_at, item.assignments.games.location)}</small>
+                  <small>Level: {item.assignments.games.levels?.name || "—"}</small>
+                </>}
+                <small>{item.assignments?.games?.leagues?.name || ""}</small>
+              </td>
               <td>{[item.assignments?.officials?.first_name, item.assignments?.officials?.last_name].filter(Boolean).join(" ") || "—"}<small>{item.assignments?.sport_positions?.name || ""}</small></td>
               <td>{money(item.paid_game_fee)}</td><td>{money(item.proposed_game_fee)}</td><td>{money(item.difference)}</td>
               <td>{item.status === "pending" ? "Needs review" : item.status === "approved" ? "Approved to address" : "Voided"}</td>
