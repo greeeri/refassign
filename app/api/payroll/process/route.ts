@@ -6,6 +6,7 @@ import { stripeConnectConfig } from "../../../../lib/stripe/runtime";
 
 type Assignment = {
   id: string;
+  fee_correction_id?: string;
   status: string;
   official_id: string;
   game_id: string;
@@ -102,32 +103,54 @@ export async function POST(request: NextRequest) {
   const { secretKey: key, mode, payrollPaymentMethodConfigurationId } = config;
   const body = (await request.json().catch(() => ({}))) as {
       assignmentIds?: string[];
+      correctionIds?: string[];
     },
     assignmentIds = [
       ...new Set((body.assignmentIds || []).filter(Boolean)),
-    ].sort();
-  if (!assignmentIds.length)
+    ].sort(),
+    correctionIds = [...new Set((body.correctionIds || []).filter(Boolean))].sort();
+  if (!assignmentIds.length && !correctionIds.length)
     return NextResponse.json(
       { error: "Select approved payroll records." },
       { status: 400 },
     );
-  if (assignmentIds.length > 250)
+  if (assignmentIds.length + correctionIds.length > 250)
     return NextResponse.json(
       { error: "Process no more than 250 payroll records at once." },
       { status: 400 },
     );
-  const { data, error } = await service
+  const { data, error } = assignmentIds.length ? await service
     .from("assignments")
     .select(
       "id,status,official_id,game_id,game_fee,mileage_miles,mileage_rate,payment_status,officials(first_name,last_name),games!inner(organization_id,league_id,bill_to_id,leagues(name))",
     )
     .in("id", assignmentIds)
-    .eq("games.organization_id", organizationId);
+    .eq("games.organization_id", organizationId) : { data: [], error: null };
   if (error)
     return NextResponse.json({ error: error.message }, { status: 400 });
   const assignments = (data || []) as unknown as Assignment[];
+  if (correctionIds.length) {
+    const { data: corrections, error: correctionError } = await service
+      .from("payroll_fee_corrections")
+      .select("id,difference,status,paid_at,assignments!inner(id,status,official_id,game_id,officials(first_name,last_name),games!inner(organization_id,league_id,bill_to_id,leagues(name)))")
+      .in("id", correctionIds).eq("organization_id", organizationId);
+    if (correctionError) return NextResponse.json({ error: correctionError.message }, { status: 400 });
+    if ((corrections || []).length !== correctionIds.length)
+      return NextResponse.json({ error: "One or more fee corrections were not found." }, { status: 400 });
+    for (const item of corrections || []) {
+      const original = (Array.isArray(item.assignments) ? item.assignments[0] : item.assignments) as any;
+      if (item.status !== "approved" || item.paid_at || Number(item.difference) <= 0 || !["accepted", "confirmed"].includes(original?.status))
+        return NextResponse.json({ error: "Only approved, unpaid positive corrections can be processed." }, { status: 400 });
+      assignments.push({
+        id: `correction:${item.id}`, fee_correction_id: item.id,
+        status: original.status, official_id: original.official_id, game_id: original.game_id,
+        game_fee: Number(item.difference), mileage_miles: 0, mileage_rate: 0,
+        payment_status: "approved", officials: original.officials, games: original.games,
+      });
+    }
+  }
   if (
-    assignments.length !== assignmentIds.length ||
+    assignments.length !== assignmentIds.length + correctionIds.length ||
     assignments.some(
       (r) =>
         !["accepted", "confirmed"].includes(r.status) ||
@@ -279,7 +302,7 @@ export async function POST(request: NextRequest) {
     total = subtotal + fee + processing,
     fingerprint = createHash("sha256")
       .update(
-        `${mode}:${organizationId}:${billToId}:${assignmentIds.join(",")}`,
+        `${mode}:${organizationId}:${billToId}:${[...assignmentIds, ...correctionIds.map((id) => `correction:${id}`)].sort().join(",")}`,
       )
       .digest("hex")
       .slice(0, 32),
@@ -392,7 +415,8 @@ export async function POST(request: NextRequest) {
   const items = await service.from("payroll_batch_items").insert(
     values.map(({ row, gameFeeCents, mileageAmountCents, totalCents }) => ({
       payroll_batch_id: batch.id,
-      assignment_id: row.id,
+      assignment_id: row.fee_correction_id ? null : row.id,
+      fee_correction_id: row.fee_correction_id || null,
       official_id: row.official_id,
       official_name_snapshot:
         `${row.officials?.first_name || ""} ${row.officials?.last_name || ""}`.trim() ||
