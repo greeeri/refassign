@@ -338,6 +338,7 @@ export default function AssignmentsManagerV2({
     [officials, setOfficials] = useState<Official[]>([]),
     [positions, setPositions] = useState<Position[]>([]),
     [assignments, setAssignments] = useState<Assignment[]>([]),
+    [positionPay, setPositionPay] = useState<Record<string, { amount: number; payment_status: string }>>({}),
     [mentorSlots, setMentorSlots] = useState<MentorSlot[]>([]),
     [ranks, setRanks] = useState<Record<string, number>>({}),
     [positionRanks, setPositionRanks] = useState<Record<string, PositionRank>>(
@@ -909,6 +910,29 @@ export default function AssignmentsManagerV2({
   useEffect(() => {
     void loadSavedViews();
   }, []);
+  useEffect(() => {
+    if (!selected || !organizationId) return;
+    let active = true;
+    fetch(`/api/games/pay?organizationId=${encodeURIComponent(organizationId)}`, { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Could not load game pay.");
+        return response.json() as Promise<{ rates: Array<{ game_id: string; position_id: string; amount: number; payment_status: string }> }>;
+      })
+      .then(({ rates }) => {
+        if (active) setPositionPay(Object.fromEntries(rates.map((rate) => [`${rate.game_id}:${rate.position_id}`, { amount: Number(rate.amount), payment_status: rate.payment_status }])));
+      })
+      .catch(() => { if (active) setPositionPay({}); });
+    return () => { active = false; };
+  }, [selected, organizationId]);
+  function positionPayDetails(gameId: string, positionId: string, assignment?: Assignment) {
+    const quote = positionPay[`${gameId}:${positionId}`];
+    const amount = assignment ? Number(assignment.game_fee || 0) : quote?.amount;
+    const hasFee = Boolean(quote || amount);
+    const status = assignment && ["accepted", "confirmed"].includes(assignment.status)
+      ? assignment.payment_status === "void" ? "Void" : assignment.payment_status === "paid" ? "Paid" : assignment.payment_status === "approved" ? "Approved" : "Unpaid"
+      : assignment ? "Awaiting acceptance" : quote?.payment_status === "void" ? "Void · no payee" : "No payee";
+    return <small className="assignmentPositionPay">{hasFee ? `Game pay: $${Number(amount).toFixed(2)} · ${status}` : "Game pay: Not set"}</small>;
+  }
   async function refreshAssignmentState() {
     const [
       assignmentResult,
@@ -4790,6 +4814,7 @@ export default function AssignmentsManagerV2({
                     <small>
                       Position {index + 1} of {gamePositions.length}
                     </small>
+                    {positionPayDetails(game.id, pos.id, current)}
                   </span>
                   {status ? (
                     <span className={status.className}>{status.label}</span>
@@ -9889,6 +9914,7 @@ export default function AssignmentsManagerV2({
                                           Slot {index + 1} of{" "}
                                           {gamePositions.length}
                                         </small>
+                                        {positionPayDetails(game.id, pos.id, current)}
                                       </div>
                                       {canManage &&
                                         (mentorSlots.some(
