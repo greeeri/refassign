@@ -2,13 +2,42 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireManagedOrganization } from "../../../../../lib/server/organizationScope";
 
 type Row = { spreadsheetRow?: number; gameId?: string; positionId?: string; gameFee?: number };
+type TemplateRow = { spreadsheetRow?: number; gameId?: string; fees?: Record<string, number> };
 
 export async function POST(request: NextRequest) {
-  const context = await requireManagedOrganization(request, ["owner", "admin", "assignor"]);
+  const context = await requireManagedOrganization(request, ["owner", "admin", "assignor", "billing"]);
   if (context.error) return context.error;
   const { service, organizationId, leagueIds } = context;
-  const body = await request.json().catch(() => ({})) as { rows?: Row[] };
-  const rows = body.rows || [];
+  const body = await request.json().catch(() => ({})) as { rows?: Row[]; templateRows?: TemplateRow[] };
+  let rows = body.rows || [];
+  if (body.templateRows) {
+    if (!body.templateRows.length || body.templateRows.length > 5000)
+      return NextResponse.json({ error: "Include between 1 and 5,000 game rows." }, { status: 400 });
+    const templateGameIds = [...new Set(body.templateRows.map((row) => row.gameId).filter(Boolean))] as string[];
+    const templateGames: Array<{ id: string; sport_id: string }> = [];
+    for (let offset = 0; offset < templateGameIds.length; offset += 200) {
+      const { data, error } = await service.from("games").select("id,sport_id")
+        .eq("organization_id", organizationId).in("id", templateGameIds.slice(offset, offset + 200));
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      templateGames.push(...(data || []));
+    }
+    const sports = [...new Set(templateGames.map((game) => game.sport_id))];
+    const { data: templatePositions, error: positionError } = sports.length
+      ? await service.from("sport_positions").select("id,sport_id,name").in("sport_id", sports)
+      : { data: [], error: null };
+    if (positionError) return NextResponse.json({ error: positionError.message }, { status: 400 });
+    const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+    rows = [];
+    for (const template of body.templateRows) {
+      const game = templateGames.find((item) => item.id === template.gameId);
+      if (!game) return NextResponse.json({ error: `Spreadsheet row ${template.spreadsheetRow || "?"}: Game ID is not available for this organization.` }, { status: 400 });
+      for (const [name, amount] of Object.entries(template.fees || {})) {
+        const match = (templatePositions || []).find((position) => position.sport_id === game.sport_id && normalize(position.name) === normalize(name));
+        if (!match) return NextResponse.json({ error: `Spreadsheet row ${template.spreadsheetRow || "?"}: ${name} is not a game position.` }, { status: 400 });
+        rows.push({ spreadsheetRow: template.spreadsheetRow, gameId: game.id, positionId: match.id, gameFee: amount });
+      }
+    }
+  }
   if (!rows.length || rows.length > 5000) return NextResponse.json({ error: "Include between 1 and 5,000 game position fees." }, { status: 400 });
   const seen = new Set<string>();
   for (const row of rows) {

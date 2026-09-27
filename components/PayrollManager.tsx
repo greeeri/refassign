@@ -89,6 +89,7 @@ type ImportRow = {
   paymentStatus: PaymentStatus;
   notes: string;
 };
+type GameFeeTemplateRow = { spreadsheetRow: number; gameId: string; gameNumber: string; fees: Record<string, number> };
 type BillTo = { id: string; name: string; email: string | null };
 type PayrollLeague = { id: string; name: string; mileage_plan: MileagePlan };
 type PayrollBatch = {
@@ -242,6 +243,7 @@ export default function PayrollManager({
     { key: "date", direction: "asc" },
   );
   const [importRows, setImportRows] = useState<ImportRow[]>([]);
+  const [gameFeeImportRows, setGameFeeImportRows] = useState<GameFeeTemplateRow[]>([]);
   const [importErrors, setImportErrors] = useState<Array<{ row: number; message: string }>>([]);
   const [importFile, setImportFile] = useState("");
   const [loading, setLoading] = useState(true);
@@ -947,6 +949,7 @@ export default function PayrollManager({
     setError("");
     setNotice("");
     setImportRows([]);
+    setGameFeeImportRows([]);
     setImportErrors([]);
     try {
       const XLSX = await import("xlsx");
@@ -957,6 +960,31 @@ export default function PayrollManager({
       );
       if (!records.length)
         throw new Error("The payroll spreadsheet has no data rows.");
+      const first = normalizedRecord(records[0]);
+      const positionFeeKeys = Object.keys(first).filter((key) => key.endsWith("_game_fee") && key !== "game_fee");
+      if ("game_id" in first && positionFeeKeys.length) {
+        const errors: Array<{ row: number; message: string }> = [];
+        const preview: GameFeeTemplateRow[] = [];
+        for (const [index, raw] of records.entries()) {
+          const record = normalizedRecord(raw);
+          const gameId = String(record.game_id || "").trim();
+          const fees: Record<string, number> = {};
+          if (!gameId) { errors.push({ row: index + 2, message: "Game ID is required." }); continue; }
+          for (const key of positionFeeKeys) {
+            const value = record[key];
+            if (value == null || value === "" || String(value).trim().toUpperCase() === "N/A") continue;
+            const fee = Number(value);
+            if (!Number.isFinite(fee) || fee < 0) { errors.push({ row: index + 2, message: `${key.replaceAll("_", " ")} must be zero or greater.` }); continue; }
+            fees[key.slice(0, -"_game_fee".length)] = fee;
+          }
+          if (Object.keys(fees).length) preview.push({ spreadsheetRow: index + 2, gameId, gameNumber: String(record.game_number || ""), fees });
+        }
+        setImportFile(file.name);
+        setImportErrors(errors);
+        setGameFeeImportRows(preview);
+        setNotice(`${preview.length} game-fee rows ready. This template updates game fees and creates separate review lines for paid payroll differences.`);
+        return;
+      }
       const errors: Array<{ row: number; message: string }> = [];
       const seen = new Set<string>();
       const preview = records.flatMap((raw, index) => {
@@ -1039,6 +1067,26 @@ export default function PayrollManager({
   }
 
   async function applyImport() {
+    if (gameFeeImportRows.length) {
+      setSaving("import");
+      setError("");
+      try {
+        const response = await fetch(`/api/games/pay/import?organizationId=${encodeURIComponent(organizationId || "")}`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ templateRows: gameFeeImportRows }),
+        });
+        const result = await response.json() as { error?: string; updated?: number; correctionSuggestions?: number; skippedProtected?: number; splitGames?: number; skippedUnused?: number };
+        if (!response.ok) throw new Error(result.error || "Game fees could not be imported.");
+        setNotice(`${result.updated ?? 0} game position fees updated. ${result.correctionSuggestions ?? 0} paid fee differences sent to Game Fee Corrections for review.${result.skippedProtected ? ` ${result.skippedProtected} approved fees left unchanged.` : ""}${result.splitGames ? ` ${result.splitGames} two-official games split equally.` : ""}`);
+        setGameFeeImportRows([]);
+        setImportErrors([]);
+        setImportFile("");
+        await load();
+      } catch (importError) {
+        setError(importError instanceof Error ? importError.message : "Game fees could not be imported.");
+      } finally { setSaving(""); }
+      return;
+    }
     if (!importRows.length) return;
     setSaving("import");
     setError("");
@@ -1120,7 +1168,7 @@ export default function PayrollManager({
             className="secondary"
             onClick={() => fileInput.current?.click()}
           >
-            Import Payroll
+            Import Payroll or Game Fees
           </button>
           <button
             className="primary"
@@ -1331,18 +1379,19 @@ export default function PayrollManager({
           <span>Unpaid assignments</span>
         </div>
       </div>
-      {(importRows.length > 0 || importErrors.length > 0) && (
+      {(importRows.length > 0 || gameFeeImportRows.length > 0 || importErrors.length > 0) && (
         <div className="payrollImportPreview">
           <div className="cardHead">
             <div>
-              <h3>Import Preview</h3>
-              <p>{importFile} — review valid rows and errors below.</p>
+              <h3>{gameFeeImportRows.length ? "Game Fee Import Preview" : "Import Preview"}</h3>
+              <p>{importFile} — {gameFeeImportRows.length ? "game fees by Game ID and position; paid differences become correction lines." : "review valid rows and errors below."}</p>
             </div>
             <div className="headerActions">
               <button
                 className="secondary"
                 onClick={() => {
                   setImportRows([]);
+                  setGameFeeImportRows([]);
                   setImportFile("");
                   setImportErrors([]);
                 }}
@@ -1351,12 +1400,12 @@ export default function PayrollManager({
               </button>
               <button
                 className="primary"
-                disabled={saving === "import" || !importRows.length}
+                disabled={saving === "import" || (gameFeeImportRows.length > 0 && importErrors.length > 0) || !(importRows.length || gameFeeImportRows.length)}
                 onClick={() => void applyImport()}
               >
                 {saving === "import"
                   ? "Importing…"
-                  : `Apply ${importRows.length} Rows`}
+                  : `Apply ${gameFeeImportRows.length || importRows.length} Rows`}
               </button>
             </div>
           </div>
@@ -1366,19 +1415,21 @@ export default function PayrollManager({
               <ul>{importErrors.map((item) => <li key={item.row}>Row {item.row}: {item.message}</li>)}</ul>
             </div>
           )}
+          {gameFeeImportRows.length > 0 && <p>{gameFeeImportRows.length} game rows with position fees are ready. Two-official games with three fees split the total across the two positions.</p>}
           <div className="tableWrap">
             <table>
               <thead>
-                <tr>
+                {gameFeeImportRows.length > 0 ? <tr><th>Row</th><th>Game Number</th><th>Game ID</th><th>Position Fees</th></tr> : <tr>
                   <th>Row</th>
                   <th>Assignment</th>
                   <th>Fee</th>
                   <th>Miles</th>
                   <th>Rate</th>
                   <th>Status</th>
-                </tr>
+                </tr>}
               </thead>
               <tbody>
+                {gameFeeImportRows.map((row) => <tr key={row.spreadsheetRow}><td>{row.spreadsheetRow}</td><td>{row.gameNumber}</td><td>{row.gameId}</td><td>{Object.entries(row.fees).map(([name, amount]) => `${name.replaceAll("_", " ")}: ${money(amount)}`).join(" · ")}</td></tr>)}
                 {importRows.map((row) => (
                   <tr key={row.assignmentId}>
                     <td>{row.spreadsheetRow}</td>
