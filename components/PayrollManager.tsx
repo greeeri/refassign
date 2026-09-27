@@ -53,6 +53,7 @@ type PayrollRow = {
     location: {
       id: string;
       name: string;
+      state: string | null;
       latitude: number | null;
       longitude: number | null;
     } | null;
@@ -1637,9 +1638,10 @@ export default function PayrollManager({
                       </td>
                       <td>
                         {row.games
-                          ? new Date(row.games.starts_at).toLocaleDateString(
-                              "en-US",
-                            )
+                          ? <>
+                              {formatEventDate(row.games.starts_at, row.games.location)}
+                              <small>{formatEventTime(row.games.starts_at, row.games.location)}</small>
+                            </>
                           : ""}
                       </td>
                       <td>
