@@ -23,6 +23,7 @@ type SortKey =
   | "status";
 type PayrollRow = {
   id: string;
+  fee_correction_id?: string;
   status: string;
   game_fee: number;
   mileage_miles: number;
@@ -66,6 +67,7 @@ type FeeCorrection = {
   proposed_game_fee: number;
   difference: number;
   status: "pending" | "approved" | "void";
+  paid_at: string | null;
   created_at: string;
   assignments: {
     officials: { first_name: string; last_name: string } | null;
@@ -282,21 +284,27 @@ export default function PayrollManager({
       setAvailableLeagues(
         (result.leagues || []).sort((a, b) => a.name.localeCompare(b.name)),
       );
-      setRows(
-        loadedRows.map((row) => {
-          const automaticMiles = calculatedMileage(row, origins);
-          return automaticMiles == null
-            ? row
-            : { ...row, mileage_miles: automaticMiles };
-        }),
-      );
       setWeekdayOrigins(origins);
       if (!correctionResponse.ok) {
         const detail = await correctionResponse.json().catch(() => ({}));
         throw new Error(detail.error || "Payroll corrections could not be loaded.");
       }
       const correctionResult = await correctionResponse.json() as { corrections: FeeCorrection[] };
-      setFeeCorrections(correctionResult.corrections || []);
+      const corrections = correctionResult.corrections || [];
+      setFeeCorrections(corrections);
+      const supplements: PayrollRow[] = corrections
+        .filter((item) => item.status === "approved" && Number(item.difference) > 0)
+        .flatMap((item) => {
+          const source = loadedRows.find((row) => row.id === item.assignment_id);
+          return source ? [{ ...source, id: `correction:${item.id}`, fee_correction_id: item.id,
+            game_fee: Number(item.difference), mileage_miles: 0, mileage_rate: 0,
+            payment_status: item.paid_at ? "paid" as const : "approved" as const,
+            paid_at: item.paid_at, payroll_notes: "Supplemental game fee correction" }] : [];
+        });
+      setRows([...loadedRows.map((row) => {
+        const automaticMiles = calculatedMileage(row, origins);
+        return automaticMiles == null ? row : { ...row, mileage_miles: automaticMiles };
+      }), ...supplements]);
       if (billToResponse.ok) {
         const billToResult = (await billToResponse.json()) as {
           billTos?: BillTo[];
@@ -470,7 +478,7 @@ export default function PayrollManager({
   const defaultMileage = (row: PayrollRow) =>
     calculatedMileage(row, weekdayOrigins);
   const mileagePay = (row: PayrollRow) =>
-    mileagePlan(row) === "none"
+    row.fee_correction_id || mileagePlan(row) === "none"
       ? 0
       : Number(row.mileage_miles || 0) * Number(row.mileage_rate || 0);
   const total = (row: PayrollRow) =>
@@ -478,6 +486,7 @@ export default function PayrollManager({
       ? 0
       : Number(row.game_fee || 0) + mileagePay(row);
   const patch = (id: string, values: Partial<PayrollRow>) => {
+    if (id.startsWith("correction:")) return;
     setDirtyIds((current) => current.includes(id) ? current : [...current, id]);
     setRows((current) =>
       current.map((row) => (row.id === id ? { ...row, ...values } : row)),
@@ -718,6 +727,7 @@ export default function PayrollManager({
 
   async function bulkStatus(paymentStatus: PaymentStatus) {
     if (!selected.length) return;
+    if (selected.some((id) => id.startsWith("correction:"))) return setError("Supplemental corrections are already approved. Process them through Stripe or deselect them before changing statuses.");
     setSaving("bulk");
     setError("");
     const selectedRecords = rows.filter((row) => selected.includes(row.id));
@@ -794,7 +804,8 @@ export default function PayrollManager({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          assignmentIds: selectedRows.map((row) => row.id),
+          assignmentIds: selectedRows.filter((row) => !row.fee_correction_id).map((row) => row.id),
+          correctionIds: selectedRows.flatMap((row) => row.fee_correction_id ? [row.fee_correction_id] : []),
         }),
       },
     );
@@ -1187,7 +1198,7 @@ export default function PayrollManager({
       {feeCorrections.length > 0 && (
         <div className="importPanel">
           <h3>Game Fee Corrections {feeCorrections.filter((item) => item.status === "pending").length ? `(${feeCorrections.filter((item) => item.status === "pending").length} to review)` : ""}</h3>
-          <p>These are separate accounting lines for games marked paid. The original paid amounts are unchanged. Approving a correction records the amount to address; it does not send a payment.</p>
+          <p>Approved positive corrections appear as separate supplemental lines in Payroll. The original paid amounts remain unchanged. Select the supplemental line to process it through Stripe.</p>
           <div className="tableWrap"><table><thead><tr><th>Game</th><th>Official / Position</th><th>Paid fee</th><th>Corrected fee</th><th>Difference</th><th>Status</th><th>Review</th></tr></thead>
             <tbody>{feeCorrections.map((item) => <tr key={item.id}>
               <td>{item.assignments?.games?.game_number || "—"}
@@ -1199,7 +1210,7 @@ export default function PayrollManager({
               </td>
               <td>{[item.assignments?.officials?.first_name, item.assignments?.officials?.last_name].filter(Boolean).join(" ") || "—"}<small>{item.assignments?.sport_positions?.name || ""}</small></td>
               <td>{money(item.paid_game_fee)}</td><td>{money(item.proposed_game_fee)}</td><td>{money(item.difference)}</td>
-              <td>{item.status === "pending" ? "Needs review" : item.status === "approved" ? "Approved to address" : "Voided"}</td>
+              <td>{item.paid_at ? "Paid" : item.status === "pending" ? "Needs review" : item.status === "approved" ? "Approved for payroll" : "Voided"}</td>
               <td>{item.status === "pending" && <><button type="button" className="secondary" disabled={Boolean(saving)} onClick={() => void reviewFeeCorrection(item.id, "approved")}>Approve</button>{" "}<button type="button" className="secondary" disabled={Boolean(saving)} onClick={() => void reviewFeeCorrection(item.id, "void")}>Void</button></>}</td>
             </tr>)}</tbody></table></div>
         </div>
@@ -1621,7 +1632,7 @@ export default function PayrollManager({
                           type="checkbox"
                           aria-label={`Select payroll record for ${officialName(row)}`}
                           checked={selected.includes(row.id)}
-                          disabled={!row.officials || !row.stripe_payment_ready}
+                          disabled={!row.officials || !row.stripe_payment_ready || (Boolean(row.fee_correction_id) && row.payment_status === "paid")}
                           title={
                             !row.officials ? "No payee: this position cannot be paid." : !row.stripe_payment_ready
                               ? "Official must complete Stripe payment setup before payroll."
@@ -1646,6 +1657,7 @@ export default function PayrollManager({
                       </td>
                       <td>
                         <b>{gameName(row)}</b>
+                        {row.fee_correction_id && <small><b>Supplemental fee correction · original payment preserved</b></small>}
                         <small>{row.games?.game_number}</small>
                         <small className="payrollLeagueName">
                           League: {row.games?.leagues?.name || "Not assigned"}
@@ -1681,7 +1693,7 @@ export default function PayrollManager({
                           min="0"
                           step="0.01"
                           value={row.game_fee}
-                          disabled={!row.officials}
+                          disabled={!row.officials || Boolean(row.fee_correction_id)}
                           onChange={(event) =>
                             patch(row.id, {
                               game_fee: Number(event.target.value),
@@ -1713,6 +1725,7 @@ export default function PayrollManager({
                             </small>
                             <button
                               className="linkButton"
+                              disabled={Boolean(row.fee_correction_id)}
                               onClick={() =>
                                 patch(row.id, { mileage_miles: suggestedMiles })
                               }
@@ -1728,7 +1741,7 @@ export default function PayrollManager({
                           type="number"
                           min="0"
                           step="0.1"
-                          disabled={mileagePlan(row) === "none"}
+                          disabled={mileagePlan(row) === "none" || Boolean(row.fee_correction_id)}
                           value={
                             mileagePlan(row) === "none" ? 0 : row.mileage_miles
                           }
@@ -1745,7 +1758,7 @@ export default function PayrollManager({
                           type="number"
                           min="0"
                           step="0.001"
-                          disabled={mileagePlan(row) === "none"}
+                          disabled={mileagePlan(row) === "none" || Boolean(row.fee_correction_id)}
                           value={row.mileage_rate}
                           onChange={(event) =>
                             patch(row.id, {
@@ -1778,6 +1791,7 @@ export default function PayrollManager({
                       <td>
                         <select
                           aria-label="Payment status"
+                          disabled={Boolean(row.fee_correction_id)}
                           value={row.payment_status}
                           onChange={(event) =>
                             patch(row.id, {
@@ -1796,6 +1810,7 @@ export default function PayrollManager({
                       <td>
                         <input
                           aria-label="Payroll notes"
+                          readOnly={Boolean(row.fee_correction_id)}
                           value={row.payroll_notes || ""}
                           onChange={(event) =>
                             patch(row.id, { payroll_notes: event.target.value })
