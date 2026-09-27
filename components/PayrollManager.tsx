@@ -2,6 +2,7 @@
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../lib/supabase/client";
+import { formatEventDate, formatEventTime } from "../lib/event-time";
 
 type PaymentStatus = "unpaid" | "approved" | "paid" | "void";
 type MileagePlan = "one_way" | "round_trip" | "actual" | "none";
@@ -52,6 +53,7 @@ type PayrollRow = {
     location: {
       id: string;
       name: string;
+      state: string | null;
       latitude: number | null;
       longitude: number | null;
     } | null;
@@ -1525,11 +1527,12 @@ export default function PayrollManager({
                         />
                       </td>
                       <td>
-                        {row.games
-                          ? new Date(row.games.starts_at).toLocaleDateString(
-                              "en-US",
-                            )
-                          : ""}
+                        {row.games && (
+                          <>
+                            {formatEventDate(row.games.starts_at, row.games.location)}
+                            <small>{formatEventTime(row.games.starts_at, row.games.location)}</small>
+                          </>
+                        )}
                       </td>
                       <td>
                         <b>{gameName(row)}</b>
