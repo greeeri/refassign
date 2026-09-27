@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
   const { service, organizationId, leagueIds } = context;
   const result = await readAllPages<Record<string, any>>((from, to) => service
     .from("payroll_fee_corrections")
-    .select("id,assignment_id,paid_game_fee,proposed_game_fee,difference,status,created_at,reviewed_at,assignments!inner(officials(first_name,last_name),sport_positions(name),games!inner(game_number,starts_at,league_id,leagues(name)))")
+    .select("id,assignment_id,paid_game_fee,proposed_game_fee,difference,status,created_at,reviewed_at,assignments!inner(officials(first_name,last_name),sport_positions(name),games!inner(game_number,starts_at,league_id,leagues(name),levels(name),location:locations(state)))")
     .eq("organization_id", organizationId).order("created_at", { ascending: false }).order("id").range(from, to));
   if (result.error) return NextResponse.json({ error: result.error.message }, { status: 400 });
   const corrections = (result.data || []).filter((row) => {
