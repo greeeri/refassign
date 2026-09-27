@@ -4213,6 +4213,7 @@ export default function AssignmentsManagerV2({
       const result = (await response.json().catch(() => ({}))) as {
         updated?: number;
         skippedProtected?: number;
+        correctionSuggestions?: number;
         error?: string;
       };
       if (!response.ok)
@@ -4220,7 +4221,7 @@ export default function AssignmentsManagerV2({
           result.error || "Assignment fees could not be imported.",
         );
       setNotice(
-        `${result.updated ?? rows.length} game position fee${(result.updated ?? rows.length) === 1 ? " was" : "s were"} uploaded and sent to Payroll.${result.skippedProtected ? ` ${result.skippedProtected} approved or paid fee${result.skippedProtected === 1 ? " was" : "s were"} left unchanged; correct those in Payroll.` : ""}${splitTwoOfficialGames ? ` ${splitTwoOfficialGames} two-official game${splitTwoOfficialGames === 1 ? "" : "s"} split the three fees equally where payroll was eligible.` : ""}${skippedUnavailableFees ? ` ${skippedUnavailableFees} fee${skippedUnavailableFees === 1 ? "" : "s"} for unused positions skipped.` : ""}`,
+        `${result.updated ?? 0} game position fee${(result.updated ?? 0) === 1 ? " was" : "s were"} updated in Payroll.${result.correctionSuggestions ? ` ${result.correctionSuggestions} paid fee correction${result.correctionSuggestions === 1 ? " needs" : "s need"} review in Payroll.` : ""}${result.skippedProtected ? ` ${result.skippedProtected} approved fee${result.skippedProtected === 1 ? " was" : "s were"} left unchanged.` : ""}${splitTwoOfficialGames ? ` ${splitTwoOfficialGames} two-official game${splitTwoOfficialGames === 1 ? "" : "s"} split the three fees equally.` : ""}${skippedUnavailableFees ? ` ${skippedUnavailableFees} fee${skippedUnavailableFees === 1 ? "" : "s"} for unused positions skipped.` : ""}`,
       );
       await refreshAssignmentState();
     } catch (importError) {

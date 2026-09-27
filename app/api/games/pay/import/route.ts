@@ -57,25 +57,33 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Spreadsheet row ${extraRows[0].spreadsheetRow || "?"}: This game uses ${game.officials_needed} positions. Enter all three fees for a two-official split, or leave unused position fees blank.` }, { status: 400 });
     } else normalizedRows.push(...activeRows);
   }
-  const protectedKeys = new Set<string>();
+  const approvedKeys = new Set<string>();
+  const paidFees = new Map<string, number>();
   for (let offset = 0; offset < gameIds.length; offset += 100) {
     const { data: protectedAssignments, error: protectedError } = await service.from("assignments")
-      .select("game_id,position_id,payment_status,status")
+      .select("game_id,position_id,game_fee,payment_status,status")
       .in("game_id", gameIds.slice(offset, offset + 100))
       .in("payment_status", ["approved", "paid"])
       .in("status", ["proposed", "accepted", "confirmed"]);
     if (protectedError) return NextResponse.json({ error: protectedError.message }, { status: 400 });
-    for (const assignment of protectedAssignments || [])
-      protectedKeys.add(`${assignment.game_id}:${assignment.position_id}`);
+    for (const assignment of protectedAssignments || []) {
+      const key = `${assignment.game_id}:${assignment.position_id}`;
+      if (assignment.payment_status === "paid") paidFees.set(key, Number(assignment.game_fee));
+      else approvedKeys.add(key);
+    }
   }
-  const eligibleRows = normalizedRows.filter((row) => !protectedKeys.has(`${row.gameId}:${row.positionId}`));
+  const eligibleRows = normalizedRows.filter((row) => !approvedKeys.has(`${row.gameId}:${row.positionId}`));
   const skippedProtected = normalizedRows.length - eligibleRows.length;
+  const correctionSuggestions = eligibleRows.filter((row) => {
+    const previous = paidFees.get(`${row.gameId}:${row.positionId}`);
+    return previous != null && Math.round(previous * 100) !== Math.round(row.gameFee! * 100);
+  }).length;
   if (!eligibleRows.length)
-    return NextResponse.json({ error: `All ${skippedProtected} game position fees belong to approved or paid payroll. No fees were changed. Correct those payments in Payroll first.` }, { status: 409 });
+    return NextResponse.json({ error: `All ${skippedProtected} game position fees belong to approved payroll. No fees were changed.` }, { status: 409 });
   const { data, error } = await service.rpc("import_game_position_pay", {
     p_organization_id: organizationId,
     p_rows: eligibleRows.map((row) => ({ spreadsheet_row: row.spreadsheetRow, game_id: row.gameId, position_id: row.positionId, amount: row.gameFee })),
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  return NextResponse.json({ updated: Number(data), splitGames, skippedUnused, skippedProtected });
+  return NextResponse.json({ updated: Number(data), splitGames, skippedUnused, skippedProtected, correctionSuggestions });
 }

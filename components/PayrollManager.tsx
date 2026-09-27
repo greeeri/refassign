@@ -57,6 +57,20 @@ type PayrollRow = {
     } | null;
   } | null;
 };
+type FeeCorrection = {
+  id: string;
+  assignment_id: string;
+  paid_game_fee: number;
+  proposed_game_fee: number;
+  difference: number;
+  status: "pending" | "approved" | "void";
+  created_at: string;
+  assignments: {
+    officials: { first_name: string; last_name: string } | null;
+    sport_positions: { name: string } | null;
+    games: { game_number: string; starts_at: string; leagues: { name: string } | null } | null;
+  } | null;
+};
 type WeekdayOrigin = {
   official_id: string;
   weekday: number;
@@ -206,6 +220,7 @@ export default function PayrollManager({
   const geocodeBackfillOrganization = useRef("");
   const handledReportFocus = useRef("");
   const [rows, setRows] = useState<PayrollRow[]>([]);
+  const [feeCorrections, setFeeCorrections] = useState<FeeCorrection[]>([]);
   const [availableLeagues, setAvailableLeagues] = useState<PayrollLeague[]>([]);
   const [billTos, setBillTos] = useState<BillTo[]>([]);
   const [batches, setBatches] = useState<PayrollBatch[]>([]);
@@ -244,10 +259,11 @@ export default function PayrollManager({
       const query = organizationId
         ? `?organizationId=${encodeURIComponent(organizationId)}`
         : "";
-      const [response, billToResponse, batchResponse] = await Promise.all([
+      const [response, billToResponse, batchResponse, correctionResponse] = await Promise.all([
         fetch(`/api/payroll${query}`, { cache: "no-store" }),
         fetch(`/api/bill-tos${query}`, { cache: "no-store" }),
         fetch(`/api/payroll/batches${query}`, { cache: "no-store" }),
+        fetch(`/api/payroll/corrections${query}`, { cache: "no-store" }),
       ]);
       const result = (await response.json()) as {
         assignments?: PayrollRow[];
@@ -271,6 +287,12 @@ export default function PayrollManager({
         }),
       );
       setWeekdayOrigins(origins);
+      if (!correctionResponse.ok) {
+        const detail = await correctionResponse.json().catch(() => ({}));
+        throw new Error(detail.error || "Payroll corrections could not be loaded.");
+      }
+      const correctionResult = await correctionResponse.json() as { corrections: FeeCorrection[] };
+      setFeeCorrections(correctionResult.corrections || []);
       if (billToResponse.ok) {
         const billToResult = (await billToResponse.json()) as {
           billTos?: BillTo[];
@@ -1059,6 +1081,23 @@ export default function PayrollManager({
     setSaving("");
   }
 
+  async function reviewFeeCorrection(id: string, status: "approved" | "void") {
+    setSaving(`correction:${id}`);
+    setError("");
+    try {
+      const response = await fetch(`/api/payroll/corrections?organizationId=${encodeURIComponent(organizationId || "")}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status }),
+      });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error || "Could not review the correction.");
+      setNotice(`Payroll correction ${status}. This review does not send a payment.`);
+      await load();
+    } catch (reviewError) {
+      setError(reviewError instanceof Error ? reviewError.message : "Could not review the correction.");
+    } finally { setSaving(""); }
+  }
+
+
   return (
     <section className="card">
       <div className="cardHead">
@@ -1095,6 +1134,20 @@ export default function PayrollManager({
           </button>
         </div>
       </div>
+      {feeCorrections.length > 0 && (
+        <div className="importPanel">
+          <h3>Game Fee Corrections {feeCorrections.filter((item) => item.status === "pending").length ? `(${feeCorrections.filter((item) => item.status === "pending").length} to review)` : ""}</h3>
+          <p>These are separate accounting lines for games marked paid. The original paid amounts are unchanged. Approving a correction records the amount to address; it does not send a payment.</p>
+          <div className="tableWrap"><table><thead><tr><th>Game</th><th>Official / Position</th><th>Paid fee</th><th>Corrected fee</th><th>Difference</th><th>Status</th><th>Review</th></tr></thead>
+            <tbody>{feeCorrections.map((item) => <tr key={item.id}>
+              <td>{item.assignments?.games?.game_number || "—"}<small>{item.assignments?.games?.leagues?.name || ""}</small></td>
+              <td>{[item.assignments?.officials?.first_name, item.assignments?.officials?.last_name].filter(Boolean).join(" ") || "—"}<small>{item.assignments?.sport_positions?.name || ""}</small></td>
+              <td>{money(item.paid_game_fee)}</td><td>{money(item.proposed_game_fee)}</td><td>{money(item.difference)}</td>
+              <td>{item.status === "pending" ? "Needs review" : item.status === "approved" ? "Approved to address" : "Voided"}</td>
+              <td>{item.status === "pending" && <><button type="button" className="secondary" disabled={Boolean(saving)} onClick={() => void reviewFeeCorrection(item.id, "approved")}>Approve</button>{" "}<button type="button" className="secondary" disabled={Boolean(saving)} onClick={() => void reviewFeeCorrection(item.id, "void")}>Void</button></>}</td>
+            </tr>)}</tbody></table></div>
+        </div>
+      )}
       {error && <div className="errorBox">{error}</div>}
       {addressWarning && <p role="status">{addressWarning}</p>}
       {notice && <div className="loginMessage">{notice}</div>}
