@@ -34,6 +34,7 @@
 @media(max-width:760px){.assignmentCompactHead{display:flex!important;align-items:flex-start!important}.assignmentCompactHead>div:first-child{min-width:0}.assignmentCompactHead p{font-size:13px}.assignmentCompactPrimary>.primary{min-height:40px;padding-inline:13px}.assignmentCompactActionStrip{display:none}.assignmentFilterPanel.assignmentCompactToolbar{grid-template-columns:1fr!important;padding:12px!important}.assignmentCompactToolbar>.assignmentToolbarButton,.assignmentCompactToolbar>.assignmentMoreFilters,.assignmentCompactToolbar>.assignmentMoreFilters>summary{width:100%}.assignmentCustomDateRow{display:grid;grid-template-columns:1fr}.assignmentCustomDateRow .assignmentToolbarField,.assignmentCustomDateRow>button{width:100%}.assignmentCustomDateResult{padding:2px 0}.assignmentDirectFilters{grid-template-columns:1fr!important}}
 
 /* Multi-game assignment workspace and official drag targets */
+.assignmentPositionPay{display:block;margin-top:5px;color:#16416a!important;font-size:14px!important;font-weight:750;line-height:1.35}
 .assignmentCenterSplit.hasSelectedGame>.card{display:block}
 .assignmentCenterSplit.hasSelectedGame .assignmentBackToGames{display:none}
 .draggableOfficial[draggable=true]{cursor:grab;touch-action:manipulation}
