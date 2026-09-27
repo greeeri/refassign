@@ -12,6 +12,7 @@ import OfficialCrewList, { OfficialCrewMember } from "./OfficialCrewList";
 type Assignment = {
   assignment_id: string;
   game_fee?: number;
+  payment_status?: "unpaid" | "approved" | "paid" | "void";
   game_id: string;
   game_number: string | null;
   game_status: string | null;
@@ -133,9 +134,9 @@ export default function OfficialDashboard({
     else {
       const assignments = results.flatMap(result=>((result.data||[]) as Assignment[]).map(row=>({...row,organization_name:organizationNames[result.organizationId]})));
       const feeRows = await Promise.all(Array.from({ length: Math.ceil(assignments.length / 200) }, (_, index) =>
-        supabase.from("assignments").select("id,game_fee").in("id", assignments.slice(index * 200, index * 200 + 200).map((row) => row.assignment_id)).limit(200)));
-      const fees = new Map(feeRows.flatMap((result) => result.data || []).map((row) => [row.id, Number(row.game_fee || 0)]));
-      setRows(assignments.map((row) => ({ ...row, game_fee: fees.get(row.assignment_id) })));
+        supabase.from("assignments").select("id,game_fee,payment_status").in("id", assignments.slice(index * 200, index * 200 + 200).map((row) => row.assignment_id)).limit(200)));
+      const fees = new Map(feeRows.flatMap((result) => result.data || []).map((row) => [row.id, row]));
+      setRows(assignments.map((row) => ({ ...row, game_fee: Number(fees.get(row.assignment_id)?.game_fee || 0), payment_status: fees.get(row.assignment_id)?.payment_status as Assignment["payment_status"] })));
     }
     setLoading(false);
   }, [organizationId, organizationIds?.join("|"), organizationNames, supabase]);
@@ -283,7 +284,7 @@ export default function OfficialDashboard({
               {next.status === "proposed" ? "Needs Response" : "Accepted"}
             </span>
           </div>
-          {next.game_fee != null && <p>Game pay: ${next.game_fee.toFixed(2)}</p>}
+          {next.game_fee != null && <p>Game pay: ${next.game_fee.toFixed(2)}{next.payment_status && ["accepted", "confirmed"].includes(next.status) ? ` · ${next.payment_status === "paid" ? "Paid" : next.payment_status === "approved" ? "Approved for payment" : next.payment_status === "void" ? "Voided" : "Unpaid"}` : ""}</p>}
           <div className="nextAssignmentFacts">
             <div>
               <small>DATE & TIME</small>

@@ -13,6 +13,7 @@ import OfficialCrewList, { OfficialCrewMember } from "./OfficialCrewList";
 type Assignment = {
   assignment_id: string;
   game_fee?: number;
+  payment_status?: "unpaid" | "approved" | "paid" | "void";
   game_id: string;
   game_number: string | null;
   game_status: string;
@@ -151,9 +152,9 @@ export default function OfficialSchedule({ organizationId,organizationIds,organi
     else {
       const rows = assignmentResults.flatMap(result=>((result.data||[]) as Assignment[]).map(row=>({...row,organization_name:organizationNames[result.organizationId]})));
       const feeRows = await Promise.all(Array.from({ length: Math.ceil(rows.length / 200) }, (_, index) =>
-        sb.from("assignments").select("id,game_fee").in("id", rows.slice(index * 200, index * 200 + 200).map((row) => row.assignment_id)).limit(200)));
-      const fees = new Map(feeRows.flatMap((result) => result.data || []).map((row) => [row.id, Number(row.game_fee || 0)]));
-      setAssignments(rows.map((row) => ({ ...row, game_fee: fees.get(row.assignment_id) })));
+        sb.from("assignments").select("id,game_fee,payment_status").in("id", rows.slice(index * 200, index * 200 + 200).map((row) => row.assignment_id)).limit(200)));
+      const fees = new Map(feeRows.flatMap((result) => result.data || []).map((row) => [row.id, row]));
+      setAssignments(rows.map((row) => ({ ...row, game_fee: Number(fees.get(row.assignment_id)?.game_fee || 0), payment_status: fees.get(row.assignment_id)?.payment_status as Assignment["payment_status"] })));
       setBlocks((b.data || []) as Block[]);
       setObservations(observationResults.flatMap(result=>((result.data||[]) as MentorObservation[]).map(row=>({...row,organization_name:organizationNames[result.organizationId]}))));
       setLocations((locationLinks.data || []).flatMap((row: any) => {
@@ -413,7 +414,7 @@ export default function OfficialSchedule({ organizationId,organizationIds,organi
                       {e.a.organization_name ? ` • ${e.a.organization_name}` : ""}
                     </small>
                   </div>
-                  {e.a.game_fee != null && <small>Game pay: ${e.a.game_fee.toFixed(2)}</small>}
+                  {e.a.game_fee != null && <small>Game pay: ${e.a.game_fee.toFixed(2)}{e.a.payment_status && ["accepted", "confirmed"].includes(e.a.status) ? ` · ${e.a.payment_status === "paid" ? "Paid" : e.a.payment_status === "approved" ? "Approved for payment" : e.a.payment_status === "void" ? "Voided" : "Unpaid"}` : ""}</small>}
                   <div className="officialScheduleCrew">
                     <OfficialCrewList crew={crew[e.a.game_id] || []} />
                   </div>
