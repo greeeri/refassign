@@ -5351,15 +5351,19 @@ export default function AssignmentsManagerV2({
     if (!fieldMove.accept) {
       for (const [gameId, assignmentId] of [[moved.targetGameId, moved.targetAssignmentId], [moved.sourceGameId, moved.sourceAssignmentId]] as const) {
         if (!assignmentId) continue;
-        const response = await fetch(`/api/assignments/publish?organizationId=${encodeURIComponent(organizationId || "")}`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ gameId, assignmentIds: [assignmentId] }),
-        });
-        const result = await response.json().catch(() => ({})) as { error?: string; failures?: string[] };
-        if (!response.ok || result.failures?.length) failures.push(result.error || result.failures?.join("; ") || "Notification failed");
+        try {
+          const response = await fetch(`/api/assignments/publish?organizationId=${encodeURIComponent(organizationId || "")}`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ gameId, assignmentIds: [assignmentId] }),
+          });
+          const result = await response.json().catch(() => ({})) as { error?: string; failures?: string[] };
+          if (!response.ok || result.failures?.length) failures.push(result.error || result.failures?.join("; ") || "Notification failed");
+        } catch {
+          failures.push(`Game #${games.find((item) => item.id === gameId)?.game_number || gameId}: notification status could not be verified`);
+        }
       }
     }
-    await refreshAssignmentState();
+    await load();
     setFieldMove(null);
     setFieldMoveSaving(false);
     setNotice(`${fieldMove.mode === "switch" ? "Switch" : "Transfer"} completed.${fieldMove.accept ? " Moved assignments accepted." : failures.length ? " Some notifications failed; review the assignment email status." : " Officials notified for acceptance."}`);

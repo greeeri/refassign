@@ -74,6 +74,8 @@ declare
   v_reasons text[];
   v_created_source uuid;
   v_created_target uuid;
+  v_source_checkin public.assignment_check_ins%rowtype;
+  v_target_checkin public.assignment_check_ins%rowtype;
   v_other record;
 begin
   if p_mode not in ('transfer','switch') then raise exception 'Choose Transfer or Switch.'; end if;
@@ -155,7 +157,8 @@ begin
   if p_mode = 'transfer' and v_target.id is not null then raise exception 'Transfer requires an open position. Choose Switch for an occupied position.'; end if;
   if v_target.id is not null and v_target.official_id = v_source.official_id then raise exception 'This official is already in the destination position.'; end if;
   if v_source.payment_status in ('approved','paid') or (v_target.id is not null and v_target.payment_status in ('approved','paid'))
-    or exists (select 1 from public.payroll_batch_items i where i.assignment_id in (v_source.id,v_target.id)) then
+    or exists (select 1 from public.payroll_batch_items i where i.assignment_id in (v_source.id,v_target.id))
+    or exists (select 1 from public.payroll_fee_corrections c where c.assignment_id in (v_source.id,v_target.id)) then
     raise exception 'Approved or processed payroll must be corrected before moving this official.';
   end if;
   if exists (select 1 from public.assignments a where a.game_id = v_target_game.id and a.official_id = v_source.official_id
@@ -177,6 +180,10 @@ begin
       and g.starts_at + make_interval(mins => coalesce(g.duration_minutes,110)) > v_target_game.starts_at
     limit 1
   loop raise exception 'Official has an overlapping assignment on Game #%.',v_other.game_number; end loop;
+  select * into v_source_checkin from public.assignment_check_ins where assignment_id = v_source.id;
+  if v_target.id is not null then
+    select * into v_target_checkin from public.assignment_check_ins where assignment_id = v_target.id;
+  end if;
   delete from public.assignments where id in (v_source.id,v_target.id);
   -- Historic declined offers retain their audit records, but their unique
   -- game/position and game/official keys must be cleared for the new offer.
@@ -193,6 +200,14 @@ begin
     insert into public.assignments(game_id,position_id,official_id,status,published_at,responded_at,assignment_source)
     values (v_source_game.id,v_source.position_id,v_target.official_id,case when p_accept then 'accepted' else 'proposed' end,
       case when p_accept then now() else null end,case when p_accept then now() else null end,'manager') returning id into v_created_source;
+  end if;
+  if v_source_checkin.assignment_id is not null then
+    insert into public.assignment_check_ins(assignment_id,checked_in_at,checked_in_by)
+    values (v_created_target,v_source_checkin.checked_in_at,v_source_checkin.checked_in_by);
+  end if;
+  if v_created_source is not null and v_target_checkin.assignment_id is not null then
+    insert into public.assignment_check_ins(assignment_id,checked_in_at,checked_in_by)
+    values (v_created_source,v_target_checkin.checked_in_at,v_target_checkin.checked_in_by);
   end if;
   insert into public.audit_history(entity_type,entity_id,game_id,assignment_id,action,actor_user_id,actor_name,summary)
   values ('assignment',v_created_target,v_target_game.id,v_created_target,p_mode,auth.uid(),public.audit_actor_name(auth.uid()),
