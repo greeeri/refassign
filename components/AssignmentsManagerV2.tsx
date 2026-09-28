@@ -522,6 +522,11 @@ export default function AssignmentsManagerV2({
   }
   async function load(reuseCandidates = false) {
     const version = ++loadVersion.current;
+    const startedAt = performance.now();
+    const logLoadMilestone = (stage: string) => {
+      if (version !== loadVersion.current) return;
+      console.info(`[RefAssign load] ${stage}: ${Math.round(performance.now() - startedAt)} ms (viewport ${document.documentElement.clientWidth}px)`);
+    };
     setError("");
     // Management actions depend on the full candidate data set. Keep them
     // unavailable while the game list is being populated in stages.
@@ -789,6 +794,7 @@ export default function AssignmentsManagerV2({
     );
     setGames(sorted);
     setInitialGamesReady(true);
+    logLoadMilestone("games data ready");
     setLinkSelected((current) =>
       current.filter((gameId) => scopedGameIds.has(gameId)),
     );
@@ -847,6 +853,7 @@ export default function AssignmentsManagerV2({
     setLevelElig((ve.data || []) as EligV[]);
     setBlocks((bl.data || []) as Block[]);
     setCanManage(hasManagerRole);
+    logLoadMilestone("candidate data ready");
   }
   useEffect(() => {
     setInitialGamesReady(false);
