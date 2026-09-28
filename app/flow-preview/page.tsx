@@ -72,6 +72,8 @@ export default function FlowPreview() {
       if (game.id === targetGame.id && slot.position === targetSlot.position) return { ...slot, official: { ...outgoing, response } };
       return slot;
     }) })));
+    setSource(`${targetGame.id}:${targetSlot.position}`);
+    setTarget(`${sourceGame.id}:${sourceSlot.position}`);
     setNotice(`${mode === "switch" ? "Switch" : "Transfer"} applied in this walkthrough. ${decision === "notify" ? "The moved official would receive an acceptance request." : "The move is marked accepted."} Other crew positions stay on their games.`);
   }
 
