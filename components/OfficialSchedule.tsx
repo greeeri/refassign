@@ -162,16 +162,19 @@ export default function OfficialSchedule({ organizationId,organizationIds,organi
         return location ? [location as Choice] : [];
       }));
       setTeams((t.data || []) as Choice[]);
+      setLoading(false);
       const ids = [...new Set(rows.map((x) => x.game_id).filter(Boolean))];
-      const bundles = await Promise.all(
-        ids.map(async (id) => {
-          const { data } = await sb.rpc("get_my_game_crew", {
-            p_game_id: id,
-          });
-          return [id, orderedCrew((data || []) as OfficialCrewMember[])] as const;
-        }),
-      );
-      setCrew(Object.fromEntries(bundles));
+      const batches = await Promise.all(Array.from({ length: Math.ceil(ids.length / 100) }, (_, index) =>
+        sb.rpc("get_my_game_crews", { p_game_ids: ids.slice(index * 100, index * 100 + 100) })));
+      const crewError = batches.find((batch) => batch.error)?.error;
+      if (crewError) setError(crewError.message);
+      else {
+        const byGame: Record<string, OfficialCrewMember[]> = {};
+        for (const batch of batches) for (const member of batch.data || []) {
+          (byGame[member.game_id] ||= []).push(member as OfficialCrewMember);
+        }
+        setCrew(Object.fromEntries(Object.entries(byGame).map(([id, members]) => [id, orderedCrew(members)])));
+      }
     }
     setLoading(false);
   }
