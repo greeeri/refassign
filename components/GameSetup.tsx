@@ -1,6 +1,7 @@
 "use client";
 import { FormEvent, Fragment, useEffect, useMemo, useState } from "react";
 import { createClient } from "../lib/supabase/client";
+import { fieldComplexRpcMissing } from "../lib/field-complex-support";
 import { coordinatesForVenue } from "../lib/client-geocode";
 import TeamsRosterManager from "./TeamsRosterManager";
 import LocationsRosterManager from "./LocationsRosterManager";
@@ -75,6 +76,7 @@ export default function GameSetup({
     [locations, setLocations] = useState<Location[]>([]);
   const [locationComplexes, setLocationComplexes] = useState<Record<string, string>>({}),
     [complexDrafts, setComplexDrafts] = useState<Record<string, string>>({}),
+    [fieldComplexAvailable, setFieldComplexAvailable] = useState(false),
     [savingComplex, setSavingComplex] = useState("");
   const [levelName, setLevelName] = useState(""),
     [levelOfficials, setLevelOfficials] = useState("3"),
@@ -324,7 +326,7 @@ export default function GameSetup({
       loc.error ||
       pw.error ||
       organizationSetup.error ||
-      complexes.error;
+      (fieldComplexRpcMissing(complexes.error) ? null : complexes.error);
     if (err) setError(err.message);
     else {
       const powerMap: Record<string, string> = {};
@@ -367,6 +369,7 @@ export default function GameSetup({
       setPowers(powerMap);
       setSavedPowers(savedPowerMap);
       setLocations((loc.data || []) as Location[]);
+      setFieldComplexAvailable(Boolean(organizationId && !complexes.error));
       if (organizationId) {
         const values = Object.fromEntries((complexes.data || []).map((row) => [row.location_id, row.field_complex || ""]));
         setLocationComplexes(values);
@@ -1423,7 +1426,7 @@ export default function GameSetup({
                   <tr>
                     <th>Location</th>
                     <th>Address</th>
-                    {organizationId && <th>Field Complex</th>}
+                    {organizationId && fieldComplexAvailable && <th>Field Complex</th>}
                     <th>Venue Details</th>
                     <th></th>
                   </tr>
@@ -1437,7 +1440,7 @@ export default function GameSetup({
                           .filter(Boolean)
                           .join(", ")}
                       </td>
-                      {organizationId && <td><div className="headerActions"><input
+                      {organizationId && fieldComplexAvailable && <td><div className="headerActions"><input
                         aria-label={`Field complex for ${v.name}`}
                         placeholder="e.g. Hy-Vee Multiplex"
                         maxLength={80}
