@@ -574,7 +574,7 @@ export default function AssignmentsManagerV2({
         ),
       );
     } else setCanManage(false);
-    const [g, oo, o, p, a, r, pr, pw, le, ve, bl, lg, lm, sas, ms, ah, at] =
+    const [g, oo, o, p, r, pr, pw, le, ve, bl, lg, at] =
       await Promise.all([
         readAllPages<Game>((from, to) => {
           let query = supabase
@@ -646,7 +646,6 @@ export default function AssignmentsManagerV2({
           .from("sport_positions")
           .select("id,sport_id,name,required,sort_order")
           .order("sort_order"),
-        Promise.resolve({ data: [] as Assignment[], error: null }),
         readAllPages<Rank>((from, to) =>
           supabase
             .from("my_assignment_rankings")
@@ -687,23 +686,6 @@ export default function AssignmentsManagerV2({
           .eq("organization_id", organizationId || "")
           .order("created_at", { ascending: false }),
         supabase
-          .from("game_link_members")
-          .select("group_id,game_id,sort_order")
-          .order("sort_order"),
-        supabase
-          .from("assignment_self_assign_slots")
-          .select("id,game_id,position_id,status")
-          .eq("status", "open"),
-        supabase.from("game_mentor_slots").select("game_id,position_id"),
-        readAllPages<UnassignmentAudit>((from, to) =>
-          supabase
-            .from("audit_history")
-            .select("game_id,old_data")
-            .eq("action", "unassigned")
-            .order("id")
-            .range(from, to),
-        ),
-        supabase
           .from("assignment_templates")
           .select(
             "id,name,sport_id,league_id,created_by,updated_at,organization_id,assignment_template_slots(id,position_id,official_id,sort_order)",
@@ -727,7 +709,6 @@ export default function AssignmentsManagerV2({
       oo.error ||
       o.error ||
       p.error ||
-      a.error ||
       r.error ||
       pr.error ||
       pw.error ||
@@ -735,10 +716,6 @@ export default function AssignmentsManagerV2({
       ve.error ||
       bl.error ||
       lg.error ||
-      lm.error ||
-      sas.error ||
-      ms.error ||
-      ah.error ||
       at.error;
     if (err) {
       setError(err.message);
@@ -805,15 +782,31 @@ export default function AssignmentsManagerV2({
     setPositions((p.data || []) as Position[]);
     const scopedGames = (g.data || []) as unknown as Game[];
     const scopedGameIds = new Set(scopedGames.map((listedGame) => listedGame.id));
-    const assignmentResult = scopedGames.length
-      ? await readAllForChunks<Assignment, string>(
-          scopedGames.map((listedGame) => listedGame.id),
+    const scopedIds = scopedGames.map((listedGame) => listedGame.id);
+    const [assignmentResult, linkResult, slotResult, mentorResult, auditResult] = scopedIds.length
+      ? await Promise.all([
+        readAllForChunks<Assignment, string>(
+          scopedIds,
           (gameIds, from, to) => supabase.from("assignments")
             .select("id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at,assignment_source,email_sent_at,email_error,resend_email_id,cancellation_notified_at,cancellation_email_error,cancellation_email_id,game_fee,payment_status")
             .in("game_id", gameIds).order("id").range(from, to),
-        )
-      : { data: [], error: null };
-    if (assignmentResult.error) { setError(assignmentResult.error.message); return; }
+        ),
+        readAllForChunks<LinkMember, string>(scopedIds, (gameIds, from, to) =>
+          supabase.from("game_link_members").select("group_id,game_id,sort_order")
+            .in("game_id", gameIds).order("game_id").order("group_id").range(from, to)),
+        readAllForChunks<SelfAssignSlot, string>(scopedIds, (gameIds, from, to) =>
+          supabase.from("assignment_self_assign_slots").select("id,game_id,position_id,status")
+            .in("game_id", gameIds).eq("status", "open").order("id").range(from, to)),
+        readAllForChunks<MentorSlot, string>(scopedIds, (gameIds, from, to) =>
+          supabase.from("game_mentor_slots").select("game_id,position_id")
+            .in("game_id", gameIds).order("game_id").order("position_id").range(from, to)),
+        readAllForChunks<UnassignmentAudit, string>(scopedIds, (gameIds, from, to) =>
+          supabase.from("audit_history").select("game_id,old_data")
+            .in("game_id", gameIds).eq("action", "unassigned").order("id").range(from, to)),
+      ])
+      : Array.from({ length: 5 }, () => ({ data: [], error: null }));
+    const scopedError = assignmentResult.error || linkResult.error || slotResult.error || mentorResult.error || auditResult.error;
+    if (scopedError) { setError(scopedError.message); return; }
     if (version !== loadVersion.current) return;
     const scopedAssignments = assignmentResult.data || [];
     const checkInResult = scopedAssignments.length
@@ -849,24 +842,24 @@ export default function AssignmentsManagerV2({
     setBlocks((bl.data || []) as Block[]);
     setLinkGroups((lg.data || []) as LinkGroup[]);
     setLinkMembers(
-      ((lm.data || []) as LinkMember[]).filter((member) =>
+      ((linkResult.data || []) as LinkMember[]).filter((member) =>
         scopedGameIds.has(member.game_id),
       ),
     );
     setSelfAssignSlots(
-      ((sas.data || []) as SelfAssignSlot[]).filter((slot) =>
+      ((slotResult.data || []) as SelfAssignSlot[]).filter((slot) =>
         scopedGameIds.has(slot.game_id),
       ),
     );
     setMentorSlots(
-      ((ms.data || []) as MentorSlot[]).filter((slot) =>
+      ((mentorResult.data || []) as MentorSlot[]).filter((slot) =>
         scopedGameIds.has(slot.game_id),
       ),
     );
     setAssignmentTemplates((at.data || []) as AssignmentTemplate[]);
     setUnassignedSlotKeys([
       ...new Set(
-        ((ah.data || []) as UnassignmentAudit[]).flatMap((row) =>
+        ((auditResult.data || []) as UnassignmentAudit[]).flatMap((row) =>
           row.game_id &&
           scopedGameIds.has(row.game_id) &&
           row.old_data?.position_id
@@ -997,6 +990,8 @@ export default function AssignmentsManagerV2({
     return <small className="assignmentPositionPay">{hasFee ? `Game pay: $${Number(amount).toFixed(2)} · ${status}` : "Game pay: Not set"}</small>;
   }
   async function refreshAssignmentState() {
+    const gameIds = games.map((game) => game.id);
+    const empty = { data: [], error: null };
     const [
       assignmentResult,
       selfAssignResult,
@@ -1004,20 +999,19 @@ export default function AssignmentsManagerV2({
       unassignmentResult,
       candidateConflictError,
     ] = await Promise.all([
-      supabase
-        .from("assignments")
-        .select(
-          "id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at,assignment_source,email_sent_at,email_error,resend_email_id,cancellation_notified_at,cancellation_email_error,cancellation_email_id,game_fee,payment_status",
-        ),
-      supabase
-        .from("assignment_self_assign_slots")
-        .select("id,game_id,position_id,status")
-        .eq("status", "open"),
-      supabase.from("game_mentor_slots").select("game_id,position_id"),
-      supabase
-        .from("audit_history")
-        .select("game_id,old_data")
-        .eq("action", "unassigned"),
+      gameIds.length ? readAllForChunks<Assignment, string>(gameIds, (ids, from, to) =>
+        supabase.from("assignments")
+          .select("id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at,assignment_source,email_sent_at,email_error,resend_email_id,cancellation_notified_at,cancellation_email_error,cancellation_email_id,game_fee,payment_status")
+          .in("game_id", ids).order("id").range(from, to)) : empty,
+      gameIds.length ? readAllForChunks<SelfAssignSlot, string>(gameIds, (ids, from, to) =>
+        supabase.from("assignment_self_assign_slots").select("id,game_id,position_id,status")
+          .in("game_id", ids).eq("status", "open").order("id").range(from, to)) : empty,
+      gameIds.length ? readAllForChunks<MentorSlot, string>(gameIds, (ids, from, to) =>
+        supabase.from("game_mentor_slots").select("game_id,position_id")
+          .in("game_id", ids).order("game_id").order("position_id").range(from, to)) : empty,
+      gameIds.length ? readAllForChunks<UnassignmentAudit, string>(gameIds, (ids, from, to) =>
+        supabase.from("audit_history").select("game_id,old_data")
+          .in("game_id", ids).eq("action", "unassigned").order("id").range(from, to)) : empty,
       loadCandidateScheduleConflicts(games),
     ]);
     const refreshError =
