@@ -47,6 +47,9 @@ type Game = {
     state: string | null;
     latitude: number | null;
     longitude: number | null;
+    address: string | null;
+    field_complex: string | null;
+    venue_id: string | null;
   } | null;
 };
 type Official = {
@@ -354,6 +357,8 @@ export default function AssignmentsManagerV2({
       Set<string>
     >(new Set()),
     [selected, setSelected] = useState(""),
+    [fieldMove, setFieldMove] = useState<{ sourceId: string; mode: "transfer" | "switch"; targetGameId: string; targetPositionId: string; accept: boolean } | null>(null),
+    [fieldMoveSaving, setFieldMoveSaving] = useState(false),
     [range, setRange] = useState<Range>("all"),
     [customDate, setCustomDate] = useState(""),
     [showCalendar, setShowCalendar] = useState(false),
@@ -558,8 +563,9 @@ export default function AssignmentsManagerV2({
           let query = supabase
             .from("games")
             .select(
-              "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,time_tbd,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,city,state,latitude,longitude)",
+              "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,time_tbd,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,address,city,state,latitude,longitude,venue_id,field_complex)",
             )
+            .is("archived_at", null)
             .order("starts_at")
             .order("id");
           if (organizationId)
@@ -5180,6 +5186,19 @@ export default function AssignmentsManagerV2({
           ))}
         </select>
         <div className="assignmentStatusCell">
+          <details className="assignmentCrewPreview">
+            <summary aria-label={`Preview crew for game ${g.game_number}`}>Crew</summary>
+            <div className="assignmentCrewPreviewBody">
+              {positions.filter((position) => position.sport_id === g.sport_id)
+                .sort((a, b) => a.sort_order - b.sort_order)
+                .slice(0, g.officials_needed)
+                .map((position) => {
+                  const assigned = assignments.find((item) => item.game_id === g.id && item.position_id === position.id && assignmentOccupiesPosition(item.status));
+                  const official = officials.find((item) => item.id === assigned?.official_id);
+                  return <div key={position.id}><b>{shortPositionName(position.name)}</b><span>{official ? `${official.first_name} ${official.last_name}` : "Open"}</span><small>{assigned ? assignmentStatus(assigned).label : "Unassigned"}</small></div>;
+                })}
+            </div>
+          </details>
           <span
             title={completeness.detail}
             className="assignmentStatusBadge"
@@ -5279,6 +5298,73 @@ export default function AssignmentsManagerV2({
       </button>
     );
   }
+  const fieldMoveSource = assignments.find((item) => item.id === fieldMove?.sourceId);
+  const fieldMoveGame = games.find((item) => item.id === fieldMoveSource?.game_id);
+  const fieldMoveCandidates = fieldMoveGame
+    ? games.filter((item) => {
+        const from = fieldMoveGame.location, to = item.location;
+        if (!from || !to || item.id === fieldMoveGame.id || item.location_id === fieldMoveGame.location_id
+          || item.starts_at !== fieldMoveGame.starts_at || !gameAcceptsAssignments(item) || item.time_tbd
+          || from.city?.toLowerCase() !== to.city?.toLowerCase() || from.state?.toLowerCase() !== to.state?.toLowerCase()) return false;
+        const sameAddress = Boolean(from.address?.trim() && from.address.trim().toLowerCase() === to.address?.trim().toLowerCase());
+        const sameComplex = Boolean(from.field_complex?.trim() && from.field_complex.trim().toLowerCase() === to.field_complex?.trim().toLowerCase());
+        if (!sameAddress && !sameComplex && !(from.venue_id && from.venue_id === to.venue_id)) return false;
+        if (sameAddress) return true;
+        if (from.latitude == null || from.longitude == null || to.latitude == null || to.longitude == null) return false;
+        const lat = (to.latitude - from.latitude) * Math.PI / 180, lon = (to.longitude - from.longitude) * Math.PI / 180;
+        const a = Math.sin(lat / 2) ** 2 + Math.cos(from.latitude * Math.PI / 180) * Math.cos(to.latitude * Math.PI / 180) * Math.sin(lon / 2) ** 2;
+        return 6371 * 2 * Math.asin(Math.sqrt(a)) <= 1;
+      })
+    : [];
+  const fieldMoveSlots = fieldMoveCandidates.flatMap((target) => positions
+    .filter((position) => position.sport_id === target.sport_id)
+    .sort((a, b) => a.sort_order - b.sort_order || a.id.localeCompare(b.id))
+    .slice(0, target.officials_needed)
+    .flatMap((position) => {
+      const occupant = assignments.find((item) => item.game_id === target.id && item.position_id === position.id && assignmentOccupiesPosition(item.status));
+      return fieldMove?.mode === "transfer" && occupant ? [] : [{ target, position, occupant }];
+    }));
+  async function completeFieldMove(override = false) {
+    if (!fieldMove || !fieldMove.targetGameId || !fieldMove.targetPositionId || fieldMoveSaving) return;
+    setFieldMoveSaving(true);
+    setError("");
+    const { data, error: moveError } = await supabase.rpc("move_official_between_fields", {
+      p_source_assignment_id: fieldMove.sourceId,
+      p_target_game_id: fieldMove.targetGameId,
+      p_target_position_id: fieldMove.targetPositionId,
+      p_mode: fieldMove.mode,
+      p_accept: fieldMove.accept,
+      p_override: override,
+    });
+    if (moveError) {
+      if (!override && moveError.message.includes("Eligibility override required:") && window.confirm(`${moveError.message}\n\nOverride eligibility for this move?`)) {
+        setFieldMoveSaving(false);
+        await completeFieldMove(true);
+        return;
+      }
+      setError(moveError.message);
+      setFieldMoveSaving(false);
+      return;
+    }
+    const moved = data as { targetAssignmentId: string; sourceAssignmentId: string | null; targetGameId: string; sourceGameId: string };
+    const failures: string[] = [];
+    if (!fieldMove.accept) {
+      for (const [gameId, assignmentId] of [[moved.targetGameId, moved.targetAssignmentId], [moved.sourceGameId, moved.sourceAssignmentId]] as const) {
+        if (!assignmentId) continue;
+        const response = await fetch(`/api/assignments/publish?organizationId=${encodeURIComponent(organizationId || "")}`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ gameId, assignmentIds: [assignmentId] }),
+        });
+        const result = await response.json().catch(() => ({})) as { error?: string; failures?: string[] };
+        if (!response.ok || result.failures?.length) failures.push(result.error || result.failures?.join("; ") || "Notification failed");
+      }
+    }
+    await refreshAssignmentState();
+    setFieldMove(null);
+    setFieldMoveSaving(false);
+    setNotice(`${fieldMove.mode === "switch" ? "Switch" : "Transfer"} completed.${fieldMove.accept ? " Moved assignments accepted." : failures.length ? " Some notifications failed; review the assignment email status." : " Officials notified for acceptance."}`);
+    if (failures.length) setError(failures.join("; "));
+  }
   return (
     <>
       <input
@@ -5288,6 +5374,21 @@ export default function AssignmentsManagerV2({
         accept=".xlsx,.xls,.csv"
         onChange={importAssignmentFees}
       />
+      {fieldMove && fieldMoveSource && fieldMoveGame && (
+        <div className="assignmentDialogBackdrop" onClick={(event) => { if (event.target === event.currentTarget && !fieldMoveSaving) setFieldMove(null); }}>
+          <section className="assignmentDialog fieldMoveDialog" role="dialog" aria-modal="true" aria-labelledby="field-move-title" style={{ maxWidth: 620 }}>
+            <div className="cardHead"><h3 id="field-move-title">{fieldMove.mode === "switch" ? "Switch officials" : "Transfer official"}</h3><button type="button" className="secondary" disabled={fieldMoveSaving} onClick={() => setFieldMove(null)}>Close</button></div>
+            <p>Game #{fieldMoveGame.game_number} · {fieldMoveGame.location?.name} · {formatEventDateTime(fieldMoveGame.starts_at, fieldMoveGame.location)}</p>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              {(["transfer", "switch"] as const).map((mode) => <button key={mode} type="button" className={fieldMove.mode === mode ? "primary" : "secondary"} onClick={() => setFieldMove({ ...fieldMove, mode, targetGameId: "", targetPositionId: "" })}>{mode === "transfer" ? "Transfer to open slot" : "Switch with open or filled slot"}</button>)}
+            </div>
+            <label>Destination game and position<select value={`${fieldMove.targetGameId}:${fieldMove.targetPositionId}`} onChange={(event) => { const [targetGameId, targetPositionId] = event.target.value.split(":"); setFieldMove({ ...fieldMove, targetGameId, targetPositionId }); }}><option value=":">Choose a slot</option>{fieldMoveSlots.map(({ target, position, occupant }) => { const official = officials.find((item) => item.id === occupant?.official_id); return <option key={`${target.id}:${position.id}`} value={`${target.id}:${position.id}`}>#{target.game_number} · {target.location?.name} · {shortPositionName(position.name)} · {official ? `${official.first_name} ${official.last_name}` : "Open"}</option>; })}</select></label>
+            {!fieldMoveSlots.length && <p>No fields in this complex at the exact start time have {fieldMove.mode === "transfer" ? "an open slot" : "a matching slot"}. Check the locations’ address or Field Complex setting.</p>}
+            <label style={{ display: "block", margin: "14px 0" }}>After the move<select value={fieldMove.accept ? "accept" : "notify"} onChange={(event) => setFieldMove({ ...fieldMove, accept: event.target.value === "accept" })}><option value="notify">Assign and notify for acceptance</option><option value="accept">Accept the move now</option></select></label>
+            <button type="button" className="primary" disabled={!fieldMove.targetPositionId || fieldMoveSaving} onClick={() => void completeFieldMove()}>{fieldMoveSaving ? "Moving…" : fieldMove.mode === "transfer" ? "Transfer official" : "Switch positions"}</button>
+          </section>
+        </div>
+      )}
       {canManage && organizationId && (
         <SelfAssignOverrideRequests organizationId={organizationId} />
       )}
@@ -10030,6 +10131,7 @@ export default function AssignmentsManagerV2({
                                             (o) => o.id === current.official_id,
                                           )?.last_name}
                                         <ScheduleLink officialId={current.official_id} />
+                                        {canManage && <><button type="button" className="assignmentFieldMoveLink" onClick={() => setFieldMove({ sourceId: current.id, mode: "transfer", targetGameId: "", targetPositionId: "", accept: false })}>Transfer</button><button type="button" className="assignmentFieldMoveLink" onClick={() => setFieldMove({ sourceId: current.id, mode: "switch", targetGameId: "", targetPositionId: "", accept: false })}>Switch</button></>}
                                         {futureBadge(current.official_id)}
                                         {canManage && (
                                           <span

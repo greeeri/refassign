@@ -21,6 +21,7 @@ export async function POST(req: NextRequest) {
     gameId?: string;
     responseByLocal?: string;
     retryFailed?: boolean;
+    assignmentIds?: string[];
   };
   if (!body.gameId)
     return NextResponse.json({ error: "Game is required." }, { status: 400 });
@@ -52,6 +53,10 @@ export async function POST(req: NextRequest) {
     .select("id")
     .eq("game_id", body.gameId)
     .not("official_id", "is", null);
+  const selectedIds = body.assignmentIds ? [...new Set(body.assignmentIds)] : null;
+  if (selectedIds && (!selectedIds.length || selectedIds.length > 2))
+    return NextResponse.json({ error: "Choose one or two assignments to notify." }, { status: 400 });
+  if (selectedIds) assignmentQuery.in("id", selectedIds);
   const { data: targetAssignments, error: targetError } = body.retryFailed
     ? await assignmentQuery
         .not("published_at", "is", null)
@@ -63,8 +68,13 @@ export async function POST(req: NextRequest) {
   const targetIds = (targetAssignments || []).map(
     (assignment) => assignment.id,
   );
+  if (selectedIds && targetIds.length !== selectedIds.length)
+    return NextResponse.json({ error: "One or more assignments changed before notification. Review the game." }, { status: 409 });
   if (!targetIds.length)
     return NextResponse.json({ sent: 0, failed: 0, failures: [] });
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey)
+    return NextResponse.json({ error: "RESEND_API_KEY is not configured." }, { status: 500 });
   const deadlineLeague = Array.isArray((ownedGame as any)?.leagues)
     ? (ownedGame as any).leagues[0]
     : (ownedGame as any)?.leagues;
@@ -109,12 +119,22 @@ export async function POST(req: NextRequest) {
     ).toISOString();
   }
   if (!body.retryFailed) {
-    const { error: publishError } = await supabase.rpc(
-      "publish_game_assignments",
-      { p_game_id: body.gameId },
-    );
+    const { data: publishedSelection, error: publishError } = selectedIds
+      ? await service.from("assignments").update({
+          published_at: new Date().toISOString(),
+          published_by: context.user.id,
+          response_token: crypto.randomUUID(),
+          responded_at: null,
+          decline_reason: null,
+          email_sent_at: null,
+          email_error: null,
+          resend_email_id: null,
+        }).eq("game_id", body.gameId).in("id", targetIds).is("published_at", null).eq("status", "proposed").select("id")
+      : await supabase.rpc("publish_game_assignments", { p_game_id: body.gameId });
     if (publishError)
       return NextResponse.json({ error: publishError.message }, { status: 400 });
+    if (selectedIds && (!Array.isArray(publishedSelection) || publishedSelection.length !== targetIds.length))
+      return NextResponse.json({ error: "An assignment changed before notification. Review its status." }, { status: 409 });
     const { error: deadlineError } = await service
       .from("assignments")
       .update({ accept_by: responseAt })
@@ -128,15 +148,11 @@ export async function POST(req: NextRequest) {
       "id,official_id,status,published_at,accept_by,response_token,email_sent_at,officials(first_name,last_name,email),sport_positions(name),games(starts_at,notes,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name,address,city,state),leagues(name),levels(name))",
     )
     .in("id", targetIds)
+    .eq("status", "proposed")
+    .not("published_at", "is", null)
     .is("email_sent_at", null);
   if (loadError)
     return NextResponse.json({ error: loadError.message }, { status: 400 });
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey)
-    return NextResponse.json(
-      { error: "RESEND_API_KEY is not configured." },
-      { status: 500 },
-    );
   let sent = 0;
   const failures: string[] = [];
   for (const raw of rows || []) {
