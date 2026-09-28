@@ -574,7 +574,7 @@ export default function AssignmentsManagerV2({
         ),
       );
     } else setCanManage(false);
-    const [g, oo, o, p, r, pr, pw, le, ve, bl, lg, at] =
+    const [g, oo, o, p, rankings, pw, le, ve, bl, lg, at] =
       await Promise.all([
         readAllPages<Game>((from, to) => {
           let query = supabase
@@ -646,18 +646,11 @@ export default function AssignmentsManagerV2({
           .from("sport_positions")
           .select("id,sport_id,name,required,sort_order")
           .order("sort_order"),
-        readAllPages<Rank>((from, to) =>
-          supabase
-            .from("my_assignment_rankings")
-            .select("official_id,rank")
-            .order("official_id")
-            .range(from, to),
-        ),
-        readAllPages<PositionRank>((from, to) =>
+        readAllPages<Rank & PositionRank>((from, to) =>
           supabase
             .from("my_assignment_rankings")
             .select(
-              "official_id,ref_rank,ar1_rank,ar2_rank,fourth_rank,mentor_certified",
+              "official_id,rank,ref_rank,ar1_rank,ar2_rank,fourth_rank,mentor_certified",
             )
             .order("official_id")
             .range(from, to),
@@ -709,8 +702,7 @@ export default function AssignmentsManagerV2({
       oo.error ||
       o.error ||
       p.error ||
-      r.error ||
-      pr.error ||
+      rankings.error ||
       pw.error ||
       le.error ||
       ve.error ||
@@ -724,20 +716,17 @@ export default function AssignmentsManagerV2({
     const rm: Record<string, number> = {},
       prm: Record<string, PositionRank> = {},
       pm: Record<string, number> = {};
-    ((r.data || []) as Rank[]).forEach(
-      (x) => (rm[x.official_id] = Number(x.rank)),
-    );
-    ((pr.data || []) as PositionRank[]).forEach(
-      (x) =>
-        (prm[x.official_id] = {
-          official_id: x.official_id,
-          ref_rank: Number(x.ref_rank),
-          ar1_rank: Number(x.ar1_rank),
-          ar2_rank: Number(x.ar2_rank),
-          fourth_rank: Number(x.fourth_rank),
-          mentor_certified: Boolean(x.mentor_certified),
-        }),
-    );
+    ((rankings.data || []) as (Rank & PositionRank)[]).forEach((x) => {
+      rm[x.official_id] = Number(x.rank);
+      prm[x.official_id] = {
+        official_id: x.official_id,
+        ref_rank: Number(x.ref_rank),
+        ar1_rank: Number(x.ar1_rank),
+        ar2_rank: Number(x.ar2_rank),
+        fourth_rank: Number(x.fourth_rank),
+        mentor_certified: Boolean(x.mentor_certified),
+      };
+    });
     ((pw.data || []) as Power[]).forEach(
       (x) => (pm[x.team_id] = Number(x.power)),
     );
@@ -751,25 +740,17 @@ export default function AssignmentsManagerV2({
         (link) => link.official_id,
       );
       officialRows = [];
-      for (
-        let index = 0;
-        index < organizationOfficialIds.length;
-        index += 200
-      ) {
-        const { data: page, error: pageError } = await supabase
-          .from("officials")
-          .select(
-            "id,first_name,last_name,email,phone,sports,active,home_city,home_state,home_latitude,home_longitude",
-          )
-          .in("id", organizationOfficialIds.slice(index, index + 200))
-          .eq("active", true)
-          .order("last_name")
-          .order("first_name");
-        if (pageError) {
-          setError(pageError.message);
-          return;
-        }
-        officialRows.push(...((page || []) as Official[]));
+      for (let index = 0; index < organizationOfficialIds.length; index += 800) {
+        const batches = await Promise.all(
+          Array.from({ length: Math.min(4, Math.ceil((organizationOfficialIds.length - index) / 200)) }, (_, offset) =>
+            supabase.from("officials")
+              .select("id,first_name,last_name,email,phone,sports,active,home_city,home_state,home_latitude,home_longitude")
+              .in("id", organizationOfficialIds.slice(index + offset * 200, index + (offset + 1) * 200))
+              .eq("active", true).order("last_name").order("first_name")),
+        );
+        const pageError = batches.find((batch) => batch.error)?.error;
+        if (pageError) { setError(pageError.message); return; }
+        officialRows.push(...batches.flatMap((batch) => (batch.data || []) as Official[]));
       }
       officialRows.sort(
         (a, b) =>
