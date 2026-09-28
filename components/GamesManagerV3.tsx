@@ -475,8 +475,8 @@ export default function GamesManagerV3({
     }
     setStatusBusy("");
   }
-  async function manageGames(action: "archive" | "restore" | "delete", ids: string[]) {
-    if (!ids.length) {
+  async function manageGames(action: "archive" | "archive_cancelled" | "restore" | "delete", ids: string[] = []) {
+    if (action !== "archive_cancelled" && !ids.length) {
       setError("Select at least one game first.");
       return;
     }
@@ -484,6 +484,8 @@ export default function GamesManagerV3({
       setError("Select an organization before managing games.");
       return;
     }
+    if (action === "archive_cancelled" &&
+      !window.confirm("Archive all cancelled games in the leagues you manage? They will leave working views and remain available under Archived Games.")) return;
     if (
       action === "delete" &&
       !window.confirm(
@@ -501,11 +503,12 @@ export default function GamesManagerV3({
         body: JSON.stringify({ action, gameIds: ids }),
       },
     );
-    const result = (await response.json().catch(() => ({}))) as { error?: string };
+    const result = (await response.json().catch(() => ({}))) as { error?: string; updated?: number };
     if (!response.ok) setError(result.error || "Games could not be updated.");
     else {
-      const past = action === "archive" ? "archived" : action === "restore" ? "restored" : "deleted";
-      setMessage(`${ids.length} game${ids.length === 1 ? "" : "s"} ${past}.`);
+      const count = action === "archive_cancelled" ? result.updated || 0 : ids.length;
+      const past = action === "archive" || action === "archive_cancelled" ? "archived" : action === "restore" ? "restored" : "deleted";
+      setMessage(`${count} game${count === 1 ? "" : "s"} ${past}.`);
       await load();
     }
     setManagementBusy(false);
@@ -1128,6 +1131,12 @@ export default function GamesManagerV3({
         >
           Archived Games
         </button>
+        {!showArchived && (
+          <button type="button" className="secondary" disabled={managementBusy}
+            onClick={() => void manageGames("archive_cancelled")}>
+            {managementBusy ? "Working…" : "Archive Cancelled Games"}
+          </button>
+        )}
         <label className="gameLeagueFilter">
           <span>League</span>
           <select
