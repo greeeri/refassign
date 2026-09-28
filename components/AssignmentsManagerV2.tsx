@@ -1035,16 +1035,20 @@ export default function AssignmentsManagerV2({
     ]);
     return true;
   }
-  async function archiveCancelledGames() {
+  async function archiveCancelledGames(selectedGameIds?: string[]) {
     if (!canManage || !organizationId || bulkWorking) return;
-    if (!window.confirm("Archive all cancelled games in the leagues you manage? They will leave the Assignment Center and remain available under Games → Archived Games.")) return;
+    if (selectedGameIds && !selectedGameIds.length) return;
+    const scope = selectedGameIds
+      ? `${selectedGameIds.length} selected cancelled game${selectedGameIds.length === 1 ? "" : "s"}`
+      : "all cancelled games in the leagues you manage";
+    if (!window.confirm(`Archive ${scope}? They will leave the Assignment Center and remain available under Games → Archived Games.`)) return;
     setBulkWorking(true);
     setError("");
     try {
       const response = await fetch(`/api/games/manage?organizationId=${encodeURIComponent(organizationId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "archive_cancelled" }),
+        body: JSON.stringify({ action: "archive_cancelled", gameIds: selectedGameIds }),
       });
       const result = (await response.json().catch(() => ({}))) as { error?: string; updated?: number };
       if (!response.ok) throw new Error(result.error || "Cancelled games could not be archived.");
@@ -1339,6 +1343,9 @@ export default function AssignmentsManagerV2({
   const assignmentSelection = games.filter((listedGame) =>
     linkSelected.includes(listedGame.id),
   );
+  const selectedCancelledGameIds = assignmentSelection
+    .filter((listedGame) => ["canceled", "cancelled"].includes(listedGame.status))
+    .map((listedGame) => listedGame.id);
   const broadcastOpenPositions = assignmentSelection.flatMap((selectedGame) =>
     positions
       .filter((position) => position.sport_id === selectedGame.sport_id)
@@ -8843,6 +8850,15 @@ export default function AssignmentsManagerV2({
                   </span>
                 )}
               </div>
+              {selectedCancelledGameIds.length > 0 && (
+                <button
+                  className="secondary"
+                  disabled={bulkWorking}
+                  onClick={() => void archiveCancelledGames(selectedCancelledGameIds)}
+                >
+                  Archive Selected Cancelled ({selectedCancelledGameIds.length})
+                </button>
+              )}
               <button
                 className="primary"
                 disabled={bulkWorking}
