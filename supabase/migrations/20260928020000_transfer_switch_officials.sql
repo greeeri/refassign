@@ -77,7 +77,7 @@ declare
   v_other record;
 begin
   if p_mode not in ('transfer','switch') then raise exception 'Choose Transfer or Switch.'; end if;
-  if auth.uid() is null or not public.can_manage_game_setup() then raise exception 'Only an assignor or administrator can move officials.'; end if;
+  if auth.uid() is null then raise exception 'Sign in to move officials.'; end if;
   -- Serialize competing changes to either game before inspecting positions.
   perform 1 from public.games where id in (select unnest(array[p_target_game_id,(select game_id from public.assignments where id=p_source_assignment_id)])) order by id for update;
   select * into v_source from public.assignments where id = p_source_assignment_id for update;
@@ -104,12 +104,17 @@ begin
     or exists (select 1 from public.organization_user_access_profiles p where p.organization_id = v_source_game.organization_id
       and p.user_id = auth.uid() and p.roles && array['admin','assignor']::text[])
     or exists (select 1 from public.protected_accounts p where p.user_id = auth.uid())) then raise exception 'No access to these games.'; end if;
-  if exists (select 1 from public.organization_member_league_access access where access.organization_id = v_source_game.organization_id and access.user_id = auth.uid())
+  if not (exists (select 1 from public.organization_memberships m where m.organization_id = v_source_game.organization_id and m.user_id = auth.uid() and m.role in ('owner','admin'))
+    or exists (select 1 from public.organization_user_access_profiles p where p.organization_id = v_source_game.organization_id and p.user_id = auth.uid() and p.roles @> array['admin']::text[])
+    or exists (select 1 from public.protected_accounts p where p.user_id = auth.uid()))
+    and exists (select 1 from public.organization_member_league_access access where access.organization_id = v_source_game.organization_id and access.user_id = auth.uid())
     and (not exists (select 1 from public.organization_member_league_access access where access.organization_id = v_source_game.organization_id and access.user_id = auth.uid() and access.league_id = v_source_game.league_id)
       or not exists (select 1 from public.organization_member_league_access access where access.organization_id = v_target_game.organization_id and access.user_id = auth.uid() and access.league_id = v_target_game.league_id)) then
     raise exception 'No league access to both games.';
   end if;
-  if exists (select 1 from public.organization_user_access_profiles p where p.organization_id = v_source_game.organization_id
+  if not (exists (select 1 from public.organization_memberships m where m.organization_id = v_source_game.organization_id and m.user_id = auth.uid() and m.role in ('owner','admin'))
+    or exists (select 1 from public.protected_accounts p where p.user_id = auth.uid()))
+    and exists (select 1 from public.organization_user_access_profiles p where p.organization_id = v_source_game.organization_id
     and p.user_id = auth.uid() and p.roles @> array['assignor']::text[] and not (p.roles @> array['admin']::text[])
     and cardinality(p.league_ids) > 0 and (not v_source_game.league_id = any(p.league_ids) or not v_target_game.league_id = any(p.league_ids))) then
     raise exception 'No league access to both games.';
@@ -175,10 +180,10 @@ begin
   delete from public.assignments where id in (v_source.id,v_target.id);
   -- Historic declined offers retain their audit records, but their unique
   -- game/position and game/official keys must be cleared for the new offer.
-  delete from public.assignments where game_id = v_target_game.id and status = 'declined'
+  delete from public.assignments where game_id = v_target_game.id and status in ('declined','cancelled')
     and (position_id = p_target_position_id or official_id = v_source.official_id);
   if v_target.id is not null then
-    delete from public.assignments where game_id = v_source_game.id and status = 'declined'
+    delete from public.assignments where game_id = v_source_game.id and status in ('declined','cancelled')
       and (position_id = v_source.position_id or official_id = v_target.official_id);
   end if;
   insert into public.assignments(game_id,position_id,official_id,status,published_at,responded_at,assignment_source)
