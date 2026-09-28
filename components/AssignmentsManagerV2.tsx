@@ -4289,7 +4289,7 @@ export default function AssignmentsManagerV2({
         name: string;
         email: string;
         phone: string;
-        games: string[];
+        games: { startsAt: string; field: string; description: string }[];
         assignmentIds: string[];
       }
     >();
@@ -4310,15 +4310,18 @@ export default function AssignmentsManagerV2({
         games: [],
         assignmentIds: [],
       };
-      row.games.push(
-        `#${listedGame.game_number} · ${formatEventDate(listedGame.starts_at, listedGame.location)} ${formatEventTime(listedGame.starts_at, listedGame.location)} · ${position?.name || "Official"} · ${listedGame.location?.name || "Venue TBD"}`,
-      );
+      row.games.push({
+        startsAt: listedGame.starts_at,
+        field: listedGame.location?.name || "Venue TBD",
+        description: `#${listedGame.game_number} · ${formatEventDate(listedGame.starts_at, listedGame.location)} ${formatEventTime(listedGame.starts_at, listedGame.location)} · ${position?.name || "Official"} · ${listedGame.location?.name || "Venue TBD"}`,
+      });
       row.assignmentIds.push(assignment.id);
       byOfficial.set(official.id, row);
     }
-    return [...byOfficial.values()].sort((a, b) =>
-      a.name.localeCompare(b.name),
-    );
+    return [...byOfficial.values()].map((row) => ({
+      ...row,
+      games: row.games.sort((a, b) => a.startsAt.localeCompare(b.startsAt) || a.field.localeCompare(b.field)).map((game) => game.description),
+    })).sort((a, b) => a.name.localeCompare(b.name));
   }
   async function saveElectronicCheckIns(
     assignmentIds: string[],
@@ -10026,6 +10029,7 @@ export default function AssignmentsManagerV2({
                                           officials.find(
                                             (o) => o.id === current.official_id,
                                           )?.last_name}
+                                        <ScheduleLink officialId={current.official_id} />
                                         {futureBadge(current.official_id)}
                                         {canManage && (
                                           <span
