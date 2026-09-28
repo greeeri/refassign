@@ -1035,6 +1035,28 @@ export default function AssignmentsManagerV2({
     ]);
     return true;
   }
+  async function archiveCancelledGames() {
+    if (!canManage || !organizationId || bulkWorking) return;
+    if (!window.confirm("Archive all cancelled games in the leagues you manage? They will leave the Assignment Center and remain available under Games → Archived Games.")) return;
+    setBulkWorking(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/games/manage?organizationId=${encodeURIComponent(organizationId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "archive_cancelled" }),
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string; updated?: number };
+      if (!response.ok) throw new Error(result.error || "Cancelled games could not be archived.");
+      await load();
+      const count = result.updated || 0;
+      setNotice(`${count} cancelled game${count === 1 ? "" : "s"} archived. You can restore them under Games → Archived Games.`);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Cancelled games could not be archived.");
+    } finally {
+      setBulkWorking(false);
+    }
+  }
   useEffect(() => {
     if (!notice) return;
     const timer = window.setTimeout(() => setNotice(""), 5000);
@@ -6619,6 +6641,9 @@ export default function AssignmentsManagerV2({
                     >
                       Export Assignments
                     </button>
+                    <button type="button" disabled={bulkWorking} onClick={() => void archiveCancelledGames()}>
+                      Archive Cancelled Games
+                    </button>
                     <button
                       type="button"
                       disabled={saving === "assignment-fee-import"}
@@ -6688,6 +6713,9 @@ export default function AssignmentsManagerV2({
                 onClick={() => void exportAssignments()}
               >
                 Export Assignments
+              </button>
+              <button type="button" disabled={bulkWorking} onClick={() => void archiveCancelledGames()}>
+                Archive Cancelled Games
               </button>
               <button
                 type="button"
