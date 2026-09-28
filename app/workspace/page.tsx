@@ -969,6 +969,8 @@ export default function Workspace() {
         {manager && section === "Assignments" && (
           <AssignmentsManager
             organizationId={testWorkspace?.organization_id}
+            accessibleLeagueIds={testWorkspace?.leagues?.map((league) => league.league_id)}
+            fullLeagueAccess={isSuperAdmin || testWorkspace?.roles?.some((role) => role === "owner" || role === "admin") === true || testWorkspace?.role === "owner" || testWorkspace?.role === "admin"}
             returnToListRequest={assignmentListReturnRequest}
             focusGameId={
               reportAction?.section === "Assignments"
