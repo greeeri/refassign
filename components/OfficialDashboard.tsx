@@ -9,6 +9,7 @@ import VenueDetailsButton from "./VenueDetailsButton";
 import OfficialPaymentSetup from "./OfficialPaymentSetup";
 import TournamentRulesLink from "./TournamentRulesLink";
 import OfficialCrewList, { OfficialCrewMember } from "./OfficialCrewList";
+import { loadOfficialLocations } from "../lib/client/loadOfficialLocations";
 type Assignment = {
   assignment_id: string;
   game_fee?: number;
@@ -21,6 +22,7 @@ type Assignment = {
   home_team: string | null;
   away_team: string | null;
   location_name: string | null;
+  location_id?: string | null;
   location_address: string | null;
   location_city: string | null;
   location_state: string | null;
@@ -126,7 +128,7 @@ export default function OfficialDashboard({
       return;
     }
     const results=await Promise.all(scopeIds.map(async id=>{
-      const result=await supabase.rpc("my_official_assignments",{p_organization_id:id});
+      const result=await supabase.rpc("my_official_assignments_brief",{p_organization_id:id});
       return {...result,organizationId:id};
     }));
     const loadError=results.find(result=>result.error)?.error;
@@ -136,7 +138,12 @@ export default function OfficialDashboard({
       const feeRows = await Promise.all(Array.from({ length: Math.ceil(assignments.length / 200) }, (_, index) =>
         supabase.from("assignments").select("id,game_fee,payment_status").in("id", assignments.slice(index * 200, index * 200 + 200).map((row) => row.assignment_id)).limit(200)));
       const fees = new Map(feeRows.flatMap((result) => result.data || []).map((row) => [row.id, row]));
-      setRows(assignments.map((row) => ({ ...row, game_fee: Number(fees.get(row.assignment_id)?.game_fee || 0), payment_status: fees.get(row.assignment_id)?.payment_status as Assignment["payment_status"] })));
+      const initialRows = assignments.map((row) => ({ ...row, game_fee: Number(fees.get(row.assignment_id)?.game_fee || 0), payment_status: fees.get(row.assignment_id)?.payment_status as Assignment["payment_status"] }));
+      setRows(initialRows);
+      setLoading(false);
+      const locationsResult = await loadOfficialLocations(supabase, initialRows);
+      if (locationsResult.error) setError(locationsResult.error);
+      else setRows(locationsResult.rows);
     }
     setLoading(false);
   }, [organizationId, organizationIds?.join("|"), organizationNames, supabase]);
