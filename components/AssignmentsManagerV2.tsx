@@ -3959,7 +3959,7 @@ export default function AssignmentsManagerV2({
     try {
       const cancellation = ["canceled", "rained_out"].includes(game.status);
       const response = await fetch(
-        cancellation ? "/api/games/status" : "/api/assignments/publish",
+        cancellation ? "/api/games/status" : `/api/assignments/publish?organizationId=${encodeURIComponent(organizationId || "")}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -5348,6 +5348,7 @@ export default function AssignmentsManagerV2({
     }
     const moved = data as { targetAssignmentId: string; sourceAssignmentId: string | null; targetGameId: string; sourceGameId: string };
     const failures: string[] = [];
+    const failedGameIds: string[] = [];
     if (!fieldMove.accept) {
       for (const [gameId, assignmentId] of [[moved.targetGameId, moved.targetAssignmentId], [moved.sourceGameId, moved.sourceAssignmentId]] as const) {
         if (!assignmentId) continue;
@@ -5357,17 +5358,22 @@ export default function AssignmentsManagerV2({
             body: JSON.stringify({ gameId, assignmentIds: [assignmentId] }),
           });
           const result = await response.json().catch(() => ({})) as { error?: string; failures?: string[] };
-          if (!response.ok || result.failures?.length) failures.push(result.error || result.failures?.join("; ") || "Notification failed");
+          if (!response.ok || result.failures?.length) {
+            failedGameIds.push(gameId);
+            failures.push(`Game #${games.find((item) => item.id === gameId)?.game_number || gameId}: ${result.error || result.failures?.join("; ") || "Notification failed"}`);
+          }
         } catch {
+          failedGameIds.push(gameId);
           failures.push(`Game #${games.find((item) => item.id === gameId)?.game_number || gameId}: notification status could not be verified`);
         }
       }
     }
     await load();
+    if (failedGameIds.length) setSelected(failedGameIds[0]);
     setFieldMove(null);
     setFieldMoveSaving(false);
     setNotice(`${fieldMove.mode === "switch" ? "Switch" : "Transfer"} completed.${fieldMove.accept ? " Moved assignments accepted." : failures.length ? " Some notifications failed; review the assignment email status." : " Officials notified for acceptance."}`);
-    if (failures.length) setError(failures.join("; "));
+    if (failures.length) setError(`${failures.join("; ")}. Open each affected game and use Notifications → Retry.`);
   }
   return (
     <>
