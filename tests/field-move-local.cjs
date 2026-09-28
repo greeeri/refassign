@@ -11,9 +11,11 @@ const LEVEL = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const LOC1 = '11111111-1111-4111-8111-111111111111';
 const LOC2 = '22222222-2222-4222-8222-222222222222';
 const LOC3 = '33333333-3333-4333-8333-333333333333';
+const LOC4 = '12121212-1212-4121-8121-121212121212';
 const GAME1 = '44444444-4444-4444-8444-444444444444';
 const GAME2 = '55555555-5555-4555-8555-555555555555';
 const GAME3 = '66666666-6666-4666-8666-666666666666';
+const GAME4 = '13131313-1313-4131-8131-131313131313';
 const POS1 = '77777777-7777-4777-8777-777777777777';
 const POS2 = '88888888-8888-4888-8888-888888888888';
 const OFF1 = '99999999-9999-4999-8999-999999999999';
@@ -26,6 +28,7 @@ async function setup(db) {
     create function auth.uid() returns uuid language sql stable as $$ select '${USER}'::uuid $$;
     create table public.sports(id uuid primary key,name text);
     create table public.locations(id uuid primary key,name text,venue_id uuid,address text,city text,state text,latitude double precision,longitude double precision);
+    create table public.organization_locations(organization_id uuid,location_id uuid,active boolean default true,primary key(organization_id,location_id));
     create table public.games(id uuid primary key,game_number text,sport_id uuid,league_id uuid,level_id uuid,organization_id uuid,
       location_id uuid,starts_at timestamptz,status text,time_tbd boolean default false,archived_at timestamptz,
       duration_minutes integer default 110,officials_needed integer,home_team_id uuid,away_team_id uuid);
@@ -72,11 +75,13 @@ async function setup(db) {
     insert into public.locations(id,name,address,city,state,latitude,longitude) values
       ('${LOC1}','Green 1','1000 Heritage Drive','Grimes','IA',41.7,-93.8),
       ('${LOC2}','Green 2','1000 Heritage Drive','Grimes','IA',41.7,-93.8),
-      ('${LOC3}','Other','Elsewhere','Grimes','IA',41.8,-93.8);
+      ('${LOC3}','Other','Elsewhere','Grimes','IA',41.8,-93.8),
+      ('${LOC4}','Green 3','1002 Heritage Drive','Grimes','IA',41.7001,-93.8001);
     insert into public.games(id,game_number,sport_id,league_id,level_id,organization_id,location_id,starts_at,status,officials_needed) values
       ('${GAME1}','100','${SPORT}','${LEAGUE}','${LEVEL}','${ORG}','${LOC1}','2026-10-03 15:00+00','active',2),
       ('${GAME2}','101','${SPORT}','${LEAGUE}','${LEVEL}','${ORG}','${LOC2}','2026-10-03 15:00+00','active',2),
-      ('${GAME3}','102','${SPORT}','${LEAGUE}','${LEVEL}','${ORG}','${LOC3}','2026-10-03 15:00+00','active',2);
+      ('${GAME3}','102','${SPORT}','${LEAGUE}','${LEVEL}','${ORG}','${LOC3}','2026-10-03 15:00+00','active',2),
+      ('${GAME4}','103','${SPORT}','${LEAGUE}','${LEVEL}','${ORG}','${LOC4}','2026-10-03 15:00+00','active',2);
     insert into public.sport_positions values('${POS1}','${SPORT}','Center Referee',1),('${POS2}','${SPORT}','Assistant Referee 1',2);
     insert into public.officials values('${OFF1}',true,array['Soccer']),('${OFF2}',true,array['Soccer']);
     insert into public.organization_officials values('${ORG}','${OFF1}',true),('${ORG}','${OFF2}',true);
@@ -131,6 +136,23 @@ async function expectReject(action,pattern){await assert.rejects(action,pattern)
     await expectReject(()=>move(db,a.id,GAME3),/same complex/i);
     assert.equal((await db.query('select count(*)::int n from public.assignments where id=$1',[a.id])).rows[0].n,1);
     await db.close();console.log('PASS wrong complex rejected without partial move');
+  }
+  {
+    const db=await fresh();const a=await assignment(db,GAME1,OFF1);
+    await expectReject(()=>move(db,a.id,GAME4),/same complex/i);
+    await db.query('insert into public.organization_locations(organization_id,location_id) values($1,$2),($1,$3)',[ORG,LOC1,LOC4]);
+    await db.query('select public.set_organization_field_complex($1,$2,$3)',[ORG,LOC1,'Green Complex']);
+    await db.query('select public.set_organization_field_complex($1,$2,$3)',[ORG,LOC4,'Green Complex']);
+    assert.equal((await db.query('select count(*)::int n from public.get_organization_field_complexes($1) where field_complex=$2',[ORG,'Green Complex'])).rows[0].n,2);
+    const result=(await move(db,a.id,GAME4)).rows[0].result;
+    assert.equal((await db.query('select game_id from public.assignments where id=$1',[result.targetAssignmentId])).rows[0].game_id,GAME4);
+    await db.close();console.log('PASS organization field complex permits nearby fields with different addresses');
+  }
+  {
+    const db=await fresh();
+    await expectReject(()=>db.query('select public.get_organization_field_complexes($1)',[SPORT]),/No access/i);
+    await expectReject(()=>db.query('select public.set_organization_field_complex($1,$2,$3)',[SPORT,LOC1,'Other Complex']),/No access/i);
+    await db.close();console.log('PASS field complex settings reject another organization');
   }
   {
     const db=await fresh();const a=await assignment(db,GAME1,OFF1);

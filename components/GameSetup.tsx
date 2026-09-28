@@ -73,6 +73,9 @@ export default function GameSetup({
     [powers, setPowers] = useState<Record<string, string>>({}),
     [savedPowers, setSavedPowers] = useState<Record<string, number>>({}),
     [locations, setLocations] = useState<Location[]>([]);
+  const [locationComplexes, setLocationComplexes] = useState<Record<string, string>>({}),
+    [complexDrafts, setComplexDrafts] = useState<Record<string, string>>({}),
+    [savingComplex, setSavingComplex] = useState("");
   const [levelName, setLevelName] = useState(""),
     [levelOfficials, setLevelOfficials] = useState("3"),
     [leagueName, setLeagueName] = useState(""),
@@ -285,7 +288,10 @@ export default function GameSetup({
           p_organization_id: organizationId,
         })
       : Promise.resolve({ data: null, error: null });
-    const [s, l, lg, t, loc, pw, organizationSetup] = await Promise.all([
+    const fieldComplexRequest = organizationId
+      ? supabase.rpc("get_organization_field_complexes", { p_organization_id: organizationId })
+      : Promise.resolve({ data: [], error: null });
+    const [s, l, lg, t, loc, pw, organizationSetup, complexes] = await Promise.all([
       supabase
         .from("sports")
         .select("id,name")
@@ -308,6 +314,7 @@ export default function GameSetup({
       locationRequest,
       supabase.from("assignor_team_power_rankings").select("team_id,power"),
       organizationSetupRequest,
+      fieldComplexRequest,
     ]);
     const err =
       s.error ||
@@ -316,7 +323,8 @@ export default function GameSetup({
       t.error ||
       loc.error ||
       pw.error ||
-      organizationSetup.error;
+      organizationSetup.error ||
+      complexes.error;
     if (err) setError(err.message);
     else {
       const powerMap: Record<string, string> = {};
@@ -359,6 +367,11 @@ export default function GameSetup({
       setPowers(powerMap);
       setSavedPowers(savedPowerMap);
       setLocations((loc.data || []) as Location[]);
+      if (organizationId) {
+        const values = Object.fromEntries((complexes.data || []).map((row) => [row.location_id, row.field_complex || ""]));
+        setLocationComplexes(values);
+        setComplexDrafts(values);
+      } else { setLocationComplexes({}); setComplexDrafts({}); }
     }
   }
   useEffect(() => {
@@ -632,6 +645,22 @@ export default function GameSetup({
       contact_phone: v.contact_phone || "",
       contact_email: v.contact_email || "",
     });
+  }
+  async function saveFieldComplex(locationId: string) {
+    if (!organizationId || savingComplex) return;
+    setSavingComplex(locationId);
+    setError("");
+    const value = complexDrafts[locationId]?.trim().slice(0, 80) || null;
+    const { error: saveError } = await supabase.rpc("set_organization_field_complex", {
+      p_organization_id: organizationId, p_location_id: locationId, p_field_complex: value,
+    });
+    if (saveError) setError(saveError.message);
+    else {
+      setLocationComplexes((current) => ({ ...current, [locationId]: value || "" }));
+      setComplexDrafts((current) => ({ ...current, [locationId]: value || "" }));
+      setLocationSaveMessage("Field complex saved. Fields in this group can be considered for transfers when they are within one kilometer.");
+    }
+    setSavingComplex("");
   }
   async function remove(
     table: "levels" | "leagues" | "teams" | "locations",
@@ -1394,6 +1423,7 @@ export default function GameSetup({
                   <tr>
                     <th>Location</th>
                     <th>Address</th>
+                    {organizationId && <th>Field Complex</th>}
                     <th>Venue Details</th>
                     <th></th>
                   </tr>
@@ -1407,6 +1437,15 @@ export default function GameSetup({
                           .filter(Boolean)
                           .join(", ")}
                       </td>
+                      {organizationId && <td><div className="headerActions"><input
+                        aria-label={`Field complex for ${v.name}`}
+                        placeholder="e.g. Hy-Vee Multiplex"
+                        maxLength={80}
+                        value={complexDrafts[v.id] || ""}
+                        onChange={(event) => setComplexDrafts((current) => ({ ...current, [v.id]: event.target.value }))}
+                      /><button type="button" className="tableButton"
+                        disabled={savingComplex === v.id || (complexDrafts[v.id] || "").trim() === (locationComplexes[v.id] || "")}
+                        onClick={() => void saveFieldComplex(v.id)}>{savingComplex === v.id ? "Saving…" : "Save"}</button></div></td>}
                       <td>
                         {[
                           v.directions && "Directions",

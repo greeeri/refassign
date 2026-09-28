@@ -359,6 +359,7 @@ export default function AssignmentsManagerV2({
     [selected, setSelected] = useState(""),
     [fieldMove, setFieldMove] = useState<{ sourceId: string; mode: "transfer" | "switch"; targetGameId: string; targetPositionId: string; accept: boolean } | null>(null),
     [fieldMoveSaving, setFieldMoveSaving] = useState(false),
+    [locationComplexes, setLocationComplexes] = useState<Record<string, string>>({}),
     [range, setRange] = useState<Range>("all"),
     [customDate, setCustomDate] = useState(""),
     [showCalendar, setShowCalendar] = useState(false),
@@ -557,7 +558,7 @@ export default function AssignmentsManagerV2({
         ),
       );
     } else setCanManage(false);
-    const [g, oo, o, p, a, r, pr, pw, le, ve, bl, lg, lm, sas, ms, ah, at] =
+    const [g, oo, o, p, a, r, pr, pw, le, ve, bl, lg, lm, sas, ms, ah, at, complexes] =
       await Promise.all([
         readAllPages<Game>((from, to) => {
           let query = supabase
@@ -680,6 +681,9 @@ export default function AssignmentsManagerV2({
           )
           .eq("organization_id", organizationId || "")
           .order("updated_at", { ascending: false }),
+        organizationId
+          ? supabase.rpc("get_organization_field_complexes", { p_organization_id: organizationId })
+          : Promise.resolve({ data: [], error: null }),
       ]);
     const suggestions = organizationId
       ? await readAllPages<{team_id: string; official_id: string}>((from, to) =>
@@ -691,6 +695,7 @@ export default function AssignmentsManagerV2({
       : {data: [], error: null};
     const err =
       suggestions.error ||
+      complexes.error ||
       g.error ||
       oo.error ||
       o.error ||
@@ -838,6 +843,8 @@ export default function AssignmentsManagerV2({
         new Date(x.starts_at).getTime() - new Date(y.starts_at).getTime(),
     );
     setGames(sorted);
+    setLocationComplexes(Object.fromEntries((complexes.data || []).filter((row) => row.field_complex?.trim())
+      .map((row) => [row.location_id, row.field_complex!.trim()])));
     setLinkSelected((current) =>
       current.filter((gameId) => scopedGameIds.has(gameId)),
     );
@@ -5307,7 +5314,9 @@ export default function AssignmentsManagerV2({
           || item.starts_at !== fieldMoveGame.starts_at || !gameAcceptsAssignments(item) || item.time_tbd
           || from.city?.toLowerCase() !== to.city?.toLowerCase() || from.state?.toLowerCase() !== to.state?.toLowerCase()) return false;
         const sameAddress = Boolean(from.address?.trim() && from.address.trim().toLowerCase() === to.address?.trim().toLowerCase());
-        const sameComplex = Boolean(from.field_complex?.trim() && from.field_complex.trim().toLowerCase() === to.field_complex?.trim().toLowerCase());
+        const fromComplex = locationComplexes[from.id] || from.field_complex;
+        const toComplex = locationComplexes[to.id] || to.field_complex;
+        const sameComplex = Boolean(fromComplex?.trim() && fromComplex.trim().toLowerCase() === toComplex?.trim().toLowerCase());
         if (!sameAddress && !sameComplex && !(from.venue_id && from.venue_id === to.venue_id)) return false;
         if (sameAddress) return true;
         if (from.latitude == null || from.longitude == null || to.latitude == null || to.longitude == null) return false;

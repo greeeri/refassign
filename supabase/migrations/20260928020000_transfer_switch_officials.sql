@@ -1,5 +1,47 @@
 -- Locations belong to the same transfer group only when explicitly configured.
 alter table public.locations add column if not exists field_complex text;
+-- Field groups set by an organization stay within its own workspace.
+alter table public.organization_locations add column if not exists field_complex text;
+
+create or replace function public.get_organization_field_complexes(p_organization_id uuid)
+returns table(location_id uuid,field_complex text)
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  if auth.uid() is null or not (
+    exists (select 1 from public.organization_memberships m where m.organization_id=p_organization_id
+      and m.user_id=auth.uid() and m.role in ('owner','admin','assignor'))
+    or exists (select 1 from public.organization_user_access_profiles p where p.organization_id=p_organization_id
+      and p.user_id=auth.uid() and p.roles && array['admin','assignor']::text[])
+    or exists (select 1 from public.protected_accounts p where p.user_id=auth.uid())
+  ) then raise exception 'No access to field complexes.'; end if;
+  return query select ol.location_id,ol.field_complex from public.organization_locations ol
+    where ol.organization_id=p_organization_id and ol.active;
+end;
+$$;
+revoke all on function public.get_organization_field_complexes(uuid) from public,anon;
+grant execute on function public.get_organization_field_complexes(uuid) to authenticated;
+
+create or replace function public.set_organization_field_complex(
+  p_organization_id uuid,p_location_id uuid,p_field_complex text
+) returns text language plpgsql security definer set search_path = '' as $$
+declare v_complex text := nullif(trim(p_field_complex),'');
+begin
+  if auth.uid() is null or not (
+    exists (select 1 from public.organization_memberships m where m.organization_id=p_organization_id
+      and m.user_id=auth.uid() and m.role in ('owner','admin','assignor'))
+    or exists (select 1 from public.organization_user_access_profiles p where p.organization_id=p_organization_id
+      and p.user_id=auth.uid() and p.roles && array['admin','assignor']::text[])
+    or exists (select 1 from public.protected_accounts p where p.user_id=auth.uid())
+  ) then raise exception 'No access to update field complexes.'; end if;
+  if length(v_complex)>80 then raise exception 'Field complex must be 80 characters or fewer.'; end if;
+  update public.organization_locations set field_complex=v_complex
+    where organization_id=p_organization_id and location_id=p_location_id and active;
+  if not found then raise exception 'This location is not connected to the organization.'; end if;
+  return v_complex;
+end;
+$$;
+revoke all on function public.set_organization_field_complex(uuid,uuid,text) from public,anon;
+grant execute on function public.set_organization_field_complex(uuid,uuid,text) to authenticated;
 
 create or replace function private.field_move_eligibility(
   p_official_id uuid, p_game_id uuid, p_position_id uuid
@@ -126,8 +168,14 @@ begin
   end if;
   select * into v_source_location from public.locations where id = v_source_game.location_id;
   select * into v_target_location from public.locations where id = v_target_game.location_id;
-  v_source_complex := nullif(lower(trim(v_source_location.field_complex)),'');
-  v_target_complex := nullif(lower(trim(v_target_location.field_complex)),'');
+  select nullif(lower(trim(ol.field_complex)),'') into v_source_complex
+  from public.organization_locations ol where ol.organization_id = v_source_game.organization_id
+    and ol.location_id = v_source_game.location_id and ol.active;
+  select nullif(lower(trim(ol.field_complex)),'') into v_target_complex
+  from public.organization_locations ol where ol.organization_id = v_target_game.organization_id
+    and ol.location_id = v_target_game.location_id and ol.active;
+  v_source_complex := coalesce(v_source_complex,nullif(lower(trim(v_source_location.field_complex)),''));
+  v_target_complex := coalesce(v_target_complex,nullif(lower(trim(v_target_location.field_complex)),''));
   if v_source_game.location_id = v_target_game.location_id or not (
     (v_source_complex is not null and v_source_complex = v_target_complex)
     or (v_source_location.venue_id is not null and v_source_location.venue_id = v_target_location.venue_id)
