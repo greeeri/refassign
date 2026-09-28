@@ -46,6 +46,7 @@ async function setup(db) {
     create table public.assignments(id uuid primary key default gen_random_uuid(),game_id uuid references public.games(id),position_id uuid,
       official_id uuid,status text default 'proposed',published_at timestamptz,responded_at timestamptz,
       assigned_at timestamptz default now(),payment_status text default 'unpaid',game_fee numeric default 0,assignment_source text default 'manager',
+      response_token uuid unique,
       unique(game_id,position_id),unique(game_id,official_id));
     create table public.payroll_batch_items(assignment_id uuid);
     create table public.payroll_fee_corrections(assignment_id uuid);
@@ -99,19 +100,27 @@ async function expectReject(action,pattern){await assert.rejects(action,pattern)
 (async()=>{
   {
     const db=await fresh(); const a=await assignment(db,GAME1,OFF1);
+    const originalToken='aaaaaaaa-aaaa-4aaa-8aaa-111111111111';
+    await db.query('update public.assignments set response_token=$1 where id=$2',[originalToken,a.id]);
     const result=(await move(db,a.id)).rows[0].result;
     assert.equal((await db.query('select count(*)::int n from public.assignments where game_id=$1',[GAME1])).rows[0].n,0);
     const target=(await db.query('select * from public.assignments where id=$1',[result.targetAssignmentId])).rows[0];
     assert.equal(target.official_id,OFF1); assert.equal(Number(target.game_fee),80); assert.equal(target.status,'accepted');
+    assert.equal(target.response_token,originalToken);
     await db.close(); console.log('PASS transfer, accept, destination game pay');
   }
   {
     const db=await fresh(); const a=await assignment(db,GAME1,OFF1); const b=await assignment(db,GAME2,OFF2);
+    const sourceToken='aaaaaaaa-aaaa-4aaa-8aaa-111111111111',targetToken='aaaaaaaa-aaaa-4aaa-8aaa-222222222222';
+    await db.query('update public.assignments set response_token=$1 where id=$2',[sourceToken,a.id]);
+    await db.query('update public.assignments set response_token=$1 where id=$2',[targetToken,b.id]);
     await db.query('insert into public.assignment_check_ins values($1,now(),$2)',[a.id,USER]);
     const result=(await move(db,a.id,GAME2,'switch',false)).rows[0].result;
     const rows=(await db.query('select * from public.assignments order by game_id')).rows;
     assert.equal(rows.length,2); assert.equal(rows.find(x=>x.game_id===GAME1).official_id,OFF2);
     assert.equal(rows.find(x=>x.game_id===GAME2).official_id,OFF1);
+    assert.equal(rows.find(x=>x.game_id===GAME2).response_token,sourceToken);
+    assert.equal(rows.find(x=>x.game_id===GAME1).response_token,targetToken);
     assert.ok(rows.every(x=>x.status==='proposed' && x.published_at===null));
     const check=(await db.query('select assignment_id from public.assignment_check_ins')).rows;
     assert.equal(check.length,1); assert.equal(check[0].assignment_id,result.targetAssignmentId);

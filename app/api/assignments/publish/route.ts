@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
     );
   const assignmentQuery = service
     .from("assignments")
-    .select("id")
+    .select("id,response_token")
     .eq("game_id", body.gameId)
     .not("official_id", "is", null);
   const selectedIds = body.assignmentIds ? [...new Set(body.assignmentIds)] : null;
@@ -119,22 +119,26 @@ export async function POST(req: NextRequest) {
     ).toISOString();
   }
   if (!body.retryFailed) {
-    const { data: publishedSelection, error: publishError } = selectedIds
-      ? await service.from("assignments").update({
+    if (selectedIds) {
+      for (const assignment of targetAssignments || []) {
+        const { data, error } = await service.from("assignments").update({
           published_at: new Date().toISOString(),
           published_by: context.user.id,
-          response_token: crypto.randomUUID(),
+          response_token: assignment.response_token || crypto.randomUUID(),
           responded_at: null,
           decline_reason: null,
           email_sent_at: null,
           email_error: null,
           resend_email_id: null,
-        }).eq("game_id", body.gameId).in("id", targetIds).is("published_at", null).eq("status", "proposed").select("id")
-      : await supabase.rpc("publish_game_assignments", { p_game_id: body.gameId });
-    if (publishError)
-      return NextResponse.json({ error: publishError.message }, { status: 400 });
-    if (selectedIds && (!Array.isArray(publishedSelection) || publishedSelection.length !== targetIds.length))
-      return NextResponse.json({ error: "An assignment changed before notification. Review its status." }, { status: 409 });
+        }).eq("game_id", body.gameId).eq("id", assignment.id).is("published_at", null).eq("status", "proposed").select("id");
+        if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+        if (data?.length !== 1)
+          return NextResponse.json({ error: "An assignment changed before notification. Review its status." }, { status: 409 });
+      }
+    } else {
+      const { error: publishError } = await supabase.rpc("publish_game_assignments", { p_game_id: body.gameId });
+      if (publishError) return NextResponse.json({ error: publishError.message }, { status: 400 });
+    }
     const { error: deadlineError } = await service
       .from("assignments")
       .update({ accept_by: responseAt })

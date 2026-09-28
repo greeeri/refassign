@@ -193,13 +193,13 @@ begin
     delete from public.assignments where game_id = v_source_game.id and status in ('declined','cancelled')
       and (position_id = v_source.position_id or official_id = v_target.official_id);
   end if;
-  insert into public.assignments(game_id,position_id,official_id,status,published_at,responded_at,assignment_source)
+  insert into public.assignments(game_id,position_id,official_id,status,published_at,responded_at,response_token,assignment_source)
   values (v_target_game.id,p_target_position_id,v_source.official_id,case when p_accept then 'accepted' else 'proposed' end,
-    case when p_accept then now() else null end,case when p_accept then now() else null end,'manager') returning id into v_created_target;
+    case when p_accept then now() else null end,case when p_accept then now() else null end,v_source.response_token,'manager') returning id into v_created_target;
   if v_target.id is not null then
-    insert into public.assignments(game_id,position_id,official_id,status,published_at,responded_at,assignment_source)
+    insert into public.assignments(game_id,position_id,official_id,status,published_at,responded_at,response_token,assignment_source)
     values (v_source_game.id,v_source.position_id,v_target.official_id,case when p_accept then 'accepted' else 'proposed' end,
-      case when p_accept then now() else null end,case when p_accept then now() else null end,'manager') returning id into v_created_source;
+      case when p_accept then now() else null end,case when p_accept then now() else null end,v_target.response_token,'manager') returning id into v_created_source;
   end if;
   if v_source_checkin.assignment_id is not null then
     insert into public.assignment_check_ins(assignment_id,checked_in_at,checked_in_by)
