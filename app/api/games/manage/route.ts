@@ -19,6 +19,8 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   if (body.action === "archive_cancelled") {
+    if (gameIds.length > 500)
+      return NextResponse.json({ error: "Archive up to 500 selected games at a time." }, { status: 400 });
     if (leagueIds && !leagueIds.length)
       return NextResponse.json({ updated: 0, action: body.action });
     let query = service.from("games")
@@ -27,6 +29,7 @@ export async function POST(request: NextRequest) {
       .is("archived_at", null)
       .in("status", ["canceled", "cancelled"]);
     if (leagueIds) query = query.in("league_id", leagueIds);
+    if (gameIds.length) query = query.in("id", gameIds);
     const { count, error } = await query;
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
     return NextResponse.json({ updated: count || 0, action: body.action });
