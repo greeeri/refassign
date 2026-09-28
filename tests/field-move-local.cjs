@@ -18,6 +18,7 @@ const GAME3 = '66666666-6666-4666-8666-666666666666';
 const GAME4 = '13131313-1313-4131-8131-131313131313';
 const POS1 = '77777777-7777-4777-8777-777777777777';
 const POS2 = '88888888-8888-4888-8888-888888888888';
+const MENTOR = 'abababab-abab-4bab-8bab-abababababab';
 const OFF1 = '99999999-9999-4999-8999-999999999999';
 const OFF2 = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 
@@ -45,6 +46,10 @@ async function setup(db) {
     create table public.protected_accounts(user_id uuid);
     create table public.organization_member_league_access(organization_id uuid,user_id uuid,league_id uuid);
     create table public.game_link_members(game_id uuid);
+    create table public.game_mentor_slots(game_id uuid primary key,position_id uuid,created_by uuid);
+    create table public.assignment_self_assign_slots(game_id uuid,position_id uuid);
+    create function private.can_manage_game(uuid) returns boolean language sql as $$ select true $$;
+    create function public.can_manage_game_setup() returns boolean language sql as $$ select true $$;
     create table public.game_position_pay(game_id uuid,position_id uuid,amount numeric,payment_status text,primary key(game_id,position_id));
     create table public.assignments(id uuid primary key default gen_random_uuid(),game_id uuid references public.games(id),position_id uuid,
       official_id uuid,status text default 'proposed',published_at timestamptz,responded_at timestamptz,
@@ -70,6 +75,17 @@ async function setup(db) {
   `);
   const migration = fs.readFileSync('supabase/migrations/20260928020000_transfer_switch_officials.sql','utf8');
   await db.exec(migration);
+  // Exercise the existing position controls against the same migrated fixture.
+  for (const [file, name] of [
+    ['supabase/migrations/20260919190000_game_mentor_slots.sql', 'add_game_mentor_slot'],
+    ['supabase/migrations/20260920134500_remove_game_assignment_position.sql', 'remove_game_assignment_position'],
+    ['supabase/migrations/20260901022832_fix_atomic_assignment_position_swap.sql', 'move_assignment_position'],
+  ]) {
+    const source = fs.readFileSync(file, 'utf8');
+    const definition = source.match(new RegExp(`create or replace function public\\.${name}\\([\\s\\S]*?\\$\\$;`, 'i'))?.[0];
+    assert.ok(definition, `${name} definition exists`);
+    await db.exec(definition);
+  }
   await db.exec(`
     insert into public.sports values('${SPORT}','Soccer');
     insert into public.locations(id,name,address,city,state,latitude,longitude) values
@@ -82,7 +98,7 @@ async function setup(db) {
       ('${GAME2}','101','${SPORT}','${LEAGUE}','${LEVEL}','${ORG}','${LOC2}','2026-10-03 15:00+00','active',2),
       ('${GAME3}','102','${SPORT}','${LEAGUE}','${LEVEL}','${ORG}','${LOC3}','2026-10-03 15:00+00','active',2),
       ('${GAME4}','103','${SPORT}','${LEAGUE}','${LEVEL}','${ORG}','${LOC4}','2026-10-03 15:00+00','active',2);
-    insert into public.sport_positions values('${POS1}','${SPORT}','Center Referee',1),('${POS2}','${SPORT}','Assistant Referee 1',2);
+    insert into public.sport_positions values('${POS1}','${SPORT}','Center Referee',1),('${POS2}','${SPORT}','Assistant Referee 1',2),('${MENTOR}','${SPORT}','Mentor',3);
     insert into public.officials values('${OFF1}',true,array['Soccer']),('${OFF2}',true,array['Soccer']);
     insert into public.organization_officials values('${ORG}','${OFF1}',true),('${ORG}','${OFF2}',true);
     insert into public.official_league_eligibility values('${OFF1}','${LEAGUE}'),('${OFF2}','${LEAGUE}');
@@ -190,5 +206,30 @@ async function expectReject(action,pattern){await assert.rejects(action,pattern)
     assert.equal((await db.query('select count(*)::int n from public.assignments where game_id=$1',[GAME2])).rows[0].n,1);
     assert.equal((await db.query('select official_id from public.assignments where id=$1',[result.targetAssignmentId])).rows[0].official_id,OFF1);
     await db.close();console.log('PASS transfer into formerly declined position');
+  }
+  {
+    const db=await fresh();const a=await assignment(db,GAME1,OFF1,POS1);await assignment(db,GAME1,OFF2,POS2);
+    await db.query('select public.move_assignment_position($1,$2,$3)',[GAME1,a.id,1]);
+    const rows=(await db.query('select official_id,position_id from public.assignments where game_id=$1',[GAME1])).rows;
+    assert.equal(rows.find(x=>x.official_id===OFF1).position_id,POS2);
+    assert.equal(rows.find(x=>x.official_id===OFF2).position_id,POS1);
+    await db.close();console.log('PASS existing position reorder swaps occupied officials');
+  }
+  {
+    const db=await fresh();await assignment(db,GAME1,OFF1,POS1);
+    const mentor=(await db.query('select public.add_game_mentor_slot($1) id',[GAME1])).rows[0].id;
+    assert.equal(mentor,MENTOR);
+    assert.equal((await db.query('select count(*)::int n from public.game_mentor_slots where game_id=$1',[GAME1])).rows[0].n,1);
+    await db.query('select public.remove_game_assignment_position($1,$2)',[GAME1,MENTOR]);
+    assert.equal((await db.query('select count(*)::int n from public.game_mentor_slots where game_id=$1',[GAME1])).rows[0].n,0);
+    assert.equal((await db.query('select count(*)::int n from public.assignments where game_id=$1',[GAME1])).rows[0].n,1);
+    await db.close();console.log('PASS existing mentor add/remove leaves standard crew');
+  }
+  {
+    const db=await fresh();await assignment(db,GAME1,OFF1,POS1);await assignment(db,GAME1,OFF2,POS2);
+    await db.query('select public.remove_game_assignment_position($1,$2)',[GAME1,POS2]);
+    assert.equal((await db.query('select officials_needed from public.games where id=$1',[GAME1])).rows[0].officials_needed,1);
+    assert.equal((await db.query('select official_id from public.assignments where game_id=$1',[GAME1])).rows[0].official_id,OFF1);
+    await db.close();console.log('PASS existing remove position preserves remaining crew');
   }
 })().catch((error)=>{console.error('FAIL',error);process.exitCode=1});
