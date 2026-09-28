@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { fieldComplexRpcMissing } from "../lib/field-complex-support";
 import {
   gameAcceptsAssignments,
   inactiveGameStatusLabel,
@@ -360,6 +361,7 @@ export default function AssignmentsManagerV2({
     [fieldMove, setFieldMove] = useState<{ sourceId: string; mode: "transfer" | "switch"; targetGameId: string; targetPositionId: string; accept: boolean } | null>(null),
     [fieldMoveSaving, setFieldMoveSaving] = useState(false),
     [locationComplexes, setLocationComplexes] = useState<Record<string, string>>({}),
+    [fieldMovesAvailable, setFieldMovesAvailable] = useState(false),
     [range, setRange] = useState<Range>("all"),
     [customDate, setCustomDate] = useState(""),
     [showCalendar, setShowCalendar] = useState(false),
@@ -564,7 +566,7 @@ export default function AssignmentsManagerV2({
           let query = supabase
             .from("games")
             .select(
-              "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,time_tbd,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,address,city,state,latitude,longitude,venue_id,field_complex)",
+              "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,time_tbd,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,address,city,state,latitude,longitude,venue_id)",
             )
             .is("archived_at", null)
             .order("starts_at")
@@ -695,7 +697,7 @@ export default function AssignmentsManagerV2({
       : {data: [], error: null};
     const err =
       suggestions.error ||
-      complexes.error ||
+      (fieldComplexRpcMissing(complexes.error) ? null : complexes.error) ||
       g.error ||
       oo.error ||
       o.error ||
@@ -843,6 +845,7 @@ export default function AssignmentsManagerV2({
         new Date(x.starts_at).getTime() - new Date(y.starts_at).getTime(),
     );
     setGames(sorted);
+    setFieldMovesAvailable(Boolean(organizationId && !complexes.error));
     setLocationComplexes(Object.fromEntries((complexes.data || []).filter((row) => row.field_complex?.trim())
       .map((row) => [row.location_id, row.field_complex!.trim()])));
     setLinkSelected((current) =>
@@ -10151,7 +10154,7 @@ export default function AssignmentsManagerV2({
                                             (o) => o.id === current.official_id,
                                           )?.last_name}
                                         <ScheduleLink officialId={current.official_id} />
-                                        {canManage && <><button type="button" className="assignmentFieldMoveLink" onClick={() => setFieldMove({ sourceId: current.id, mode: "transfer", targetGameId: "", targetPositionId: "", accept: false })}>Transfer</button><button type="button" className="assignmentFieldMoveLink" onClick={() => setFieldMove({ sourceId: current.id, mode: "switch", targetGameId: "", targetPositionId: "", accept: false })}>Switch</button></>}
+                                        {canManage && fieldMovesAvailable && <><button type="button" className="assignmentFieldMoveLink" onClick={() => setFieldMove({ sourceId: current.id, mode: "transfer", targetGameId: "", targetPositionId: "", accept: false })}>Transfer</button><button type="button" className="assignmentFieldMoveLink" onClick={() => setFieldMove({ sourceId: current.id, mode: "switch", targetGameId: "", targetPositionId: "", accept: false })}>Switch</button></>}
                                         {futureBadge(current.official_id)}
                                         {canManage && (
                                           <span
