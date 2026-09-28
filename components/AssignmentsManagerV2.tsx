@@ -325,20 +325,31 @@ function inRange(g: Game, r: Range, customDate = "") {
 }
 export default function AssignmentsManagerV2({
   organizationId,
+  accessibleLeagueIds,
+  leagueOptions = [],
+  fullLeagueAccess = false,
   focusGameId,
   returnToListRequest = 0,
 }: {
   organizationId?: string;
+  accessibleLeagueIds?: string[];
+  leagueOptions?: { id: string; name: string }[];
+  fullLeagueAccess?: boolean;
   focusGameId?: string;
   returnToListRequest?: number;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const handledReportFocus = useRef("");
+  const requestedFocusLoad = useRef("");
   const assignmentFeeImportInput = useRef<HTMLInputElement>(null);
   const handledListReturnRequest = useRef(returnToListRequest);
+  const initialFilterLoad = useRef(true);
+  const loadVersion = useRef(0);
   const [inlineAssignmentHost, setInlineAssignmentHost] =
     useState<HTMLDivElement | null>(null);
   const [games, setGames] = useState<Game[]>([]),
+    [initialGamesReady, setInitialGamesReady] = useState(false),
+    [allowedLeagueIds, setAllowedLeagueIds] = useState<string[] | null>(null),
     [officials, setOfficials] = useState<Official[]>([]),
     [positions, setPositions] = useState<Position[]>([]),
     [assignments, setAssignments] = useState<Assignment[]>([]),
@@ -516,6 +527,7 @@ export default function AssignmentsManagerV2({
     return null;
   }
   async function load() {
+    const version = ++loadVersion.current;
     setError("");
     const loadAllLeagueEligibility = async () => {
       const data: EligL[] = [];
@@ -552,6 +564,16 @@ export default function AssignmentsManagerV2({
       return { data, error: null };
     };
     const { data: userData } = await supabase.auth.getUser();
+    let scopedLeagueIds = accessibleLeagueIds;
+    if (organizationId && userData.user && !fullLeagueAccess) {
+      const access = await supabase.from("organization_member_league_access")
+        .select("league_id").eq("organization_id", organizationId)
+        .eq("user_id", userData.user.id);
+      if (access.error) { setError(access.error.message); return; }
+      scopedLeagueIds = (access.data || []).map((row) => row.league_id);
+    }
+    if (version !== loadVersion.current) return;
+    setAllowedLeagueIds(scopedLeagueIds || null);
     if (userData.user) {
       const { data: userRoles } = await supabase.rpc("current_user_roles");
       setCanManage(
@@ -573,6 +595,27 @@ export default function AssignmentsManagerV2({
             .order("id");
           if (organizationId)
             query = query.eq("organization_id", organizationId);
+          if (scopedLeagueIds?.length)
+            query = query.in("league_id", scopedLeagueIds);
+          else if (organizationId && scopedLeagueIds)
+            return Promise.resolve({ data: [], error: null });
+          if (leagueFilter) query = query.eq("league_id", leagueFilter);
+          if (levelFilter) query = query.eq("level_id", levelFilter);
+          if (locationFilter.length) query = query.in("location_id", locationFilter);
+          // Keep the existing client-side filters. Only the initial, unfiltered
+          // view is capped; a filter change fetches the broader game set.
+          const explicitFilter = range !== "all" || Boolean(
+            locationFilter.length || dayFilter.length || timeFilter.length ||
+            officialFilter || leagueFilter || levelFilter ||
+            unpublishedOnly || selfAssignOnly || replacementOnly || completenessFilter.length,
+          );
+          if (focusGameId && !explicitFilter) query = query.eq("id", focusGameId);
+          if (!explicitFilter && !focusGameId)
+            query = query.gte("starts_at", new Date().toISOString());
+          if (!explicitFilter && !focusGameId) {
+            if (from >= 50) return Promise.resolve({ data: [], error: null });
+            return query.range(from, Math.min(to, 49)) as unknown as PromiseLike<{ data: Game[] | null; error: { message: string } | null }>;
+          }
           return query.range(from, to) as unknown as PromiseLike<{
             data: Game[] | null;
             error: { message: string } | null;
@@ -611,15 +654,7 @@ export default function AssignmentsManagerV2({
           .from("sport_positions")
           .select("id,sport_id,name,required,sort_order")
           .order("sort_order"),
-        readAllPages<Assignment>((from, to) =>
-          supabase
-            .from("assignments")
-            .select(
-              "id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at,assignment_source,email_sent_at,email_error,resend_email_id,cancellation_notified_at,cancellation_email_error,cancellation_email_id,game_fee,payment_status",
-            )
-            .order("id")
-            .range(from, to),
-        ),
+        Promise.resolve({ data: [] as Assignment[], error: null }),
         readAllPages<Rank>((from, to) =>
           supabase
             .from("my_assignment_rankings")
@@ -687,6 +722,7 @@ export default function AssignmentsManagerV2({
           ? supabase.rpc("get_organization_field_complexes", { p_organization_id: organizationId })
           : Promise.resolve({ data: [], error: null }),
       ]);
+    if (version !== loadVersion.current) return;
     const suggestions = organizationId
       ? await readAllPages<{team_id: string; official_id: string}>((from, to) =>
           supabase.from("team_quick_assign_officials")
@@ -695,6 +731,7 @@ export default function AssignmentsManagerV2({
             .order("team_id").order("official_id").range(from, to),
         )
       : {data: [], error: null};
+    if (version !== loadVersion.current) return;
     const err =
       suggestions.error ||
       (fieldComplexRpcMissing(complexes.error) ? null : complexes.error) ||
@@ -775,13 +812,22 @@ export default function AssignmentsManagerV2({
           a.first_name.localeCompare(b.first_name),
       );
     }
+    if (version !== loadVersion.current) return;
     setOfficials(officialRows);
     setPositions((p.data || []) as Position[]);
     const scopedGames = (g.data || []) as unknown as Game[];
     const scopedGameIds = new Set(scopedGames.map((listedGame) => listedGame.id));
-    const scopedAssignments = ((a.data || []) as Assignment[]).filter(
-      (assignment) => scopedGameIds.has(assignment.game_id),
-    );
+    const assignmentResult = scopedGames.length
+      ? await readAllForChunks<Assignment, string>(
+          scopedGames.map((listedGame) => listedGame.id),
+          (gameIds, from, to) => supabase.from("assignments")
+            .select("id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at,assignment_source,email_sent_at,email_error,resend_email_id,cancellation_notified_at,cancellation_email_error,cancellation_email_id,game_fee,payment_status")
+            .in("game_id", gameIds).order("id").range(from, to),
+        )
+      : { data: [], error: null };
+    if (assignmentResult.error) { setError(assignmentResult.error.message); return; }
+    if (version !== loadVersion.current) return;
+    const scopedAssignments = assignmentResult.data || [];
     const checkInResult = scopedAssignments.length
       ? await readAllForChunks<{ assignment_id: string }, string>(
           scopedAssignments.map((assignment) => assignment.id),
@@ -798,6 +844,7 @@ export default function AssignmentsManagerV2({
       setError(checkInResult.error.message);
       return;
     }
+    if (version !== loadVersion.current) return;
     setCheckedInAssignmentIds(
       new Set((checkInResult.data || []).map((row) => row.assignment_id)),
     );
@@ -807,6 +854,7 @@ export default function AssignmentsManagerV2({
       setError(candidateConflictError.message);
       return;
     }
+    if (version !== loadVersion.current) return;
     setAssignments(scopedAssignments);
     setLeagueElig((le.data || []) as EligL[]);
     setLevelElig((ve.data || []) as EligV[]);
@@ -848,6 +896,7 @@ export default function AssignmentsManagerV2({
     setFieldMovesAvailable(Boolean(organizationId && !complexes.error));
     setLocationComplexes(Object.fromEntries((complexes.data || []).filter((row) => row.field_complex?.trim())
       .map((row) => [row.location_id, row.field_complex!.trim()])));
+    setInitialGamesReady(true);
     setLinkSelected((current) =>
       current.filter((gameId) => scopedGameIds.has(gameId)),
     );
@@ -859,6 +908,7 @@ export default function AssignmentsManagerV2({
     );
   }
   useEffect(() => {
+    setInitialGamesReady(false);
     setLinkSelected([]);
     setSelfAssignSelected([]);
     setSelected("");
@@ -866,10 +916,22 @@ export default function AssignmentsManagerV2({
     void load();
   }, [organizationId]);
   useEffect(() => {
+    if (initialFilterLoad.current) { initialFilterLoad.current = false; return; }
+    void load();
+  }, [range, customDate, locationFilter, dayFilter, timeFilter, officialFilter,
+      leagueFilter, levelFilter, unpublishedOnly, selfAssignOnly,
+      replacementOnly, completenessFilter]);
+  useEffect(() => {
     const refreshAfterUndo = () => { void load(); };
     window.addEventListener("refassign:undo-completed", refreshAfterUndo);
     return () => window.removeEventListener("refassign:undo-completed", refreshAfterUndo);
   }, [organizationId]);
+  useEffect(() => {
+    if (!initialGamesReady || !focusGameId || games.some((item) => item.id === focusGameId) ||
+      requestedFocusLoad.current === focusGameId) return;
+    requestedFocusLoad.current = focusGameId;
+    void load();
+  }, [focusGameId, games, initialGamesReady]);
   useEffect(() => {
     if (handledListReturnRequest.current === returnToListRequest) return;
     handledListReturnRequest.current = returnToListRequest;
@@ -8600,6 +8662,12 @@ export default function AssignmentsManagerV2({
             </section>
           )}
           <div className="assignmentFilterPanel assignmentCompactToolbar">
+            {range === "all" && !locationFilter.length && !dayFilter.length &&
+              !timeFilter.length && !officialFilter && !leagueFilter && !levelFilter &&
+              !unpublishedOnly && !selfAssignOnly && !replacementOnly &&
+              !completenessFilter.length && (
+                <small>Showing the next 50 games that have not started. Select a filter to search beyond this list.</small>
+              )}
             <label className="assignmentToolbarField">
               <span>View</span>
               <select
@@ -8618,6 +8686,20 @@ export default function AssignmentsManagerV2({
                 </option>
               </select>
             </label>
+            {canManage && (
+              <label className="assignmentToolbarField">
+                <span>League</span>
+                <select aria-label="Show games in league" value={leagueFilter}
+                  onChange={(event) => { setLeagueFilter(event.target.value); setLinkSelected([]); setSelected(""); }}>
+                  <option value="">All Leagues</option>
+                  {Array.from(new Map(leagueOptions.filter((league) =>
+                    !allowedLeagueIds || allowedLeagueIds.includes(league.id))
+                    .map((league) => [league.id, league.name])).entries())
+                    .sort((a, b) => a[1].localeCompare(b[1]))
+                    .map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                </select>
+              </label>
+            )}
             <label className="assignmentToolbarField">
               <span>Date</span>
               <select
@@ -8709,40 +8791,6 @@ export default function AssignmentsManagerV2({
                 <summary>More Filters</summary>
                 <div className="assignmentDirectFilters">
                   <span className="assignmentFilterLabel">Filters</span>
-                  <label>
-                    League
-                    <select
-                      aria-label="Show games in league"
-                      value={leagueFilter}
-                      onChange={(event) => {
-                        setLeagueFilter(event.target.value);
-                        setLinkSelected([]);
-                        setSelected("");
-                      }}
-                    >
-                      <option value="">All Leagues</option>
-                      {Array.from(
-                        new Map(
-                          games
-                            .filter(
-                              (listedGame) =>
-                                listedGame.league_id &&
-                                listedGame.leagues?.name,
-                            )
-                            .map((listedGame) => [
-                              listedGame.league_id!,
-                              listedGame.leagues!.name,
-                            ]),
-                        ).entries(),
-                      )
-                        .sort((a, b) => a[1].localeCompare(b[1]))
-                        .map(([id, name]) => (
-                          <option key={id} value={id}>
-                            {name}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
                   <label>
                     Level
                     <select
