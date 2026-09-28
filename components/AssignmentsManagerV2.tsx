@@ -561,6 +561,9 @@ export default function AssignmentsManagerV2({
       return { data, error: null };
     };
     const { data: userData } = await supabase.auth.getUser();
+    const rolePromise = userData.user
+      ? supabase.rpc("current_user_roles")
+      : Promise.resolve({ data: null });
     let scopedLeagueIds = accessibleLeagueIds;
     if (organizationId && userData.user && !fullLeagueAccess) {
       const access = await supabase.from("organization_member_league_access")
@@ -571,14 +574,6 @@ export default function AssignmentsManagerV2({
     }
     if (version !== loadVersion.current) return;
     setAllowedLeagueIds(scopedLeagueIds || null);
-    let hasManagerRole = false;
-    if (userData.user) {
-      const { data: userRoles } = await supabase.rpc("current_user_roles");
-      hasManagerRole = ((userRoles || []) as string[]).some((role) =>
-        ["admin", "assignor"].includes(role),
-      );
-    }
-    if (version !== loadVersion.current) return;
     const gamePromise =
         readAllPages<Game>((from, to) => {
           let query = supabase
@@ -694,17 +689,11 @@ export default function AssignmentsManagerV2({
       }
       return { results, officialRows, error };
     };
-    // Filters change the games being read, not the organization's roster or
-    // eligibility. Reuse this request (including one already in flight) only
-    // for filter changes. Mutations and organization changes load it afresh.
-    const candidateKey = `${organizationId || ""}:${userData.user?.id || ""}`;
-    const candidatePromise: ReturnType<typeof fetchCandidateData> =
-      reuseCandidates && candidateCache.current?.key === candidateKey &&
-        Date.now() - candidateCache.current.createdAt < 60_000
-        ? candidateCache.current.promise as ReturnType<typeof fetchCandidateData>
-        : fetchCandidateData();
-    if (candidateCache.current?.promise !== candidatePromise)
-      candidateCache.current = { key: candidateKey, createdAt: Date.now(), promise: candidatePromise };
+    const g = await gamePromise;
+    if (version !== loadVersion.current) return;
+    if (g.error) { setError(g.error.message); return; }
+    // Start the smaller game-scoped requests before opening the large roster
+    // and eligibility request batch on a constrained mobile connection.
     const corePromise = Promise.all([
         supabase
           .from("sport_positions")
@@ -730,9 +719,6 @@ export default function AssignmentsManagerV2({
           .eq("organization_id", organizationId || "")
           .order("updated_at", { ascending: false }),
       ]);
-    const g = await gamePromise;
-    if (version !== loadVersion.current) return;
-    if (g.error) { setError(g.error.message); return; }
     const scopedGames = (g.data || []) as unknown as Game[];
     const scopedGameIds = new Set(scopedGames.map((listedGame) => listedGame.id));
     const scopedIds = scopedGames.map((listedGame) => listedGame.id);
@@ -835,8 +821,22 @@ export default function AssignmentsManagerV2({
     setSelected((current) =>
       scopedGameIds.has(current) ? current : sorted[0]?.id || "",
     );
-    // Candidate data is loaded in parallel, but it no longer blocks the
-    // first game list and its assignment summaries from being displayed.
+    // Yield to give React a chance to paint the first game list before the
+    // large candidate request batch. Filters can reuse a recent result.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    if (version !== loadVersion.current) return;
+    const candidateKey = `${organizationId || ""}:${userData.user?.id || ""}`;
+    const candidatePromise: ReturnType<typeof fetchCandidateData> =
+      reuseCandidates && candidateCache.current?.key === candidateKey &&
+        Date.now() - candidateCache.current.createdAt < 60_000
+        ? candidateCache.current.promise as ReturnType<typeof fetchCandidateData>
+        : fetchCandidateData();
+    if (candidateCache.current?.promise !== candidatePromise)
+      candidateCache.current = { key: candidateKey, createdAt: Date.now(), promise: candidatePromise };
+    const { data: userRoles } = await rolePromise;
+    const hasManagerRole = ((userRoles || []) as string[]).some((role) =>
+      ["admin", "assignor"].includes(role),
+    );
     const candidate = await candidatePromise;
     if (version !== loadVersion.current) return;
     if (candidate.error) {
