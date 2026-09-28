@@ -341,6 +341,7 @@ export default function AssignmentsManagerV2({
   const handledListReturnRequest = useRef(returnToListRequest);
   const initialFilterLoad = useRef(true);
   const loadVersion = useRef(0);
+  const candidateCache = useRef<{ key: string; createdAt: number; promise: Promise<unknown> } | null>(null);
   const [inlineAssignmentHost, setInlineAssignmentHost] =
     useState<HTMLDivElement | null>(null);
   const [games, setGames] = useState<Game[]>([]),
@@ -519,7 +520,7 @@ export default function AssignmentsManagerV2({
     );
     return null;
   }
-  async function load() {
+  async function load(reuseCandidates = false) {
     const version = ++loadVersion.current;
     setError("");
     // Management actions depend on the full candidate data set. Keep them
@@ -616,7 +617,8 @@ export default function AssignmentsManagerV2({
             error: { message: string } | null;
           }>;
         });
-    const candidatePromise = Promise.all([
+    const fetchCandidateData = async () => {
+      const results = await Promise.all([
         organizationId
           ? readAllPages<{ official_id: string }>((from, to) =>
               supabase
@@ -667,7 +669,42 @@ export default function AssignmentsManagerV2({
                 .order("team_id").order("official_id").range(from, to),
             )
           : Promise.resolve({data: [], error: null}),
-    ]);
+      ]);
+      const [oo, o, rankings, le, ve, bl, suggestions] = results;
+      const error = oo.error || o.error || rankings.error || le.error || ve.error || bl.error || suggestions.error;
+      let officialRows = (o.data || []) as Official[];
+      if (!error && organizationId) {
+        const organizationOfficialIds = (oo.data || []).map((link) => link.official_id);
+        officialRows = [];
+        for (let index = 0; index < organizationOfficialIds.length; index += 800) {
+          const batches = await Promise.all(
+            Array.from({ length: Math.min(4, Math.ceil((organizationOfficialIds.length - index) / 200)) }, (_, offset) =>
+              supabase.from("officials")
+                .select("id,first_name,last_name,email,phone,sports,active,home_city,home_state,home_latitude,home_longitude")
+                .in("id", organizationOfficialIds.slice(index + offset * 200, index + (offset + 1) * 200))
+                .eq("active", true).order("last_name").order("first_name")),
+          );
+          const pageError = batches.find((batch) => batch.error)?.error;
+          if (pageError) return { results, officialRows: [], error: pageError };
+          officialRows.push(...batches.flatMap((batch) => (batch.data || []) as Official[]));
+        }
+        officialRows.sort((a, b) =>
+          a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name),
+        );
+      }
+      return { results, officialRows, error };
+    };
+    // Filters change the games being read, not the organization's roster or
+    // eligibility. Reuse this request (including one already in flight) only
+    // for filter changes. Mutations and organization changes load it afresh.
+    const candidateKey = `${organizationId || ""}:${userData.user?.id || ""}`;
+    const candidatePromise: ReturnType<typeof fetchCandidateData> =
+      reuseCandidates && candidateCache.current?.key === candidateKey &&
+        Date.now() - candidateCache.current.createdAt < 60_000
+        ? candidateCache.current.promise as ReturnType<typeof fetchCandidateData>
+        : fetchCandidateData();
+    if (candidateCache.current?.promise !== candidatePromise)
+      candidateCache.current = { key: candidateKey, createdAt: Date.now(), promise: candidatePromise };
     const corePromise = Promise.all([
         supabase
           .from("sport_positions")
@@ -800,10 +837,14 @@ export default function AssignmentsManagerV2({
     );
     // Candidate data is loaded in parallel, but it no longer blocks the
     // first game list and its assignment summaries from being displayed.
-    const [oo, o, rankings, le, ve, bl, suggestions] = await candidatePromise;
+    const candidate = await candidatePromise;
     if (version !== loadVersion.current) return;
-    const candidateError = oo.error || o.error || rankings.error || le.error || ve.error || bl.error || suggestions.error;
-    if (candidateError) { setError(candidateError.message); return; }
+    if (candidate.error) {
+      if (candidateCache.current?.promise === candidatePromise) candidateCache.current = null;
+      setError(candidate.error.message);
+      return;
+    }
+    const [, , rankings, le, ve, bl, suggestions] = candidate.results;
     const rm: Record<string, number> = {},
       prm: Record<string, PositionRank> = {};
     ((rankings.data || []) as (Rank & PositionRank)[]).forEach((x) => {
@@ -817,32 +858,11 @@ export default function AssignmentsManagerV2({
         mentor_certified: Boolean(x.mentor_certified),
       };
     });
-    let officialRows = (o.data || []) as Official[];
-    if (organizationId) {
-      const organizationOfficialIds = (oo.data || []).map((link) => link.official_id);
-      officialRows = [];
-      for (let index = 0; index < organizationOfficialIds.length; index += 800) {
-        const batches = await Promise.all(
-          Array.from({ length: Math.min(4, Math.ceil((organizationOfficialIds.length - index) / 200)) }, (_, offset) =>
-            supabase.from("officials")
-              .select("id,first_name,last_name,email,phone,sports,active,home_city,home_state,home_latitude,home_longitude")
-              .in("id", organizationOfficialIds.slice(index + offset * 200, index + (offset + 1) * 200))
-              .eq("active", true).order("last_name").order("first_name")),
-        );
-        if (version !== loadVersion.current) return;
-        const pageError = batches.find((batch) => batch.error)?.error;
-        if (pageError) { setError(pageError.message); return; }
-        officialRows.push(...batches.flatMap((batch) => (batch.data || []) as Official[]));
-      }
-      officialRows.sort((a, b) =>
-        a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name),
-      );
-    }
     if (version !== loadVersion.current) return;
     const candidateConflictError = await loadCandidateScheduleConflicts(scopedGames, version);
     if (version !== loadVersion.current) return;
     if (candidateConflictError) { setError(candidateConflictError.message); return; }
-    setOfficials(officialRows);
+    setOfficials(candidate.officialRows);
     setRanks(rm);
     setPositionRanks(prm);
     setTeamSuggestions(suggestions.data || []);
@@ -861,7 +881,7 @@ export default function AssignmentsManagerV2({
   }, [organizationId]);
   useEffect(() => {
     if (initialFilterLoad.current) { initialFilterLoad.current = false; return; }
-    void load();
+    void load(true);
   }, [range, customDate, locationFilter, dayFilter, timeFilter, officialFilter,
       leagueFilter, levelFilter, unpublishedOnly, selfAssignOnly,
       replacementOnly, completenessFilter]);
@@ -2419,9 +2439,12 @@ export default function AssignmentsManagerV2({
       ? await query.delete().eq("organization_id", organizationId).eq("team_id", teamId).eq("official_id", officialId)
       : await query.insert({organization_id: organizationId, team_id: teamId, official_id: officialId});
     if (saveError) setError(saveError.message);
-    else setTeamSuggestions((current) => existing
-      ? current.filter((link) => link.team_id !== teamId || link.official_id !== officialId)
-      : [...current, {team_id: teamId, official_id: officialId}]);
+    else {
+      candidateCache.current = null;
+      setTeamSuggestions((current) => existing
+        ? current.filter((link) => link.team_id !== teamId || link.official_id !== officialId)
+        : [...current, {team_id: teamId, official_id: officialId}]);
+    }
     setTeamSuggestionSaving("");
   }
   function lastAssignmentTime(officialId: string) {
