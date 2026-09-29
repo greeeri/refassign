@@ -9,6 +9,7 @@ import VenueDetailsButton from "./VenueDetailsButton";
 import TournamentRulesLink from "./TournamentRulesLink";
 import { crewPositionLabel, orderedCrew } from "../lib/crewDisplay";
 import { readAllPages } from "../lib/supabase/readAll";
+import { loadOfficialLocations } from "../lib/client/loadOfficialLocations";
 import OfficialCrewList, { OfficialCrewMember } from "./OfficialCrewList";
 type Assignment = {
   assignment_id: string;
@@ -22,6 +23,7 @@ type Assignment = {
   home_team: string | null;
   away_team: string | null;
   location_name: string | null;
+  location_id?: string | null;
   location_address: string | null;
   location_city: string | null;
   location_state: string | null;
@@ -136,7 +138,7 @@ export default function OfficialSchedule({ organizationId,organizationIds,organi
       return;
     }
     const [assignmentResults, b, locationLinks, t, observationResults] = await Promise.all([
-      Promise.all(scopeIds.map(async id=>({...await readAllPages<any>((from, to) => sb.rpc("my_official_assignments",{p_organization_id:id}).order("starts_at").order("assignment_id").range(from, to)),organizationId:id}))),
+      Promise.all(scopeIds.map(async id=>({...await readAllPages<any>((from, to) => sb.rpc("my_official_assignments_brief",{p_organization_id:id}).order("starts_at").order("assignment_id").range(from, to)),organizationId:id}))),
       readAllPages<Block>((from, to) => sb
         .from("official_availability_blocks")
         .select(
@@ -162,16 +164,27 @@ export default function OfficialSchedule({ organizationId,organizationIds,organi
         return location ? [location as Choice] : [];
       }));
       setTeams((t.data || []) as Choice[]);
+      setLoading(false);
       const ids = [...new Set(rows.map((x) => x.game_id).filter(Boolean))];
-      const bundles = await Promise.all(
-        ids.map(async (id) => {
-          const { data } = await sb.rpc("get_my_game_crew", {
-            p_game_id: id,
-          });
-          return [id, orderedCrew((data || []) as OfficialCrewMember[])] as const;
-        }),
-      );
-      setCrew(Object.fromEntries(bundles));
+      const [locationsResult, batches] = await Promise.all([
+        loadOfficialLocations(sb, rows),
+        Promise.all(Array.from({ length: Math.ceil(ids.length / 100) }, (_, index) =>
+          sb.rpc("get_my_game_crews", { p_game_ids: ids.slice(index * 100, index * 100 + 100) }))),
+      ]);
+      if (locationsResult.error) setError(locationsResult.error);
+      else {
+        const venues = new Map(locationsResult.rows.map((row) => [row.assignment_id, row]));
+        setAssignments((current) => current.map((row) => ({ ...row, ...venues.get(row.assignment_id) })));
+      }
+      const crewError = batches.find((batch) => batch.error)?.error;
+      if (crewError) setError(crewError.message);
+      else {
+        const byGame: Record<string, OfficialCrewMember[]> = {};
+        for (const batch of batches) for (const member of batch.data || []) {
+          (byGame[member.game_id] ||= []).push(member as OfficialCrewMember);
+        }
+        setCrew(Object.fromEntries(Object.entries(byGame).map(([id, members]) => [id, orderedCrew(members)])));
+      }
     }
     setLoading(false);
   }

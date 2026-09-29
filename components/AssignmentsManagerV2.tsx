@@ -345,6 +345,7 @@ export default function AssignmentsManagerV2({
   const handledListReturnRequest = useRef(returnToListRequest);
   const initialFilterLoad = useRef(true);
   const loadVersion = useRef(0);
+  const candidateCache = useRef<{ key: string; createdAt: number; promise: Promise<unknown> } | null>(null);
   const [inlineAssignmentHost, setInlineAssignmentHost] =
     useState<HTMLDivElement | null>(null);
   const [games, setGames] = useState<Game[]>([]),
@@ -514,9 +515,10 @@ export default function AssignmentsManagerV2({
       override?: boolean;
     } | null>(null),
     [bulkResult, setBulkResult] = useState<BulkActionResult | null>(null);
-  async function loadCandidateScheduleConflicts(targetGames: Game[]) {
+  async function loadCandidateScheduleConflicts(targetGames: Game[], version?: number) {
     if (!targetGames.length) {
-      setCandidateScheduleConflicts(new Set());
+      if (version === undefined || version === loadVersion.current)
+        setCandidateScheduleConflicts(new Set());
       return null;
     }
     const { data, error: conflictError } = await supabase.rpc(
@@ -524,7 +526,7 @@ export default function AssignmentsManagerV2({
       { p_target_game_ids: targetGames.map((targetGame) => targetGame.id) },
     );
     if (conflictError) return conflictError;
-    setCandidateScheduleConflicts(
+    if (version === undefined || version === loadVersion.current) setCandidateScheduleConflicts(
       new Set(
         ((data || []) as CandidateScheduleConflict[]).map(
           (conflict) => `${conflict.target_game_id}:${conflict.official_id}`,
@@ -533,9 +535,17 @@ export default function AssignmentsManagerV2({
     );
     return null;
   }
-  async function load() {
+  async function load(reuseCandidates = false) {
     const version = ++loadVersion.current;
+    const startedAt = performance.now();
+    const logLoadMilestone = (stage: string) => {
+      if (version !== loadVersion.current) return;
+      console.info(`[RefAssign load] ${stage}: ${Math.round(performance.now() - startedAt)} ms (viewport ${document.documentElement.clientWidth}px)`);
+    };
     setError("");
+    // Management actions depend on the full candidate data set. Keep them
+    // unavailable while the game list is being populated in stages.
+    setCanManage(false);
     const loadAllLeagueEligibility = async () => {
       const data: EligL[] = [];
       const pageSize = 1000;
@@ -571,6 +581,9 @@ export default function AssignmentsManagerV2({
       return { data, error: null };
     };
     const { data: userData } = await supabase.auth.getUser();
+    const rolePromise = userData.user
+      ? supabase.rpc("current_user_roles")
+      : Promise.resolve({ data: null });
     let scopedLeagueIds = accessibleLeagueIds;
     if (organizationId && userData.user && !fullLeagueAccess) {
       const access = await supabase.from("organization_member_league_access")
@@ -581,16 +594,7 @@ export default function AssignmentsManagerV2({
     }
     if (version !== loadVersion.current) return;
     setAllowedLeagueIds(scopedLeagueIds || null);
-    if (userData.user) {
-      const { data: userRoles } = await supabase.rpc("current_user_roles");
-      setCanManage(
-        ((userRoles || []) as string[]).some((role) =>
-          ["admin", "assignor"].includes(role),
-        ),
-      );
-    } else setCanManage(false);
-    const [g, oo, o, p, a, r, pr, pw, le, ve, bl, lg, lm, sas, ms, ah, at, complexes] =
-      await Promise.all([
+    const gamePromise =
         readAllPages<Game>((from, to) => {
           let query = supabase
             .from("games")
@@ -627,57 +631,71 @@ export default function AssignmentsManagerV2({
             data: Game[] | null;
             error: { message: string } | null;
           }>;
-        }),
+        });
+    const fetchCandidateData = async () => {
+      const loadOfficialRoster = () => organizationId
+        ? readAllPages<{ official_id: string; officials: Official }>((from, to) =>
+            supabase.from("organization_officials")
+              .select("official_id,officials!inner(id,first_name,last_name,email,phone,sports,active,home_city,home_state,home_latitude,home_longitude)")
+              .eq("organization_id", organizationId)
+              .eq("active", true)
+              .eq("officials.active", true)
+              .order("official_id").range(from, to),
+          ).then(({ data, error }) => ({
+            data: (data || []).map((link) => link.officials), error,
+          }))
+        : readAllPages<Official>((from, to) =>
+            supabase.from("officials")
+              .select("id,first_name,last_name,email,phone,sports,active,home_city,home_state,home_latitude,home_longitude")
+              .eq("active", true)
+              .order("last_name").order("first_name").order("id")
+              .range(from, to) as unknown as PromiseLike<{
+                data: Official[] | null;
+                error: { message: string } | null;
+              }>,
+          );
+      const results = await Promise.all([
+        loadOfficialRoster(),
+        readAllPages<Rank & PositionRank>((from, to) =>
+          supabase
+            .from("my_assignment_rankings")
+            .select("official_id,rank,ref_rank,ar1_rank,ar2_rank,fourth_rank,mentor_certified")
+            .order("official_id").range(from, to),
+        ),
+        loadAllLeagueEligibility(),
+        loadAllLevelEligibility(),
+        readAllPages<Block>((from, to) =>
+          supabase.from("official_availability_blocks")
+            .select("official_id,block_type,start_date,end_date,starts_at,ends_at,location_id,team_id")
+            .order("official_id").range(from, to),
+        ),
         organizationId
-          ? readAllPages<{ official_id: string }>((from, to) =>
-              supabase
-                .from("organization_officials")
-                .select("official_id")
+          ? readAllPages<{team_id: string; official_id: string}>((from, to) =>
+              supabase.from("team_quick_assign_officials")
+                .select("team_id,official_id")
                 .eq("organization_id", organizationId)
-                .eq("active", true)
-                .order("official_id")
-                .range(from, to),
+                .order("team_id").order("official_id").range(from, to),
             )
-          : Promise.resolve({ data: null, error: null }),
-        organizationId
-          ? Promise.resolve({ data: [], error: null })
-          : readAllPages<Official>(
-              (from, to) =>
-                supabase
-                  .from("officials")
-                  .select(
-                    "id,first_name,last_name,email,phone,sports,active,home_city,home_state,home_latitude,home_longitude",
-                  )
-                  .eq("active", true)
-                  .order("last_name")
-                  .order("first_name")
-                  .order("id")
-                  .range(from, to) as unknown as PromiseLike<{
-                  data: Official[] | null;
-                  error: { message: string } | null;
-                }>,
-            ),
+          : Promise.resolve({data: [], error: null}),
+      ]);
+      const [roster, rankings, le, ve, bl, suggestions] = results;
+      const error = roster.error || rankings.error || le.error || ve.error || bl.error || suggestions.error;
+      const officialRows = (roster.data || []) as Official[];
+      if (organizationId) officialRows.sort((a, b) =>
+        a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name),
+      );
+      return { results, officialRows, error };
+    };
+    const g = await gamePromise;
+    if (version !== loadVersion.current) return;
+    if (g.error) { setError(g.error.message); return; }
+    // Start the smaller game-scoped requests before opening the large roster
+    // and eligibility request batch on a constrained mobile connection.
+    const corePromise = Promise.all([
         supabase
           .from("sport_positions")
           .select("id,sport_id,name,required,sort_order")
           .order("sort_order"),
-        Promise.resolve({ data: [] as Assignment[], error: null }),
-        readAllPages<Rank>((from, to) =>
-          supabase
-            .from("my_assignment_rankings")
-            .select("official_id,rank")
-            .order("official_id")
-            .range(from, to),
-        ),
-        readAllPages<PositionRank>((from, to) =>
-          supabase
-            .from("my_assignment_rankings")
-            .select(
-              "official_id,ref_rank,ar1_rank,ar2_rank,fourth_rank,mentor_certified",
-            )
-            .order("official_id")
-            .range(from, to),
-        ),
         readAllPages<Power>((from, to) =>
           supabase
             .from("assignor_team_power_rankings")
@@ -685,39 +703,11 @@ export default function AssignmentsManagerV2({
             .order("team_id")
             .range(from, to),
         ),
-        loadAllLeagueEligibility(),
-        loadAllLevelEligibility(),
-        readAllPages<Block>((from, to) =>
-          supabase
-            .from("official_availability_blocks")
-            .select(
-              "official_id,block_type,start_date,end_date,starts_at,ends_at,location_id,team_id",
-            )
-            .order("official_id")
-            .range(from, to),
-        ),
         supabase
           .from("game_link_groups")
           .select("id,name,created_at,organization_id")
           .eq("organization_id", organizationId || "")
           .order("created_at", { ascending: false }),
-        supabase
-          .from("game_link_members")
-          .select("group_id,game_id,sort_order")
-          .order("sort_order"),
-        supabase
-          .from("assignment_self_assign_slots")
-          .select("id,game_id,position_id,status")
-          .eq("status", "open"),
-        supabase.from("game_mentor_slots").select("game_id,position_id"),
-        readAllPages<UnassignmentAudit>((from, to) =>
-          supabase
-            .from("audit_history")
-            .select("game_id,old_data")
-            .eq("action", "unassigned")
-            .order("id")
-            .range(from, to),
-        ),
         supabase
           .from("assignment_templates")
           .select(
@@ -729,111 +719,43 @@ export default function AssignmentsManagerV2({
           ? supabase.rpc("get_organization_field_complexes", { p_organization_id: organizationId })
           : Promise.resolve({ data: [], error: null }),
       ]);
-    if (version !== loadVersion.current) return;
-    const suggestions = organizationId
-      ? await readAllPages<{team_id: string; official_id: string}>((from, to) =>
-          supabase.from("team_quick_assign_officials")
-            .select("team_id,official_id")
-            .eq("organization_id", organizationId)
-            .order("team_id").order("official_id").range(from, to),
-        )
-      : {data: [], error: null};
-    if (version !== loadVersion.current) return;
-    const err =
-      suggestions.error ||
-      (fieldComplexRpcMissing(complexes.error) ? null : complexes.error) ||
-      g.error ||
-      oo.error ||
-      o.error ||
-      p.error ||
-      a.error ||
-      r.error ||
-      pr.error ||
-      pw.error ||
-      le.error ||
-      ve.error ||
-      bl.error ||
-      lg.error ||
-      lm.error ||
-      sas.error ||
-      ms.error ||
-      ah.error ||
-      at.error;
-    if (err) {
-      setError(err.message);
-      return;
-    }
-    const rm: Record<string, number> = {},
-      prm: Record<string, PositionRank> = {},
-      pm: Record<string, number> = {};
-    ((r.data || []) as Rank[]).forEach(
-      (x) => (rm[x.official_id] = Number(x.rank)),
-    );
-    ((pr.data || []) as PositionRank[]).forEach(
-      (x) =>
-        (prm[x.official_id] = {
-          official_id: x.official_id,
-          ref_rank: Number(x.ref_rank),
-          ar1_rank: Number(x.ar1_rank),
-          ar2_rank: Number(x.ar2_rank),
-          fourth_rank: Number(x.fourth_rank),
-          mentor_certified: Boolean(x.mentor_certified),
-        }),
-    );
-    ((pw.data || []) as Power[]).forEach(
-      (x) => (pm[x.team_id] = Number(x.power)),
-    );
-    setRanks(rm);
-    setPositionRanks(prm);
-    setPowers(pm);
-    setTeamSuggestions(suggestions.data || []);
-    let officialRows = (o.data || []) as Official[];
-    if (organizationId) {
-      const organizationOfficialIds = (oo.data || []).map(
-        (link) => link.official_id,
-      );
-      officialRows = [];
-      for (
-        let index = 0;
-        index < organizationOfficialIds.length;
-        index += 200
-      ) {
-        const { data: page, error: pageError } = await supabase
-          .from("officials")
-          .select(
-            "id,first_name,last_name,email,phone,sports,active,home_city,home_state,home_latitude,home_longitude",
-          )
-          .in("id", organizationOfficialIds.slice(index, index + 200))
-          .eq("active", true)
-          .order("last_name")
-          .order("first_name");
-        if (pageError) {
-          setError(pageError.message);
-          return;
-        }
-        officialRows.push(...((page || []) as Official[]));
-      }
-      officialRows.sort(
-        (a, b) =>
-          a.last_name.localeCompare(b.last_name) ||
-          a.first_name.localeCompare(b.first_name),
-      );
-    }
-    if (version !== loadVersion.current) return;
-    setOfficials(officialRows);
-    setPositions((p.data || []) as Position[]);
     const scopedGames = (g.data || []) as unknown as Game[];
     const scopedGameIds = new Set(scopedGames.map((listedGame) => listedGame.id));
-    const assignmentResult = scopedGames.length
-      ? await readAllForChunks<Assignment, string>(
-          scopedGames.map((listedGame) => listedGame.id),
+    const scopedIds = scopedGames.map((listedGame) => listedGame.id);
+    const [assignmentResult, linkResult, slotResult, mentorResult, auditResult] = scopedIds.length
+      ? await Promise.all([
+        readAllForChunks<Assignment, string>(
+          scopedIds,
           (gameIds, from, to) => supabase.from("assignments")
             .select("id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at,assignment_source,email_sent_at,email_error,resend_email_id,cancellation_notified_at,cancellation_email_error,cancellation_email_id,game_fee,payment_status")
             .in("game_id", gameIds).order("id").range(from, to),
-        )
-      : { data: [], error: null };
-    if (assignmentResult.error) { setError(assignmentResult.error.message); return; }
+        ),
+        readAllForChunks<LinkMember, string>(scopedIds, (gameIds, from, to) =>
+          supabase.from("game_link_members").select("group_id,game_id,sort_order")
+            .in("game_id", gameIds).order("game_id").order("group_id").range(from, to)),
+        readAllForChunks<SelfAssignSlot, string>(scopedIds, (gameIds, from, to) =>
+          supabase.from("assignment_self_assign_slots").select("id,game_id,position_id,status")
+            .in("game_id", gameIds).eq("status", "open").order("id").range(from, to)),
+        readAllForChunks<MentorSlot, string>(scopedIds, (gameIds, from, to) =>
+          supabase.from("game_mentor_slots").select("game_id,position_id")
+            .in("game_id", gameIds).order("game_id").order("position_id").range(from, to)),
+        readAllForChunks<UnassignmentAudit, string>(scopedIds, (gameIds, from, to) =>
+          supabase.from("audit_history").select("game_id,old_data")
+            .in("game_id", gameIds).eq("action", "unassigned").order("id").range(from, to)),
+      ])
+      : Array.from({ length: 5 }, () => ({ data: [], error: null }));
+    const scopedError = assignmentResult.error || linkResult.error || slotResult.error || mentorResult.error || auditResult.error;
+    if (scopedError) { setError(scopedError.message); return; }
     if (version !== loadVersion.current) return;
+    const [p, pw, lg, at, complexes] = await corePromise;
+    if (version !== loadVersion.current) return;
+    const coreError = p.error || pw.error || lg.error || at.error ||
+      (fieldComplexRpcMissing(complexes.error) ? null : complexes.error);
+    if (coreError) { setError(coreError.message); return; }
+    const pm: Record<string, number> = {};
+    ((pw.data || []) as Power[]).forEach((x) => (pm[x.team_id] = Number(x.power)));
+    setPowers(pm);
+    setPositions((p.data || []) as Position[]);
     const scopedAssignments = assignmentResult.data || [];
     const checkInResult = scopedAssignments.length
       ? await readAllForChunks<{ assignment_id: string }, string>(
@@ -855,37 +777,27 @@ export default function AssignmentsManagerV2({
     setCheckedInAssignmentIds(
       new Set((checkInResult.data || []).map((row) => row.assignment_id)),
     );
-    const candidateConflictError =
-      await loadCandidateScheduleConflicts(scopedGames);
-    if (candidateConflictError) {
-      setError(candidateConflictError.message);
-      return;
-    }
-    if (version !== loadVersion.current) return;
     setAssignments(scopedAssignments);
-    setLeagueElig((le.data || []) as EligL[]);
-    setLevelElig((ve.data || []) as EligV[]);
-    setBlocks((bl.data || []) as Block[]);
     setLinkGroups((lg.data || []) as LinkGroup[]);
     setLinkMembers(
-      ((lm.data || []) as LinkMember[]).filter((member) =>
+      ((linkResult.data || []) as LinkMember[]).filter((member) =>
         scopedGameIds.has(member.game_id),
       ),
     );
     setSelfAssignSlots(
-      ((sas.data || []) as SelfAssignSlot[]).filter((slot) =>
+      ((slotResult.data || []) as SelfAssignSlot[]).filter((slot) =>
         scopedGameIds.has(slot.game_id),
       ),
     );
     setMentorSlots(
-      ((ms.data || []) as MentorSlot[]).filter((slot) =>
+      ((mentorResult.data || []) as MentorSlot[]).filter((slot) =>
         scopedGameIds.has(slot.game_id),
       ),
     );
     setAssignmentTemplates((at.data || []) as AssignmentTemplate[]);
     setUnassignedSlotKeys([
       ...new Set(
-        ((ah.data || []) as UnassignmentAudit[]).flatMap((row) =>
+        ((auditResult.data || []) as UnassignmentAudit[]).flatMap((row) =>
           row.game_id &&
           scopedGameIds.has(row.game_id) &&
           row.old_data?.position_id
@@ -904,6 +816,7 @@ export default function AssignmentsManagerV2({
     setLocationComplexes(Object.fromEntries((complexes.data || []).filter((row) => row.field_complex?.trim())
       .map((row) => [row.location_id, row.field_complex!.trim()])));
     setInitialGamesReady(true);
+    logLoadMilestone("games data ready");
     setLinkSelected((current) =>
       current.filter((gameId) => scopedGameIds.has(gameId)),
     );
@@ -913,6 +826,56 @@ export default function AssignmentsManagerV2({
     setSelected((current) =>
       scopedGameIds.has(current) ? current : sorted[0]?.id || "",
     );
+    // Yield to give React a chance to paint the first game list before the
+    // large candidate request batch. Filters can reuse a recent result.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    if (version !== loadVersion.current) return;
+    const candidateKey = `${organizationId || ""}:${userData.user?.id || ""}`;
+    const candidatePromise: ReturnType<typeof fetchCandidateData> =
+      reuseCandidates && candidateCache.current?.key === candidateKey &&
+        Date.now() - candidateCache.current.createdAt < 60_000
+        ? candidateCache.current.promise as ReturnType<typeof fetchCandidateData>
+        : fetchCandidateData();
+    if (candidateCache.current?.promise !== candidatePromise)
+      candidateCache.current = { key: candidateKey, createdAt: Date.now(), promise: candidatePromise };
+    const { data: userRoles } = await rolePromise;
+    const hasManagerRole = ((userRoles || []) as string[]).some((role) =>
+      ["admin", "assignor"].includes(role),
+    );
+    const candidate = await candidatePromise;
+    if (version !== loadVersion.current) return;
+    if (candidate.error) {
+      if (candidateCache.current?.promise === candidatePromise) candidateCache.current = null;
+      setError(candidate.error.message);
+      return;
+    }
+    const [, rankings, le, ve, bl, suggestions] = candidate.results;
+    const rm: Record<string, number> = {},
+      prm: Record<string, PositionRank> = {};
+    ((rankings.data || []) as (Rank & PositionRank)[]).forEach((x) => {
+      rm[x.official_id] = Number(x.rank);
+      prm[x.official_id] = {
+        official_id: x.official_id,
+        ref_rank: Number(x.ref_rank),
+        ar1_rank: Number(x.ar1_rank),
+        ar2_rank: Number(x.ar2_rank),
+        fourth_rank: Number(x.fourth_rank),
+        mentor_certified: Boolean(x.mentor_certified),
+      };
+    });
+    if (version !== loadVersion.current) return;
+    const candidateConflictError = await loadCandidateScheduleConflicts(scopedGames, version);
+    if (version !== loadVersion.current) return;
+    if (candidateConflictError) { setError(candidateConflictError.message); return; }
+    setOfficials(candidate.officialRows);
+    setRanks(rm);
+    setPositionRanks(prm);
+    setTeamSuggestions(suggestions.data || []);
+    setLeagueElig((le.data || []) as EligL[]);
+    setLevelElig((ve.data || []) as EligV[]);
+    setBlocks((bl.data || []) as Block[]);
+    setCanManage(hasManagerRole);
+    logLoadMilestone("candidate data ready");
   }
   useEffect(() => {
     setInitialGamesReady(false);
@@ -972,7 +935,7 @@ export default function AssignmentsManagerV2({
   }, [fieldMove?.sourceId, organizationId, allowedLeagueIds, games, assignments, supabase]);
   useEffect(() => {
     if (initialFilterLoad.current) { initialFilterLoad.current = false; return; }
-    void load();
+    void load(true);
   }, [range, customDate, locationFilter, dayFilter, timeFilter, officialFilter,
       leagueFilter, levelFilter, unpublishedOnly, selfAssignOnly,
       replacementOnly, completenessFilter]);
@@ -1067,6 +1030,8 @@ export default function AssignmentsManagerV2({
     return <small className="assignmentPositionPay">{hasFee ? `Game pay: $${Number(amount).toFixed(2)} · ${status}` : "Game pay: Not set"}</small>;
   }
   async function refreshAssignmentState() {
+    const gameIds = games.map((game) => game.id);
+    const empty = { data: [], error: null };
     const [
       assignmentResult,
       selfAssignResult,
@@ -1074,20 +1039,19 @@ export default function AssignmentsManagerV2({
       unassignmentResult,
       candidateConflictError,
     ] = await Promise.all([
-      supabase
-        .from("assignments")
-        .select(
-          "id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at,assignment_source,email_sent_at,email_error,resend_email_id,cancellation_notified_at,cancellation_email_error,cancellation_email_id,game_fee,payment_status",
-        ),
-      supabase
-        .from("assignment_self_assign_slots")
-        .select("id,game_id,position_id,status")
-        .eq("status", "open"),
-      supabase.from("game_mentor_slots").select("game_id,position_id"),
-      supabase
-        .from("audit_history")
-        .select("game_id,old_data")
-        .eq("action", "unassigned"),
+      gameIds.length ? readAllForChunks<Assignment, string>(gameIds, (ids, from, to) =>
+        supabase.from("assignments")
+          .select("id,game_id,official_id,position_id,status,published_at,accept_by,responded_at,decline_reason,overdue_reviewed_at,assignment_source,email_sent_at,email_error,resend_email_id,cancellation_notified_at,cancellation_email_error,cancellation_email_id,game_fee,payment_status")
+          .in("game_id", ids).order("id").range(from, to)) : empty,
+      gameIds.length ? readAllForChunks<SelfAssignSlot, string>(gameIds, (ids, from, to) =>
+        supabase.from("assignment_self_assign_slots").select("id,game_id,position_id,status")
+          .in("game_id", ids).eq("status", "open").order("id").range(from, to)) : empty,
+      gameIds.length ? readAllForChunks<MentorSlot, string>(gameIds, (ids, from, to) =>
+        supabase.from("game_mentor_slots").select("game_id,position_id")
+          .in("game_id", ids).order("game_id").order("position_id").range(from, to)) : empty,
+      gameIds.length ? readAllForChunks<UnassignmentAudit, string>(gameIds, (ids, from, to) =>
+        supabase.from("audit_history").select("game_id,old_data")
+          .in("game_id", ids).eq("action", "unassigned").order("id").range(from, to)) : empty,
       loadCandidateScheduleConflicts(games),
     ]);
     const refreshError =
@@ -1129,6 +1093,32 @@ export default function AssignmentsManagerV2({
       ),
     ]);
     return true;
+  }
+  async function archiveCancelledGames(selectedGameIds?: string[]) {
+    if (!canManage || !organizationId || bulkWorking) return;
+    if (selectedGameIds && !selectedGameIds.length) return;
+    const scope = selectedGameIds
+      ? `${selectedGameIds.length} selected cancelled game${selectedGameIds.length === 1 ? "" : "s"}`
+      : "all cancelled games in the leagues you manage";
+    if (!window.confirm(`Archive ${scope}? They will leave the Assignment Center and remain available under Games → Archived Games.`)) return;
+    setBulkWorking(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/games/manage?organizationId=${encodeURIComponent(organizationId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "archive_cancelled", gameIds: selectedGameIds }),
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string; updated?: number };
+      if (!response.ok) throw new Error(result.error || "Cancelled games could not be archived.");
+      await load();
+      const count = result.updated || 0;
+      setNotice(`${count} cancelled game${count === 1 ? "" : "s"} archived. You can restore them under Games → Archived Games.`);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Cancelled games could not be archived.");
+    } finally {
+      setBulkWorking(false);
+    }
   }
   useEffect(() => {
     if (!notice) return;
@@ -1412,6 +1402,9 @@ export default function AssignmentsManagerV2({
   const assignmentSelection = games.filter((listedGame) =>
     linkSelected.includes(listedGame.id),
   );
+  const selectedCancelledGameIds = assignmentSelection
+    .filter((listedGame) => ["canceled", "cancelled"].includes(listedGame.status))
+    .map((listedGame) => listedGame.id);
   const broadcastOpenPositions = assignmentSelection.flatMap((selectedGame) =>
     positions
       .filter((position) => position.sport_id === selectedGame.sport_id)
@@ -2500,9 +2493,12 @@ export default function AssignmentsManagerV2({
       ? await query.delete().eq("organization_id", organizationId).eq("team_id", teamId).eq("official_id", officialId)
       : await query.insert({organization_id: organizationId, team_id: teamId, official_id: officialId});
     if (saveError) setError(saveError.message);
-    else setTeamSuggestions((current) => existing
-      ? current.filter((link) => link.team_id !== teamId || link.official_id !== officialId)
-      : [...current, {team_id: teamId, official_id: officialId}]);
+    else {
+      candidateCache.current = null;
+      setTeamSuggestions((current) => existing
+        ? current.filter((link) => link.team_id !== teamId || link.official_id !== officialId)
+        : [...current, {team_id: teamId, official_id: officialId}]);
+    }
     setTeamSuggestionSaving("");
   }
   function lastAssignmentTime(officialId: string) {
@@ -5322,7 +5318,7 @@ export default function AssignmentsManagerV2({
                 .map((position) => {
                   const assigned = assignments.find((item) => item.game_id === g.id && item.position_id === position.id && assignmentOccupiesPosition(item.status));
                   const official = officials.find((item) => item.id === assigned?.official_id);
-                  return <div key={position.id}><b>{shortPositionName(position.name)}</b><span>{official ? `${official.first_name} ${official.last_name}` : "Open"}</span><small>{assigned ? assignmentStatus(assigned).label : "Unassigned"}</small></div>;
+                  return <div key={position.id}><b>{shortPositionName(position.name)}</b><span>{official ? `${official.first_name} ${official.last_name}` : assigned ? "Assigned official" : "Open"}</span><small>{assigned ? assignmentStatus(assigned).label : "Unassigned"}</small></div>;
                 })}
             </div>
           </details>
@@ -5497,7 +5493,7 @@ export default function AssignmentsManagerV2({
         }
       }
     }
-    await load();
+    await load(true);
     if (failedGameIds.length && games.some((item) => item.id === failedGameIds[0])) setSelected(failedGameIds[0]);
     setFieldMove(null);
     setFieldMoveSaving(false);
@@ -6827,6 +6823,9 @@ export default function AssignmentsManagerV2({
                     >
                       Export Assignments
                     </button>
+                    <button type="button" disabled={bulkWorking} onClick={() => void archiveCancelledGames()}>
+                      Archive Cancelled Games
+                    </button>
                     <button
                       type="button"
                       disabled={saving === "assignment-fee-import"}
@@ -6896,6 +6895,9 @@ export default function AssignmentsManagerV2({
                 onClick={() => void exportAssignments()}
               >
                 Export Assignments
+              </button>
+              <button type="button" disabled={bulkWorking} onClick={() => void archiveCancelledGames()}>
+                Archive Cancelled Games
               </button>
               <button
                 type="button"
@@ -9023,6 +9025,15 @@ export default function AssignmentsManagerV2({
                   </span>
                 )}
               </div>
+              {selectedCancelledGameIds.length > 0 && (
+                <button
+                  className="secondary"
+                  disabled={bulkWorking}
+                  onClick={() => void archiveCancelledGames(selectedCancelledGameIds)}
+                >
+                  Archive Selected Cancelled ({selectedCancelledGameIds.length})
+                </button>
+              )}
               <button
                 className="primary"
                 disabled={bulkWorking}
