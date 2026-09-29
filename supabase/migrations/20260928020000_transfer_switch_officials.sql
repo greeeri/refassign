@@ -220,7 +220,6 @@ begin
   end if;
   v_reasons := private.field_move_eligibility(v_source.official_id,v_target_game.id,p_target_position_id);
   if v_target.id is not null then v_reasons := v_reasons || private.field_move_eligibility(v_target.official_id,v_source_game.id,v_source.position_id); end if;
-  if cardinality(v_reasons) > 0 and not p_override then raise exception 'Eligibility override required: %',array_to_string(v_reasons,'; '); end if;
   -- Other bookings cannot be overridden, including bookings in another organization.
   for v_other in select a.official_id,g.game_number from public.assignments a join public.games g on g.id = a.game_id
     where a.official_id in (v_source.official_id,v_target.official_id) and a.id not in (v_source.id,coalesce(v_target.id,v_source.id))
@@ -229,6 +228,7 @@ begin
       and g.starts_at + make_interval(mins => coalesce(g.duration_minutes,110)) > v_target_game.starts_at
     limit 1
   loop raise exception 'Official has an overlapping assignment on Game #%.',v_other.game_number; end loop;
+  if cardinality(v_reasons) > 0 and not p_override then raise exception 'Eligibility override required: %',array_to_string(v_reasons,'; '); end if;
   if p_preview then
     return jsonb_build_object('preview',true,'targetGameId',v_target_game.id,
       'sourceGameId',v_source_game.id,'occupied',v_target.id is not null);
