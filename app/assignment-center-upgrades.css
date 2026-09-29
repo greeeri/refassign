@@ -53,6 +53,8 @@
 .assignmentCrewPreviewBody>div:last-child{border-bottom:0}
 .assignmentCrewPreviewBody small{grid-column:2;color:#475569}
 .assignmentFieldMoveLink{border:0;background:transparent;color:#1d4ed8;text-decoration:underline;font-size:12px;font-weight:800;margin-left:6px;cursor:pointer;padding:3px}
+.assignmentFieldMoveActions{display:inline-flex;gap:4px;vertical-align:middle}
+@media(max-width:700px){.assignmentFieldMoveActions{display:flex;gap:8px;margin:10px 0 2px}.assignmentFieldMoveLink{min-height:44px;margin:0;padding:8px 12px;border:1px solid #93c5fd;border-radius:8px;background:#eff6ff;font-size:14px;text-decoration:none}}
 .fieldMoveDialog{padding:18px;display:block}
 .fieldMoveDialog .cardHead{display:flex;justify-content:space-between;align-items:center;gap:12px}
 .fieldMoveDialog label{display:block;font-weight:750}

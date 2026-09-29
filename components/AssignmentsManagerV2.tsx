@@ -381,7 +381,6 @@ export default function AssignmentsManagerV2({
     [fieldMoveLoadError, setFieldMoveLoadError] = useState(""),
     [fieldMovePreview, setFieldMovePreview] = useState<{ key: string; loading: boolean; error: string } | null>(null),
     [locationComplexes, setLocationComplexes] = useState<Record<string, string>>({}),
-    [fieldMovesAvailable, setFieldMovesAvailable] = useState(false),
     [range, setRange] = useState<Range>("all"),
     [customDate, setCustomDate] = useState(""),
     [showCalendar, setShowCalendar] = useState(false),
@@ -544,7 +543,6 @@ export default function AssignmentsManagerV2({
       console.info(`[RefAssign load] ${stage}: ${Math.round(performance.now() - startedAt)} ms (viewport ${document.documentElement.clientWidth}px)`);
     };
     setError("");
-    setFieldMovesAvailable(false);
     // Management actions depend on the full candidate data set. Keep them
     // unavailable while the game list is being populated in stages.
     setCanManage(false);
@@ -843,7 +841,6 @@ export default function AssignmentsManagerV2({
         const complexes = await supabase.rpc("get_organization_field_complexes", { p_organization_id: organizationId });
         if (version !== loadVersion.current) return;
         if (complexes.error && !fieldComplexRpcMissing(complexes.error)) setError(complexes.error.message);
-        setFieldMovesAvailable(!complexes.error);
         setLocationComplexes(Object.fromEntries((complexes.data || []).filter((row) => row.field_complex?.trim())
           .map((row) => [row.location_id, row.field_complex!.trim()])));
       })();
@@ -5556,7 +5553,7 @@ export default function AssignmentsManagerV2({
             <label>Destination game and position<select value={`${fieldMove.targetGameId}:${fieldMove.targetPositionId}`} onChange={(event) => { const [targetGameId, targetPositionId] = event.target.value.split(":"); setFieldMove({ ...fieldMove, targetGameId, targetPositionId }); }}><option value=":">Choose a slot</option>{fieldMoveSlots.map(({ target, position, occupant }) => { const official = officials.find((item) => item.id === occupant?.official_id); return <option key={`${target.id}:${position.id}`} value={`${target.id}:${position.id}`}>#{target.game_number} · {target.location?.name} · {shortPositionName(position.name)} · {occupant ? official ? `${official.first_name} ${official.last_name}` : "Assigned official" : "Open"}</option>; })}</select></label>
             {fieldMoveLoading && <p>Finding positions at the same start time…</p>}
             {fieldMoveLoadError && <p className="errorBox" role="alert">{fieldMoveLoadError}</p>}
-            {!fieldMoveLoading && !fieldMoveLoadError && !fieldMoveSlots.length && <p>No fields in this complex at the exact start time have {fieldMove.mode === "transfer" ? "an open slot" : "a matching slot"}. Check the locations’ address or Field Complex setting.</p>}
+            {!fieldMoveLoading && !fieldMoveLoadError && !fieldMoveSlots.length && <p>{fieldMove.mode === "transfer" && fieldMoveCandidates.length ? "All matching positions are filled. Choose Switch to exchange officials with an occupied position." : `No fields in this complex at the exact start time have ${fieldMove.mode === "transfer" ? "an open slot" : "a matching slot"}. Check the locations’ address or Field Complex setting.`}</p>}
             <label style={{ display: "block", margin: "14px 0" }}>After the move<select value={fieldMove.accept ? "accept" : "notify"} onChange={(event) => setFieldMove({ ...fieldMove, accept: event.target.value === "accept" })}><option value="notify">Assign and notify for acceptance</option><option value="accept">Accept the move now</option></select></label>
             {fieldMove.targetPositionId && fieldMovePreview?.key === fieldMovePreviewKey && fieldMovePreview.loading && <p>Checking eligibility, payroll, and schedule conflicts…</p>}
             {fieldMovePreviewCurrent && fieldMovePreview?.error && <p className="errorBox" role="alert">{fieldMovePreview.error}{fieldMoveNeedsOverride ? " You may review an explicit eligibility override." : " Choose another position or resolve this conflict."}</p>}
@@ -10309,7 +10306,7 @@ export default function AssignmentsManagerV2({
                                             (o) => o.id === current.official_id,
                                           )?.last_name}
                                         <ScheduleLink officialId={current.official_id} />
-                                        {canManage && fieldMovesAvailable && <><button type="button" className="assignmentFieldMoveLink" onClick={() => setFieldMove({ sourceId: current.id, mode: "transfer", targetGameId: "", targetPositionId: "", accept: false })}>Transfer</button><button type="button" className="assignmentFieldMoveLink" onClick={() => setFieldMove({ sourceId: current.id, mode: "switch", targetGameId: "", targetPositionId: "", accept: false })}>Switch</button></>}
+                                        {canManage && <span className="assignmentFieldMoveActions"><button type="button" className="assignmentFieldMoveLink" onClick={() => setFieldMove({ sourceId: current.id, mode: "transfer", targetGameId: "", targetPositionId: "", accept: false })}>Transfer</button><button type="button" className="assignmentFieldMoveLink" onClick={() => setFieldMove({ sourceId: current.id, mode: "switch", targetGameId: "", targetPositionId: "", accept: false })}>Switch</button></span>}
                                         {futureBadge(current.official_id)}
                                         {canManage && (
                                           <span
