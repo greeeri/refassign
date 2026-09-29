@@ -216,6 +216,13 @@ async function expectReject(action,pattern){await assert.rejects(action,pattern)
   }
   {
     const db=await fresh();const a=await assignment(db,GAME1,OFF1);
+    await db.query('insert into public.assignments(game_id,position_id,official_id,status) values($1,$2,$3,$4)',[GAME3,POS1,OFF1,'accepted']);
+    await db.exec(`delete from public.official_level_eligibility where official_id='${OFF1}'`);
+    await expectReject(()=>preview(db,a.id),/overlapping assignment/i);
+    await db.close();console.log('PASS preview prioritizes non-overridable overlap over eligibility override');
+  }
+  {
+    const db=await fresh();const a=await assignment(db,GAME1,OFF1);
     await db.query('insert into public.payroll_fee_corrections values($1)',[a.id]);
     await expectReject(()=>move(db,a.id),/payroll/i);
     assert.equal((await db.query('select count(*)::int n from public.assignments where id=$1',[a.id])).rows[0].n,1);
