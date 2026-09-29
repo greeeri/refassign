@@ -111,6 +111,9 @@ async function setup(db) {
 async function move(db,id,target=GAME2,mode='transfer',accept=true,override=false){
   return db.query('select public.move_official_between_fields($1,$2,$3,$4,$5,$6) result',[id,target,POS1,mode,accept,override]);
 }
+async function preview(db,id,target=GAME2,mode='transfer',accept=true){
+  return db.query('select public.move_official_between_fields($1,$2,$3,$4,$5,false,true) result',[id,target,POS1,mode,accept]);
+}
 async function assignment(db,game,official,position=POS1){
   const r=await db.query('insert into public.assignments(game_id,position_id,official_id,status) values($1,$2,$3,$4) returning *',[game,position,official,'accepted']);
   return r.rows[0];
@@ -119,6 +122,23 @@ async function fresh(){const db=new PGlite();await setup(db);return db;}
 async function expectReject(action,pattern){await assert.rejects(action,pattern);}
 
 (async()=>{
+  {
+    const db=await fresh(); const a=await assignment(db,GAME1,OFF1);
+    const result=(await preview(db,a.id)).rows[0].result;
+    assert.equal(result.preview,true);
+    assert.equal(result.occupied,false);
+    assert.equal((await db.query('select count(*)::int n from public.assignments')).rows[0].n,1);
+    assert.equal((await db.query('select game_id from public.assignments where id=$1',[a.id])).rows[0].game_id,GAME1);
+    await db.close();console.log('PASS preview validates transfer without changing assignments');
+  }
+  {
+    const db=await fresh(); const a=await assignment(db,GAME1,OFF1);await assignment(db,GAME2,OFF2);
+    await expectReject(()=>preview(db,a.id,GAME2,'transfer'),/open position/i);
+    const result=(await preview(db,a.id,GAME2,'switch')).rows[0].result;
+    assert.equal(result.occupied,true);
+    assert.equal((await db.query('select count(*)::int n from public.assignments')).rows[0].n,2);
+    await db.close();console.log('PASS preview distinguishes occupied transfer and switch');
+  }
   {
     const db=await fresh(); const a=await assignment(db,GAME1,OFF1);
     const originalToken='aaaaaaaa-aaaa-4aaa-8aaa-111111111111';
@@ -173,6 +193,7 @@ async function expectReject(action,pattern){await assert.rejects(action,pattern)
   {
     const db=await fresh();const a=await assignment(db,GAME1,OFF1);
     await db.query('update public.assignments set payment_status=$1 where id=$2',['paid',a.id]);
+    await expectReject(()=>preview(db,a.id),/payroll/i);
     await expectReject(()=>move(db,a.id),/payroll/i);
     assert.equal((await db.query('select count(*)::int n from public.assignments where id=$1',[a.id])).rows[0].n,1);
     await db.close();console.log('PASS paid assignment rejected without partial move');
@@ -188,6 +209,7 @@ async function expectReject(action,pattern){await assert.rejects(action,pattern)
   {
     const db=await fresh();const a=await assignment(db,GAME1,OFF1);
     await db.query('insert into public.assignments(game_id,position_id,official_id,status) values($1,$2,$3,$4)',[GAME3,POS1,OFF1,'accepted']);
+    await expectReject(()=>preview(db,a.id),/overlapping assignment/i);
     await expectReject(()=>move(db,a.id),/overlapping assignment/i);
     assert.equal((await db.query('select count(*)::int n from public.assignments where id=$1',[a.id])).rows[0].n,1);
     await db.close();console.log('PASS overlap rejected without partial move');
