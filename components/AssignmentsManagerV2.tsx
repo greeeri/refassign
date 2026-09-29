@@ -543,6 +543,7 @@ export default function AssignmentsManagerV2({
       console.info(`[RefAssign load] ${stage}: ${Math.round(performance.now() - startedAt)} ms (viewport ${document.documentElement.clientWidth}px)`);
     };
     setError("");
+    setFieldMovesAvailable(false);
     // Management actions depend on the full candidate data set. Keep them
     // unavailable while the game list is being populated in stages.
     setCanManage(false);
@@ -715,9 +716,6 @@ export default function AssignmentsManagerV2({
           )
           .eq("organization_id", organizationId || "")
           .order("updated_at", { ascending: false }),
-        organizationId
-          ? supabase.rpc("get_organization_field_complexes", { p_organization_id: organizationId })
-          : Promise.resolve({ data: [], error: null }),
       ]);
     const scopedGames = (g.data || []) as unknown as Game[];
     const scopedGameIds = new Set(scopedGames.map((listedGame) => listedGame.id));
@@ -747,10 +745,9 @@ export default function AssignmentsManagerV2({
     const scopedError = assignmentResult.error || linkResult.error || slotResult.error || mentorResult.error || auditResult.error;
     if (scopedError) { setError(scopedError.message); return; }
     if (version !== loadVersion.current) return;
-    const [p, pw, lg, at, complexes] = await corePromise;
+    const [p, pw, lg, at] = await corePromise;
     if (version !== loadVersion.current) return;
-    const coreError = p.error || pw.error || lg.error || at.error ||
-      (fieldComplexRpcMissing(complexes.error) ? null : complexes.error);
+    const coreError = p.error || pw.error || lg.error || at.error;
     if (coreError) { setError(coreError.message); return; }
     const pm: Record<string, number> = {};
     ((pw.data || []) as Power[]).forEach((x) => (pm[x.team_id] = Number(x.power)));
@@ -812,9 +809,6 @@ export default function AssignmentsManagerV2({
         new Date(x.starts_at).getTime() - new Date(y.starts_at).getTime(),
     );
     setGames(sorted);
-    setFieldMovesAvailable(Boolean(organizationId && !complexes.error));
-    setLocationComplexes(Object.fromEntries((complexes.data || []).filter((row) => row.field_complex?.trim())
-      .map((row) => [row.location_id, row.field_complex!.trim()])));
     setInitialGamesReady(true);
     logLoadMilestone("games data ready");
     setLinkSelected((current) =>
@@ -839,9 +833,20 @@ export default function AssignmentsManagerV2({
     if (candidateCache.current?.promise !== candidatePromise)
       candidateCache.current = { key: candidateKey, createdAt: Date.now(), promise: candidatePromise };
     const { data: userRoles } = await rolePromise;
+    if (version !== loadVersion.current) return;
     const hasManagerRole = ((userRoles || []) as string[]).some((role) =>
       ["admin", "assignor"].includes(role),
     );
+    if (organizationId && hasManagerRole) {
+      void (async () => {
+        const complexes = await supabase.rpc("get_organization_field_complexes", { p_organization_id: organizationId });
+        if (version !== loadVersion.current) return;
+        if (complexes.error && !fieldComplexRpcMissing(complexes.error)) setError(complexes.error.message);
+        setFieldMovesAvailable(!complexes.error);
+        setLocationComplexes(Object.fromEntries((complexes.data || []).filter((row) => row.field_complex?.trim())
+          .map((row) => [row.location_id, row.field_complex!.trim()])));
+      })();
+    } else setLocationComplexes({});
     const candidate = await candidatePromise;
     if (version !== loadVersion.current) return;
     if (candidate.error) {
