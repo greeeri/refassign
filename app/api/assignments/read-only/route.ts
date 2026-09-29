@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
   // Explicit projection excludes response tokens, personal contact data, rankings and pay.
   const { data: games, error } = await service.from("games")
     .select("id,game_number,starts_at,status,officials_needed,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name),leagues(name),assignments(id,status,published_at,officials(first_name,last_name),sport_positions(name))")
-    .eq("organization_id", organizationId).in("league_id", access.map(row => row.league_id))
+    .eq("organization_id", organizationId).is("archived_at", null).in("league_id", access.map(row => row.league_id))
     .gte("starts_at", `${from}T00:00:00Z`).order("starts_at").order("id").limit(5000);
   if (error) return NextResponse.json({ error: "Could not load assignments." }, { status: 500 });
   return NextResponse.json({ games: games || [], isMentor: mentor }, { headers: { "Cache-Control": "private, no-store" } });

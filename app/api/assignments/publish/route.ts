@@ -21,6 +21,7 @@ export async function POST(req: NextRequest) {
     gameId?: string;
     responseByLocal?: string;
     retryFailed?: boolean;
+    assignmentIds?: string[];
   };
   if (!body.gameId)
     return NextResponse.json({ error: "Game is required." }, { status: 400 });
@@ -49,22 +50,30 @@ export async function POST(req: NextRequest) {
     );
   const assignmentQuery = service
     .from("assignments")
-    .select("id")
+    .select("id,response_token")
     .eq("game_id", body.gameId)
     .not("official_id", "is", null);
+  const selectedIds = body.assignmentIds ? [...new Set(body.assignmentIds)] : null;
+  if (selectedIds && (!selectedIds.length || selectedIds.length > 2))
+    return NextResponse.json({ error: "Choose one or two assignments to notify." }, { status: 400 });
+  if (selectedIds) assignmentQuery.in("id", selectedIds);
   const { data: targetAssignments, error: targetError } = body.retryFailed
     ? await assignmentQuery
         .not("published_at", "is", null)
         .is("email_sent_at", null)
-        .not("email_error", "is", null)
     : await assignmentQuery.is("published_at", null);
   if (targetError)
     return NextResponse.json({ error: targetError.message }, { status: 400 });
   const targetIds = (targetAssignments || []).map(
     (assignment) => assignment.id,
   );
+  if (selectedIds && targetIds.length !== selectedIds.length)
+    return NextResponse.json({ error: "One or more assignments changed before notification. Review the game." }, { status: 409 });
   if (!targetIds.length)
     return NextResponse.json({ sent: 0, failed: 0, failures: [] });
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey)
+    return NextResponse.json({ error: "RESEND_API_KEY is not configured." }, { status: 500 });
   const deadlineLeague = Array.isArray((ownedGame as any)?.leagues)
     ? (ownedGame as any).leagues[0]
     : (ownedGame as any)?.leagues;
@@ -109,12 +118,26 @@ export async function POST(req: NextRequest) {
     ).toISOString();
   }
   if (!body.retryFailed) {
-    const { error: publishError } = await supabase.rpc(
-      "publish_game_assignments",
-      { p_game_id: body.gameId },
-    );
-    if (publishError)
-      return NextResponse.json({ error: publishError.message }, { status: 400 });
+    if (selectedIds) {
+      for (const assignment of targetAssignments || []) {
+        const { data, error } = await service.from("assignments").update({
+          published_at: new Date().toISOString(),
+          published_by: context.user.id,
+          response_token: assignment.response_token || crypto.randomUUID(),
+          responded_at: null,
+          decline_reason: null,
+          email_sent_at: null,
+          email_error: null,
+          resend_email_id: null,
+        }).eq("game_id", body.gameId).eq("id", assignment.id).is("published_at", null).eq("status", "proposed").select("id");
+        if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+        if (data?.length !== 1)
+          return NextResponse.json({ error: "An assignment changed before notification. Review its status." }, { status: 409 });
+      }
+    } else {
+      const { error: publishError } = await supabase.rpc("publish_game_assignments", { p_game_id: body.gameId });
+      if (publishError) return NextResponse.json({ error: publishError.message }, { status: 400 });
+    }
     const { error: deadlineError } = await service
       .from("assignments")
       .update({ accept_by: responseAt })
@@ -128,15 +151,11 @@ export async function POST(req: NextRequest) {
       "id,official_id,status,published_at,accept_by,response_token,email_sent_at,officials(first_name,last_name,email),sport_positions(name),games(starts_at,notes,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name,address,city,state),leagues(name),levels(name))",
     )
     .in("id", targetIds)
+    .eq("status", "proposed")
+    .not("published_at", "is", null)
     .is("email_sent_at", null);
   if (loadError)
     return NextResponse.json({ error: loadError.message }, { status: 400 });
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey)
-    return NextResponse.json(
-      { error: "RESEND_API_KEY is not configured." },
-      { status: 500 },
-    );
   let sent = 0;
   const failures: string[] = [];
   for (const raw of rows || []) {
@@ -147,9 +166,9 @@ export async function POST(req: NextRequest) {
         ? a.sport_positions[0]
         : a.sport_positions;
     if (!o?.email || !a.response_token) {
-      failures.push(
-        `${o?.first_name || "Official"}: missing email or response link`,
-      );
+      const message = "Missing email or response link";
+      failures.push(`${o?.first_name || "Official"}: ${message}`);
+      await service.from("assignments").update({ email_error: message }).eq("id", a.id);
       continue;
     }
     const home = (Array.isArray(g?.home) ? g.home[0] : g?.home)?.name || "TBD",
@@ -182,7 +201,9 @@ export async function POST(req: NextRequest) {
       .filter(Boolean)
       .join(", ");
     const html = `<div style="font-family:Arial,sans-serif;background:#f5f7fb;padding:28px"><div style="max-width:620px;margin:auto;background:white;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden"><div style="background:#14233b;color:white;padding:24px 28px"><div style="font-size:22px;font-weight:800">REF PRO <span style="color:#60a5fa">GROUP</span></div><div style="font-size:12px;color:#cbd5e1;margin-top:4px">New Game Assignment</div></div><div style="padding:28px"><p style="font-size:16px;color:#172033">Hi ${esc(o.first_name)},</p><p style="color:#475569">You have a new game assignment from Ref Pro Group.</p><h2 style="color:#172033;margin:24px 0 18px">${esc(home)} vs ${esc(away)}</h2><table style="width:100%;border-collapse:collapse;color:#172033;font-size:14px"><tr><td style="padding:10px 0;color:#64748b">Date & Time</td><td style="padding:10px 0;font-weight:700">${esc(when)}</td></tr><tr><td style="padding:10px 0;color:#64748b">Position</td><td style="padding:10px 0;font-weight:700">${esc(pos?.name || "Official")}</td></tr><tr><td style="padding:10px 0;color:#64748b">Location</td><td style="padding:10px 0;font-weight:700">${esc(loc?.name || "TBD")}${address ? `<br><span style="font-weight:400;color:#64748b">${esc(address)}</span>` : ""}</td></tr><tr><td style="padding:10px 0;color:#64748b">League / Level</td><td style="padding:10px 0;font-weight:700">${esc(league?.name || "—")}${level?.name ? ` • ${esc(level.name)}` : ""}</td></tr></table>${g?.notes ? `<div style="margin-top:18px;padding:14px;background:#f8fafc;border-radius:8px"><b>Game Information</b><div style="margin-top:5px;color:#475569">${esc(g.notes)}</div></div>` : ""}<div style="margin:22px 0;padding:14px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;color:#92400e"><b>Response required by ${esc(deadline)}</b></div><div style="text-align:center;margin:26px 0"><a href="${responseUrl}" style="display:inline-block;background:#2563eb;color:white;text-decoration:none;font-weight:700;padding:14px 24px;border-radius:9px">View Assignment</a></div><p style="font-size:12px;color:#64748b">Use the secure link above to accept or decline your assignment. You do not need to sign in to respond.</p></div></div><div style="text-align:center;color:#94a3b8;font-size:10px;padding:18px">© 2026 Ref Pro Group, LLC. All rights reserved.</div></div>`;
-    const response = await sendOfficialNotification(service, a.official_id, "https://api.resend.com/emails", {
+    let response: Response;
+    try {
+      response = await sendOfficialNotification(service, a.official_id, "https://api.resend.com/emails", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -196,7 +217,15 @@ export async function POST(req: NextRequest) {
         subject: `Game Assignment: ${home} vs ${away}`,
         html,
       }),
-    });
+      });
+    } catch {
+      // A transport failure happens after publishing. Record it so Retry
+      // can find this assignment without reassigning the official.
+      const message = "Email provider request failed; retry notification.";
+      failures.push(`${o.first_name} ${o.last_name}: ${message}`);
+      await service.from("assignments").update({ email_error: message }).eq("id", a.id);
+      continue;
+    }
     const result = (await response.json().catch(() => ({}))) as {
       id?: string;
       message?: string;

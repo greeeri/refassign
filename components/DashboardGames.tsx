@@ -152,6 +152,7 @@ export default function DashboardGames({
             .select(
               "id,game_number,location_id,starts_at,duration_minutes,officials_needed,status,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name,latitude,longitude),leagues(name),levels(name)",
             )
+            .is("archived_at", null)
             .order("starts_at")
             .order("id");
           if (organizationId)

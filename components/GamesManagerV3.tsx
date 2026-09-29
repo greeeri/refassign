@@ -4,6 +4,7 @@ import { createClient } from "../lib/supabase/client";
 import { readAllPages } from "../lib/supabase/readAll";
 import { announceUndoAvailable } from "./UndoCenter";
 import { resolveImportTeam } from "../lib/game-import-team";
+import { normalizeGameStatus } from "../lib/game-status";
 import { eventLocalToIso, eventTimeParts, formatEventDate, formatEventTime } from "../lib/event-time";
 type Named = { id: string; name: string };
 type BillTo = Named;
@@ -1234,6 +1235,16 @@ export default function GamesManagerV3({
           >
             {managementBusy ? "Working…" : showArchived ? "Restore selected" : "Archive selected"}
           </button>
+          {!showArchived && selectedGames.some((id) => games.some((game) => game.id === id && normalizeGameStatus(game.status) === "canceled")) && (
+            <button
+              type="button"
+              className="secondary"
+              disabled={managementBusy}
+              onClick={() => void manageGames("archive", selectedGames.filter((id) => games.some((game) => game.id === id && normalizeGameStatus(game.status) === "canceled")))}
+            >
+              Archive selected canceled games
+            </button>
+          )}
           {showArchived && (
             <button
               type="button"

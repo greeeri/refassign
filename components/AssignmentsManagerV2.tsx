@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { fieldComplexRpcMissing } from "../lib/field-complex-support";
 import {
   gameAcceptsAssignments,
   inactiveGameStatusLabel,
@@ -47,6 +48,9 @@ type Game = {
     state: string | null;
     latitude: number | null;
     longitude: number | null;
+    address: string | null;
+    field_complex: string | null;
+    venue_id: string | null;
   } | null;
 };
 type Official = {
@@ -366,6 +370,18 @@ export default function AssignmentsManagerV2({
       Set<string>
     >(new Set()),
     [selected, setSelected] = useState(""),
+    [fieldMove, setFieldMove] = useState<{ sourceId: string; mode: "transfer" | "switch"; targetGameId: string; targetPositionId: string; accept: boolean } | null>(null),
+    [fieldMoveSaving, setFieldMoveSaving] = useState(false),
+    [fieldMoveOptions, setFieldMoveOptions] = useState<{
+      sourceId: string;
+      games: Game[];
+      occupants: Pick<Assignment, "game_id" | "position_id" | "official_id" | "status">[];
+    } | null>(null),
+    [fieldMoveLoading, setFieldMoveLoading] = useState(false),
+    [fieldMoveLoadError, setFieldMoveLoadError] = useState(""),
+    [fieldMovePreview, setFieldMovePreview] = useState<{ key: string; loading: boolean; error: string } | null>(null),
+    [locationComplexes, setLocationComplexes] = useState<Record<string, string>>({}),
+    [fieldMovesAvailable, setFieldMovesAvailable] = useState(false),
     [range, setRange] = useState<Range>("all"),
     [customDate, setCustomDate] = useState(""),
     [showCalendar, setShowCalendar] = useState(false),
@@ -528,6 +544,7 @@ export default function AssignmentsManagerV2({
       console.info(`[RefAssign load] ${stage}: ${Math.round(performance.now() - startedAt)} ms (viewport ${document.documentElement.clientWidth}px)`);
     };
     setError("");
+    setFieldMovesAvailable(false);
     // Management actions depend on the full candidate data set. Keep them
     // unavailable while the game list is being populated in stages.
     setCanManage(false);
@@ -584,7 +601,7 @@ export default function AssignmentsManagerV2({
           let query = supabase
             .from("games")
             .select(
-              "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,time_tbd,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,city,state,latitude,longitude)",
+              "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,time_tbd,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,address,city,state,latitude,longitude,venue_id)",
             )
             .is("archived_at", null)
             .order("starts_at")
@@ -817,9 +834,20 @@ export default function AssignmentsManagerV2({
     if (candidateCache.current?.promise !== candidatePromise)
       candidateCache.current = { key: candidateKey, createdAt: Date.now(), promise: candidatePromise };
     const { data: userRoles } = await rolePromise;
+    if (version !== loadVersion.current) return;
     const hasManagerRole = ((userRoles || []) as string[]).some((role) =>
       ["admin", "assignor"].includes(role),
     );
+    if (organizationId && hasManagerRole) {
+      void (async () => {
+        const complexes = await supabase.rpc("get_organization_field_complexes", { p_organization_id: organizationId });
+        if (version !== loadVersion.current) return;
+        if (complexes.error && !fieldComplexRpcMissing(complexes.error)) setError(complexes.error.message);
+        setFieldMovesAvailable(!complexes.error);
+        setLocationComplexes(Object.fromEntries((complexes.data || []).filter((row) => row.field_complex?.trim())
+          .map((row) => [row.location_id, row.field_complex!.trim()])));
+      })();
+    } else setLocationComplexes({});
     const candidate = await candidatePromise;
     if (version !== loadVersion.current) return;
     if (candidate.error) {
@@ -863,6 +891,77 @@ export default function AssignmentsManagerV2({
     setReplacementOnly(false);
     void load();
   }, [organizationId]);
+  useEffect(() => {
+    const sourceId = fieldMove?.sourceId;
+    const sourceAssignment = assignments.find((item) => item.id === sourceId);
+    const sourceGame = games.find((item) => item.id === sourceAssignment?.game_id);
+    if (!sourceId || !sourceGame || !organizationId) {
+      setFieldMoveOptions(null);
+      setFieldMoveLoading(false);
+      return;
+    }
+    let active = true;
+    setFieldMoveOptions(null);
+    setFieldMoveLoadError("");
+    setFieldMoveLoading(true);
+    void (async () => {
+      const eligibleGames = allowedLeagueIds?.length === 0
+        ? { data: [] as Game[], error: null }
+        : await readAllPages<Game>((from, to) => {
+          let query = supabase.from("games")
+            .select("id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,time_tbd,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,address,city,state,latitude,longitude,venue_id)")
+            .eq("organization_id", organizationId)
+            .eq("starts_at", sourceGame.starts_at)
+            .is("archived_at", null)
+            .order("id");
+          if (allowedLeagueIds?.length) query = query.in("league_id", allowedLeagueIds);
+          return query.range(from, to) as unknown as PromiseLike<{ data: Game[] | null; error: { message: string } | null }>;
+        });
+      if (!active) return;
+      if (eligibleGames.error) {
+        setFieldMoveLoadError(eligibleGames.error.message);
+        setFieldMoveLoading(false);
+        return;
+      }
+      const ids = (eligibleGames.data || []).map((item) => item.id);
+      const occupants = ids.length
+        ? await readAllForChunks<Pick<Assignment, "game_id" | "position_id" | "official_id" | "status">, string>(
+            ids,
+            (gameIds, from, to) => supabase.from("assignments")
+              .select("game_id,position_id,official_id,status")
+              .in("game_id", gameIds).order("game_id").order("position_id").order("id").range(from, to),
+          )
+        : { data: [], error: null };
+      if (!active) return;
+      setFieldMoveLoading(false);
+      if (occupants.error) setFieldMoveLoadError(occupants.error.message);
+      else setFieldMoveOptions({ sourceId, games: eligibleGames.data || [], occupants: occupants.data || [] });
+    })();
+    return () => { active = false; };
+  }, [fieldMove?.sourceId, organizationId, allowedLeagueIds, games, assignments, supabase]);
+  useEffect(() => {
+    if (!fieldMove?.targetGameId || !fieldMove.targetPositionId) {
+      setFieldMovePreview(null);
+      return;
+    }
+    const move = fieldMove;
+    const key = [move.sourceId, move.targetGameId, move.targetPositionId, move.mode, move.accept].join(":");
+    let active = true;
+    setFieldMovePreview({ key, loading: true, error: "" });
+    void (async () => {
+      const { error } = await supabase.rpc("move_official_between_fields", {
+        p_source_assignment_id: move.sourceId,
+        p_target_game_id: move.targetGameId,
+        p_target_position_id: move.targetPositionId,
+        p_mode: move.mode,
+        p_accept: move.accept,
+        p_override: false,
+        p_preview: true,
+      });
+      if (active) setFieldMovePreview({ key, loading: false, error: error?.message || "" });
+    })();
+    return () => { active = false; };
+  }, [fieldMove?.sourceId, fieldMove?.targetGameId, fieldMove?.targetPositionId, fieldMove?.mode, fieldMove?.accept, supabase]);
   useEffect(() => {
     if (initialFilterLoad.current) { initialFilterLoad.current = false; return; }
     void load(true);
@@ -4012,7 +4111,7 @@ export default function AssignmentsManagerV2({
     try {
       const cancellation = ["canceled", "rained_out"].includes(game.status);
       const response = await fetch(
-        cancellation ? "/api/games/status" : "/api/assignments/publish",
+        cancellation ? "/api/games/status" : `/api/assignments/publish?organizationId=${encodeURIComponent(organizationId || "")}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -4348,7 +4447,7 @@ export default function AssignmentsManagerV2({
         name: string;
         email: string;
         phone: string;
-        games: string[];
+        games: { startsAt: string; field: string; description: string }[];
         assignmentIds: string[];
       }
     >();
@@ -4369,15 +4468,18 @@ export default function AssignmentsManagerV2({
         games: [],
         assignmentIds: [],
       };
-      row.games.push(
-        `#${listedGame.game_number} · ${formatEventDate(listedGame.starts_at, listedGame.location)} ${formatEventTime(listedGame.starts_at, listedGame.location)} · ${position?.name || "Official"} · ${listedGame.location?.name || "Venue TBD"}`,
-      );
+      row.games.push({
+        startsAt: listedGame.starts_at,
+        field: listedGame.location?.name || "Venue TBD",
+        description: `#${listedGame.game_number} · ${formatEventDate(listedGame.starts_at, listedGame.location)} ${formatEventTime(listedGame.starts_at, listedGame.location)} · ${position?.name || "Official"} · ${listedGame.location?.name || "Venue TBD"}`,
+      });
       row.assignmentIds.push(assignment.id);
       byOfficial.set(official.id, row);
     }
-    return [...byOfficial.values()].sort((a, b) =>
-      a.name.localeCompare(b.name),
-    );
+    return [...byOfficial.values()].map((row) => ({
+      ...row,
+      games: row.games.sort((a, b) => a.startsAt.localeCompare(b.startsAt) || a.field.localeCompare(b.field)).map((game) => game.description),
+    })).sort((a, b) => a.name.localeCompare(b.name));
   }
   async function saveElectronicCheckIns(
     assignmentIds: string[],
@@ -5236,6 +5338,19 @@ export default function AssignmentsManagerV2({
           ))}
         </select>
         <div className="assignmentStatusCell">
+          <details className="assignmentCrewPreview">
+            <summary aria-label={`Preview crew for game ${g.game_number}`}>Crew</summary>
+            <div className="assignmentCrewPreviewBody">
+              {positions.filter((position) => position.sport_id === g.sport_id)
+                .sort((a, b) => a.sort_order - b.sort_order)
+                .slice(0, g.officials_needed)
+                .map((position) => {
+                  const assigned = assignments.find((item) => item.game_id === g.id && item.position_id === position.id && assignmentOccupiesPosition(item.status));
+                  const official = officials.find((item) => item.id === assigned?.official_id);
+                  return <div key={position.id}><b>{shortPositionName(position.name)}</b><span>{official ? `${official.first_name} ${official.last_name}` : assigned ? "Assigned official" : "Open"}</span><small>{assigned ? assignmentStatus(assigned).label : "Unassigned"}</small></div>;
+                })}
+            </div>
+          </details>
           <span
             title={completeness.detail}
             className="assignmentStatusBadge"
@@ -5335,6 +5450,92 @@ export default function AssignmentsManagerV2({
       </button>
     );
   }
+  const fieldMoveSource = assignments.find((item) => item.id === fieldMove?.sourceId);
+  const fieldMoveGame = games.find((item) => item.id === fieldMoveSource?.game_id);
+  const fieldMoveCandidates = fieldMoveGame && fieldMoveOptions?.sourceId === fieldMove?.sourceId
+    ? fieldMoveOptions.games.filter((item) => {
+        const from = fieldMoveGame.location, to = item.location;
+        if (!from || !to || item.id === fieldMoveGame.id || item.location_id === fieldMoveGame.location_id
+          || item.starts_at !== fieldMoveGame.starts_at || !gameAcceptsAssignments(item) || item.time_tbd
+          || from.city?.toLowerCase() !== to.city?.toLowerCase() || from.state?.toLowerCase() !== to.state?.toLowerCase()) return false;
+        const sameAddress = Boolean(from.address?.trim() && from.address.trim().toLowerCase() === to.address?.trim().toLowerCase());
+        const fromComplex = locationComplexes[from.id] || from.field_complex;
+        const toComplex = locationComplexes[to.id] || to.field_complex;
+        const sameComplex = Boolean(fromComplex?.trim() && fromComplex.trim().toLowerCase() === toComplex?.trim().toLowerCase());
+        if (!sameAddress && !sameComplex && !(from.venue_id && from.venue_id === to.venue_id)) return false;
+        if (sameAddress) return true;
+        if (from.latitude == null || from.longitude == null || to.latitude == null || to.longitude == null) return false;
+        const lat = (to.latitude - from.latitude) * Math.PI / 180, lon = (to.longitude - from.longitude) * Math.PI / 180;
+        const a = Math.sin(lat / 2) ** 2 + Math.cos(from.latitude * Math.PI / 180) * Math.cos(to.latitude * Math.PI / 180) * Math.sin(lon / 2) ** 2;
+        return 6371 * 2 * Math.asin(Math.sqrt(a)) <= 1;
+      })
+    : [];
+  const fieldMoveSlots = fieldMoveCandidates.flatMap((target) => positions
+    .filter((position) => position.sport_id === target.sport_id)
+    .sort((a, b) => a.sort_order - b.sort_order || a.id.localeCompare(b.id))
+    .slice(0, target.officials_needed)
+    .flatMap((position) => {
+      const occupant = fieldMoveOptions?.occupants.find((item) => item.game_id === target.id && item.position_id === position.id && assignmentOccupiesPosition(item.status));
+      return fieldMove?.mode === "transfer" && occupant ? [] : [{ target, position, occupant }];
+    }));
+  const fieldMovePreviewKey = fieldMove
+    ? [fieldMove.sourceId, fieldMove.targetGameId, fieldMove.targetPositionId, fieldMove.mode, fieldMove.accept].join(":")
+    : "";
+  const fieldMovePreviewCurrent = fieldMovePreview?.key === fieldMovePreviewKey && !fieldMovePreview.loading;
+  const fieldMoveNeedsOverride = fieldMovePreviewCurrent && fieldMovePreview?.error.startsWith("Eligibility override required:");
+  async function completeFieldMove(override = false) {
+    if (!fieldMove || !fieldMove.targetGameId || !fieldMove.targetPositionId || fieldMoveSaving ||
+      !fieldMovePreviewCurrent || (fieldMovePreview?.error && !fieldMoveNeedsOverride)) return;
+    setFieldMoveSaving(true);
+    setError("");
+    const { data, error: moveError } = await supabase.rpc("move_official_between_fields", {
+      p_source_assignment_id: fieldMove.sourceId,
+      p_target_game_id: fieldMove.targetGameId,
+      p_target_position_id: fieldMove.targetPositionId,
+      p_mode: fieldMove.mode,
+      p_accept: fieldMove.accept,
+      p_override: override,
+      p_preview: false,
+    });
+    if (moveError) {
+      if (!override && moveError.message.includes("Eligibility override required:") && window.confirm(`${moveError.message}\n\nOverride eligibility for this move?`)) {
+        setFieldMoveSaving(false);
+        await completeFieldMove(true);
+        return;
+      }
+      setError(moveError.message);
+      setFieldMoveSaving(false);
+      return;
+    }
+    const moved = data as { targetAssignmentId: string; sourceAssignmentId: string | null; targetGameId: string; sourceGameId: string };
+    const failures: string[] = [];
+    const failedGameIds: string[] = [];
+    if (!fieldMove.accept) {
+      for (const [gameId, assignmentId] of [[moved.targetGameId, moved.targetAssignmentId], [moved.sourceGameId, moved.sourceAssignmentId]] as const) {
+        if (!assignmentId) continue;
+        try {
+          const response = await fetch(`/api/assignments/publish?organizationId=${encodeURIComponent(organizationId || "")}`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ gameId, assignmentIds: [assignmentId] }),
+          });
+          const result = await response.json().catch(() => ({})) as { error?: string; failures?: string[] };
+          if (!response.ok || result.failures?.length) {
+            failedGameIds.push(gameId);
+            failures.push(`Game #${fieldMoveOptions?.games.find((item) => item.id === gameId)?.game_number || gameId}: ${result.error || result.failures?.join("; ") || "Notification failed"}`);
+          }
+        } catch {
+          failedGameIds.push(gameId);
+            failures.push(`Game #${fieldMoveOptions?.games.find((item) => item.id === gameId)?.game_number || gameId}: notification status could not be verified`);
+        }
+      }
+    }
+    await load(true);
+    if (failedGameIds.length && games.some((item) => item.id === failedGameIds[0])) setSelected(failedGameIds[0]);
+    setFieldMove(null);
+    setFieldMoveSaving(false);
+    setNotice(`${fieldMove.mode === "switch" ? "Switch" : "Transfer"} completed.${fieldMove.accept ? " Moved assignments accepted." : failures.length ? " Some notifications failed; review the assignment email status." : " Officials notified for acceptance."}`);
+    if (failures.length) setError(`${failures.join("; ")}. Filter to the game date if needed, then open each affected game and use Notifications → Retry.`);
+  }
   return (
     <>
       <input
@@ -5344,6 +5545,27 @@ export default function AssignmentsManagerV2({
         accept=".xlsx,.xls,.csv"
         onChange={importAssignmentFees}
       />
+      {fieldMove && fieldMoveSource && fieldMoveGame && (
+        <div className="assignmentDialogBackdrop" onClick={(event) => { if (event.target === event.currentTarget && !fieldMoveSaving) setFieldMove(null); }}>
+          <section className="assignmentDialog fieldMoveDialog" role="dialog" aria-modal="true" aria-labelledby="field-move-title" style={{ maxWidth: 620 }}>
+            <div className="cardHead"><h3 id="field-move-title">{fieldMove.mode === "switch" ? "Switch officials" : "Transfer official"}</h3><button type="button" className="secondary" disabled={fieldMoveSaving} onClick={() => setFieldMove(null)}>Close</button></div>
+            <p>Game #{fieldMoveGame.game_number} · {fieldMoveGame.location?.name} · {formatEventDateTime(fieldMoveGame.starts_at, fieldMoveGame.location)}</p>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              {(["transfer", "switch"] as const).map((mode) => <button key={mode} type="button" className={fieldMove.mode === mode ? "primary" : "secondary"} onClick={() => setFieldMove({ ...fieldMove, mode, targetGameId: "", targetPositionId: "" })}>{mode === "transfer" ? "Transfer to open slot" : "Switch with open or filled slot"}</button>)}
+            </div>
+            <label>Destination game and position<select value={`${fieldMove.targetGameId}:${fieldMove.targetPositionId}`} onChange={(event) => { const [targetGameId, targetPositionId] = event.target.value.split(":"); setFieldMove({ ...fieldMove, targetGameId, targetPositionId }); }}><option value=":">Choose a slot</option>{fieldMoveSlots.map(({ target, position, occupant }) => { const official = officials.find((item) => item.id === occupant?.official_id); return <option key={`${target.id}:${position.id}`} value={`${target.id}:${position.id}`}>#{target.game_number} · {target.location?.name} · {shortPositionName(position.name)} · {occupant ? official ? `${official.first_name} ${official.last_name}` : "Assigned official" : "Open"}</option>; })}</select></label>
+            {fieldMoveLoading && <p>Finding positions at the same start time…</p>}
+            {fieldMoveLoadError && <p className="errorBox" role="alert">{fieldMoveLoadError}</p>}
+            {!fieldMoveLoading && !fieldMoveLoadError && !fieldMoveSlots.length && <p>No fields in this complex at the exact start time have {fieldMove.mode === "transfer" ? "an open slot" : "a matching slot"}. Check the locations’ address or Field Complex setting.</p>}
+            <label style={{ display: "block", margin: "14px 0" }}>After the move<select value={fieldMove.accept ? "accept" : "notify"} onChange={(event) => setFieldMove({ ...fieldMove, accept: event.target.value === "accept" })}><option value="notify">Assign and notify for acceptance</option><option value="accept">Accept the move now</option></select></label>
+            {fieldMove.targetPositionId && fieldMovePreview?.key === fieldMovePreviewKey && fieldMovePreview.loading && <p>Checking eligibility, payroll, and schedule conflicts…</p>}
+            {fieldMovePreviewCurrent && fieldMovePreview?.error && <p className="errorBox" role="alert">{fieldMovePreview.error}{fieldMoveNeedsOverride ? " You may review an explicit eligibility override." : " Choose another position or resolve this conflict."}</p>}
+            {fieldMovePreviewCurrent && !fieldMovePreview?.error && <p>No eligibility, payroll, or schedule conflict found for this move. Other crew positions stay in place.</p>}
+            {error && <p className="errorBox" role="alert">{error}</p>}
+            <button type="button" className="primary" disabled={!fieldMove.targetPositionId || fieldMoveSaving || !fieldMovePreviewCurrent || Boolean(fieldMovePreview?.error && !fieldMoveNeedsOverride)} onClick={() => void completeFieldMove()}>{fieldMoveSaving ? "Moving…" : fieldMoveNeedsOverride ? "Review eligibility override" : fieldMove.mode === "transfer" ? "Transfer official" : "Switch positions"}</button>
+          </section>
+        </div>
+      )}
       {canManage && organizationId && (
         <SelfAssignOverrideRequests organizationId={organizationId} />
       )}
@@ -10086,6 +10308,8 @@ export default function AssignmentsManagerV2({
                                           officials.find(
                                             (o) => o.id === current.official_id,
                                           )?.last_name}
+                                        <ScheduleLink officialId={current.official_id} />
+                                        {canManage && fieldMovesAvailable && <><button type="button" className="assignmentFieldMoveLink" onClick={() => setFieldMove({ sourceId: current.id, mode: "transfer", targetGameId: "", targetPositionId: "", accept: false })}>Transfer</button><button type="button" className="assignmentFieldMoveLink" onClick={() => setFieldMove({ sourceId: current.id, mode: "switch", targetGameId: "", targetPositionId: "", accept: false })}>Switch</button></>}
                                         {futureBadge(current.official_id)}
                                         {canManage && (
                                           <span
