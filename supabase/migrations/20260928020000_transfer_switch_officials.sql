@@ -102,7 +102,8 @@ revoke all on function private.field_move_eligibility(uuid,uuid,uuid) from publi
 
 create or replace function public.move_official_between_fields(
   p_source_assignment_id uuid, p_target_game_id uuid, p_target_position_id uuid,
-  p_mode text, p_accept boolean default false, p_override boolean default false
+  p_mode text, p_accept boolean default false, p_override boolean default false,
+  p_preview boolean default false
 ) returns jsonb language plpgsql security definer set search_path = '' as $$
 declare
   v_source public.assignments%rowtype;
@@ -201,7 +202,7 @@ begin
     raise exception 'The destination position is not an active slot.';
   end if;
   select * into v_target from public.assignments where game_id = p_target_game_id and position_id = p_target_position_id
-    and status not in ('declined','cancelled','canceled') order by assigned_at desc limit 1 for update;
+    and lower(status) not in ('declined','cancelled','canceled') order by assigned_at desc limit 1 for update;
   if p_mode = 'transfer' and v_target.id is not null then raise exception 'Transfer requires an open position. Choose Switch for an occupied position.'; end if;
   if v_target.id is not null and v_target.official_id = v_source.official_id then raise exception 'This official is already in the destination position.'; end if;
   if v_source.payment_status in ('approved','paid') or (v_target.id is not null and v_target.payment_status in ('approved','paid'))
@@ -228,6 +229,10 @@ begin
       and g.starts_at + make_interval(mins => coalesce(g.duration_minutes,110)) > v_target_game.starts_at
     limit 1
   loop raise exception 'Official has an overlapping assignment on Game #%.',v_other.game_number; end loop;
+  if p_preview then
+    return jsonb_build_object('preview',true,'targetGameId',v_target_game.id,
+      'sourceGameId',v_source_game.id,'occupied',v_target.id is not null);
+  end if;
   select * into v_source_checkin from public.assignment_check_ins where assignment_id = v_source.id;
   if v_target.id is not null then
     select * into v_target_checkin from public.assignment_check_ins where assignment_id = v_target.id;
@@ -235,10 +240,10 @@ begin
   delete from public.assignments where id in (v_source.id,v_target.id);
   -- Historic declined offers retain their audit records, but their unique
   -- game/position and game/official keys must be cleared for the new offer.
-  delete from public.assignments where game_id = v_target_game.id and status in ('declined','cancelled')
+  delete from public.assignments where game_id = v_target_game.id and lower(status) in ('declined','cancelled','canceled')
     and (position_id = p_target_position_id or official_id = v_source.official_id);
   if v_target.id is not null then
-    delete from public.assignments where game_id = v_source_game.id and status in ('declined','cancelled')
+    delete from public.assignments where game_id = v_source_game.id and lower(status) in ('declined','cancelled','canceled')
       and (position_id = v_source.position_id or official_id = v_target.official_id);
   end if;
   insert into public.assignments(game_id,position_id,official_id,status,published_at,responded_at,response_token,assignment_source)
@@ -264,5 +269,5 @@ begin
     'targetGameId',v_target_game.id,'sourceGameId',v_source_game.id);
 end;
 $$;
-revoke all on function public.move_official_between_fields(uuid,uuid,uuid,text,boolean,boolean) from public, anon;
-grant execute on function public.move_official_between_fields(uuid,uuid,uuid,text,boolean,boolean) to authenticated;
+revoke all on function public.move_official_between_fields(uuid,uuid,uuid,text,boolean,boolean,boolean) from public, anon;
+grant execute on function public.move_official_between_fields(uuid,uuid,uuid,text,boolean,boolean,boolean) to authenticated;
