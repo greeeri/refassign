@@ -5070,6 +5070,17 @@ export default function AssignmentsManagerV2({
                     <small>{eligibleCount} eligible</small>
                   </button>
                 </div>
+                {current && (
+                  <div className="mobileInlineFieldActions" role="group" aria-label={`Schedule and field moves for ${official?.first_name || "official"}`}>
+                    <ScheduleLink officialId={current.official_id} />
+                    {canManage && (
+                      <>
+                        <button type="button" className="secondary" onClick={() => setFieldMove({ sourceId: current.id, mode: "transfer", targetGameId: "", targetPositionId: "", accept: false })}>Transfer</button>
+                        <button type="button" className="secondary" onClick={() => setFieldMove({ sourceId: current.id, mode: "switch", targetGameId: "", targetPositionId: "", accept: false })}>Switch</button>
+                      </>
+                    )}
+                  </div>
+                )}
                 {current && canManage && (
                   <div
                     className="mobileInlinePositionControls"
