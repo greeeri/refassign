@@ -379,6 +379,7 @@ export default function AssignmentsManagerV2({
     } | null>(null),
     [fieldMoveLoading, setFieldMoveLoading] = useState(false),
     [fieldMoveLoadError, setFieldMoveLoadError] = useState(""),
+    [fieldMovePreview, setFieldMovePreview] = useState<{ key: string; loading: boolean; error: string } | null>(null),
     [locationComplexes, setLocationComplexes] = useState<Record<string, string>>({}),
     [fieldMovesAvailable, setFieldMovesAvailable] = useState(false),
     [range, setRange] = useState<Range>("all"),
@@ -938,6 +939,29 @@ export default function AssignmentsManagerV2({
     })();
     return () => { active = false; };
   }, [fieldMove?.sourceId, organizationId, allowedLeagueIds, games, assignments, supabase]);
+  useEffect(() => {
+    if (!fieldMove?.targetGameId || !fieldMove.targetPositionId) {
+      setFieldMovePreview(null);
+      return;
+    }
+    const move = fieldMove;
+    const key = [move.sourceId, move.targetGameId, move.targetPositionId, move.mode, move.accept].join(":");
+    let active = true;
+    setFieldMovePreview({ key, loading: true, error: "" });
+    void (async () => {
+      const { error } = await supabase.rpc("move_official_between_fields", {
+        p_source_assignment_id: move.sourceId,
+        p_target_game_id: move.targetGameId,
+        p_target_position_id: move.targetPositionId,
+        p_mode: move.mode,
+        p_accept: move.accept,
+        p_override: false,
+        p_preview: true,
+      });
+      if (active) setFieldMovePreview({ key, loading: false, error: error?.message || "" });
+    })();
+    return () => { active = false; };
+  }, [fieldMove?.sourceId, fieldMove?.targetGameId, fieldMove?.targetPositionId, fieldMove?.mode, fieldMove?.accept, supabase]);
   useEffect(() => {
     if (initialFilterLoad.current) { initialFilterLoad.current = false; return; }
     void load(true);
@@ -5454,8 +5478,14 @@ export default function AssignmentsManagerV2({
       const occupant = fieldMoveOptions?.occupants.find((item) => item.game_id === target.id && item.position_id === position.id && assignmentOccupiesPosition(item.status));
       return fieldMove?.mode === "transfer" && occupant ? [] : [{ target, position, occupant }];
     }));
+  const fieldMovePreviewKey = fieldMove
+    ? [fieldMove.sourceId, fieldMove.targetGameId, fieldMove.targetPositionId, fieldMove.mode, fieldMove.accept].join(":")
+    : "";
+  const fieldMovePreviewCurrent = fieldMovePreview?.key === fieldMovePreviewKey && !fieldMovePreview.loading;
+  const fieldMoveNeedsOverride = fieldMovePreviewCurrent && fieldMovePreview?.error.startsWith("Eligibility override required:");
   async function completeFieldMove(override = false) {
-    if (!fieldMove || !fieldMove.targetGameId || !fieldMove.targetPositionId || fieldMoveSaving) return;
+    if (!fieldMove || !fieldMove.targetGameId || !fieldMove.targetPositionId || fieldMoveSaving ||
+      !fieldMovePreviewCurrent || (fieldMovePreview?.error && !fieldMoveNeedsOverride)) return;
     setFieldMoveSaving(true);
     setError("");
     const { data, error: moveError } = await supabase.rpc("move_official_between_fields", {
@@ -5465,6 +5495,7 @@ export default function AssignmentsManagerV2({
       p_mode: fieldMove.mode,
       p_accept: fieldMove.accept,
       p_override: override,
+      p_preview: false,
     });
     if (moveError) {
       if (!override && moveError.message.includes("Eligibility override required:") && window.confirm(`${moveError.message}\n\nOverride eligibility for this move?`)) {
@@ -5527,8 +5558,11 @@ export default function AssignmentsManagerV2({
             {fieldMoveLoadError && <p className="errorBox" role="alert">{fieldMoveLoadError}</p>}
             {!fieldMoveLoading && !fieldMoveLoadError && !fieldMoveSlots.length && <p>No fields in this complex at the exact start time have {fieldMove.mode === "transfer" ? "an open slot" : "a matching slot"}. Check the locations’ address or Field Complex setting.</p>}
             <label style={{ display: "block", margin: "14px 0" }}>After the move<select value={fieldMove.accept ? "accept" : "notify"} onChange={(event) => setFieldMove({ ...fieldMove, accept: event.target.value === "accept" })}><option value="notify">Assign and notify for acceptance</option><option value="accept">Accept the move now</option></select></label>
+            {fieldMove.targetPositionId && fieldMovePreview?.key === fieldMovePreviewKey && fieldMovePreview.loading && <p>Checking eligibility, payroll, and schedule conflicts…</p>}
+            {fieldMovePreviewCurrent && fieldMovePreview?.error && <p className="errorBox" role="alert">{fieldMovePreview.error}{fieldMoveNeedsOverride ? " You may review an explicit eligibility override." : " Choose another position or resolve this conflict."}</p>}
+            {fieldMovePreviewCurrent && !fieldMovePreview?.error && <p>No eligibility, payroll, or schedule conflict found for this move. Other crew positions stay in place.</p>}
             {error && <p className="errorBox" role="alert">{error}</p>}
-            <button type="button" className="primary" disabled={!fieldMove.targetPositionId || fieldMoveSaving} onClick={() => void completeFieldMove()}>{fieldMoveSaving ? "Moving…" : fieldMove.mode === "transfer" ? "Transfer official" : "Switch positions"}</button>
+            <button type="button" className="primary" disabled={!fieldMove.targetPositionId || fieldMoveSaving || !fieldMovePreviewCurrent || Boolean(fieldMovePreview?.error && !fieldMoveNeedsOverride)} onClick={() => void completeFieldMove()}>{fieldMoveSaving ? "Moving…" : fieldMoveNeedsOverride ? "Review eligibility override" : fieldMove.mode === "transfer" ? "Transfer official" : "Switch positions"}</button>
           </section>
         </div>
       )}
