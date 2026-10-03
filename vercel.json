@@ -24,5 +24,51 @@
       "path": "/api/cron/history-retention",
       "schedule": "30 13 * * *"
     }
+  ],
+  "redirects": [
+    {
+      "source": "/login",
+      "has": [
+        {
+          "type": "host",
+          "value": "ref-assign.com"
+        }
+      ],
+      "destination": "https://refassign-chi.vercel.app/login",
+      "permanent": false
+    },
+    {
+      "source": "/login",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.ref-assign.com"
+        }
+      ],
+      "destination": "https://refassign-chi.vercel.app/login",
+      "permanent": false
+    },
+    {
+      "source": "/workspace/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "ref-assign.com"
+        }
+      ],
+      "destination": "https://refassign-chi.vercel.app/workspace/:path*",
+      "permanent": false
+    },
+    {
+      "source": "/workspace/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.ref-assign.com"
+        }
+      ],
+      "destination": "https://refassign-chi.vercel.app/workspace/:path*",
+      "permanent": false
+    }
   ]
 }
