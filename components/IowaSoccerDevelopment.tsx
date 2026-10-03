@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../lib/supabase/client";
 import IowaTrainingSupportActions from "./IowaTrainingSupportActions";
 import TrainingCardQuiz from "./TrainingCardQuiz";
+import IowaRulesQuiz from "./IowaRulesQuiz";
 type Module = {
   id: string;
   title: string;
@@ -193,31 +194,34 @@ export default function IowaSoccerDevelopment({
     setBusy("");
   }
   useEffect(() => {
-    if (activeQuiz)
-      window.location.href = `/training/iowa-entry-rules?module=${encodeURIComponent(activeQuiz.id)}`;
-  }, [activeQuiz]);
-  useEffect(() => {
-    const quizModules = modules.filter(
-      (module) => module.content_type === "quiz",
-    );
-    if (!quizModules.length) return;
-    const cleanups: (() => void)[] = [];
-    for (const card of Array.from(
-      document.querySelectorAll<HTMLElement>(".trainingModule"),
-    )) {
-      const title = card.querySelector("h4")?.textContent,
-        quiz = quizModules.find((module) => module.title === title);
-      if (!quiz) continue;
-      const open = () =>
-        window.location.assign(
-          `/training/iowa-entry-rules?module=${encodeURIComponent(quiz.id)}`,
-        );
-      card.addEventListener("click", open);
-      card.style.cursor = "pointer";
-      cleanups.push(() => card.removeEventListener("click", open));
+    if (!officialId) return;
+    let active = true;
+    async function refreshProgress() {
+      if (document.visibilityState === "hidden") return;
+      const { data, error: progressError } = await supabase
+        .from("official_development_progress")
+        .select("module_id,status,completed_at")
+        .eq("official_id", officialId);
+      if (!active) return;
+      if (progressError) {
+        setError(progressError.message);
+        return;
+      }
+      const updated: Record<string, Progress> = {};
+      for (const row of (data || []) as Progress[]) updated[row.module_id] = row;
+      setProgress(updated);
     }
-    return () => cleanups.forEach((cleanup) => cleanup());
-  }, [modules]);
+    const refresh = () => { void refreshProgress(); };
+    window.addEventListener("pageshow", refresh);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      active = false;
+      window.removeEventListener("pageshow", refresh);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [officialId, supabase]);
   async function register(m: Module) {
     if (!officialId) return;
     setBusy(`reg-${m.id}`);
@@ -448,17 +452,22 @@ export default function IowaSoccerDevelopment({
       .from("iowa-training-materials")
       .getPublicUrl(`materials/${name}`).data.publicUrl;
   }
-  if (cardQuiz)
+  const quizModule = cardQuiz || activeQuiz;
+  const Quiz = cardQuiz ? TrainingCardQuiz : IowaRulesQuiz;
+  if (quizModule)
     return (
       <div className="standaloneQuiz">
-        <TrainingCardQuiz
-          moduleId={cardQuiz.id}
-          onClose={() => setCardQuiz(null)}
+        <Quiz
+          moduleId={quizModule.id}
+          onClose={() => {
+            setCardQuiz(null);
+            setActiveQuiz(null);
+          }}
           onPassed={(completedAt) => {
             setProgress((old) => ({
               ...old,
-              [cardQuiz.id]: {
-                module_id: cardQuiz.id,
+              [quizModule.id]: {
+                module_id: quizModule.id,
                 status: "completed",
                 completed_at: completedAt,
               },
