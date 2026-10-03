@@ -16,6 +16,7 @@ type TeamAccess = {
   id: string;
   user_id?: string;
   email: string;
+  full_name?: string | null;
   roles: RoleCode[];
   viewer_permissions: string[];
   league_ids: string[];
@@ -96,6 +97,7 @@ export default function OrganizationTeamManager({
     allLeagueIds = validLeagues.map((x) => x.id);
   const [team, setTeam] = useState<TeamData>({ members: [], invitations: [] }),
     [email, setEmail] = useState(""),
+    [search, setSearch] = useState(""),
     [roles, setRoles] = useState<RoleCode[]>(["assignor"]),
     [viewerPermissions, setViewerPermissions] = useState<string[]>([
       "overview",
@@ -103,6 +105,15 @@ export default function OrganizationTeamManager({
     [leagueIds, setLeagueIds] = useState<string[]>(allLeagueIds),
     [busy, setBusy] = useState(""),
     [message, setMessage] = useState("");
+  const people = [...team.members, ...team.invitations];
+  const searchTerms = search.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  const matchingPeople = people.filter((item) => {
+    const searchable = [item.full_name, item.email,
+      ...(item.roles || []).flatMap((role) => [role, labels[role]]),
+      item.owner ? "Organization owner" : "",
+    ].filter(Boolean).join(" ").toLocaleLowerCase();
+    return searchTerms.every((term) => searchable.includes(term));
+  });
   const load = async () => {
     const [a, b] = await Promise.all([
       supabase.rpc("get_organization_team", {
@@ -293,6 +304,35 @@ export default function OrganizationTeamManager({
           <span>Each person can hold multiple roles at the same time.</span>
         </div>
       </section>
+      <section className={styles.list}>
+        <div className={styles.listHead}>
+          <h3>Organization access</h3>
+          <b>
+            {team.members.length} active · {team.invitations.length} pending
+          </b>
+        </div>
+        <label>
+          Search contacts by name, email or role
+          <input type="search" value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Name, email or role" autoComplete="off" />
+        </label>
+        <p className={styles.empty} role="status">
+          {search.trim() ? `${matchingPeople.length} of ${people.length} contacts found` : `${people.length} contacts`}
+        </p>
+        {matchingPeople.length === 0 && <p className={styles.empty}>
+          {search.trim() ? "No contacts match your search." : "No team members or pending invitations yet."}
+        </p>}
+        {matchingPeople.map((item) => (
+          <MemberCard
+            key={item.id}
+            item={item}
+            leagues={validLeagues}
+            disabled={!canManage || busy === item.id}
+            saving={busy === item.id}
+            onSave={save}
+          />
+        ))}
+      </section>
       {!canManage && (
         <section className={styles.notice}>
           Only the organization owner or an administrator can change team
@@ -339,24 +379,7 @@ export default function OrganizationTeamManager({
           {message}
         </p>
       )}
-      <section className={styles.list}>
-        <div className={styles.listHead}>
-          <h3>Organization access</h3>
-          <b>
-            {team.members.length} active · {team.invitations.length} pending
-          </b>
-        </div>
-        {[...team.members, ...team.invitations].map((item) => (
-          <MemberCard
-            key={item.id}
-            item={item}
-            leagues={validLeagues}
-            disabled={!canManage || busy === item.id}
-            saving={busy === item.id}
-            onSave={save}
-          />
-        ))}
-      </section>
+
     </div>
   );
 }
@@ -508,7 +531,8 @@ function MemberCard({
       <div className={styles.identity}>
         <span>{item.email[0].toUpperCase()}</span>
         <div>
-          <strong>{item.email}</strong>
+          <strong>{item.full_name || item.email}</strong>
+          {item.full_name && <small>{item.email}</small>}
           <small>
             {[
               ...(item.owner ? ["Organization owner"] : []),
