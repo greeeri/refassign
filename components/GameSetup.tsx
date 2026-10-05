@@ -8,6 +8,7 @@ import LocationsRosterManager from "./LocationsRosterManager";
 import LeagueDocumentsManager from "./LeagueDocumentsManager";
 import SharedDirectorySearch from "./SharedDirectorySearch";
 import TeamOfficialLinks from "./TeamOfficialLinks";
+import { LeagueLevelSetting } from "../lib/league-levels";
 type Sport = { id: string; name: string };
 type Level = { id: string; name: string; officials_needed: number };
 type MileagePlan = "one_way" | "round_trip" | "actual" | "none";
@@ -124,6 +125,31 @@ export default function GameSetup({
     [locationMessage, setLocationMessage] = useState(""),
     [locationSaveMessage, setLocationSaveMessage] = useState(""),
     [locationSource, setLocationSource] = useState<"system" | "all">("system");
+
+  const [levelLeagueId, setLevelLeagueId] = useState("");
+  const [leagueLevelSettings, setLeagueLevelSettings] = useState<LeagueLevelSetting[]>([]);
+  const [levelSelection, setLevelSelection] = useState<string[]>([]);
+  const [savingLevels, setSavingLevels] = useState(false);
+  const [levelMessage, setLevelMessage] = useState("");
+  const [levelSettingsReady, setLevelSettingsReady] = useState(false);
+  useEffect(() => {
+    const saved = leagueLevelSettings.find((item) => item.league_id === levelLeagueId);
+    setLevelSelection(saved?.level_ids ?? levels.map((level) => level.id));
+  }, [levelLeagueId, leagueLevelSettings, levels]);
+  async function saveLeagueLevels() {
+    if (!organizationId || !levelLeagueId || !levelSettingsReady) return;
+    setSavingLevels(true);
+    setError("");
+    setLevelMessage("");
+    try {
+      const { error: saveError } = await supabase.rpc("save_organization_league_levels", {
+        p_organization_id: organizationId, p_league_id: levelLeagueId, p_level_ids: levelSelection,
+      });
+      if (saveError) { setError(saveError.message); return; }
+      setLeagueLevelSettings((current) => [...current.filter((item) => item.league_id !== levelLeagueId), { league_id: levelLeagueId, level_ids: levelSelection }]);
+      setLevelMessage("League levels saved.");
+    } finally { setSavingLevels(false); }
+  }
 
   async function copyLeagueConnectionLink(league: League) {
     if (!organizationId) return;
@@ -293,7 +319,8 @@ export default function GameSetup({
     const fieldComplexRequest = organizationId
       ? supabase.rpc("get_organization_field_complexes", { p_organization_id: organizationId })
       : Promise.resolve({ data: [], error: null });
-    const [s, l, lg, t, loc, pw, organizationSetup, complexes] = await Promise.all([
+    setLevelSettingsReady(false);
+    const [s, l, lg, t, loc, pw, organizationSetup, complexes, levelSettings] = await Promise.all([
       supabase
         .from("sports")
         .select("id,name")
@@ -317,6 +344,7 @@ export default function GameSetup({
       supabase.from("assignor_team_power_rankings").select("team_id,power"),
       organizationSetupRequest,
       fieldComplexRequest,
+      organizationId ? supabase.rpc("get_organization_league_levels", { p_organization_id: organizationId }) : Promise.resolve({ data: [], error: null }),
     ]);
     const err =
       s.error ||
@@ -326,6 +354,7 @@ export default function GameSetup({
       loc.error ||
       pw.error ||
       organizationSetup.error ||
+      levelSettings.error ||
       (fieldComplexRpcMissing(complexes.error) ? null : complexes.error);
     if (err) setError(err.message);
     else {
@@ -350,6 +379,8 @@ export default function GameSetup({
       const visibleTeams = organizationId
         ? scoped?.teams || []
         : ((t.data || []) as Team[]);
+      setLeagueLevelSettings((levelSettings.data || []) as LeagueLevelSetting[]);
+      setLevelSettingsReady(true);
       setLevels(visibleLevels);
       setLeagues(visibleLeagues);
       setLeagueDrafts(
@@ -900,6 +931,27 @@ export default function GameSetup({
             level.
           </p>
           {organizationId && (
+            <div className="card">
+              <label>League
+                <select aria-label="Select league for levels" value={levelLeagueId} disabled={savingLevels || !levelSettingsReady}
+                  onChange={(event) => { setLevelLeagueId(event.target.value); setLevelMessage(""); }}>
+                  <option value="">Select a league to choose its levels</option>
+                  {leagues.map((league) => <option key={league.id} value={league.id}>{league.name}</option>)}
+                </select>
+              </label>
+              {levelLeagueId && <>
+                <p>Check the levels available for games in this league.</p>
+                <div className="toolbar">
+                  <button type="button" className="secondary" disabled={savingLevels} onClick={() => setLevelSelection(levels.map((level) => level.id))}>Select all</button>
+                  <button type="button" className="secondary" disabled={savingLevels} onClick={() => setLevelSelection([])}>Clear selection</button>
+                  <button type="button" className="primary" disabled={savingLevels || !levelSettingsReady} onClick={() => void saveLeagueLevels()}>{savingLevels ? "Saving…" : "Save league levels"}</button>
+                </div>
+                {levelSelection.length === 0 && <p>No levels selected. New games will need a level enabled here first.</p>}
+                {levelMessage && <p role="status">{levelMessage}</p>}
+              </>}
+            </div>
+          )}
+          {organizationId && (
             <SharedDirectorySearch
               organizationId={organizationId}
               entity="level"
@@ -929,6 +981,7 @@ export default function GameSetup({
             <table>
               <thead>
                 <tr>
+                  {levelLeagueId && <th>Available in league</th>}
                   <th>Level</th>
                   <th>Officials Needed</th>
                   <th></th>
@@ -937,6 +990,8 @@ export default function GameSetup({
               <tbody>
                 {levels.map((l) => (
                   <tr key={l.id}>
+                    {levelLeagueId && <td><input type="checkbox" aria-label={`Enable ${l.name} for selected league`} checked={levelSelection.includes(l.id)} disabled={savingLevels || !levelSettingsReady}
+                      onChange={(event) => setLevelSelection((current) => event.target.checked ? [...current, l.id] : current.filter((id) => id !== l.id))} /></td>}
                     <td>
                       <b>{l.name}</b>
                     </td>

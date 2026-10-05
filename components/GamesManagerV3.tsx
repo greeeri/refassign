@@ -6,6 +6,7 @@ import { announceUndoAvailable } from "./UndoCenter";
 import { resolveImportTeam } from "../lib/game-import-team";
 import { normalizeGameStatus } from "../lib/game-status";
 import { eventLocalToIso, eventTimeParts, formatEventDate, formatEventTime } from "../lib/event-time";
+import { LeagueLevelSetting, levelsForLeague } from "../lib/league-levels";
 type Named = { id: string; name: string };
 type BillTo = Named;
 type Sport = Named & { default_officials: number };
@@ -366,7 +367,7 @@ export default function GamesManagerV3({
           .eq("active", true)
           .order("name");
 
-    const [s, lg, lv, t, lo, g, billToResponse] = await Promise.all([
+    const [s, lg, lv, t, lo, g, billToResponse, levelSettings] = await Promise.all([
       sb
         .from("sports")
         .select("id,name,default_officials")
@@ -408,13 +409,15 @@ export default function GamesManagerV3({
             },
           )
         : Promise.resolve(null),
+      organizationId ? sb.rpc("get_organization_league_levels", { p_organization_id: organizationId }) : Promise.resolve({ data: [], error: null }),
     ]);
-    const e = s.error || lg.error || lv.error || t.error || lo.error || g.error;
+    const e = s.error || lg.error || lv.error || t.error || lo.error || g.error || levelSettings.error;
     if (e) setError(e.message);
     else {
       setSports(s.data || []);
       setLeagues(lg.data || []);
       setLevels(lv.data || []);
+      setLeagueLevelSettings((levelSettings.data || []) as LeagueLevelSetting[]);
       setTeams(t.data || []);
       setLocations(lo.data || []);
       setGames((g.data || []) as unknown as Game[]);
@@ -429,6 +432,7 @@ export default function GamesManagerV3({
       }
     }
   }
+  const [leagueLevelSettings, setLeagueLevelSettings] = useState<LeagueLevelSetting[]>([]);
   useEffect(() => {
     void load();
   }, [organizationId, showArchived]);
@@ -1144,6 +1148,7 @@ export default function GamesManagerV3({
             value={leagueFilter}
             onChange={(event) => {
               setLeagueFilter(event.target.value);
+              setLevelFilter("all");
               setSelectedGames([]);
             }}
           >
@@ -1159,7 +1164,7 @@ export default function GamesManagerV3({
           <span>Level</span>
           <select value={levelFilter} onChange={(event) => { setLevelFilter(event.target.value); setSelectedGames([]); }}>
             <option value="all">All Levels</option>
-            {levels.map((level) => <option key={level.id} value={level.id}>{level.name}</option>)}
+            {levels.filter((level) => leagueFilter === "all" || levelsForLeague(levels, leagueLevelSettings, leagueFilter).some((item) => item.id === level.id) || games.some((game) => game.league_id === leagueFilter && game.level_id === level.id)).map((level) => <option key={level.id} value={level.id}>{level.name}</option>)}
           </select>
         </label>
         <label className="gameLeagueFilter">
@@ -1303,7 +1308,7 @@ export default function GamesManagerV3({
             <select
               required
               value={form.league_id}
-              onChange={(e) => setForm({ ...form, league_id: e.target.value })}
+              onChange={(e) => setForm({ ...form, league_id: e.target.value, level_id: "", home_team_id: "", away_team_id: "" })}
             >
               <option value="">Select</option>
               {leagues.map((x) => (
@@ -1327,8 +1332,10 @@ export default function GamesManagerV3({
                 })
               }
             >
-              <option value="">Select</option>
-              {levels.map((x) => (
+              <option value="">{form.league_id ? "Select level" : "Select league first"}</option>
+              {editing && games.some((game) => game.id === editing && game.league_id === form.league_id && game.level_id === form.level_id) && form.level_id && !levelsForLeague(levels, leagueLevelSettings, form.league_id).some((level) => level.id === form.level_id) &&
+                <option value={form.level_id}>{levels.find((level) => level.id === form.level_id)?.name || "Existing level"} (existing game)</option>}
+              {levelsForLeague(levels, leagueLevelSettings, form.league_id).filter(() => Boolean(form.league_id)).map((x) => (
                 <option key={x.id} value={x.id}>
                   {x.name}
                 </option>

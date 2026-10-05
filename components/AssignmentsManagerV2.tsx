@@ -8796,7 +8796,7 @@ export default function AssignmentsManagerV2({
               <label className="assignmentToolbarField">
                 <span>League</span>
                 <select aria-label="Show games in league" value={leagueFilter}
-                  onChange={(event) => { setLeagueFilter(event.target.value); setLinkSelected([]); setSelected(""); }}>
+                  onChange={(event) => { setLeagueFilter(event.target.value); setLevelFilter(""); setLinkSelected([]); setSelected(""); }}>
                   <option value="">All Leagues</option>
                   {Array.from(new Map(leagueOptions.filter((league) =>
                     !allowedLeagueIds || allowedLeagueIds.includes(league.id))
@@ -8914,7 +8914,7 @@ export default function AssignmentsManagerV2({
                           games
                             .filter(
                               (listedGame) =>
-                                listedGame.level_id && listedGame.levels?.name,
+                                listedGame.level_id && listedGame.levels?.name && (!leagueFilter || listedGame.league_id === leagueFilter),
                             )
                             .map((listedGame) => [
                               listedGame.level_id!,
