@@ -7,6 +7,7 @@ import { resolveImportTeam } from "../lib/game-import-team";
 import { normalizeGameStatus } from "../lib/game-status";
 import { eventLocalToIso, eventTimeParts, formatEventDate, formatEventTime } from "../lib/event-time";
 import { LeagueLevelSetting, levelsForLeague } from "../lib/league-levels";
+import { LeagueTeamSetting, teamsForLeague } from "../lib/league-teams";
 type Named = { id: string; name: string };
 type BillTo = Named;
 type Sport = Named & { default_officials: number };
@@ -367,7 +368,7 @@ export default function GamesManagerV3({
           .eq("active", true)
           .order("name");
 
-    const [s, lg, lv, t, lo, g, billToResponse, levelSettings] = await Promise.all([
+    const [s, lg, lv, t, lo, g, billToResponse, levelSettings, teamSettings] = await Promise.all([
       sb
         .from("sports")
         .select("id,name,default_officials")
@@ -410,14 +411,16 @@ export default function GamesManagerV3({
           )
         : Promise.resolve(null),
       organizationId ? sb.rpc("get_organization_league_levels", { p_organization_id: organizationId }) : Promise.resolve({ data: [], error: null }),
+      organizationId ? sb.rpc("get_organization_league_teams", { p_organization_id: organizationId }) : Promise.resolve({ data: [], error: null }),
     ]);
-    const e = s.error || lg.error || lv.error || t.error || lo.error || g.error || levelSettings.error;
+    const e = s.error || lg.error || lv.error || t.error || lo.error || g.error || levelSettings.error || teamSettings.error;
     if (e) setError(e.message);
     else {
       setSports(s.data || []);
       setLeagues(lg.data || []);
       setLevels(lv.data || []);
       setLeagueLevelSettings((levelSettings.data || []) as LeagueLevelSetting[]);
+      setLeagueTeamSettings((teamSettings.data || []) as LeagueTeamSetting[]);
       setTeams(t.data || []);
       setLocations(lo.data || []);
       setGames((g.data || []) as unknown as Game[]);
@@ -432,6 +435,7 @@ export default function GamesManagerV3({
       }
     }
   }
+  const [leagueTeamSettings, setLeagueTeamSettings] = useState<LeagueTeamSetting[]>([]);
   const [leagueLevelSettings, setLeagueLevelSettings] = useState<LeagueLevelSetting[]>([]);
   useEffect(() => {
     void load();
@@ -532,8 +536,8 @@ export default function GamesManagerV3({
     if (!game.time_tbd && timeTo && localTime > timeTo) return false;
     return true;
   });
-  const eligible = teams.filter(
-    (t) => t.sport_id === form.sport_id && t.level_id === form.level_id,
+  const eligible = teamsForLeague(teams, leagueTeamSettings, form.league_id).filter(
+    (t) => Boolean(form.league_id) && t.sport_id === form.sport_id && t.level_id === form.level_id,
   );
   function edit(g: Game) {
     const eventTime = eventTimeParts(g.starts_at, g.location);
@@ -1352,7 +1356,7 @@ export default function GamesManagerV3({
               }
             >
               <option value="">Select</option>
-              {eligible.map((x) => (
+              {[...eligible, ...teams.filter((team) => !eligible.some((item) => item.id === team.id) && team.id === form.home_team_id && games.some((game) => game.id === editing && game.league_id === form.league_id && game.home_team_id === team.id))].map((x) => (
                 <option key={x.id} value={x.id}>
                   {x.name}
                 </option>
@@ -1369,7 +1373,7 @@ export default function GamesManagerV3({
               }
             >
               <option value="">Select</option>
-              {eligible.map((x) => (
+              {[...eligible, ...teams.filter((team) => !eligible.some((item) => item.id === team.id) && team.id === form.away_team_id && games.some((game) => game.id === editing && game.league_id === form.league_id && game.away_team_id === team.id))].map((x) => (
                 <option key={x.id} value={x.id}>
                   {x.name}
                 </option>

@@ -8,6 +8,7 @@ import LocationsRosterManager from "./LocationsRosterManager";
 import LeagueDocumentsManager from "./LeagueDocumentsManager";
 import SharedDirectorySearch from "./SharedDirectorySearch";
 import TeamOfficialLinks from "./TeamOfficialLinks";
+import LeagueTeamSelection from "./LeagueTeamSelection";
 import { LeagueLevelSetting } from "../lib/league-levels";
 type Sport = { id: string; name: string };
 type Level = { id: string; name: string; officials_needed: number };
@@ -718,7 +719,8 @@ export default function GameSetup({
     if (r.error) setError(r.error.message);
     else load();
   }
-  const rankedTeams = [...teams].sort(
+  const [teamLeagueScope, setTeamLeagueScope] = useState<{ leagueId: string; teamIds: string[] } | null>(null);
+  const rankedTeams = [...teams].filter((team) => !teamLeagueScope || teamLeagueScope.teamIds.includes(team.id)).sort(
     (a, b) =>
       (savedPowers[b.id] ?? 1) - (savedPowers[a.id] ?? 1) ||
       a.name.localeCompare(b.name),
@@ -1046,6 +1048,7 @@ export default function GameSetup({
               {showTeamImport ? "Close Team Uploader" : "Team Import / Export"}
             </button>
           </div>
+          {organizationId && <LeagueTeamSelection organizationId={organizationId} leagues={leagues} teams={teams} onScopeChange={setTeamLeagueScope} />}
           {showTeamImport && <TeamsRosterManager />}
           {organizationId && (
             <SharedDirectorySearch
