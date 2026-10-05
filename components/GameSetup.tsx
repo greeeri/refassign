@@ -941,11 +941,6 @@ export default function GameSetup({
               </label>
               {levelLeagueId && <>
                 <p>Check the levels available for games in this league.</p>
-                <div className="toolbar">
-                  <button type="button" className="secondary" disabled={savingLevels} onClick={() => setLevelSelection(levels.map((level) => level.id))}>Select all</button>
-                  <button type="button" className="secondary" disabled={savingLevels} onClick={() => setLevelSelection([])}>Clear selection</button>
-                  <button type="button" className="primary" disabled={savingLevels || !levelSettingsReady} onClick={() => void saveLeagueLevels()}>{savingLevels ? "Saving…" : "Save league levels"}</button>
-                </div>
                 {levelSelection.length === 0 && <p>No levels selected. New games will need a level enabled here first.</p>}
                 {levelMessage && <p role="status">{levelMessage}</p>}
               </>}
@@ -977,6 +972,17 @@ export default function GameSetup({
             />
             <button className="primary">Add Level</button>
           </form>
+          {organizationId && levelLeagueId && (
+            <div className="toolbar" role="group" aria-label="League level selection actions">
+              <button type="button" className="secondary" disabled={savingLevels || !levelSettingsReady}
+                onClick={() => { setLevelSelection(levels.map((level) => level.id)); setLevelMessage(""); }}>Select All Levels</button>
+              <button type="button" className="secondary" disabled={savingLevels || !levelSettingsReady}
+                onClick={() => { setLevelSelection([]); setLevelMessage(""); }}>Clear All Levels</button>
+              <span aria-live="polite">{levelSelection.length} of {levels.length} levels selected</span>
+              <button type="button" className="primary" disabled={savingLevels || !levelSettingsReady}
+                onClick={() => void saveLeagueLevels()}>{savingLevels ? "Saving…" : "Save League Levels"}</button>
+            </div>
+          )}
           <div className="tableWrap">
             <table>
               <thead>
