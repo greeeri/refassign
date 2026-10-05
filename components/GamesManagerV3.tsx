@@ -1,5 +1,5 @@
 "use client";
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../lib/supabase/client";
 import { readAllPages } from "../lib/supabase/readAll";
 import { announceUndoAvailable } from "./UndoCenter";
@@ -348,11 +348,15 @@ export default function GamesManagerV3({
     } | null>(null),
     [error, setError] = useState(""),
     [message, setMessage] = useState("");
+  const gameLoadVersion = useRef(0);
+  const [directoryLoading, setDirectoryLoading] = useState(false);
   async function load() {
+    const version = ++gameLoadVersion.current;
     if (organizationId) {
-      const response = await fetch(`/api/games/pay?organizationId=${encodeURIComponent(organizationId)}`, { cache: "no-store" });
+      const response = await fetch(`/api/games/pay?organizationId=${encodeURIComponent(organizationId)}${leagueFilter !== "all" ? `&leagueId=${encodeURIComponent(leagueFilter)}` : ""}`, { cache: "no-store" });
       if (response.ok) {
         const result = await response.json();
+        if (version !== gameLoadVersion.current) return;
         setPayPositions(result.positions || []);
         setPayRates(Object.fromEntries((result.rates || []).map((rate: { game_id: string; position_id: string; amount: number }) => [`${rate.game_id}:${rate.position_id}`, Number(rate.amount)])));
         setPayStatuses(Object.fromEntries((result.rates || []).map((rate: { game_id: string; position_id: string; payment_status: string }) => [`${rate.game_id}:${rate.position_id}`, rate.payment_status])));
@@ -368,15 +372,15 @@ export default function GamesManagerV3({
           .eq("active", true)
           .order("name");
 
-    const [s, lg, lv, t, lo, g, billToResponse, levelSettings, teamSettings] = await Promise.all([
+    const [s, lg, lv, t, lo, g, billToResponse] = await Promise.all([
       sb
         .from("sports")
         .select("id,name,default_officials")
         .eq("active", true)
         .order("name"),
       sb.from("leagues").select("id,name").eq("active", true).order("name"),
-      sb.from("levels").select("id,name").eq("active", true).order("name"),
-      readAllPages<Team>((from, to) =>
+      organizationId ? Promise.resolve({data: [],error:null}) : sb.from("levels").select("id,name").eq("active", true).order("name"),
+      organizationId ? Promise.resolve({data: [],error:null}) : readAllPages<Team>((from, to) =>
         sb.from("teams")
           .select("id,name,level_id,sport_id")
           .order("name")
@@ -397,6 +401,7 @@ export default function GamesManagerV3({
           : query.is("archived_at", null);
         if (organizationId)
           query = query.eq("organization_id", organizationId);
+        if (leagueFilter !== "all") query = query.eq("league_id", leagueFilter);
         return query.range(from, to) as unknown as PromiseLike<{
           data: Game[] | null;
           error: { message: string } | null;
@@ -410,18 +415,14 @@ export default function GamesManagerV3({
             },
           )
         : Promise.resolve(null),
-      organizationId ? sb.rpc("get_organization_league_levels", { p_organization_id: organizationId }) : Promise.resolve({ data: [], error: null }),
-      organizationId ? sb.rpc("get_organization_league_teams", { p_organization_id: organizationId }) : Promise.resolve({ data: [], error: null }),
     ]);
-    const e = s.error || lg.error || lv.error || t.error || lo.error || g.error || levelSettings.error || teamSettings.error;
+    if (version !== gameLoadVersion.current) return;
+    const e = s.error || lg.error || lv.error || t.error || lo.error || g.error;
     if (e) setError(e.message);
     else {
       setSports(s.data || []);
       setLeagues(lg.data || []);
-      setLevels(lv.data || []);
-      setLeagueLevelSettings((levelSettings.data || []) as LeagueLevelSetting[]);
-      setLeagueTeamSettings((teamSettings.data || []) as LeagueTeamSetting[]);
-      setTeams(t.data || []);
+      if (!organizationId) { setLevels(lv.data || []); setTeams(t.data || []); }
       setLocations(lo.data || []);
       setGames((g.data || []) as unknown as Game[]);
       setSelectedGames([]);
@@ -437,14 +438,29 @@ export default function GamesManagerV3({
   }
   const [leagueTeamSettings, setLeagueTeamSettings] = useState<LeagueTeamSetting[]>([]);
   const [leagueLevelSettings, setLeagueLevelSettings] = useState<LeagueLevelSetting[]>([]);
+  const directoryLeagueId = show && form.league_id ? form.league_id : leagueFilter !== "all" ? leagueFilter : null;
+  useEffect(() => {
+    if (!organizationId) return;
+    let active = true;
+    setDirectoryLoading(true); setTeams([]); setLevels([]);
+    void sb.rpc("get_game_directory", {p_organization_id: organizationId,p_league_id: directoryLeagueId}).then(({data,error: directoryError}) => {
+      if (!active) return;
+      setDirectoryLoading(false);
+      if (directoryError) { setError(directoryError.message); return; }
+      const directory = data as {teams: Team[]; levels: Named[]; team_settings: LeagueTeamSetting[]; level_settings: LeagueLevelSetting[]};
+      setTeams(directory.teams); setLevels(directory.levels);
+      setLeagueTeamSettings(directory.team_settings); setLeagueLevelSettings(directory.level_settings);
+    });
+    return () => { active = false; };
+  }, [organizationId, directoryLeagueId, sb]);
   useEffect(() => {
     void load();
-  }, [organizationId, showArchived]);
+  }, [organizationId, showArchived, leagueFilter]);
   useEffect(() => {
     const refreshAfterUndo = () => { void load(); };
     window.addEventListener("refassign:undo-completed", refreshAfterUndo);
     return () => window.removeEventListener("refassign:undo-completed", refreshAfterUndo);
-  }, [organizationId, showArchived]);
+  }, [organizationId, showArchived, leagueFilter]);
   function requestStatusChange(gameId: string, status: string) {
     if (["canceled", "rained_out"].includes(status)) {
       setPendingStatus({ gameId, status });
@@ -684,6 +700,7 @@ export default function GamesManagerV3({
       if (!sportMatch) issues.push("Sport not found");
       if (!leagues.some((x) => norm(x.name) === norm(league)))
         issues.push("League not found");
+      if (leagueFilter !== "all" && norm(leagues.find((item) => item.id === leagueFilter)?.name || "") !== norm(league)) issues.push("League does not match the selected league filter. Choose All Leagues for a multi-league import.");
       if (!levelMatch) issues.push("Level not found");
       if (
         !availableLocations.some(
@@ -1168,7 +1185,7 @@ export default function GamesManagerV3({
           <span>Level</span>
           <select value={levelFilter} onChange={(event) => { setLevelFilter(event.target.value); setSelectedGames([]); }}>
             <option value="all">All Levels</option>
-            {levels.filter((level) => leagueFilter === "all" || levelsForLeague(levels, leagueLevelSettings, leagueFilter).some((item) => item.id === level.id) || games.some((game) => game.league_id === leagueFilter && game.level_id === level.id)).map((level) => <option key={level.id} value={level.id}>{level.name}</option>)}
+            {Array.from(new Map(games.filter((game) => game.level_id && game.levels?.name).map((game) => [game.level_id!, {id:game.level_id!, name:game.levels!.name}])).values()).sort((a,b) => a.name.localeCompare(b.name)).map((level) => <option key={level.id} value={level.id}>{level.name}</option>)}
           </select>
         </label>
         <label className="gameLeagueFilter">
@@ -1326,6 +1343,7 @@ export default function GamesManagerV3({
             Level
             <select
               required
+              disabled={directoryLoading}
               value={form.level_id}
               onChange={(e) =>
                 setForm({
@@ -1350,6 +1368,7 @@ export default function GamesManagerV3({
             Home Team
             <select
               required
+              disabled={directoryLoading}
               value={form.home_team_id}
               onChange={(e) =>
                 setForm({ ...form, home_team_id: e.target.value })
@@ -1367,6 +1386,7 @@ export default function GamesManagerV3({
             Away Team
             <select
               required
+              disabled={directoryLoading}
               value={form.away_team_id}
               onChange={(e) =>
                 setForm({ ...form, away_team_id: e.target.value })
@@ -1492,7 +1512,7 @@ export default function GamesManagerV3({
               onChange={(e) => setForm({ ...form, notes: e.target.value })}
             />
           </label>
-          <button className="primary" disabled={busy}>
+          <button className="primary" disabled={busy || directoryLoading}>
             {editing ? "Update Game" : "Save Game"}
           </button>
         </form>

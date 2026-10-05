@@ -7,9 +7,12 @@ export async function GET(request: NextRequest) {
   if (context.error) return context.error;
   const { service, organizationId, leagueIds } = context;
   if (leagueIds?.length === 0) return NextResponse.json({ positions: [], rates: [] });
+  const selectedLeague = request.nextUrl.searchParams.get("leagueId");
+  if (selectedLeague && leagueIds && !leagueIds.includes(selectedLeague)) return NextResponse.json({error: "League is not available."}, {status:403});
   const games = await readAllPages<{ id: string; league_id: string | null }>((from, to) => {
     let query = service.from("games").select("id,league_id").eq("organization_id", organizationId).order("id");
     if (leagueIds) query = query.in("league_id", leagueIds);
+    if (selectedLeague) query = query.eq("league_id", selectedLeague);
     return query.range(from, to);
   });
   if (games.error) return NextResponse.json({ error: games.error.message }, { status: 400 });

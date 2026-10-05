@@ -546,40 +546,13 @@ export default function AssignmentsManagerV2({
     // Management actions depend on the full candidate data set. Keep them
     // unavailable while the game list is being populated in stages.
     setCanManage(false);
-    const loadAllLeagueEligibility = async () => {
-      const data: EligL[] = [];
-      const pageSize = 1000;
-      for (let from = 0; ; from += pageSize) {
-        const page = await supabase
-          .from("official_league_eligibility")
-          .select("official_id,league_id")
-          .order("official_id")
-          .order("league_id")
-          .range(from, from + pageSize - 1);
-        if (page.error) return { data: null, error: page.error };
-        const rows = (page.data || []) as EligL[];
-        data.push(...rows);
-        if (rows.length < pageSize) break;
-      }
-      return { data, error: null };
-    };
-    const loadAllLevelEligibility = async () => {
-      const data: EligV[] = [];
-      const pageSize = 1000;
-      for (let from = 0; ; from += pageSize) {
-        const page = await supabase
-          .from("official_level_eligibility")
-          .select("official_id,level_id,center_eligible,ar_eligible")
-          .order("official_id")
-          .order("level_id")
-          .range(from, from + pageSize - 1);
-        if (page.error) return { data: null, error: page.error };
-        const rows = (page.data || []) as EligV[];
-        data.push(...rows);
-        if (rows.length < pageSize) break;
-      }
-      return { data, error: null };
-    };
+    let candidateLeagueIds: string[] = [], candidateLevelIds: string[] = [], candidateTeamIds: string[] = [];
+    const loadAllLeagueEligibility = () => readAllForChunks<EligL,string>(candidateLeagueIds, (ids,from,to) =>
+      supabase.from("official_league_eligibility").select("official_id,league_id")
+        .in("league_id",ids).order("official_id").order("league_id").range(from,to));
+    const loadAllLevelEligibility = () => readAllForChunks<EligV,string>(candidateLevelIds, (ids,from,to) =>
+      supabase.from("official_level_eligibility").select("official_id,level_id,center_eligible,ar_eligible")
+        .in("level_id",ids).order("official_id").order("level_id").range(from,to));
     const { data: userData } = await supabase.auth.getUser();
     const rolePromise = userData.user
       ? supabase.rpc("current_user_roles")
@@ -669,10 +642,11 @@ export default function AssignmentsManagerV2({
             .select("official_id,block_type,start_date,end_date,starts_at,ends_at,location_id,team_id")
             .order("official_id").range(from, to),
         ),
-        organizationId
-          ? readAllPages<{team_id: string; official_id: string}>((from, to) =>
+        organizationId && candidateTeamIds.length
+          ? readAllForChunks<{team_id: string; official_id: string},string>(candidateTeamIds,(ids,from, to) =>
               supabase.from("team_quick_assign_officials")
                 .select("team_id,official_id")
+                .in("team_id",ids)
                 .eq("organization_id", organizationId)
                 .order("team_id").order("official_id").range(from, to),
             )
@@ -689,6 +663,9 @@ export default function AssignmentsManagerV2({
     const g = await gamePromise;
     if (version !== loadVersion.current) return;
     if (g.error) { setError(g.error.message); return; }
+    candidateLeagueIds = Array.from(new Set((g.data || []).map((game) => game.league_id).filter((id): id is string => Boolean(id)))).sort();
+    candidateLevelIds = Array.from(new Set((g.data || []).map((game) => game.level_id).filter((id): id is string => Boolean(id)))).sort();
+    candidateTeamIds = Array.from(new Set((g.data || []).flatMap((game) => [game.home?.id,game.away?.id]).filter((id): id is string => Boolean(id)))).sort();
     // Start the smaller game-scoped requests before opening the large roster
     // and eligibility request batch on a constrained mobile connection.
     const corePromise = Promise.all([
@@ -696,13 +673,14 @@ export default function AssignmentsManagerV2({
           .from("sport_positions")
           .select("id,sport_id,name,required,sort_order")
           .order("sort_order"),
-        readAllPages<Power>((from, to) =>
+        candidateTeamIds.length ? readAllForChunks<Power,string>(candidateTeamIds,(ids,from, to) =>
           supabase
             .from("assignor_team_power_rankings")
             .select("team_id,power")
+            .in("team_id",ids)
             .order("team_id")
             .range(from, to),
-        ),
+        ) : Promise.resolve({data: [] as Power[],error:null}),
         supabase
           .from("game_link_groups")
           .select("id,name,created_at,organization_id")
@@ -823,7 +801,7 @@ export default function AssignmentsManagerV2({
     // large candidate request batch. Filters can reuse a recent result.
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     if (version !== loadVersion.current) return;
-    const candidateKey = `${organizationId || ""}:${userData.user?.id || ""}`;
+    const candidateKey = `${organizationId || ""}:${userData.user?.id || ""}:${candidateLeagueIds.join(",")}:${candidateLevelIds.join(",")}:${candidateTeamIds.join(",")}`;
     const candidatePromise: ReturnType<typeof fetchCandidateData> =
       reuseCandidates && candidateCache.current?.key === candidateKey &&
         Date.now() - candidateCache.current.createdAt < 60_000
