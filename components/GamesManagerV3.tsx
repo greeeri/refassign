@@ -353,14 +353,29 @@ export default function GamesManagerV3({
   async function load() {
     const version = ++gameLoadVersion.current;
     if (organizationId) {
-      const response = await fetch(`/api/games/pay?organizationId=${encodeURIComponent(organizationId)}${leagueFilter !== "all" ? `&leagueId=${encodeURIComponent(leagueFilter)}` : ""}`, { cache: "no-store" });
-      if (response.ok) {
-        const result = await response.json();
-        if (version !== gameLoadVersion.current) return;
-        setPayPositions(result.positions || []);
-        setPayRates(Object.fromEntries((result.rates || []).map((rate: { game_id: string; position_id: string; amount: number }) => [`${rate.game_id}:${rate.position_id}`, Number(rate.amount)])));
-        setPayStatuses(Object.fromEntries((result.rates || []).map((rate: { game_id: string; position_id: string; payment_status: string }) => [`${rate.game_id}:${rate.position_id}`, rate.payment_status])));
-      }
+      // Pay and billing metadata are independent of the schedule rows.
+      void fetch(`/api/games/pay?organizationId=${encodeURIComponent(organizationId)}${leagueFilter !== "all" ? `&leagueId=${encodeURIComponent(leagueFilter)}` : ""}`, { cache: "no-store" })
+        .then(async (response) => {
+          if (!response.ok) return;
+          const result = await response.json();
+          if (version !== gameLoadVersion.current) return;
+          setPayPositions(result.positions || []);
+          setPayRates(Object.fromEntries((result.rates || []).map((rate: { game_id: string; position_id: string; amount: number }) => [`${rate.game_id}:${rate.position_id}`, Number(rate.amount)])));
+          setPayStatuses(Object.fromEntries((result.rates || []).map((rate: { game_id: string; position_id: string; payment_status: string }) => [`${rate.game_id}:${rate.position_id}`, rate.payment_status])));
+        })
+        .catch(() => { /* Schedule loading can continue without pay metadata. */ });
+      void fetch(`/api/bill-tos?organizationId=${encodeURIComponent(organizationId)}`, { cache: "no-store" })
+        .then(async (response) => {
+          if (!response.ok) return;
+          const result = (await response.json()) as {
+            billTos?: BillTo[];
+            canManageBillTos?: boolean;
+          };
+          if (version !== gameLoadVersion.current) return;
+          setBillTos(result.billTos || []);
+          setCanManageBillTos(Boolean(result.canManageBillTos));
+        })
+        .catch(() => { /* Schedule loading can continue without billing metadata. */ });
     }
     const locationRequest = organizationId
       ? sb.rpc("get_organization_locations", {
@@ -372,7 +387,7 @@ export default function GamesManagerV3({
           .eq("active", true)
           .order("name");
 
-    const [s, lg, lv, t, lo, g, billToResponse] = await Promise.all([
+    const [s, lg, lv, t, lo, g] = await Promise.all([
       sb
         .from("sports")
         .select("id,name,default_officials")
@@ -407,14 +422,6 @@ export default function GamesManagerV3({
           error: { message: string } | null;
         }>;
       }),
-      organizationId
-        ? fetch(
-            `/api/bill-tos?organizationId=${encodeURIComponent(organizationId)}`,
-            {
-              cache: "no-store",
-            },
-          )
-        : Promise.resolve(null),
     ]);
     if (version !== gameLoadVersion.current) return;
     const e = s.error || lg.error || lv.error || t.error || lo.error || g.error;
@@ -426,14 +433,6 @@ export default function GamesManagerV3({
       setLocations(lo.data || []);
       setGames((g.data || []) as unknown as Game[]);
       setSelectedGames([]);
-      if (billToResponse?.ok) {
-        const billToResult = (await billToResponse.json()) as {
-          billTos?: BillTo[];
-          canManageBillTos?: boolean;
-        };
-        setBillTos(billToResult.billTos || []);
-        setCanManageBillTos(Boolean(billToResult.canManageBillTos));
-      }
     }
   }
   const [leagueTeamSettings, setLeagueTeamSettings] = useState<LeagueTeamSetting[]>([]);
