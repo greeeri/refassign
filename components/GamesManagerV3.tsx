@@ -350,8 +350,13 @@ export default function GamesManagerV3({
     [message, setMessage] = useState("");
   const gameLoadVersion = useRef(0);
   const [directoryLoading, setDirectoryLoading] = useState(false);
+  const [gamesLoading, setGamesLoading] = useState(true);
   async function load() {
     const version = ++gameLoadVersion.current;
+    const startedAt = performance.now();
+    setGamesLoading(true);
+    setGames([]);
+    setSelectedGames([]);
     if (organizationId) {
       // Pay and billing metadata are independent of the schedule rows.
       void fetch(`/api/games/pay?organizationId=${encodeURIComponent(organizationId)}${leagueFilter !== "all" ? `&leagueId=${encodeURIComponent(leagueFilter)}` : ""}`, { cache: "no-store" })
@@ -387,53 +392,63 @@ export default function GamesManagerV3({
           .eq("active", true)
           .order("name");
 
-    const [s, lg, lv, t, lo, g] = await Promise.all([
-      sb
-        .from("sports")
-        .select("id,name,default_officials")
-        .eq("active", true)
-        .order("name"),
+    const readGamePage = (from: number, to: number, preview = false) => {
+      let query = sb
+        .from("games")
+        .select(
+          "id,game_number,status,sport_id,league_id,level_id,home_team_id,away_team_id,location_id,bill_to_id,archived_at,starts_at,time_tbd,field_tbd,duration_minutes,officials_needed,notes,sports(name),leagues(name),levels(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(id,name,city,state)",
+        )
+        .order("starts_at", { ascending: !(preview && showArchived) })
+        .order("id");
+      query = showArchived
+        ? query.not("archived_at", "is", null)
+        : query.is("archived_at", null);
+      if (organizationId) query = query.eq("organization_id", organizationId);
+      if (leagueFilter !== "all") query = query.eq("league_id", leagueFilter);
+      if (preview && !showArchived) query = query.gte("starts_at", new Date().toISOString());
+      return query.range(from, to) as unknown as PromiseLike<{
+        data: Game[] | null;
+        error: { message: string } | null;
+      }>;
+    };
+    const metadataPromise = Promise.all([
+      sb.from("sports").select("id,name,default_officials").eq("active", true).order("name"),
       sb.from("leagues").select("id,name").eq("active", true).order("name"),
       organizationId ? Promise.resolve({data: [],error:null}) : sb.from("levels").select("id,name").eq("active", true).order("name"),
       organizationId ? Promise.resolve({data: [],error:null}) : readAllPages<Team>((from, to) =>
-        sb.from("teams")
-          .select("id,name,level_id,sport_id")
-          .order("name")
-          .order("id")
-          .range(from, to),
+        sb.from("teams").select("id,name,level_id,sport_id").order("name").order("id").range(from, to),
       ),
       locationRequest,
-      readAllPages<Game>((from, to) => {
-        let query = sb
-          .from("games")
-          .select(
-            "id,game_number,status,sport_id,league_id,level_id,home_team_id,away_team_id,location_id,bill_to_id,archived_at,starts_at,time_tbd,field_tbd,duration_minutes,officials_needed,notes,sports(name),leagues(name),levels(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(id,name,city,state)",
-          )
-          .order("starts_at")
-          .order("id");
-        query = showArchived
-          ? query.not("archived_at", "is", null)
-          : query.is("archived_at", null);
-        if (organizationId)
-          query = query.eq("organization_id", organizationId);
-        if (leagueFilter !== "all") query = query.eq("league_id", leagueFilter);
-        return query.range(from, to) as unknown as PromiseLike<{
-          data: Game[] | null;
-          error: { message: string } | null;
-        }>;
-      }),
+    ]);
+    // Show the next games (or most recently archived games) before reading history.
+    const preview = await readGamePage(0, 49, true);
+    if (version !== gameLoadVersion.current) return;
+    if (preview.error) {
+      setError(preview.error.message);
+      setGamesLoading(false);
+      return;
+    }
+    setGames(preview.data || []);
+    console.info(`[RefAssign load] games preview ready: ${Math.round(performance.now() - startedAt)} ms`);
+    const [metadata, g] = await Promise.all([
+      metadataPromise,
+      readAllPages<Game>((from, to) => readGamePage(from, to)),
     ]);
     if (version !== gameLoadVersion.current) return;
+    const [s, lg, lv, t, lo] = metadata;
     const e = s.error || lg.error || lv.error || t.error || lo.error || g.error;
-    if (e) setError(e.message);
-    else {
+    if (e) {
+      setGames([]);
+      setError(e.message);
+    } else {
       setSports(s.data || []);
       setLeagues(lg.data || []);
       if (!organizationId) { setLevels(lv.data || []); setTeams(t.data || []); }
       setLocations(lo.data || []);
-      setGames((g.data || []) as unknown as Game[]);
-      setSelectedGames([]);
+      setGames(g.data || []);
+      console.info(`[RefAssign load] all games ready: ${Math.round(performance.now() - startedAt)} ms`);
     }
+    setGamesLoading(false);
   }
   const [leagueTeamSettings, setLeagueTeamSettings] = useState<LeagueTeamSetting[]>([]);
   const [leagueLevelSettings, setLeagueLevelSettings] = useState<LeagueLevelSetting[]>([]);
@@ -1097,16 +1112,18 @@ export default function GamesManagerV3({
         <div>
           <h2>Live Game Schedule</h2>
           <p>
-            {filteredGames.length} shown • {games.length} total games • Default
+            {filteredGames.length} shown • {games.length} ${gamesLoading ? "loaded so far" : "total games"} • Default
             game length is 110 minutes
+            {gamesLoading && " • Loading remaining games…"}
           </p>
         </div>
         <div className="headerActions">
-          <button className="secondary" disabled={!filteredGames.length} onClick={() => void exportGames()}>
+          <button className="secondary" disabled={gamesLoading || !filteredGames.length} onClick={() => void exportGames()}>
             Export Shown Games
           </button>
           <button
             className="secondary"
+            disabled={gamesLoading}
             onClick={() => {
               setShowImport(!showImport);
               setShow(false);
@@ -1122,6 +1139,7 @@ export default function GamesManagerV3({
           </button>
           <button
             className="primary"
+            disabled={gamesLoading}
             onClick={() => {
               setEditing(null);
               setForm(blank);
@@ -1157,7 +1175,7 @@ export default function GamesManagerV3({
           Archived Games
         </button>
         {!showArchived && (
-          <button type="button" className="secondary" disabled={managementBusy}
+          <button type="button" className="secondary" disabled={gamesLoading || managementBusy}
             onClick={() => void manageGames("archive_cancelled")}>
             {managementBusy ? "Working…" : "Archive Cancelled Games"}
           </button>
@@ -1255,7 +1273,7 @@ export default function GamesManagerV3({
           <button
             type="button"
             className="secondary"
-            disabled={managementBusy}
+            disabled={gamesLoading || managementBusy}
             onClick={() => void manageGames(showArchived ? "restore" : "archive", selectedGames)}
           >
             {managementBusy ? "Working…" : showArchived ? "Restore selected" : "Archive selected"}
@@ -1264,7 +1282,7 @@ export default function GamesManagerV3({
             <button
               type="button"
               className="secondary"
-              disabled={managementBusy}
+              disabled={gamesLoading || managementBusy}
               onClick={() => void manageGames("archive", selectedGames.filter((id) => games.some((game) => game.id === id && normalizeGameStatus(game.status) === "canceled")))}
             >
               Archive selected canceled games
@@ -1274,7 +1292,7 @@ export default function GamesManagerV3({
             <button
               type="button"
               className="danger"
-              disabled={managementBusy}
+              disabled={gamesLoading || managementBusy}
               onClick={() => void manageGames("delete", selectedGames)}
             >
               Permanently delete selected
@@ -1511,7 +1529,7 @@ export default function GamesManagerV3({
               onChange={(e) => setForm({ ...form, notes: e.target.value })}
             />
           </label>
-          <button className="primary" disabled={busy || directoryLoading}>
+          <button className="primary" disabled={busy || directoryLoading || gamesLoading}>
             {editing ? "Update Game" : "Save Game"}
           </button>
         </form>
@@ -1531,7 +1549,7 @@ export default function GamesManagerV3({
               Download Template
             </button>
           </div>
-          <input type="file" accept=".xlsx,.xls,.csv" onChange={file} />
+          <input type="file" accept=".xlsx,.xls,.csv" disabled={gamesLoading} onChange={file} />
           {validationBusy && <p>Validating every spreadsheet row…</p>}
           {rows.length > 0 && (
             <>
@@ -1704,6 +1722,7 @@ export default function GamesManagerV3({
                 className="primary"
                 disabled={
                   busy ||
+                  gamesLoading ||
                   validationBusy ||
                   !importPreviewReady ||
                   !importApproved ||
@@ -1869,7 +1888,7 @@ export default function GamesManagerV3({
                   <td>
                     <select
                       aria-label={`Status for ${g.game_number}`}
-                      disabled={showArchived || statusBusy === g.id}
+                      disabled={gamesLoading || showArchived || statusBusy === g.id}
                       value={g.status === "open" ? "active" : g.status}
                       onChange={(e) =>
                         requestStatusChange(g.id, e.target.value)
@@ -1889,11 +1908,11 @@ export default function GamesManagerV3({
                   </td>
                   <td>
                     <div style={{ display: "flex", gap: 6 }}>
-                      {!showArchived && <button className="secondary" onClick={() => edit(g)}>Edit</button>}
+                      {!showArchived && <button className="secondary" disabled={gamesLoading} onClick={() => edit(g)}>Edit</button>}
                       <button
                         type="button"
                         className="danger"
-                        disabled={managementBusy}
+                        disabled={gamesLoading || managementBusy}
                         onClick={() => void manageGames("delete", [g.id])}
                       >
                         Delete
