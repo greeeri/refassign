@@ -614,6 +614,7 @@ export default function AssignmentsManagerV2({
               .eq("active", true)
               .eq("officials.active", true)
               .order("official_id").range(from, to),
+            1000, 2,
           ).then(({ data, error }) => ({
             data: (data || []).map((link) => link.officials), error,
           }))
@@ -626,6 +627,7 @@ export default function AssignmentsManagerV2({
                 data: Official[] | null;
                 error: { message: string } | null;
               }>,
+            1000, 2,
           );
       const results = await Promise.all([
         loadOfficialRoster(),
@@ -634,6 +636,7 @@ export default function AssignmentsManagerV2({
             .from("my_assignment_rankings")
             .select("official_id,rank,ref_rank,ar1_rank,ar2_rank,fourth_rank,mentor_certified")
             .order("official_id").range(from, to),
+          1000, 2,
         ),
         loadAllLeagueEligibility(),
         loadAllLevelEligibility(),
