@@ -14,16 +14,26 @@ export type PageResult<T> = {
 export async function readAllPages<T>(
   readPage: (from: number, to: number) => PromiseLike<PageResult<T>>,
   pageSize = 1000,
+  parallelPages = 1,
 ): Promise<PageResult<T>> {
   const data: T[] = [];
-
-  for (let from = 0; ; from += pageSize) {
-    const page = await readPage(from, from + pageSize - 1);
-    if (page.error) return { data: null, error: page.error };
-
-    const rows = page.data || [];
-    data.push(...rows);
-    if (rows.length < pageSize) return { data, error: null };
+  // Read the first page alone. Small result sets need no speculative requests.
+  let from = 0;
+  let batchSize = 1;
+  for (;;) {
+    const pages = await Promise.all(
+      Array.from({ length: batchSize }, (_, index) =>
+        readPage(from + index * pageSize, from + (index + 1) * pageSize - 1),
+      ),
+    );
+    for (const page of pages) {
+      if (page.error) return { data: null, error: page.error };
+      const rows = page.data || [];
+      data.push(...rows);
+      if (rows.length < pageSize) return { data, error: null };
+    }
+    from += batchSize * pageSize;
+    batchSize = Math.max(1, Math.floor(parallelPages));
   }
 }
 
