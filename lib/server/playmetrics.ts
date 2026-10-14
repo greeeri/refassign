@@ -33,7 +33,7 @@ export function parsePlayMetricsGames(csv: string): PlayMetricsGame[] {
   });
 }
 
-export async function downloadJuscGames() {
+export async function downloadJuscReport(filename: "all_games.csv" | "teams.csv" | "team_schedules.csv") {
   const raw = process.env.JUSC_GOOGLE_SERVICE_ACCOUNT_JSON;
   if (!raw) throw new Error("JUSC_GOOGLE_SERVICE_ACCOUNT_JSON is not configured.");
   let credentials: { client_email?: string; private_key?: string };
@@ -52,9 +52,13 @@ export async function downloadJuscGames() {
   if (!tokenResponse.ok) throw new Error(`Google service-account authentication failed (HTTP ${tokenResponse.status}).`);
   const token = await tokenResponse.json();
   if (typeof token.access_token !== "string") throw new Error("Google did not return an access token.");
-  const response = await fetch(`https://storage.googleapis.com/storage/v1/b/${JUSC_BUCKET}/o/all_games.csv?alt=media`, {
+  const response = await fetch(`https://storage.googleapis.com/storage/v1/b/${JUSC_BUCKET}/o/${filename}?alt=media`, {
     headers: { Authorization: `Bearer ${token.access_token}` }, cache: "no-store", signal: AbortSignal.timeout(30000),
   });
-  if (!response.ok) throw new Error(`JUSC game download failed (HTTP ${response.status}).`);
-  return parsePlayMetricsGames(await response.text());
+  if (!response.ok) throw new Error(`JUSC ${filename} download failed (HTTP ${response.status}).`);
+  return response.text();
+}
+
+export async function downloadJuscGames() {
+  return parsePlayMetricsGames(await downloadJuscReport("all_games.csv"));
 }
