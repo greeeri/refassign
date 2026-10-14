@@ -5,6 +5,14 @@ export const JUSC_BUCKET = "club367-reports-playmetrics-prod";
 const EMAIL = "club367-referee-reporting@playmetrics-prod.iam.gserviceaccount.com";
 export type PlayMetricsGame = { id: string; date: string; time: string; field: string; home: string; away: string; cancelled: boolean };
 
+export function upcomingJuscHomeGames(games: PlayMetricsGame[], now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
+  const part = (type: string) => parts.find(value => value.type === type)!.value;
+  const today = `${part("year")}-${part("month")}-${part("day")}`;
+  // Require an explicit club name; aliases must be reviewed before widening the scope.
+  return games.filter(game => game.date >= today && /^JUSC\b/i.test(game.home.trim()));
+}
+
 export function parsePlayMetricsGames(csv: string): PlayMetricsGame[] {
   const workbook = XLSX.read(csv.replace(/^\uFEFF/, ""), { type: "string", raw: true });
   const grid = XLSX.utils.sheet_to_json<string[]>(workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: "", raw: true });
