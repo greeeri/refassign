@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { showGameConflictPopup } from "../lib/game-conflict-popup";
 import { createPortal } from "react-dom";
 import { fieldComplexRpcMissing } from "../lib/field-complex-support";
 import {
@@ -3866,7 +3867,11 @@ export default function AssignmentsManagerV2({
       failed?: number;
       failures?: string[];
     };
-    if (!response.ok) setError(result.error || "Unable to change game status.");
+    if (!response.ok) {
+      const message = result.error || "Unable to change game status.";
+      setError(message);
+      showGameConflictPopup(message);
+    }
     else {
       setGames((current) =>
         current.map((listedGame) =>
@@ -4681,6 +4686,7 @@ export default function AssignmentsManagerV2({
       setNotice(
         `Bulk action complete: ${succeeded} ${action === "status" ? "game" : action === "confirm" || action === "unassign" ? "assignment" : "game"}${succeeded === 1 ? "" : "s"} processed.`,
       );
+      if (action === "status" && failures.length) showGameConflictPopup(failures.join("\n\n"));
       setBulkResult({
         action: labels[action],
         succeeded,

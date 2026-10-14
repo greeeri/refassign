@@ -4,6 +4,7 @@ import { createClient } from "../lib/supabase/client";
 import { readAllPages } from "../lib/supabase/readAll";
 import { announceUndoAvailable } from "./UndoCenter";
 import { resolveImportTeam } from "../lib/game-import-team";
+import { showGameConflictPopup } from "../lib/game-conflict-popup";
 import { normalizeGameStatus } from "../lib/game-status";
 import { eventLocalToIso, eventTimeParts, formatEventDate, formatEventTime } from "../lib/event-time";
 import { LeagueLevelSetting, levelsForLeague } from "../lib/league-levels";
@@ -500,8 +501,11 @@ export default function GamesManagerV3({
       sent?: number;
       failed?: number;
     };
-    if (!response.ok)
-      setError(result.error || "Game status could not be updated.");
+    if (!response.ok) {
+      const message = result.error || "Game status could not be updated.";
+      setError(message);
+      showGameConflictPopup(message);
+    }
     else {
       setGames((current) =>
         current.map((game) => (game.id === id ? { ...game, status } : game)),
@@ -658,7 +662,9 @@ export default function GamesManagerV3({
       setShow(false);
       await load();
     } catch (x) {
-      setError(x instanceof Error ? x.message : "Unable to save game");
+      const message = x instanceof Error ? x.message : "Unable to save game";
+      setError(message);
+      showGameConflictPopup(message);
     }
     setBusy(false);
   }
