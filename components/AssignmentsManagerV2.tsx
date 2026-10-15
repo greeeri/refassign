@@ -7,6 +7,7 @@ import {
   gameAcceptsAssignments,
   inactiveGameStatusLabel,
   normalizeGameStatus,
+  gameHoldReason,
 } from "../lib/game-status";
 import { createClient } from "../lib/supabase/client";
 import { readAllForChunks, readAllPages } from "../lib/supabase/readAll";
@@ -30,6 +31,9 @@ type Game = {
   location_id: string | null;
   starts_at: string;
   time_tbd: boolean;
+  field_tbd: boolean;
+  venue_conflict_hold: boolean;
+  notes: string | null;
   calendar_needs_review: boolean;
   calendar_reviewed_at: string | null;
   duration_minutes: number;
@@ -600,7 +604,7 @@ export default function AssignmentsManagerV2({
           let query = supabase
             .from("games")
             .select(
-              "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,time_tbd,calendar_needs_review,calendar_reviewed_at,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,address,city,state,latitude,longitude,venue_id)",
+              "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,time_tbd,field_tbd,venue_conflict_hold,notes,calendar_needs_review,calendar_reviewed_at,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,address,city,state,latitude,longitude,venue_id)",
             )
             .is("archived_at", null)
             .order("starts_at")
@@ -915,7 +919,7 @@ export default function AssignmentsManagerV2({
         ? { data: [] as Game[], error: null }
         : await readAllPages<Game>((from, to) => {
           let query = supabase.from("games")
-            .select("id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,time_tbd,calendar_needs_review,calendar_reviewed_at,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,address,city,state,latitude,longitude,venue_id)")
+            .select("id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,time_tbd,field_tbd,venue_conflict_hold,notes,calendar_needs_review,calendar_reviewed_at,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,address,city,state,latitude,longitude,venue_id)")
             .eq("organization_id", organizationId)
             .eq("starts_at", sourceGame.starts_at)
             .is("archived_at", null)
@@ -5310,6 +5314,7 @@ export default function AssignmentsManagerV2({
           <small style={{ color: isRainOut ? "#dbeafe" : undefined }}>
             {g.game_number}
           </small>
+          {gameHoldReason(g) && <small className="assignmentHoldReason"><strong>Hold reason:</strong> {gameHoldReason(g)}</small>}
         </button>
         <span
           className="assignmentGameLocation"
@@ -10051,6 +10056,7 @@ export default function AssignmentsManagerV2({
                       {game.location?.name || "TBD"} •{" "}
                       <b>{gamePositions.length} assignment slots</b>
                     </p>
+                    {gameHoldReason(game) && <div className="assignmentHoldReason assignmentHoldReasonDetail"><strong>Hold reason:</strong> {gameHoldReason(game)}</div>}
                     <div
                       className="selectedGameSummary"
                       aria-label="Assignment summary"

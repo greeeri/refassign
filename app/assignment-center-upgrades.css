@@ -377,3 +377,21 @@ body.officialDragActive{cursor:grabbing}
 .calendarGameReviewPrompt>div{display:grid;gap:4px;flex:1;min-width:220px}
 .calendarGameReviewPrompt span{font-size:12px;line-height:1.4}
 @media(max-width:760px){.calendarGameReviewPrompt .calendarGameReviewButton{width:100%}.assignmentGameRow.calendarGameNew{border-left:4px solid #16a34a!important}}
+
+.assignmentHoldReason {
+  display: block;
+  margin-top: 6px;
+  color: #854d0e;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.assignmentHoldReasonDetail {
+  margin: 10px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid #facc15;
+  border-radius: 8px;
+  background: #fefce8;
+  font-size: 14px;
+}
