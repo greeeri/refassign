@@ -14,6 +14,7 @@ import { readAllForChunks, readAllPages } from "../lib/supabase/readAll";
 import { announceUndoAvailable } from "./UndoCenter";
 import SelfAssignOverrideRequests from "./SelfAssignOverrideRequests";
 import CalendarSyncPanel from "./CalendarSyncPanel";
+import GameHoldDetails from "./GameHoldDetails";
 import {
   eventTimeParts,
   formatEventDate,
@@ -10056,7 +10057,7 @@ export default function AssignmentsManagerV2({
                       {game.location?.name || "TBD"} •{" "}
                       <b>{gamePositions.length} assignment slots</b>
                     </p>
-                    {gameHoldReason(game) && <div className="assignmentHoldReason assignmentHoldReasonDetail"><strong>Hold reason:</strong> {gameHoldReason(game)}</div>}
+                    {normalizeGameStatus(game.status) === "suspended" && organizationId && <GameHoldDetails key={game.id} organizationId={organizationId} gameId={game.id} />}
                     <div
                       className="selectedGameSummary"
                       aria-label="Assignment summary"
