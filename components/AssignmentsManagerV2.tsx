@@ -29,6 +29,8 @@ type Game = {
   location_id: string | null;
   starts_at: string;
   time_tbd: boolean;
+  calendar_needs_review: boolean;
+  calendar_reviewed_at: string | null;
   duration_minutes: number;
   officials_needed: number;
   sports: { name: string } | null;
@@ -515,7 +517,31 @@ export default function AssignmentsManagerV2({
       nextPositionId?: string;
       override?: boolean;
     } | null>(null),
+    [calendarReviewSaving, setCalendarReviewSaving] = useState(false),
     [bulkResult, setBulkResult] = useState<BulkActionResult | null>(null);
+  async function confirmCalendarReview(ids: string[]) {
+    const pending = games.filter((item) => ids.includes(item.id) && item.calendar_needs_review);
+    if (!canManage || calendarReviewSaving || !pending.length) return;
+    if (!window.confirm(`Confirm you reviewed the dates, times, venues and teams for ${pending.length === 1 ? "this new or updated calendar game" : `these ${pending.length} new or updated calendar games`}?`)) return;
+    setCalendarReviewSaving(true);
+    setError("");
+    try {
+      const { data, error: reviewError } = await supabase.rpc("confirm_calendar_game_review", {
+        p_game_ids: pending.map((item) => item.id),
+      });
+      if (reviewError) throw new Error(reviewError.message);
+      const result = data as { reviewed: number; confirmed_ids: string[] };
+      const confirmed = new Set(result.confirmed_ids);
+      setGames((current) => current.map((item) => confirmed.has(item.id)
+        ? { ...item, calendar_needs_review: false, calendar_reviewed_at: new Date().toISOString() }
+        : item));
+      setNotice(`${result.reviewed} calendar game${result.reviewed === 1 ? "" : "s"} marked reviewed.`);
+    } catch (reviewError) {
+      setError(reviewError instanceof Error ? reviewError.message : "Unable to confirm calendar game review.");
+    } finally {
+      setCalendarReviewSaving(false);
+    }
+  }
   async function loadCandidateScheduleConflicts(targetGames: Game[], version?: number) {
     if (!targetGames.length) {
       if (version === undefined || version === loadVersion.current)
@@ -573,7 +599,7 @@ export default function AssignmentsManagerV2({
           let query = supabase
             .from("games")
             .select(
-              "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,time_tbd,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,address,city,state,latitude,longitude,venue_id)",
+              "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,time_tbd,calendar_needs_review,calendar_reviewed_at,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,address,city,state,latitude,longitude,venue_id)",
             )
             .is("archived_at", null)
             .order("starts_at")
@@ -888,7 +914,7 @@ export default function AssignmentsManagerV2({
         ? { data: [] as Game[], error: null }
         : await readAllPages<Game>((from, to) => {
           let query = supabase.from("games")
-            .select("id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,time_tbd,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,address,city,state,latitude,longitude,venue_id)")
+            .select("id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,time_tbd,calendar_needs_review,calendar_reviewed_at,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,address,city,state,latitude,longitude,venue_id)")
             .eq("organization_id", organizationId)
             .eq("starts_at", sourceGame.starts_at)
             .is("archived_at", null)
@@ -5182,7 +5208,7 @@ export default function AssignmentsManagerV2({
       <div
         key={g.id}
         id={`assignment-game-${g.id}`}
-        className={`assignmentGameRow${officialDropGame === g.id ? " officialDropTarget" : ""}${draggingOfficial ? " officialDropReady" : ""}`}
+        className={`assignmentGameRow${g.calendar_needs_review ? " calendarGameNew" : ""}${officialDropGame === g.id ? " officialDropTarget" : ""}${draggingOfficial ? " officialDropReady" : ""}`}
         onDragEnter={(event) => {
           if (!draggingOfficial || !canManage) return;
           event.preventDefault();
@@ -5211,7 +5237,7 @@ export default function AssignmentsManagerV2({
           borderBottom: `1px solid ${statusBorder || (linked ? "#bfdbfe" : "#e2e8f0")}`,
           background:
             statusBackground ||
-            (linked ? "#eff6ff" : selected === g.id ? "#f8fafc" : "#fff"),
+            (g.calendar_needs_review ? "#f0fdf4" : linked ? "#eff6ff" : selected === g.id ? "#f8fafc" : "#fff"),
           color: isRainOut ? "#fff" : "inherit",
         }}
       >
@@ -5252,6 +5278,11 @@ export default function AssignmentsManagerV2({
             {showChain && (
               <span aria-hidden="true" className="assignmentLinkedArrow">
                 ↳
+              </span>
+            )}
+            {g.calendar_needs_review && (
+              <span className="calendarGameNewBadge" title="New or updated calendar game — assignor review required">
+                <span aria-hidden="true">✦</span> New
               </span>
             )}
             {g.home?.name || "TBD"} vs {g.away?.name || "TBD"}
@@ -5379,6 +5410,15 @@ export default function AssignmentsManagerV2({
               }}
             />
           </span>
+          {canManage && (g.calendar_needs_review || g.calendar_reviewed_at) && (
+            <label className="calendarGameReviewCheckbox" onClick={(event) => event.stopPropagation()}>
+              <input type="checkbox" checked={!g.calendar_needs_review}
+                disabled={calendarReviewSaving || !g.calendar_needs_review}
+                aria-label={`Reviewed calendar game ${g.game_number}`}
+                onChange={(event) => { if (event.target.checked) void confirmCalendarReview([g.id]); }} />
+              Reviewed
+            </label>
+          )}
           {canManage && (
             <button
               type="button"
@@ -9025,6 +9065,15 @@ export default function AssignmentsManagerV2({
               </div>
             )}
           </div>
+          {canManage && filteredGames.some((item) => item.calendar_needs_review) && (
+            <div className="calendarGameReviewPrompt" role="status">
+              <div><b>New or updated calendar games need review</b><span>Check dates, times, venues and teams, then check Reviewed on each game or select games to confirm together.</span></div>
+              <button type="button" className="calendarGameReviewButton" disabled={calendarReviewSaving || !games.some((item) => item.calendar_needs_review && linkSelected.includes(item.id))}
+                onClick={() => void confirmCalendarReview(linkSelected)}>
+                Mark selected reviewed ({games.filter((item) => item.calendar_needs_review && linkSelected.includes(item.id)).length})
+              </button>
+            </div>
+          )}
           {canManage && linkSelected.length > 0 && (
             <div className="assignmentSelectionBar">
               <div className="assignmentSelectionSummary">

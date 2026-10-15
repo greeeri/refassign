@@ -1,0 +1,37 @@
+const {PGlite}=require('@electric-sql/pglite');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+(async()=>{
+ const db=new PGlite();
+ const user='00000000-0000-4000-8000-000000000001', org='00000000-0000-4000-8000-000000000002', league='00000000-0000-4000-8000-000000000003', other='00000000-0000-4000-8000-000000000004';
+ const ids=Array.from({length:6},(_,i)=>`00000000-0000-4000-8000-${String(i+10).padStart(12,'0')}`);
+ await db.exec(`
+ create role anon;create role authenticated;
+ create schema auth;create schema private;
+ create table auth.users(id uuid primary key);
+ insert into auth.users values('${user}');
+ create function auth.uid() returns uuid language sql as $$ select nullif(current_setting('test.user',true),'')::uuid $$;
+ create function private.can_manage_organization_league(o uuid,l uuid,u uuid) returns boolean language sql as $$ select o='${org}'::uuid and l='${league}'::uuid and u='${user}'::uuid $$;
+ create table games(id uuid primary key,organization_id uuid,league_id uuid,source_system text,status text,starts_at timestamptz,notes text);
+ insert into games values('${ids[0]}','${org}','${league}','gobound','suspended','2027-04-01 18:00Z','Venue conflict'),('${ids[1]}','${org}','${league}',null,'active','2027-04-02 18:00Z','Manual'),('${ids[2]}','${org}','${other}','gobound','active','2027-04-03 18:00Z','Other league');
+ `);
+ await db.exec(fs.readFileSync('supabase/migrations/20261014171329_calendar_game_review_confirmation.sql','utf8'));
+ assert.equal((await db.query('select count(*)::int n from games where calendar_needs_review')).rows[0].n,2);
+ await assert.rejects(db.query('select confirm_calendar_game_review($1::uuid[])',[[ids[0]]]),/Sign in/);
+ await db.exec(`select set_config('test.user','${user}',false)`);
+ await assert.rejects(db.query('select confirm_calendar_game_review($1::uuid[])',[[ids[0],ids[2]]]),/cannot confirm/);
+ assert.equal((await db.query('select calendar_needs_review from games where id=$1',[ids[0]])).rows[0].calendar_needs_review,true);
+ await assert.rejects(db.query('select confirm_calendar_game_review($1::uuid[])',[[ids[5]]]),/cannot confirm/);
+ const confirmed=(await db.query('select confirm_calendar_game_review($1::uuid[]) result',[[ids[0],ids[0]]])).rows[0].result;
+ assert.equal(confirmed.reviewed,1);
+ const row=(await db.query('select * from games where id=$1',[ids[0]])).rows[0];
+ assert.equal(row.status,'suspended');assert.equal(row.notes,'Venue conflict');assert.equal(row.calendar_reviewed_by,user);assert.ok(row.calendar_reviewed_at);assert.equal(row.calendar_needs_review,false);
+ assert.equal((await db.query('select confirm_calendar_game_review($1::uuid[]) result',[[ids[0]]])).rows[0].result.reviewed,0);
+ await db.exec(`insert into games(id,organization_id,league_id,source_system,status) values('${ids[3]}','${org}','${league}','gobound','active'),('${ids[4]}','${org}','${league}','ical','active')`);
+ assert.equal((await db.query('select confirm_calendar_game_review($1::uuid[]) result',[[ids[3],ids[4]]])).rows[0].result.reviewed,2);
+ await db.exec(`update games set source_system='calendar' where id='${ids[1]}'`);
+ assert.equal((await db.query('select calendar_needs_review from games where id=$1',[ids[1]])).rows[0].calendar_needs_review,true);
+ await db.exec(`set role anon`);
+ await assert.rejects(db.query('select confirm_calendar_game_review($1::uuid[])',[[ids[1]]]),/permission denied/);
+ await db.close();console.log('Calendar review checks passed: existing/new calendar games, manual exclusion, individual/bulk, idempotency, timestamps, permissions and hold preservation.');
+})().catch(e=>{console.error(e);process.exitCode=1});
