@@ -12,6 +12,7 @@ import { createClient } from "../lib/supabase/client";
 import { readAllForChunks, readAllPages } from "../lib/supabase/readAll";
 import { announceUndoAvailable } from "./UndoCenter";
 import SelfAssignOverrideRequests from "./SelfAssignOverrideRequests";
+import CalendarSyncPanel from "./CalendarSyncPanel";
 import {
   eventTimeParts,
   formatEventDate,
@@ -9065,6 +9066,7 @@ export default function AssignmentsManagerV2({
               </div>
             )}
           </div>
+          {canManage && organizationId && <CalendarSyncPanel organizationId={organizationId} leagueId={leagueFilter || undefined} onSynced={() => void load()} />}
           {canManage && filteredGames.some((item) => item.calendar_needs_review) && (
             <div className="calendarGameReviewPrompt" role="status">
               <div><b>New or updated calendar games need review</b><span>Check dates, times, venues and teams, then check Reviewed on each game or select games to confirm together.</span></div>
