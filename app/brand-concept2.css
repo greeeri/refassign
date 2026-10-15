@@ -10,3 +10,4 @@
 @media (min-width:761px) and (max-width:900px){
   .refAssignBranded main{margin-left:245px;width:calc(100% - 245px)}
 }
+.refAssignBranded aside{scrollbar-width:none}.refAssignBranded aside::-webkit-scrollbar{display:none;width:0;height:0}
