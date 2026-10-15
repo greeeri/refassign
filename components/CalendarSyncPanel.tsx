@@ -4,10 +4,10 @@ type Feed = { id: string; name: string; enabled: boolean; bootstrapped: boolean;
 type Run = { id: string; feed_id: string; status: string; games_added: number; games_updated: number; games_removed: number; games_held: number; assigned_games_affected: number; started_at: string; error: string | null };
 type Change = { id: string; uid: string; kind: string; before_source: Record<string, string> | null; after_source: Record<string, string> | null; details: string; assignments_affected: number };
 const when = (v: string | null) => v ? new Date(v).toLocaleString("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }) : "Not checked yet";
-export default function CalendarSyncPanel({ organizationId, leagueId, onSynced }: { organizationId: string; leagueId?: string; onSynced?: () => void }) {
+export default function CalendarSyncPanel({ organizationId, leagueId, onSynced }: { organizationId: string; leagueId: string; onSynced?: () => void }) {
   const [feeds, setFeeds] = useState<Feed[]>([]), [runs, setRuns] = useState<Run[]>([]), [changes, setChanges] = useState<Change[]>([]);
   const [error, setError] = useState(""), [notice, setNotice] = useState(""), [busy, setBusy] = useState<string | null>(null), [open, setOpen] = useState(false);
-  const endpoint = `/api/calendar-sync?organizationId=${encodeURIComponent(organizationId)}${leagueId ? `&leagueId=${encodeURIComponent(leagueId)}` : ""}`;
+  const endpoint = `/api/calendar-sync?organizationId=${encodeURIComponent(organizationId)}&leagueId=${encodeURIComponent(leagueId)}`;
   const refresh = useCallback(async (signal?: AbortSignal) => {
     try {
       const response = await fetch(endpoint, { cache: "no-store", signal });
