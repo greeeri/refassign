@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "../../../../lib/supabase/admin";
+import { syncJuscFeed } from "../../../../lib/server/jusc-calendar-sync";
 import { syncBoundFeed } from "../../../../lib/server/bound-calendar-sync";
 export const maxDuration = 300;
 export async function GET(request: NextRequest) {
@@ -13,12 +14,12 @@ export async function GET(request: NextRequest) {
     }
   }
   if (!authorized) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const { data: feeds, error } = await service.from("calendar_sync_feeds").select("id").eq("enabled", true).eq("bootstrapped", true).lte("next_run_at", new Date().toISOString()).order("next_run_at").limit(6);
+  const { data: feeds, error } = await service.from("calendar_sync_feeds").select("id,source_system").eq("enabled", true).eq("bootstrapped", true).lte("next_run_at", new Date().toISOString()).order("next_run_at").limit(6);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   const results = [];
   // Each feed commits independently; one failed retrieval never blocks other feeds.
   for (let i = 0; i < feeds.length; i += 2) {
-    const batch = await Promise.allSettled(feeds.slice(i, i + 2).map(f => syncBoundFeed(service, f.id)));
+    const batch = await Promise.allSettled(feeds.slice(i, i + 2).map(f => f.source_system === "playmetrics" ? syncJuscFeed(service, f.id) : syncBoundFeed(service, f.id)));
     results.push(...batch.map(r => r.status === "fulfilled" ? r.value : { failed: true, error: r.reason instanceof Error ? r.reason.message : "Sync failed" }));
   }
   return NextResponse.json({ results, failed: results.some(x => x.failed) });
