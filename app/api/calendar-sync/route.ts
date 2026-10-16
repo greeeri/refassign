@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireManagedOrganization } from "../../../lib/server/organizationScope";
+import { syncJuscFeed } from "../../../lib/server/jusc-calendar-sync";
 import { syncBoundFeed } from "../../../lib/server/bound-calendar-sync";
 export const maxDuration = 90;
 async function context(request: NextRequest) {
   const scope = await requireManagedOrganization(request);
   if (scope.error) return { ...scope, feeds: [] };
-  let query = scope.service.from("calendar_sync_feeds").select("id,name,league_id,enabled,bootstrapped,last_attempt_at,last_success_at,next_run_at,last_error,event_count,lease_until").eq("organization_id", scope.organizationId).order("name").limit(100);
+  let query = scope.service.from("calendar_sync_feeds").select("id,name,league_id,source_system,enabled,bootstrapped,last_attempt_at,last_success_at,next_run_at,last_error,event_count,lease_until").eq("organization_id", scope.organizationId).order("name").limit(100);
   if (!scope.fullOrganizationAccess) {
     if (!scope.leagueIds?.length) return { ...scope, feeds: [] };
     query = query.in("league_id", scope.leagueIds);
@@ -31,6 +32,6 @@ export async function POST(request: NextRequest) {
   if (scope.error) return scope.error;
   const body = await request.json().catch(() => null);
   if (!body?.feedId || !scope.feeds.some(f => f.id === body.feedId)) return NextResponse.json({ error: "Select a calendar you manage." }, { status: 403 });
-  try { return NextResponse.json(await syncBoundFeed(scope.service, body.feedId, true)); }
+  try { const feed = scope.feeds.find(f => f.id === body.feedId)!; return NextResponse.json(await (feed.source_system === "playmetrics" ? syncJuscFeed(scope.service, body.feedId, true) : syncBoundFeed(scope.service, body.feedId, true))); }
   catch (e) { return NextResponse.json({ error: e instanceof Error ? e.message : "Sync failed." }, { status: 500 }); }
 }

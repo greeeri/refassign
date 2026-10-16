@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-type Feed = { id: string; name: string; enabled: boolean; bootstrapped: boolean; last_success_at: string | null; next_run_at: string; last_error: string | null; event_count: number; lease_until: string | null };
+type Feed = { id: string; name: string; source_system: string; enabled: boolean; bootstrapped: boolean; last_success_at: string | null; next_run_at: string; last_error: string | null; event_count: number; lease_until: string | null };
 type Run = { id: string; feed_id: string; status: string; games_added: number; games_updated: number; games_removed: number; games_held: number; assigned_games_affected: number; started_at: string; error: string | null };
 type Change = { id: string; uid: string; kind: string; before_source: Record<string, string> | null; after_source: Record<string, string> | null; details: string; assignments_affected: number };
 const when = (v: string | null) => v ? new Date(v).toLocaleString("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }) : "Not checked yet";
@@ -32,10 +32,10 @@ export default function CalendarSyncPanel({ organizationId, leagueId, onSynced }
   const failures = feeds.filter(f => f.last_error || overdue(f));
   return <details className="calendarSyncPanel" open={open} onToggle={e => setOpen(e.currentTarget.open)}>
     <summary>Calendar sync{failures.length > 0 && <span className="calendarSyncFailure">{failures.length} calendar{failures.length === 1 ? " needs" : "s need"} attention</span>}</summary>
-    <p>Automatic checks run daily at 8:00 AM Central. New and changed games are marked NEW until an assignor checks Reviewed. Existing holds, crews and billing choices are preserved.</p>
+    <p>Automatic checks follow each feed’s schedule below. New and changed games are marked NEW until an assignor checks Reviewed. Existing holds, crews and billing choices are preserved.</p>
     {error && <p role="alert" className="calendarSyncError">{error}</p>}{notice && <p role="status">{notice}</p>}
     <div className="calendarSyncFeeds">{feeds.map(f => <div key={f.id} className="calendarSyncFeed">
-      <strong>{f.name}</strong><span>{f.event_count} source games · {f.enabled ? "Enabled" : "Paused"}</span>
+      <strong>{f.name}</strong><span>Daily at {f.source_system === "playmetrics" ? "6:30 PM" : "8:00 AM"} Central</span><span>{f.event_count} source games · {f.enabled ? "Enabled" : "Paused"}</span>
       <span>Last successful check: {when(f.last_success_at)}</span><span>Next check: {when(f.next_run_at)}</span>
       {f.last_error && <span role="alert" className="calendarSyncError">Check failed: {f.last_error} The last successful schedule is retained; a retry is scheduled.</span>}
       {!f.last_error && overdue(f) && <span role="alert" className="calendarSyncError">The scheduled check is overdue. The saved schedule is retained; use Run now to retry.</span>}
