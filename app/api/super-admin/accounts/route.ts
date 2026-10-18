@@ -11,20 +11,21 @@ export async function DELETE(req: NextRequest) {
     const { id } = (await req.json()) as { id?: string };
     if (!id) throw new Error("Account is required.");
 
-    const [{ data: locked }, { data: linkedOfficials, error: officialError }] =
+    const [{ data: locked }, { data: linkedOfficial, error: officialError }] =
       await Promise.all([
         service
           .from("protected_accounts")
           .select("user_id")
           .eq("user_id", id)
           .maybeSingle(),
-        service.from("officials").select("id").eq("auth_user_id", id),
+        // auth_user_id is UNIQUE; accounts without an official return null.
+        service.from("officials").select("id").eq("auth_user_id", id).maybeSingle(),
       ]);
     if (locked)
       throw new Error("The protected super-admin account cannot be deleted.");
     if (officialError) throw officialError;
 
-    const officialIds = (linkedOfficials || []).map((official) => official.id);
+    const officialIds = linkedOfficial ? [linkedOfficial.id] : [];
     await service.from("super_admin_audit").insert({
       actor_user_id: user.id,
       action: "account_deleted",

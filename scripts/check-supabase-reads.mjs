@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 const roots = ["app", "components", "lib"];
@@ -11,6 +12,11 @@ const largeTables = new Set([
   "organization_officials", "registration_program_officials", "undo_changes",
 ]);
 const boundedMethods = new Set(["limit", "range", "single", "maybeSingle"]);
+// Mutation RETURNING is not a collection read when a verified primary key
+// bounds the write to one row. Keep this narrow rather than exempting all writes.
+const singletonMutationKeys = new Map([
+  ["official_availability_blocks", "id"],
+]);
 // Reviewed starting point for phase two. New entries are not added casually;
 // this list is reduced as each legacy read moves to paging or a bounded API.
 const reviewedBaseline = new Set([
@@ -78,9 +84,8 @@ function containingStatement(node) {
   return current;
 }
 
-const failures = [];
-for (const file of roots.flatMap(filesIn)) {
-  const sourceText = fs.readFileSync(file, "utf8");
+export function findUnboundedReads(file, sourceText, baseline = reviewedBaseline) {
+  const failures = [];
   const source = ts.createSourceFile(file, sourceText, ts.ScriptTarget.Latest, true, file.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   function visit(node) {
     if (ts.isCallExpression(node) && methodName(node) === "select") {
@@ -91,12 +96,17 @@ for (const file of roots.flatMap(filesIn)) {
         tableArg = from?.arguments[0],
         table = tableArg && ts.isStringLiteral(tableArg) ? tableArg.text : "";
       if (largeTables.has(table)) {
+        const mutationKey = singletonMutationKeys.get(table),
+          singletonMutation = calls.some((call) => ["delete", "update"].includes(methodName(call))) &&
+            calls.some((call) => methodName(call) === "eq" &&
+              call.arguments[0] && ts.isStringLiteral(call.arguments[0]) &&
+              call.arguments[0].text === mutationKey);
         const bounded = calls.some((call) => boundedMethods.has(methodName(call))),
           statement = containingStatement(node),
           text = statement?.getFullText(source) || top.getFullText(source),
           explicitlyReviewed = text.includes("data-access: query-builder");
         const baselineKey = `${file}:${table}`;
-        if (!bounded && !explicitlyReviewed && !reviewedBaseline.has(baselineKey)) {
+        if (!bounded && !singletonMutation && !explicitlyReviewed && !baseline.has(baselineKey)) {
           const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
           failures.push(`${file}:${line + 1} ${table}`);
         }
@@ -105,11 +115,18 @@ for (const file of roots.flatMap(filesIn)) {
     ts.forEachChild(node, visit);
   }
   visit(source);
+  return failures;
 }
 
-if (failures.length) {
-  console.error("Unbounded reads from growth-sensitive tables:\n" + failures.join("\n"));
-  console.error("Add range/limit/single, use a paging helper, or annotate a reviewed query builder.");
-  process.exit(1);
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+  const failures = roots.flatMap(filesIn).flatMap((file) =>
+    findUnboundedReads(file, fs.readFileSync(file, "utf8")),
+  );
+  if (failures.length) {
+    console.error("Unbounded reads from growth-sensitive tables:\n" + failures.join("\n"));
+    console.error("Add range/limit/single, use a paging helper, or annotate a reviewed query builder.");
+    process.exitCode = 1;
+  } else {
+    console.log("No new unreviewed growth-sensitive Supabase reads found.");
+  }
 }
-console.log("No new unreviewed growth-sensitive Supabase reads found.");

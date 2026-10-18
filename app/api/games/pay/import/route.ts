@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireManagedOrganization } from "../../../../../lib/server/organizationScope";
+import { readAllPages } from "../../../../../lib/supabase/readAll";
 
 type Row = { spreadsheetRow?: number; gameId?: string; positionId?: string; gameFee?: number };
 type TemplateRow = { spreadsheetRow?: number; gameId?: string; fees?: Record<string, number> };
+type ProtectedAssignment = { game_id: string; position_id: string; game_fee: number; payment_status: string; status: string };
 
 export async function POST(request: NextRequest) {
   const context = await requireManagedOrganization(request, ["owner", "admin", "assignor", "billing"]);
@@ -89,11 +91,14 @@ export async function POST(request: NextRequest) {
   const approvedKeys = new Set<string>();
   const paidFees = new Map<string, number>();
   for (let offset = 0; offset < gameIds.length; offset += 100) {
-    const { data: protectedAssignments, error: protectedError } = await service.from("assignments")
+    // A bounded game filter can still match more than one response of assignments.
+    const { data: protectedAssignments, error: protectedError } = await readAllPages<ProtectedAssignment>((from, to) => service.from("assignments")
       .select("game_id,position_id,game_fee,payment_status,status")
       .in("game_id", gameIds.slice(offset, offset + 100))
       .in("payment_status", ["approved", "paid"])
-      .in("status", ["proposed", "accepted", "confirmed"]);
+      .in("status", ["proposed", "accepted", "confirmed"])
+      .order("id")
+      .range(from, to));
     if (protectedError) return NextResponse.json({ error: protectedError.message }, { status: 400 });
     for (const assignment of protectedAssignments || []) {
       const key = `${assignment.game_id}:${assignment.position_id}`;
