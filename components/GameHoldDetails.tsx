@@ -16,7 +16,7 @@ export default function GameHoldDetails({ organizationId, gameId }: { organizati
   return <div className="assignmentHoldReason assignmentHoldReasonDetail">
     <strong>Why this game is on hold</strong>
     {error ? <p role="alert">{error}</p> : !data ? <p>Checking saved hold information and current schedule overlaps…</p> : data.status !== "suspended" ? <p>This game is no longer on hold. Refresh the game list.</p> : <>
-      {data.conflicts.length > 0 && <><p>Resolve {data.conflicts.length === 1 ? "this overlap" : "these overlaps"} before activating:</p><ul>{data.conflicts.map(c => <li key={c.id}>
+      {data.conflicts.length > 0 && <><p>Review {data.conflicts.length === 1 ? "this possible conflict" : "these possible conflicts"} before activating. A shared venue may contain multiple fields:</p><ul>{data.conflicts.map(c => <li key={c.id}>
         <strong>{c.home?.name || "TBD"} vs {c.away?.name || "TBD"} · {c.levels?.name || "Level TBD"}</strong><br />
         {formatEventDateTime(c.starts_at, c.location)}–{formatEventTime(new Date(new Date(c.starts_at).getTime() + (c.duration_minutes || 110) * 60000).toISOString(), c.location)}<br />
         {c.location?.name || "Venue TBD"} · {c.conflict_type} · <strong>{c.overlap_minutes}-minute overlap</strong><br />

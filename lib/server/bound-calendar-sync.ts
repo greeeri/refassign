@@ -10,8 +10,8 @@ export async function syncBoundFeed(service: Service, feedId: string, force = fa
     const url = new URL(feed.url);
     if (url.protocol !== "https:" || url.hostname !== "gobound.com" || !/^\/ia\/conferences\/[a-z]+\/calendar\/ical\/[a-z0-9]+$/.test(url.pathname) || url.search || url.hash) throw new Error("Invalid registered feed URL.");
     const headers: Record<string, string> = { Accept: "text/calendar" };
-    if (feed.etag) headers["If-None-Match"] = feed.etag;
-    if (feed.last_modified) headers["If-Modified-Since"] = feed.last_modified;
+    if (!force && !feed.needs_full_fetch && feed.etag) headers["If-None-Match"] = feed.etag;
+    if (!force && !feed.needs_full_fetch && feed.last_modified) headers["If-Modified-Since"] = feed.last_modified;
     const response = await fetch(url, { cache: "no-store", redirect: "error", signal: AbortSignal.timeout(45000), headers });
     let events = null, hash = feed.content_hash;
     if (response.status !== 304) {

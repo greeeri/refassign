@@ -5,7 +5,7 @@ import { readAllPages } from "../lib/supabase/readAll";
 import { announceUndoAvailable } from "./UndoCenter";
 import { resolveImportTeam } from "../lib/game-import-team";
 import { showGameConflictPopup } from "../lib/game-conflict-popup";
-import { normalizeGameStatus } from "../lib/game-status";
+import { normalizeGameStatus, boundCalendarReview } from "../lib/game-status";
 import { eventLocalToIso, eventTimeParts, formatEventDate, formatEventTime } from "../lib/event-time";
 import { LeagueLevelSetting, levelsForLeague } from "../lib/league-levels";
 import { LeagueTeamSetting, teamsForLeague } from "../lib/league-teams";
@@ -18,6 +18,11 @@ type Game = {
   id: string;
   game_number: string;
   status: string;
+  bound_source_status?: string | null;
+  bound_hold_reasons?: string[];
+  bound_hold_resolution_candidate?: boolean;
+  venue_conflict_hold?: boolean;
+  calendar_needs_review?: boolean;
   sport_id: string;
   league_id: string | null;
   level_id: string | null;
@@ -397,7 +402,7 @@ export default function GamesManagerV3({
       let query = sb
         .from("games")
         .select(
-          "id,game_number,status,sport_id,league_id,level_id,home_team_id,away_team_id,location_id,bill_to_id,archived_at,starts_at,time_tbd,field_tbd,duration_minutes,officials_needed,notes,sports(name),leagues(name),levels(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(id,name,city,state)",
+          "id,game_number,status,bound_source_status,bound_hold_reasons,bound_hold_resolution_candidate,venue_conflict_hold,calendar_needs_review,sport_id,league_id,level_id,home_team_id,away_team_id,location_id,bill_to_id,archived_at,starts_at,time_tbd,field_tbd,duration_minutes,officials_needed,notes,sports(name),leagues(name),levels(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(id,name,city,state)",
         )
         .order("starts_at", { ascending: !(preview && showArchived) })
         .order("id");
@@ -1845,6 +1850,7 @@ export default function GamesManagerV3({
           <tbody>
             {filteredGames.map((g) => {
               const row = statusColors(g.status);
+              const calendarReview = boundCalendarReview(g);
               const rainOut = g.status === "rained_out";
               return (
                 <tr
@@ -1877,6 +1883,7 @@ export default function GamesManagerV3({
                     <b>
                       {g.home?.name || "TBD"} vs {g.away?.name || "TBD"}
                     </b>
+                    {calendarReview && <small><strong>Calendar: {calendarReview.sourceLabel} · RefAssign: {calendarReview.operationalLabel}</strong><br />{calendarReview.recommendation}</small>}
                   </td>
                   <td>
                     {g.leagues?.name || "—"}
