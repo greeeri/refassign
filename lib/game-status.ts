@@ -39,3 +39,47 @@ export function gameHoldReason(game: {
   if (notes.length) reasons.push(notes[notes.length - 1].replace(/^(?:on hold|hold reason)\s*:\s*/i, ""));
   return reasons.length ? reasons.join(" ") : "No hold reason has been recorded. Review the game details before activating.";
 }
+
+export type BoundCalendarReview = {
+  status: string;
+  venue_conflict_hold?: boolean;
+  bound_source_status?: string | null;
+  bound_hold_reasons?: string[] | null;
+  bound_hold_resolution_candidate?: boolean;
+  calendar_needs_review?: boolean;
+};
+
+export function boundCalendarReview(game: BoundCalendarReview) {
+  if (!game.bound_source_status) return null;
+  const source = game.bound_source_status.trim().toUpperCase();
+  const sourceLabel = source === "CANCELLED" || source === "CANCELED" ? "Cancelled"
+    : source === "CONFIRMED" ? "Confirmed" : source === "TENTATIVE" ? "Tentative" : "Unknown";
+  const status = normalizeGameStatus(game.status);
+  const operationalLabel = status === "active" ? "Active" : inactiveGameStatusLabel(status);
+  const reasons = game.bound_hold_reasons || [];
+  let recommendation: string;
+  if (sourceLabel === "Cancelled") {
+    recommendation = "Review the calendar cancellation; do not assign.";
+  } else if (game.bound_hold_resolution_candidate && status === "suspended") {
+    recommendation = "Previous blockers are no longer detected. Verify the correction before manually releasing the hold.";
+  } else if (status === "suspended" || game.venue_conflict_hold) {
+    const checks: string[] = [];
+    if (reasons.includes("source_overlap") || reasons.includes("database_overlap") || game.venue_conflict_hold)
+      checks.push("verify overlapping teams and the actual field (a shared venue may have multiple fields)");
+    if (reasons.includes("invalid_duration")) checks.push("confirm the end time and duration");
+    if (reasons.includes("missing_time")) checks.push("confirm the start time");
+    if (reasons.includes("missing_venue")) checks.push("confirm the venue or field");
+    if (reasons.some(reason => ["missing_level", "ambiguous_level"].includes(reason))) checks.push("confirm the team level");
+    if (reasons.includes("missing_teams")) checks.push("confirm both teams");
+    if (reasons.includes("source_removed")) checks.push("confirm why the game was removed from the calendar");
+    if (reasons.includes("source_tentative")) checks.push("confirm the tentative calendar event");
+    if (reasons.includes("source_status_unknown")) checks.push("confirm the source calendar status");
+    if (reasons.includes("source_details_unverified")) checks.push("refresh and verify the full source calendar details");
+    recommendation = checks.length ? `Assignor review: ${checks.join("; ")}. Keep on hold until resolved.` : "Assignor review: confirm the saved hold reason before releasing the hold.";
+  } else if (status !== "active") {
+    recommendation = "Review the difference from the source calendar before changing the RefAssign status.";
+  } else {
+    recommendation = game.calendar_needs_review ? "Review the calendar details before assigning." : "Calendar review acknowledged; assign using the usual eligibility checks.";
+  }
+  return { sourceLabel, operationalLabel, recommendation };
+}

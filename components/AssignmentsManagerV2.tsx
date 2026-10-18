@@ -8,6 +8,7 @@ import {
   inactiveGameStatusLabel,
   normalizeGameStatus,
   gameHoldReason,
+  boundCalendarReview,
 } from "../lib/game-status";
 import { createClient } from "../lib/supabase/client";
 import { readAllForChunks, readAllPages } from "../lib/supabase/readAll";
@@ -34,6 +35,10 @@ type Game = {
   time_tbd: boolean;
   field_tbd: boolean;
   venue_conflict_hold: boolean;
+  bound_source_status: string | null;
+  bound_hold_reasons: string[];
+  bound_hold_resolution_candidate: boolean;
+  bound_hold_checked_at: string | null;
   notes: string | null;
   calendar_needs_review: boolean;
   calendar_reviewed_at: string | null;
@@ -525,10 +530,39 @@ export default function AssignmentsManagerV2({
     } | null>(null),
     [calendarReviewSaving, setCalendarReviewSaving] = useState(false),
     [bulkResult, setBulkResult] = useState<BulkActionResult | null>(null);
+  const [calendarReleaseSaving, setCalendarReleaseSaving] = useState<string | null>(null);
+  const calendarReleaseLock = useRef(false);
+  const calendarReleaseOrganization = useRef(organizationId);
+  calendarReleaseOrganization.current = organizationId;
+  async function reviewAndReleaseCalendarHold(game: Game) {
+    if (!canManage || calendarReleaseLock.current || !game.bound_hold_checked_at) return;
+    const startedOrganization = organizationId;
+    calendarReleaseLock.current = true;
+    setCalendarReleaseSaving(game.id);
+    setError("");
+    try {
+      const { data, error: releaseError } = await supabase.rpc("review_and_release_bound_game", {
+        p_game_id: game.id,
+        p_expected_hold_checked_at: game.bound_hold_checked_at,
+      });
+      if (calendarReleaseOrganization.current !== startedOrganization) return;
+      if (releaseError) throw new Error(releaseError.message);
+      const result = data as { status: string };
+      await load(true);
+      if (calendarReleaseOrganization.current !== startedOrganization) return;
+      setNotice(result.status === "canceled" ? "Calendar cancellation reviewed. The game remains Cancelled." : "Calendar reviewed and hold released. The game is Active.");
+    } catch (releaseError) {
+      if (calendarReleaseOrganization.current !== startedOrganization) return;
+      setError(releaseError instanceof Error ? releaseError.message : "Unable to review and release the hold. No review was acknowledged.");
+    } finally {
+      calendarReleaseLock.current = false;
+      setCalendarReleaseSaving(null);
+    }
+  }
   async function confirmCalendarReview(ids: string[]) {
     const pending = games.filter((item) => ids.includes(item.id) && item.calendar_needs_review);
     if (!canManage || calendarReviewSaving || !pending.length) return;
-    if (!window.confirm(`Confirm you reviewed the dates, times, venues and teams for ${pending.length === 1 ? "this new or updated calendar game" : `these ${pending.length} new or updated calendar games`}?`)) return;
+    if (!window.confirm(`Confirm you reviewed the dates, times, venues and teams for ${pending.length === 1 ? "this new or updated calendar game" : `these ${pending.length} new or updated calendar games`}? This acknowledges review only; it does not release holds or change game status.`)) return;
     setCalendarReviewSaving(true);
     setError("");
     try {
@@ -541,7 +575,7 @@ export default function AssignmentsManagerV2({
       setGames((current) => current.map((item) => confirmed.has(item.id)
         ? { ...item, calendar_needs_review: false, calendar_reviewed_at: new Date().toISOString() }
         : item));
-      setNotice(`${result.reviewed} calendar game${result.reviewed === 1 ? "" : "s"} marked reviewed.`);
+      setNotice(`${result.reviewed} calendar game${result.reviewed === 1 ? "" : "s"} marked reviewed. Holds and game statuses are unchanged.`);
     } catch (reviewError) {
       setError(reviewError instanceof Error ? reviewError.message : "Unable to confirm calendar game review.");
     } finally {
@@ -605,7 +639,7 @@ export default function AssignmentsManagerV2({
           let query = supabase
             .from("games")
             .select(
-              "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,time_tbd,field_tbd,venue_conflict_hold,notes,calendar_needs_review,calendar_reviewed_at,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,address,city,state,latitude,longitude,venue_id)",
+              "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,time_tbd,field_tbd,venue_conflict_hold,bound_source_status,bound_hold_reasons,bound_hold_resolution_candidate,bound_hold_checked_at,notes,calendar_needs_review,calendar_reviewed_at,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,address,city,state,latitude,longitude,venue_id)",
             )
             .is("archived_at", null)
             .order("starts_at")
@@ -920,7 +954,7 @@ export default function AssignmentsManagerV2({
         ? { data: [] as Game[], error: null }
         : await readAllPages<Game>((from, to) => {
           let query = supabase.from("games")
-            .select("id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,time_tbd,field_tbd,venue_conflict_hold,notes,calendar_needs_review,calendar_reviewed_at,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,address,city,state,latitude,longitude,venue_id)")
+            .select("id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,time_tbd,field_tbd,venue_conflict_hold,bound_source_status,bound_hold_reasons,bound_hold_resolution_candidate,bound_hold_checked_at,notes,calendar_needs_review,calendar_reviewed_at,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,address,city,state,latitude,longitude,venue_id)")
             .eq("organization_id", organizationId)
             .eq("starts_at", sourceGame.starts_at)
             .is("archived_at", null)
@@ -5190,6 +5224,7 @@ export default function AssignmentsManagerV2({
     );
   }
   function renderGameRow(g: Game, linked: boolean, showChain: boolean) {
+    const calendarReview = boundCalendarReview(g);
     const completeness = assignmentCompleteness(g);
     const staffing = staffingCounts(g);
     const normalizedStatus = normalizeGameStatus(g.status);
@@ -5315,7 +5350,8 @@ export default function AssignmentsManagerV2({
           <small style={{ color: isRainOut ? "#dbeafe" : undefined }}>
             {g.game_number}
           </small>
-          {gameHoldReason(g) && <small className="assignmentHoldReason"><strong>Hold reason:</strong> {gameHoldReason(g)}</small>}
+          {calendarReview && <small className="assignmentHoldReason"><strong>Calendar: {calendarReview.sourceLabel} · RefAssign: {calendarReview.operationalLabel}</strong><br />{calendarReview.recommendation}</small>}
+          {!calendarReview && gameHoldReason(g) && <small className="assignmentHoldReason"><strong>Hold reason:</strong> {gameHoldReason(g)}</small>}
         </button>
         <span
           className="assignmentGameLocation"
@@ -5417,10 +5453,18 @@ export default function AssignmentsManagerV2({
               }}
             />
           </span>
+          {canManage && g.bound_source_status && (normalizedStatus === "suspended" || (normalizedStatus === "canceled" && g.bound_source_status === "CANCELLED")) && (
+            <button type="button" className="secondary" style={{ padding: "3px 7px", fontSize: 10 }}
+              disabled={Boolean(calendarReleaseSaving) || calendarReviewSaving || !g.bound_hold_checked_at || (normalizedStatus === "suspended" && (!g.bound_hold_resolution_candidate || !g.venue_conflict_hold))}
+              title={normalizedStatus === "canceled" ? "Acknowledge the cancellation without reactivating the game." : g.bound_hold_resolution_candidate && g.venue_conflict_hold ? "Review and release this resolved calendar hold in one action. The server checks for live conflicts before release." : "Release is blocked until the calendar hold reasons are resolved. You can still mark the calendar reviewed."}
+              onClick={(event) => { event.stopPropagation(); void reviewAndReleaseCalendarHold(g); }}>
+              {calendarReleaseSaving === g.id ? "Reviewing…" : normalizedStatus === "canceled" ? "Review cancellation" : "Review & release hold"}
+            </button>
+          )}
           {canManage && (g.calendar_needs_review || g.calendar_reviewed_at) && (
-            <label className="calendarGameReviewCheckbox" onClick={(event) => event.stopPropagation()}>
+            <label className="calendarGameReviewCheckbox" title="Acknowledges calendar review only. Does not release a hold or change game status." onClick={(event) => event.stopPropagation()}>
               <input type="checkbox" checked={!g.calendar_needs_review}
-                disabled={calendarReviewSaving || !g.calendar_needs_review}
+                disabled={calendarReviewSaving || Boolean(calendarReleaseSaving) || !g.calendar_needs_review}
                 aria-label={`Reviewed calendar game ${g.game_number}`}
                 onChange={(event) => { if (event.target.checked) void confirmCalendarReview([g.id]); }} />
               Reviewed

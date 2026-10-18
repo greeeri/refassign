@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
       const venue = Boolean(game.location_id && !game.field_tbd && !other.field_tbd && other.location_id === game.location_id);
       const team = realTeams.some(t => t === other.home_team_id || t === other.away_team_id);
       if (!venue && !team) return [];
-      return [{ ...other, notes: undefined, conflict_type: [venue ? "Same field" : "", team ? "Same team" : ""].filter(Boolean).join(" and "), overlap_minutes: Math.ceil(overlap / 60000) }];
+      return [{ ...other, notes: undefined, conflict_type: [venue ? "Same listed venue (verify field)" : "", team ? "Same team" : ""].filter(Boolean).join(" and "), overlap_minutes: Math.ceil(overlap / 60000) }];
     });
   }
   const recorded = gameHoldReason(game);
