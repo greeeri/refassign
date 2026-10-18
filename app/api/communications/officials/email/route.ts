@@ -1,14 +1,18 @@
 import {NextRequest,NextResponse} from "next/server";
 import {sendOfficialNotification} from "../../../../../lib/communications/officialCc";
 import {requireManagedOrganization} from "../../../../../lib/server/organizationScope";
+const MAX_GROUP_EMAIL_RECIPIENTS=500;
 const esc=(v:unknown)=>String(v??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"})[c]!);
 export async function POST(request:NextRequest){
  const scope=await requireManagedOrganization(request);if(scope.error)return scope.error;const{service,user,organizationId}=scope;
  const body=await request.json().catch(()=>({})) as {officialIds?:string[];subject?:string;message?:string};
- const ids=[...new Set(body.officialIds||[])].slice(0,500),subject=body.subject?.trim().slice(0,180)||"",message=body.message?.trim().slice(0,10000)||"";
+ const ids=[...new Set(body.officialIds||[])],subject=body.subject?.trim().slice(0,180)||"",message=body.message?.trim().slice(0,10000)||"";
+ if(ids.length>MAX_GROUP_EMAIL_RECIPIENTS)return NextResponse.json({error:`Select no more than ${MAX_GROUP_EMAIL_RECIPIENTS} officials per email.`},{status:400});
  if(!ids.length||!subject||!message)return NextResponse.json({error:"Choose at least one official and enter a subject and message."},{status:400});
  const key=process.env.RESEND_API_KEY;if(!key)return NextResponse.json({error:"Email is not configured yet."},{status:503});
- const{data:links,error}=await service.from("organization_officials").select("official_id,officials!inner(id,first_name,last_name,email)").eq("organization_id",organizationId).eq("active",true).in("official_id",ids);
+ // The (organization_id, official_id) primary key gives at most one row per
+ // selected ID. The validated cap makes this limit complete, not truncation.
+ const{data:links,error}=await service.from("organization_officials").select("official_id,officials!inner(id,first_name,last_name,email)").eq("organization_id",organizationId).eq("active",true).in("official_id",ids).limit(MAX_GROUP_EMAIL_RECIPIENTS);
  if(error)return NextResponse.json({error:error.message},{status:400});let sent=0;const failures:string[]=[];
  for(const row of links||[]){const o=(Array.isArray(row.officials)?row.officials[0]:row.officials) as {id:string;first_name:string;last_name:string;email:string|null}|null,name=`${o?.first_name||"Official"} ${o?.last_name||""}`.trim();if(!o?.email){failures.push(`${name}: missing email address`);continue}
   const{data:log,error:logError}=await service.from("official_communications").insert({organization_id:organizationId,official_id:o.id,channel:"email",message_type:"custom",recipient:o.email,subject,message_body:message,sent_by:user.id,delivery_status:"queued"}).select("id").single();if(logError||!log){failures.push(`${name}: ${logError?.message||"could not create communication log"}`);continue}

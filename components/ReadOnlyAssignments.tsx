@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { readOnlySchedule } from "../lib/assignments/readOnlySchedule";
 import styles from "./ReadOnlyAssignments.module.css";
 
 type Named = { name: string } | null;
@@ -59,23 +60,26 @@ export default function ReadOnlyAssignments({
   const [isMentor, setIsMentor] = useState(false);
   const [selfAssigning, setSelfAssigning] = useState("");
   const [notice, setNotice] = useState("");
+  const [refresh, setRefresh] = useState(0);
+  const loadGeneration = useRef(0);
+  const assignmentPending = useRef(false);
+
+  useEffect(() => { setNotice(""); setPage(0); }, [organizationId]);
 
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
     setError("");
     setGames([]);
-    fetch(
-      `/api/assignments/read-only?${new URLSearchParams({ organizationId })}`,
-      { signal: controller.signal, cache: "no-store" },
-    )
-      .then(async (response) => {
-        const result = await response.json();
-        if (!response.ok)
-          throw new Error(result.error || "Could not load assignments.");
-        return result;
+    const generation = ++loadGeneration.current;
+    setIsMentor(false);
+    readOnlySchedule<Game>(organizationId, controller.signal)
+      .then((result) => {
+        if (!controller.signal.aborted && generation === loadGeneration.current) {
+          setGames(result.games);
+          setIsMentor(result.isMentor);
+        }
       })
-      .then((result) => { setGames(result.games); setIsMentor(Boolean(result.isMentor)); })
       .catch((problem) => {
         if (!controller.signal.aborted) setError(problem.message);
       })
@@ -83,7 +87,7 @@ export default function ReadOnlyAssignments({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [organizationId]);
+  }, [organizationId, refresh]);
 
   const locations = useMemo(
     () =>
@@ -172,16 +176,24 @@ export default function ReadOnlyAssignments({
   }
 
   async function selfAssignMentor(gameId: string) {
+    if (assignmentPending.current) return;
+    assignmentPending.current = true;
+    const generation = loadGeneration.current;
     setSelfAssigning(gameId); setError(""); setNotice("");
-    const response = await fetch("/api/assignments/read-only", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gameId }) });
-    const result = await response.json();
-    if (!response.ok) setError(result.error || "Could not self-assign as mentor.");
-    else {
+    try {
+      const response = await fetch("/api/assignments/read-only", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gameId }) });
+      const result = await response.json();
+      if (generation !== loadGeneration.current) return;
+      if (!response.ok) throw new Error(result.error || "Could not self-assign as mentor.");
       setNotice("Mentor assignment accepted.");
-      const refreshed = await fetch(`/api/assignments/read-only?${new URLSearchParams({ organizationId })}`, { cache: "no-store" }).then((item) => item.json());
-      setGames(refreshed.games || []);
+      setRefresh((value) => value + 1);
+    } catch (problem) {
+      if (generation === loadGeneration.current)
+        setError(problem instanceof Error ? problem.message : "Could not self-assign as mentor.");
+    } finally {
+      assignmentPending.current = false;
+      setSelfAssigning("");
     }
-    setSelfAssigning("");
   }
 
   return (
@@ -300,7 +312,7 @@ export default function ReadOnlyAssignments({
       {notice && <p className="loginMessage" role="status">{notice}</p>}
       {loading ? (
         <p>Loading assignments…</p>
-      ) : !error && (
+      ) : (!error || games.length > 0) && (
         <>
           {!visibleGames.length && (
             <p>No games match the selected date, location, and official filters.</p>
@@ -308,7 +320,7 @@ export default function ReadOnlyAssignments({
           {visibleGames.map((game) => (
             <article className={`card ${styles.gameCard}`} key={game.id} style={{ marginTop: 12 }}>
               {isMentor && !game.assignments.some((assignment) => assignment.sport_positions?.name.toLowerCase().includes("mentor") && !["declined", "cancelled"].includes(assignment.status)) && (
-                <button type="button" className={styles.selfAssign} disabled={selfAssigning === game.id} onClick={() => void selfAssignMentor(game.id)}>
+                <button type="button" className={styles.selfAssign} disabled={Boolean(selfAssigning)} onClick={() => void selfAssignMentor(game.id)}>
                   {selfAssigning === game.id ? "Assigning…" : "Self-Assign"}
                 </button>
               )}
