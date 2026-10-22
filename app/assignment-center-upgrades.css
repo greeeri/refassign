@@ -48,7 +48,7 @@
 .assignmentCrewPreview summary{cursor:pointer;list-style:none;border:1px solid #94a3b8;border-radius:7px;padding:6px 9px;background:#fff;color:#173b62;font-size:13px;font-weight:750}
 .assignmentCrewPreview summary::-webkit-details-marker{display:none}
 .assignmentCrewPreviewBody{display:none;position:absolute;right:0;top:calc(100% + 5px);min-width:235px;max-width:min(320px,85vw);padding:10px;background:#fff;color:#172033;border:1px solid #cbd5e1;border-radius:9px;box-shadow:0 8px 25px #0f172a30;z-index:20}
-.assignmentCrewPreview[open] .assignmentCrewPreviewBody,.assignmentCrewPreview:hover .assignmentCrewPreviewBody,.assignmentGameRow>button:hover~.assignmentStatusCell .assignmentCrewPreviewBody{display:block}
+.assignmentCrewPreview[open] .assignmentCrewPreviewBody,.assignmentCrewPreview:hover .assignmentCrewPreviewBody,.assignmentGameRow>.assignmentGameOpen:hover~.assignmentStatusCell .assignmentCrewPreviewBody{display:block}
 .assignmentCrewPreviewBody>div{display:grid;grid-template-columns:55px 1fr;gap:2px 8px;padding:5px 0;border-bottom:1px solid #e2e8f0;font-size:13px}
 .assignmentCrewPreviewBody>div:last-child{border-bottom:0}
 .assignmentCrewPreviewBody small{grid-column:2;color:#475569}
@@ -394,4 +394,53 @@ body.officialDragActive{cursor:grabbing}
   border-radius: 8px;
   background: #fefce8;
   font-size: 14px;
+}
+
+
+/* Each game's visibility is independent from bulk selection and the active editor. */
+.assignmentGameRow { position: relative; }
+.assignmentGameTableHeader,
+.assignmentGameRow { padding-right: 68px; }
+.assignmentGameRow > .assignmentGameCollapse {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #173b62;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.assignmentGameRow > .assignmentGameCollapse:hover { background: #eff6ff; border-color: #93c5fd; }
+.assignmentGameCollapse:focus-visible { outline: 3px solid #2563eb; outline-offset: 2px; }
+.assignmentGameChevrons { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.assignmentGameCollapse[aria-expanded="true"] .assignmentGameChevrons { transform: rotate(180deg); }
+.assignmentExpandedDetails { padding: 16px; border-bottom: 1px solid #cbd5e1; background: #f8fafc; color: #173b62; }
+.assignmentExpandedHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.assignmentExpandedHeader h3 { margin: 0; font-size: 17px; }
+.assignmentExpandedHeader p { margin: 5px 0; color: #475569; font-size: 13px; line-height: 1.5; }
+.assignmentExpandedHeader > button { min-height: 44px; margin: 0; }
+.assignmentExpandedSummary { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 12px 0; font-size: 13px; }
+.assignmentExpandedCrew { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.assignmentExpandedCrew article { display: grid; align-content: start; gap: 8px; min-width: 0; padding: 12px; border: 1px solid #dbe4ee; border-radius: 9px; background: #fff; }
+.assignmentExpandedCrew article > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.assignmentExpandedCrew article > strong { overflow-wrap: anywhere; }
+.assignmentExpandedCrew article > button { justify-self: start; min-height: 44px; }
+@media (max-width: 760px) {
+  .assignmentGameRow > .assignmentGameOpen { padding-right: 52px !important; }
+  .assignmentGameRow > .assignmentGameCollapse { grid-column: auto; grid-row: auto; top: 12px; right: 12px; width: 44px; }
+  .assignmentExpandedDetails { margin: 0 8px 12px; padding: 12px; border: 1px solid #cbd5e1; border-top: 0; border-radius: 0 0 12px 12px; }
+  .assignmentExpandedHeader > button { width: 100%; }
+  .assignmentExpandedCrew { grid-template-columns: minmax(0, 1fr); }
 }

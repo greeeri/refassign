@@ -428,7 +428,7 @@ export default function AssignmentsManagerV2({
     [linkGroups, setLinkGroups] = useState<LinkGroup[]>([]),
     [linkMembers, setLinkMembers] = useState<LinkMember[]>([]),
     [linkSelected, setLinkSelected] = useState<string[]>([]),
-    [showSelectedDetails, setShowSelectedDetails] = useState(false),
+    [expandedGameIds, setExpandedGameIds] = useState<Set<string>>(new Set()),
     [linking, setLinking] = useState(false),
     [draggingGame, setDraggingGame] = useState(""),
     [draggingOfficial, setDraggingOfficial] = useState(""),
@@ -932,6 +932,7 @@ export default function AssignmentsManagerV2({
     setInitialGamesReady(false);
     setLinkSelected([]);
     setSelfAssignSelected([]);
+    setExpandedGameIds(new Set());
     setSelected("");
     setReplacementOnly(false);
     void load();
@@ -1904,29 +1905,20 @@ export default function AssignmentsManagerV2({
     setSelfAssignSaving(false);
   }
   const game = games.find((g) => g.id === selected);
-  const sportPositions = game
-    ? positions
-        .filter((p) => p.sport_id === game.sport_id)
-        .sort((a, b) => a.sort_order - b.sort_order)
-    : [];
-  const gamePositions = game
-    ? [
-        ...sportPositions.slice(
-          0,
-          Math.max(0, Math.min(game.officials_needed, sportPositions.length)),
-        ),
-        ...sportPositions.filter(
-          (position) =>
-            mentorSlots.some(
-              (slot) =>
-                slot.game_id === game.id && slot.position_id === position.id,
-            ) &&
-            !sportPositions
-              .slice(0, game.officials_needed)
-              .some((active) => active.id === position.id),
-        ),
-      ]
-    : [];
+  function assignmentPositionsForGame(listedGame: Game) {
+    const sportPositions = positions
+      .filter((position) => position.sport_id === listedGame.sport_id)
+      .sort((a, b) => a.sort_order - b.sort_order);
+    const regularPositions = sportPositions.slice(0, Math.max(0, listedGame.officials_needed));
+    return [
+      ...regularPositions,
+      ...sportPositions.filter((position) =>
+        mentorSlots.some((slot) => slot.game_id === listedGame.id && slot.position_id === position.id) &&
+        !regularPositions.some((active) => active.id === position.id),
+      ),
+    ];
+  }
+  const gamePositions = game ? assignmentPositionsForGame(game) : [];
   const gameAssignments = game
     ? assignments.filter((a) => a.game_id === game.id)
     : [];
@@ -1996,6 +1988,48 @@ export default function AssignmentsManagerV2({
         return start >= now && start <= end;
       }).length;
   }
+  // Card visibility is independent of both bulk selection and the active editor.
+  // Keep previously opened games visible when editing another game's assignments.
+  useEffect(() => {
+    if (selected) {
+      setExpandedGameIds((current) => {
+        if (current.has(selected)) return current;
+        return new Set(current).add(selected);
+      });
+    }
+  }, [selected]);
+  function toggleGameExpanded(gameId: string) {
+    setExpandedGameIds((current) => {
+      const next = new Set(current);
+      if (next.has(gameId)) next.delete(gameId);
+      else next.add(gameId);
+      return next;
+    });
+  }
+  function closeGameDetails(gameId: string) {
+    setExpandedGameIds((current) => {
+      const next = new Set(current);
+      next.delete(gameId);
+      return next;
+    });
+    if (selected === gameId) setSelected("");
+  }
+  const selectedVisibleGameIds = linkSelected.filter((id) =>
+    filteredGames.some((listedGame) => listedGame.id === id),
+  );
+  const showSelectedDetails = selectedVisibleGameIds.length > 0 &&
+    selectedVisibleGameIds.every((id) => expandedGameIds.has(id));
+  function toggleSelectedDetails() {
+    setExpandedGameIds((current) => {
+      const next = new Set(current);
+      const closeSelected = selectedVisibleGameIds.every((id) => current.has(id));
+      selectedVisibleGameIds.forEach((id) => {
+        if (closeSelected) next.delete(id);
+        else next.add(id);
+      });
+      return next;
+    });
+  }
   function requestSelectedGame(nextGameId: string) {
     if (
       nextGameId &&
@@ -2007,6 +2041,7 @@ export default function AssignmentsManagerV2({
     )
       return;
     setSelected(nextGameId);
+    if (nextGameId) setExpandedGameIds((current) => new Set(current).add(nextGameId));
     setOverrideOfficial("");
   }
   function chooseRange(r: Range) {
@@ -4991,7 +5026,7 @@ export default function AssignmentsManagerV2({
           <button
             type="button"
             className="secondary"
-            onClick={() => setSelected("")}
+            onClick={() => closeGameDetails(game.id)}
             aria-label="Close game assignments"
           >
             Close
@@ -5282,6 +5317,22 @@ export default function AssignmentsManagerV2({
           color: isRainOut ? "#fff" : "inherit",
         }}
       >
+        <button
+          type="button"
+          className="assignmentGameCollapse"
+          aria-label={`${expandedGameIds.has(g.id) ? "Collapse" : "Expand"} game ${g.game_number}`}
+          aria-expanded={expandedGameIds.has(g.id)}
+          aria-controls={`assignment-game-details-${g.id}`}
+          title={`${expandedGameIds.has(g.id) ? "Collapse" : "Expand"} game details`}
+          onClick={(event) => {
+            event.stopPropagation();
+            toggleGameExpanded(g.id);
+          }}
+        >
+          <svg className="assignmentGameChevrons" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="m6 4 6 4 6-4 M6 10l6 4 6-4 M6 16l6 4 6-4" />
+          </svg>
+        </button>
         <label
           title="Select game for bulk actions or linking"
           style={{ display: "flex", justifyContent: "center" }}
@@ -5296,7 +5347,9 @@ export default function AssignmentsManagerV2({
         </label>
         <button
           type="button"
-          aria-expanded={selected === g.id}
+          aria-expanded={expandedGameIds.has(g.id)}
+          aria-controls={`assignment-game-details-${g.id}`}
+          className="assignmentGameOpen"
           onClick={() => {
             if (pickedOfficial) void dropOfficialOnGame(g.id, pickedOfficial);
             else requestSelectedGame(g.id);
@@ -9352,7 +9405,7 @@ export default function AssignmentsManagerV2({
                   className="secondary"
                   disabled={!linkSelected.some((id) => filteredGames.some((g) => g.id === id))}
                   aria-expanded={showSelectedDetails}
-                  onClick={() => setShowSelectedDetails((current) => !current)}
+                  onClick={toggleSelectedDetails}
                 >
                   {showSelectedDetails ? "Close Selected Details" : "Open Selected Details"}
                 </button>
@@ -9666,6 +9719,11 @@ export default function AssignmentsManagerV2({
                         const travel = previous
                           ? travelDetails(previous, listedGame)
                           : null;
+                        const cardPositions = assignmentPositionsForGame(listedGame);
+                        const cardFilledCount = cardPositions.filter((position) =>
+                          assignments.some((assignment) => assignment.game_id === listedGame.id &&
+                            assignment.position_id === position.id && assignmentOccupiesPosition(assignment.status)),
+                        ).length;
                         return (
                           <div
                             key={listedGame.id}
@@ -9725,11 +9783,10 @@ export default function AssignmentsManagerV2({
                             {unit.groupId && canManage && (
                               <div
                                 style={{
-                                  position: "absolute",
-                                  right: 8,
-                                  top: 8,
-                                  zIndex: 2,
                                   display: "flex",
+                                  justifyContent: "flex-end",
+                                  padding: "6px 12px",
+                                  background: "#eff6ff",
                                   gap: 4,
                                 }}
                               >
@@ -9792,33 +9849,52 @@ export default function AssignmentsManagerV2({
                               Boolean(unit.groupId),
                               Boolean(unit.groupId) && index > 0,
                             )}
-                            {showSelectedDetails && linkSelected.includes(listedGame.id) && (
-                              <div className="assignmentSelectedDetails" style={{ padding: "12px 16px", borderBottom: "1px solid #cbd5e1", background: "#f8fafc" }}>
-                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                                  <strong>Game #{listedGame.game_number} · {listedGame.home?.name || "TBD"} vs {listedGame.away?.name || "TBD"}</strong>
-                                  <button type="button" className="secondary" onClick={() => requestSelectedGame(listedGame.id)}>Open Full Game Details</button>
-                                </div>
-                                <div style={{ marginTop: 8 }}>
-                                  {listedGame.leagues?.name || "League TBD"} · {listedGame.levels?.name || "Level TBD"} · {formatEventDate(listedGame.starts_at, listedGame.location)} {listedGame.time_tbd ? "Time TBD" : formatEventTime(listedGame.starts_at, listedGame.location)} · {listedGame.location?.name || "Location TBD"} · {inactiveGameStatusLabel(listedGame.status) || "Active"}
-                                </div>
-                                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 16px", marginTop: 8 }}>
-                                  {positions.filter((position) => position.sport_id === listedGame.sport_id).sort((a, b) => a.sort_order - b.sort_order).slice(0, Math.max(0, listedGame.officials_needed)).map((position) => {
-                                    const assignment = assignments.find((item) => item.game_id === listedGame.id && item.position_id === position.id && item.status !== "declined");
-                                    const official = assignment && officials.find((item) => item.id === assignment.official_id);
-                                    return <span key={position.id}><b>{shortPositionName(position.name)}:</b> {official ? `${official.first_name} ${official.last_name} (${assignment.status})` : "Open"}</span>;
-                                  })}
-                                </div>
-                              </div>
-                            )}
-                            {selected === listedGame.id && (
-                              <>
-                                <div
-                                  className="desktopInlineAssignmentHost"
-                                  ref={setInlineAssignmentHost}
-                                />
-                                {renderMobileInlineAssignment()}
-                              </>
-                            )}
+                            <div
+                              id={`assignment-game-details-${listedGame.id}`}
+                              hidden={!expandedGameIds.has(listedGame.id)}
+                            >
+                              {expandedGameIds.has(listedGame.id) && selected !== listedGame.id && (
+                                <section className="assignmentExpandedDetails" aria-label={`Details for game ${listedGame.game_number}`}>
+                                  <div className="assignmentExpandedHeader">
+                                    <div>
+                                      <h3>{listedGame.home?.name || "TBD"} vs {listedGame.away?.name || "TBD"}</h3>
+                                      <p>Game #{listedGame.game_number} · {listedGame.leagues?.name || "League TBD"} · {listedGame.levels?.name || "Level TBD"}</p>
+                                      <p>{formatEventDate(listedGame.starts_at, listedGame.location)} · {listedGame.time_tbd ? "Time TBD" : formatEventTime(listedGame.starts_at, listedGame.location)} · {listedGame.duration_minutes || 110} min · {listedGame.location?.name || "Location TBD"}</p>
+                                    </div>
+                                    <button type="button" className="secondary" onClick={() => requestSelectedGame(listedGame.id)}>Open Full Game Details</button>
+                                  </div>
+                                  <div className="assignmentExpandedSummary" aria-label="Assignment summary">
+                                    <span><b>{cardFilledCount}/{cardPositions.length}</b> Filled</span>
+                                    <span><b>{cardPositions.length - cardFilledCount}</b> Open</span>
+                                    <span>{inactiveGameStatusLabel(listedGame.status) || "Active"}</span>
+                                  </div>
+                                  <div className="assignmentExpandedCrew">
+                                    {cardPositions.map((position) => {
+                                      const assignment = assignments.find((item) => item.game_id === listedGame.id && item.position_id === position.id && assignmentOccupiesPosition(item.status));
+                                      const official = assignment && officials.find((item) => item.id === assignment.official_id);
+                                      const status = assignment ? assignmentStatus(assignment) : null;
+                                      return (
+                                        <article key={position.id}>
+                                          <div><b>{shortPositionName(position.name)}</b><span className={status?.className || "badge gray"}>{status?.label || "Open"}</span></div>
+                                          <strong>{official ? `${official.first_name} ${official.last_name}` : assignment ? "Assigned official" : "Unassigned"}</strong>
+                                          {assignment && positionPayDetails(listedGame.id, position.id, assignment)}
+                                          {assignment && <ScheduleLink officialId={assignment.official_id} />}
+                                        </article>
+                                      );
+                                    })}
+                                  </div>
+                                </section>
+                              )}
+                              {expandedGameIds.has(listedGame.id) && selected === listedGame.id && (
+                                <>
+                                  <div
+                                    className="desktopInlineAssignmentHost"
+                                    ref={setInlineAssignmentHost}
+                                  />
+                                  {renderMobileInlineAssignment()}
+                                </>
+                              )}
+                            </div>
                           </div>
                         );
                       })}
@@ -10060,6 +10136,7 @@ export default function AssignmentsManagerV2({
         </section>
         {game &&
           filteredGames.some((g) => g.id === game.id) &&
+          expandedGameIds.has(game.id) &&
           inlineAssignmentHost &&
           createPortal(
             <div
@@ -10074,10 +10151,7 @@ export default function AssignmentsManagerV2({
                     <button
                       type="button"
                       className="assignmentBackToGames"
-                      onClick={() => {
-                        setSelected("");
-                        setLinkSelected([]);
-                      }}
+                      onClick={() => closeGameDetails(game.id)}
                     >
                       ← Back to games
                     </button>
