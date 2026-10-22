@@ -1,6 +1,6 @@
 import {NextRequest,NextResponse} from "next/server";
 import {sendOfficialNotification} from "../../../../../lib/communications/officialCc";
-import {requireManagedOrganization} from "../../../../../lib/server/organizationScope";
+import {requireManagedOrganization,requireOfficialScope} from "../../../../../lib/server/organizationScope";
 const MAX_GROUP_EMAIL_RECIPIENTS=500;
 const esc=(v:unknown)=>String(v??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"})[c]!);
 export async function POST(request:NextRequest){
@@ -9,6 +9,7 @@ export async function POST(request:NextRequest){
  const ids=[...new Set(body.officialIds||[])],subject=body.subject?.trim().slice(0,180)||"",message=body.message?.trim().slice(0,10000)||"";
  if(ids.length>MAX_GROUP_EMAIL_RECIPIENTS)return NextResponse.json({error:`Select no more than ${MAX_GROUP_EMAIL_RECIPIENTS} officials per email.`},{status:400});
  if(!ids.length||!subject||!message)return NextResponse.json({error:"Choose at least one official and enter a subject and message."},{status:400});
+ const accessError=await requireOfficialScope(scope,ids);if(accessError)return accessError;
  const key=process.env.RESEND_API_KEY;if(!key)return NextResponse.json({error:"Email is not configured yet."},{status:503});
  // The (organization_id, official_id) primary key gives at most one row per
  // selected ID. The validated cap makes this limit complete, not truncation.

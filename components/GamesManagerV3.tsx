@@ -1,7 +1,8 @@
 "use client";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { applyLeagueGameAccess, canAccessLeagueGameLocation, leagueGameAccessKey, type LeagueGameAccess } from "./leagueGameScope";
 import { createClient } from "../lib/supabase/client";
-import { readAllPages } from "../lib/supabase/readAll";
+import { readAllForChunks, readAllPages } from "../lib/supabase/readAll";
 import { announceUndoAvailable } from "./UndoCenter";
 import { resolveImportTeam } from "../lib/game-import-team";
 import { showGameConflictPopup } from "../lib/game-conflict-popup";
@@ -308,10 +309,20 @@ function teamsForConflict(game: Game, teamId: string) {
 }
 export default function GamesManagerV3({
   organizationId,
+  accessibleLeagueIds = [],
+  leagueGameAccess = [],
+  fullLeagueAccess = false,
 }: {
   organizationId?: string;
+  accessibleLeagueIds?: string[];
+  leagueGameAccess?: LeagueGameAccess[];
+  fullLeagueAccess?: boolean;
 }) {
   const sb = useMemo(() => createClient(), []);
+  const leagueScopeKey = fullLeagueAccess ? "full" : leagueGameAccessKey(leagueGameAccess);
+  const scopedLeagueIds = fullLeagueAccess ? null : leagueGameAccess
+    .filter((grant) => grant.all_locations === true || grant.location_ids?.length)
+    .map((grant) => grant.league_id);
   const [games, setGames] = useState<Game[]>([]),
     [sports, setSports] = useState<Sport[]>([]),
     [leagues, setLeagues] = useState<Named[]>([]),
@@ -361,8 +372,16 @@ export default function GamesManagerV3({
     const version = ++gameLoadVersion.current;
     const startedAt = performance.now();
     setGamesLoading(true);
+    setError("");
     setGames([]);
     setSelectedGames([]);
+    setSports([]); setLeagues([]); setLocations([]);
+    setPayPositions([]); setPayRates({}); setPayStatuses({});
+    setBillTos([]); setCanManageBillTos(false);
+    if (!fullLeagueAccess && (!organizationId || !leagueGameAccess.some((grant) => grant.all_locations === true || grant.location_ids?.length))) {
+      setGamesLoading(false);
+      return;
+    }
     if (organizationId) {
       // Pay and billing metadata are independent of the schedule rows.
       void fetch(`/api/games/pay?organizationId=${encodeURIComponent(organizationId)}${leagueFilter !== "all" ? `&leagueId=${encodeURIComponent(leagueFilter)}` : ""}`, { cache: "no-store" })
@@ -384,19 +403,21 @@ export default function GamesManagerV3({
           };
           if (version !== gameLoadVersion.current) return;
           setBillTos(result.billTos || []);
-          setCanManageBillTos(Boolean(result.canManageBillTos));
+          setCanManageBillTos(fullLeagueAccess && Boolean(result.canManageBillTos));
         })
         .catch(() => { /* Schedule loading can continue without billing metadata. */ });
     }
     const locationRequest = organizationId
-      ? sb.rpc("get_organization_locations", {
-          p_organization_id: organizationId,
-        })
-      : sb
-          .from("locations")
-          .select("id,name,city,state")
-          .eq("active", true)
-          .order("name");
+      ? fullLeagueAccess
+        ? sb.rpc("get_organization_locations", { p_organization_id: organizationId })
+        : readAllPages<{ location_id: string }>((from, to) =>
+            sb.rpc("get_organization_field_complexes", { p_organization_id: organizationId })
+              .order("location_id").range(from, to))
+          .then(async ({ data, error }) => error ? { data: [], error } :
+            readAllForChunks<Location, string>((data || []).map((row) => row.location_id), (ids, from, to) =>
+              sb.from("locations").select("id,name,city,state").in("id", ids)
+                .eq("active", true).order("name").order("id").range(from, to)))
+      : sb.from("locations").select("id,name,city,state").eq("active", true).order("name");
 
     const readGamePage = (from: number, to: number, preview = false) => {
       let query = sb
@@ -410,6 +431,9 @@ export default function GamesManagerV3({
         ? query.not("archived_at", "is", null)
         : query.is("archived_at", null);
       if (organizationId) query = query.eq("organization_id", organizationId);
+      const scopedQuery = applyLeagueGameAccess(query, leagueGameAccess, fullLeagueAccess);
+      if (!scopedQuery) return Promise.resolve({ data: [], error: null });
+      query = scopedQuery;
       if (leagueFilter !== "all") query = query.eq("league_id", leagueFilter);
       if (preview && !showArchived) query = query.gte("starts_at", new Date().toISOString());
       return query.range(from, to) as unknown as PromiseLike<{
@@ -419,7 +443,9 @@ export default function GamesManagerV3({
     };
     const metadataPromise = Promise.all([
       sb.from("sports").select("id,name,default_officials").eq("active", true).order("name"),
-      sb.from("leagues").select("id,name").eq("active", true).order("name"),
+      accessibleLeagueIds.length
+        ? sb.from("leagues").select("id,name").in("id", accessibleLeagueIds).eq("active", true).order("name")
+        : Promise.resolve({ data: [], error: null }),
       organizationId ? Promise.resolve({data: [],error:null}) : sb.from("levels").select("id,name").eq("active", true).order("name"),
       organizationId ? Promise.resolve({data: [],error:null}) : readAllPages<Team>((from, to) =>
         sb.from("teams").select("id,name,level_id,sport_id").order("name").order("id").range(from, to),
@@ -460,27 +486,41 @@ export default function GamesManagerV3({
   const [leagueLevelSettings, setLeagueLevelSettings] = useState<LeagueLevelSetting[]>([]);
   const directoryLeagueId = show && form.league_id ? form.league_id : leagueFilter !== "all" ? leagueFilter : null;
   useEffect(() => {
-    if (!organizationId) return;
     let active = true;
-    setDirectoryLoading(true); setTeams([]); setLevels([]);
-    void sb.rpc("get_game_directory", {p_organization_id: organizationId,p_league_id: directoryLeagueId}).then(({data,error: directoryError}) => {
+    setTeams([]); setLevels([]); setLeagueTeamSettings([]); setLeagueLevelSettings([]);
+    setDirectoryLoading(false);
+    if (!organizationId || scopedLeagueIds?.length === 0) return;
+    if (directoryLeagueId && scopedLeagueIds && !scopedLeagueIds.includes(directoryLeagueId)) return;
+    setDirectoryLoading(true);
+    // Scoped users never ask for an organization-wide directory. Combine only
+    // their selected leagues; the server independently enforces each scope.
+    const requestedLeagues = directoryLeagueId ? [directoryLeagueId] : scopedLeagueIds || [null];
+    void Promise.all(requestedLeagues.map((leagueId) => sb.rpc("get_game_directory", {
+      p_organization_id: organizationId, p_league_id: leagueId,
+    }))).then((results) => {
       if (!active) return;
       setDirectoryLoading(false);
+      const directoryError = results.find((result) => result.error)?.error;
       if (directoryError) { setError(directoryError.message); return; }
-      const directory = data as {teams: Team[]; levels: Named[]; team_settings: LeagueTeamSetting[]; level_settings: LeagueLevelSetting[]};
-      setTeams(directory.teams); setLevels(directory.levels);
-      setLeagueTeamSettings(directory.team_settings); setLeagueLevelSettings(directory.level_settings);
+      const directories = results.map(({ data }) => data as {
+        teams: Team[]; levels: Named[]; team_settings: LeagueTeamSetting[]; level_settings: LeagueLevelSetting[];
+      });
+      setTeams(Array.from(new Map(directories.flatMap((directory) => directory.teams).map((team) => [team.id, team])).values()));
+      setLevels(Array.from(new Map(directories.flatMap((directory) => directory.levels).map((level) => [level.id, level])).values()));
+      setLeagueTeamSettings(directories.flatMap((directory) => directory.team_settings));
+      setLeagueLevelSettings(directories.flatMap((directory) => directory.level_settings));
     });
     return () => { active = false; };
-  }, [organizationId, directoryLeagueId, sb]);
+  }, [organizationId, directoryLeagueId, leagueScopeKey, sb]);
   useEffect(() => {
     void load();
-  }, [organizationId, showArchived, leagueFilter]);
+    return () => { gameLoadVersion.current++; };
+  }, [organizationId, showArchived, leagueFilter, leagueScopeKey]);
   useEffect(() => {
     const refreshAfterUndo = () => { void load(); };
     window.addEventListener("refassign:undo-completed", refreshAfterUndo);
     return () => window.removeEventListener("refassign:undo-completed", refreshAfterUndo);
-  }, [organizationId, showArchived, leagueFilter]);
+  }, [organizationId, showArchived, leagueFilter, leagueScopeKey]);
   function requestStatusChange(gameId: string, status: string) {
     if (["canceled", "rained_out"].includes(status)) {
       setPendingStatus({ gameId, status });
@@ -519,7 +559,7 @@ export default function GamesManagerV3({
         ? ` ${result.sent || 0} official notification${result.sent === 1 ? "" : "s"} sent${result.failed ? `; ${result.failed} failed` : ""}.`
         : "";
       setMessage(`Game status updated.${notification}`);
-      announceUndoAvailable();
+      if (fullLeagueAccess) announceUndoAvailable();
     }
     setStatusBusy("");
   }
@@ -608,6 +648,8 @@ export default function GamesManagerV3({
     setError("");
     const lv = levels.find((x) => x.id === form.level_id);
     try {
+      if (!canAccessLeagueGameLocation(leagueGameAccess, form.league_id, form.location_id, fullLeagueAccess))
+        throw new Error("Choose a location you are permitted to manage in this league.");
       if (form.home_team_id === form.away_team_id)
         throw new Error("Home and away teams must be different.");
       const payload = {
@@ -733,6 +775,10 @@ export default function GamesManagerV3({
         )
       )
         issues.push("Location not found");
+      const leagueMatch = leagues.find((item) => norm(item.name) === norm(league));
+      const locationMatch = availableLocations.find((item) => locationKey(item.name) === locationKey(location));
+      if (leagueMatch && locationMatch && !canAccessLeagueGameLocation(leagueGameAccess, leagueMatch.id, locationMatch.id, fullLeagueAccess))
+        issues.push("Location is not permitted for this league");
       if (!date) issues.push("Invalid date");
       if (!time) issues.push("Invalid time");
       if (
@@ -915,13 +961,13 @@ export default function GamesManagerV3({
               .filter(Boolean),
           ),
         ],
-        { data: importLocations, error: locationError } = await sb.rpc(
+        { data: importLocations, error: locationError } = fullLeagueAccess ? await sb.rpc(
           "prepare_game_import_locations",
           {
             p_organization_id: organizationId,
             p_location_names: requestedLocations,
           },
-        );
+        ) : { data: [], error: null };
       if (locationError) throw locationError;
       const mergedLocations = [
         ...locations,
@@ -1000,6 +1046,8 @@ export default function GamesManagerV3({
         throw new Error(
           `Spreadsheet row ${r.row} — Game ${r.game_number || "NEW"} — a sport, league, level, team, or location could not be resolved.`,
         );
+      if (r.valid && r.action !== "skip" && !canAccessLeagueGameLocation(leagueGameAccess, lg?.id, loc?.id, fullLeagueAccess))
+        throw new Error(`Spreadsheet row ${r.row}: location is not permitted for this league.`);
       return {
         row: r.row,
         action: r.valid ? r.action : "skip",
@@ -1046,7 +1094,7 @@ export default function GamesManagerV3({
       setMessage(
         `Import complete: ${result.updated || 0} updated, ${result.added || 0} added, ${result.skipped || 0} unchanged${blockedRows ? `, and ${blockedRows} unresolved row${blockedRows === 1 ? " was" : "s were"} not imported` : ""}.`,
       );
-      announceUndoAvailable();
+      if (fullLeagueAccess) announceUndoAvailable();
       setRows([]);
       setImportApproved(false);
       setImportValidated(false);
@@ -1076,6 +1124,7 @@ export default function GamesManagerV3({
     a.click();
   }
   async function addBillTo() {
+    if (!fullLeagueAccess || !canManageBillTos) return;
     const name = newBillToName.trim();
     if (!name || !organizationId) return;
     setBusy(true);
@@ -1357,7 +1406,7 @@ export default function GamesManagerV3({
             <select
               required
               value={form.league_id}
-              onChange={(e) => setForm({ ...form, league_id: e.target.value, level_id: "", home_team_id: "", away_team_id: "" })}
+              onChange={(e) => setForm({ ...form, league_id: e.target.value, level_id: "", home_team_id: "", away_team_id: "", location_id: "" })}
             >
               <option value="">Select</option>
               {leagues.map((x) => (
@@ -1471,7 +1520,7 @@ export default function GamesManagerV3({
               }
             >
               <option value="">Select</option>
-              {locations.map((x) => (
+              {locations.filter((location) => canAccessLeagueGameLocation(leagueGameAccess, form.league_id, location.id, fullLeagueAccess)).map((x) => (
                 <option key={x.id} value={x.id}>
                   {x.name}
                 </option>
@@ -1493,7 +1542,7 @@ export default function GamesManagerV3({
               ))}
             </select>
           </label>
-          {canManageBillTos && (
+          {fullLeagueAccess && canManageBillTos && (
             <label>
               Add a new Bill To
               <span style={{ display: "flex", gap: 8 }}>

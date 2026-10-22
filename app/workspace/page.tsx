@@ -34,6 +34,7 @@ import OfficialReports from "../../components/OfficialReports";
 import ManagerReports from "../../components/ManagerReports";
 import SupportCenter from "../../components/SupportCenter";
 import TaxDocumentsManager from "../../components/TaxDocumentsManager";
+import { leagueGameAccessKey, type LeagueGameAccess } from "../../components/leagueGameScope";
 import type { ReportActionTarget } from "../../lib/reportActions";
 const setupNav = ["Leagues", "Levels", "Teams", "Locations"] as const;
 type SetupView = (typeof setupNav)[number];
@@ -71,8 +72,9 @@ type TestWorkspace = {
     | "registrar"
     | "iowa_development_admin"
   >;
+  full_organization_access?: boolean;
   viewer_permissions: string[];
-  leagues?: Array<{ league_id: string; name: string }>;
+  leagues?: Array<{ league_id: string; name: string; all_locations?: boolean; location_ids?: string[] }>;
 };
 const labels: Record<Role, string> = {
   admin: "Admin",
@@ -385,16 +387,16 @@ export default function Workspace() {
     }
     void load();
   }, [supabase]);
+  const fullOrganizationAccess = isSuperAdmin || testWorkspace?.full_organization_access === true ||
+    testWorkspace?.role === "owner" || testWorkspace?.roles?.includes("owner") === true;
+  const accessibleLeagueIds = testWorkspace?.leagues?.map((league) => league.league_id) || [];
+  const leagueGameAccess: LeagueGameAccess[] = (testWorkspace?.leagues || []).map((league) => ({
+    league_id: league.league_id, all_locations: league.all_locations === true, location_ids: league.location_ids || [],
+  }));
+  const workspaceScopeKey = `${testWorkspace?.organization_id || ""}:${fullOrganizationAccess ? "owner" : leagueGameAccessKey(leagueGameAccess)}`;
   const manager = viewRole === "admin" || viewRole === "assignor",
     billingManager = viewRole === "billing",
-    organizationTaxAdmin = Boolean(
-      testWorkspace &&
-        (testWorkspace.role === "owner" ||
-          testWorkspace.role === "admin" ||
-          testWorkspace.roles?.some(
-            (role) => role === "owner" || role === "admin",
-          )),
-    ),
+    organizationTaxAdmin = Boolean(testWorkspace && fullOrganizationAccess),
     isSetup = setupNav.includes(section as SetupView),
     isOfficials = ["Officials", "Blocks", "Block Removal Requests"].includes(
       section,
@@ -638,9 +640,11 @@ export default function Workspace() {
               {group("Games", "▣", [
                 { view: "Games", label: "Game List / Import" },
                 { view: "Leagues", label: "Leagues" },
-                { view: "Levels", label: "Levels" },
-                { view: "Teams", label: "Teams" },
-                { view: "Locations", label: "Locations" },
+                ...(fullOrganizationAccess ? [
+                  { view: "Levels", label: "Levels" },
+                  { view: "Teams", label: "Teams" },
+                  { view: "Locations", label: "Locations" },
+                ] : []),
               ])}
               {group("Assignments", "✓", [
                 { view: "Assignments", label: "Assignment Center" },
@@ -655,7 +659,7 @@ export default function Workspace() {
                   label: "Block Removal Requests",
                 },
               ])}
-              {testWorkspace && (
+              {testWorkspace && fullOrganizationAccess && (
                 <button
                   className={`topNavButton ${section === "Team & Roles" ? "active" : ""}`}
                   onClick={() => nav("Team & Roles")}
@@ -672,20 +676,20 @@ export default function Workspace() {
                 <Icon>▥</Icon>
                 <span>Reports</span>
               </button>
-              <button
+              {fullOrganizationAccess && <button
                 className={`topNavButton ${section === "Contacts" ? "active" : ""}`}
                 onClick={() => nav("Contacts")}
               >
                 <Icon>✉</Icon>
                 <span>Contacts</span>
-              </button>
-              <button
+              </button>}
+              {isSuperAdmin && <button
                 className={`topNavButton ${section === "Sports & Rules" ? "active" : ""}`}
                 onClick={() => nav("Sports & Rules")}
               >
                 <Icon>⚙</Icon>
                 <span>Sports & Rules</span>
-              </button>
+              </button>}
               {organizationTaxAdmin && (
                 <button
                   className={`topNavButton ${section === "Billing & Tax" ? "active" : ""}`}
@@ -922,25 +926,36 @@ export default function Workspace() {
         </header>
         {manager && section === "Dashboard" && (
           <DashboardGames
+            key={workspaceScopeKey}
+            accessibleLeagueIds={accessibleLeagueIds}
+            leagueGameAccess={leagueGameAccess}
+            fullLeagueAccess={fullOrganizationAccess}
             organizationId={testWorkspace?.organization_id}
             onNavigate={setSection}
           />
         )}{" "}
         {viewRole === "iowa_development_admin" && section === "Dashboard" && (
-          <DashboardGames organizationId={testWorkspace?.organization_id} />
+          <DashboardGames key={workspaceScopeKey} organizationId={testWorkspace?.organization_id} accessibleLeagueIds={accessibleLeagueIds} leagueGameAccess={leagueGameAccess} fullLeagueAccess={fullOrganizationAccess} />
         )}{" "}
         {manager && section === "Games" && (
-          <GamesManager organizationId={testWorkspace?.organization_id} />
+          <GamesManager key={workspaceScopeKey} organizationId={testWorkspace?.organization_id} accessibleLeagueIds={accessibleLeagueIds} leagueGameAccess={leagueGameAccess} fullLeagueAccess={fullOrganizationAccess} />
         )}
-        {manager && isSetup && (
+        {manager && isSetup && (fullOrganizationAccess || section === "Leagues") && (
           <GameSetup
+            key={workspaceScopeKey}
+            allowedLeagueIds={accessibleLeagueIds}
+            leagueGameAccess={leagueGameAccess}
+            fullOrganizationAccess={fullOrganizationAccess}
             view={section as SetupView}
             organizationId={testWorkspace?.organization_id}
-            canManageLeagueDirectory={viewRole === "admin"}
+            canManageLeagueDirectory={fullOrganizationAccess}
           />
         )}{" "}
         {manager && section === "Officials" && (
           <OfficialsDirectory
+            key={workspaceScopeKey}
+            fullOrganizationAccess={fullOrganizationAccess}
+            leagueGameAccess={leagueGameAccess}
             organizationId={testWorkspace?.organization_id}
             focusOfficialId={
               reportAction?.section === "Officials"
@@ -949,7 +964,7 @@ export default function Workspace() {
             }
           />
         )}
-        {manager && testWorkspace && section === "Team & Roles" && (
+        {manager && fullOrganizationAccess && testWorkspace && section === "Team & Roles" && (
           <OrganizationTeamManager
             organizationId={testWorkspace.organization_id}
             organization={testWorkspace.name}
@@ -957,21 +972,17 @@ export default function Workspace() {
               id: league.league_id,
               name: league.name,
             }))}
-            canManage={
-              testWorkspace.role === "owner" ||
-              testWorkspace.role === "admin" ||
-              testWorkspace.roles?.some(
-                (role) => role === "owner" || role === "admin",
-              ) === true
-            }
+            canManage={fullOrganizationAccess}
           />
         )}
         {manager && section === "Assignments" && (
           <AssignmentsManager
+            key={workspaceScopeKey}
             organizationId={testWorkspace?.organization_id}
-            accessibleLeagueIds={testWorkspace?.leagues?.map((league) => league.league_id)}
+            accessibleLeagueIds={accessibleLeagueIds}
+            leagueGameAccess={leagueGameAccess}
             leagueOptions={testWorkspace?.leagues?.map((league) => ({ id: league.league_id, name: league.name }))}
-            fullLeagueAccess={isSuperAdmin || testWorkspace?.roles?.some((role) => role === "owner" || role === "admin") === true || testWorkspace?.role === "owner" || testWorkspace?.role === "admin"}
+            fullLeagueAccess={fullOrganizationAccess}
             returnToListRequest={assignmentListReturnRequest}
             focusGameId={
               reportAction?.section === "Assignments"
@@ -982,26 +993,31 @@ export default function Workspace() {
         )}
         {manager && section === "Reports" && (
           <ManagerReports
+            key={workspaceScopeKey}
+            fullOrganizationAccess={fullOrganizationAccess}
             organizationId={testWorkspace?.organization_id}
             onOpenAction={openReportAction}
           />
         )}
         {manager && section === "Auto Assign" && (
-          <AutoAssignManager organizationId={testWorkspace?.organization_id} />
+          <AutoAssignManager key={workspaceScopeKey} organizationId={testWorkspace?.organization_id} fullOrganizationAccess={fullOrganizationAccess} leagueGameAccess={leagueGameAccess} />
         )}
         {(manager || billingManager) && section === "Payroll" && (
           <>
             <PayrollManager
+              key={workspaceScopeKey}
               organizationId={testWorkspace?.organization_id}
-              canGeocode={manager}
+              canGeocode={manager && fullOrganizationAccess}
+              fullOrganizationAccess={fullOrganizationAccess}
               focusAssignmentId={
                 reportAction?.section === "Payroll"
                   ? reportAction.assignmentId
                   : undefined
               }
             />
-            {manager && (
+            {manager && fullOrganizationAccess && (
               <MileageCoordinatesManager
+                key={workspaceScopeKey}
                 organizationId={testWorkspace?.organization_id}
               />
             )}
@@ -1009,19 +1025,23 @@ export default function Workspace() {
         )}
         {manager && section === "Blocks" && (
           <AvailabilityCalendar
+            key={workspaceScopeKey}
             managerView
+            fullOrganizationAccess={fullOrganizationAccess}
             organizationId={testWorkspace?.organization_id}
           />
         )}
         {manager && section === "Block Removal Requests" && (
           <BlockRemovalRequests
+            key={workspaceScopeKey}
+            fullOrganizationAccess={fullOrganizationAccess}
             organizationId={testWorkspace?.organization_id}
           />
         )}
-        {manager && section === "Contacts" && (
-          <ContactsManager organizationId={testWorkspace?.organization_id} />
+        {manager && fullOrganizationAccess && section === "Contacts" && (
+          <ContactsManager key={workspaceScopeKey} organizationId={testWorkspace?.organization_id} />
         )}
-        {manager && section === "Sports & Rules" && <SportsRulesManager />}
+        {manager && isSuperAdmin && section === "Sports & Rules" && <SportsRulesManager />}
         {viewRole === "official" && section === "Official Dashboard" && (
           <>
             {testWorkspace && (
@@ -1108,7 +1128,7 @@ export default function Workspace() {
             )}
           </section>
         )}
-        {viewRole === "contact" && section === "Games" && <DashboardGames />}
+        {viewRole === "contact" && section === "Games" && <DashboardGames key={workspaceScopeKey} organizationId={testWorkspace?.organization_id} accessibleLeagueIds={accessibleLeagueIds} leagueGameAccess={leagueGameAccess} fullLeagueAccess={fullOrganizationAccess} />}
         {viewRole === "contact" &&
           section === "Assignments" &&
           testWorkspace?.viewer_permissions?.includes("assignments") && (
@@ -1247,8 +1267,8 @@ export default function Workspace() {
         {isSuperAdmin && section === "Support Queue" && (
           <SupportCenter isSuperAdmin />
         )}
-        {manager && (
-          <UndoCenter organizationId={testWorkspace?.organization_id} />
+        {manager && fullOrganizationAccess && (
+          <UndoCenter key={workspaceScopeKey} organizationId={testWorkspace?.organization_id} />
         )}
       </main>
       {manager && (

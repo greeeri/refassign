@@ -1,3 +1,4 @@
+import {isCurrentOrganizationOwner} from "../../../../lib/server/organizationScope";
 import {NextRequest,NextResponse} from "next/server";
 import {createServerSupabaseClient} from "../../../../lib/supabase/server";
 import {createServiceClient} from "../../../../lib/supabase/admin";
@@ -11,7 +12,8 @@ export async function GET(){
  if(!user)return NextResponse.json({error:"Unauthorized"},{status:401});
  const service=createServiceClient();
  const{data:subscriptions}=await service.from("refassign_subscriptions").select("id,organization_id").eq("user_id",user.id).not("organization_id","is",null).order("created_at",{ascending:false});
- const organizationIds=(subscriptions||[]).map(item=>item.organization_id).filter(Boolean) as string[];
+ const organizationIds:string[]=[];
+ for(const item of subscriptions||[])if(item.organization_id&&await isCurrentOrganizationOwner(service,item.organization_id,user.id))organizationIds.push(item.organization_id);
  if(!organizationIds.length)return NextResponse.json({exemption:null});
  const{data:exemption,error}=await service.from("organization_tax_exemptions").select("organization_id,subscription_id,purchaser_state,exemption_basis,status,certificate_original_name,certified_at").in("organization_id",organizationIds).order("certified_at",{ascending:false}).limit(1).maybeSingle();
  if(error)return NextResponse.json({error:"Could not load the tax-exemption record."},{status:500});
@@ -45,6 +47,7 @@ export async function POST(request:NextRequest){
   const{data:existing}=await service.from("refassign_subscriptions").select("id,organization_id").eq("id",subscriptionId).eq("user_id",user.id).maybeSingle();
   if(!existing?.organization_id)return NextResponse.json({error:"The pending organization billing record could not be found."},{status:404});
   organizationId=existing.organization_id;
+  if(!await isCurrentOrganizationOwner(service,organizationId,user.id))return NextResponse.json({error:"Only organization owners can manage tax documents."},{status:403});
  }else{
   const price=PRICES[plan];
   const{data,error}=await service.rpc("create_pending_organization_subscription",{p_user_id:user.id,p_organization_name:organizationName,p_plan:plan,p_official_limit:price.limit,p_stripe_price_id:price.id,p_founding_offer:price.founding});

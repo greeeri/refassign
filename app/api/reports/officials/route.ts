@@ -1,161 +1,103 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "../../../../lib/supabase/admin";
 import { createServerSupabaseClient } from "../../../../lib/supabase/server";
-import { readAllPages } from "../../../../lib/supabase/readAll";
+import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
+import { readAllForChunks, readAllPages } from "../../../../lib/supabase/readAll";
+import { readReportOfficialLinks, scopeReportLeagues } from "../reportScope";
 
 export async function GET(request: NextRequest) {
   const session = await createServerSupabaseClient();
-  const {
-    data: { user },
-  } = await session.auth.getUser();
+  const { data: { user } } = await session.auth.getUser();
   if (!user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const organizationId = request.nextUrl.searchParams.get("organizationId");
   if (!organizationId)
     return NextResponse.json({ error: "Select an organization." }, { status: 400 });
-  const requestedOfficialId = request.nextUrl.searchParams.get("officialId");
   const managerScope = request.nextUrl.searchParams.get("scope") === "manager";
   const service = createServiceClient();
-  let officialId = requestedOfficialId;
+  let officialId = request.nextUrl.searchParams.get("officialId");
+  let leagueIds: string[] | null = null;
+  let reportScope: Parameters<typeof scopeReportLeagues>[1] = { fullOrganizationAccess: true };
+  let officialIds: string[];
 
-  const [{ data: managerMembership }, { data: ownOfficial }] = await Promise.all([
-    service
-      .from("organization_memberships")
-      .select("role")
-      .eq("organization_id", organizationId)
-      .eq("user_id", user.id)
-      .in("role", ["owner", "admin", "assignor"])
-      .maybeSingle(),
-    service
-      .from("officials")
-      .select("id")
-      .eq("auth_user_id", user.id)
-      .maybeSingle(),
-  ]);
-  const canManage = Boolean(managerMembership);
-  const { data: ownOfficialLink } = ownOfficial
-    ? await service
-        .from("organization_officials")
-        .select("official_id")
-        .eq("organization_id", organizationId)
-        .eq("official_id", ownOfficial.id)
-        .eq("active", true)
-        .maybeSingle()
-    : { data: null };
-  if (!canManage && !ownOfficialLink)
-    return NextResponse.json(
-      { error: "You do not have access to this organization." },
-      { status: 403 },
-    );
-
-  // Prefer the organization subscription when organization workspaces are
-  // enabled; direct subscriptions remain supported for legacy accounts.
-  let subscriptionQuery = service
-    .from("refassign_subscriptions")
-    .select("reporting_access")
-    .in("status", ["active", "trialing", "pending"])
-    .order("created_at", { ascending: false })
-    .limit(1);
-  subscriptionQuery = subscriptionQuery.eq("organization_id", organizationId);
-  const { data: reportingSubscription } = await subscriptionQuery.maybeSingle();
-  // Existing accounts are grandfathered into premium until a Super Admin
-  // explicitly assigns standard access.
-  const reportingAccess =
-    reportingSubscription?.reporting_access === "standard"
-      ? "standard"
-      : "premium";
-
-  // Reports are self-scoped by default, including for users who also hold a
-  // manager role. The manager report UI must explicitly request manager scope.
-  if (!managerScope || !canManage) {
-    if (!ownOfficial || !ownOfficialLink)
-      return NextResponse.json(
-        { error: "Your official profile is not linked to this organization." },
-        { status: 403 },
-      );
+  // Manager authority is freshly resolved from actual memberships and league
+  // grants. An official's own report remains independent of any manager role.
+  if (managerScope) {
+    const scope = await requireManagedOrganization(request);
+    if (scope.error) return scope.error;
+    leagueIds = scope.leagueIds;
+    reportScope = scope;
+    const links = await readReportOfficialLinks(scope);
+    if (links.error)
+      return NextResponse.json({ error: links.error.message }, { status: 400 });
+    officialIds = (links.data || []).map((row) => row.official_id);
+    if (officialId && !officialIds.includes(officialId))
+      return NextResponse.json({ error: "That official is outside your league access." }, { status: 403 });
+  } else {
+    const { data: ownOfficial, error: officialError } = await service
+      .from("officials").select("id").eq("auth_user_id", user.id).maybeSingle();
+    if (officialError)
+      return NextResponse.json({ error: officialError.message }, { status: 400 });
+    if (!ownOfficial)
+      return NextResponse.json({ error: "Your official profile is not linked to this organization." }, { status: 403 });
+    const { data: ownLink, error: linkError } = await service
+      .from("organization_officials").select("official_id")
+      .eq("organization_id", organizationId).eq("official_id", ownOfficial.id)
+      .eq("active", true).maybeSingle();
+    if (linkError)
+      return NextResponse.json({ error: linkError.message }, { status: 400 });
+    if (!ownLink)
+      return NextResponse.json({ error: "Your official profile is not linked to this organization." }, { status: 403 });
     if (officialId && officialId !== ownOfficial.id)
-      return NextResponse.json(
-        { error: "You can only view your own report." },
-        { status: 403 },
-      );
+      return NextResponse.json({ error: "You can only view your own report." }, { status: 403 });
     officialId = ownOfficial.id;
+    officialIds = [ownOfficial.id];
   }
 
-  const [{ data: organizationOfficials, error: organizationOfficialError }, { data: organizationGames, error: organizationGameError }] = await Promise.all([
-    readAllPages<{ official_id: string }>((from, to) => service
-      .from("organization_officials")
-      .select("official_id")
-      .eq("organization_id", organizationId)
-      .eq("active", true)
-      .order("official_id")
-      .range(from, to)),
-    readAllPages<{ id: string }>((from, to) => service.from("games").select("id").eq("organization_id", organizationId).order("id").range(from, to)),
-  ]);
-  if (organizationOfficialError || organizationGameError)
-    return NextResponse.json(
-      { error: organizationOfficialError?.message || organizationGameError?.message },
-      { status: 400 },
-    );
-  const organizationOfficialIds = (organizationOfficials || []).map((row) => row.official_id);
-  const organizationGameIds = (organizationGames || []).map((row) => row.id);
-  if (managerScope && canManage && officialId && !organizationOfficialIds.includes(officialId))
-    return NextResponse.json({ error: "That official is not active in this organization." }, { status: 403 });
+  const { data: subscription } = await service.from("refassign_subscriptions")
+    .select("reporting_access").eq("organization_id", organizationId)
+    .in("status", ["active", "trialing", "pending"])
+    .order("created_at", { ascending: false }).limit(1).maybeSingle();
+  const reportingAccess = subscription?.reporting_access === "standard" ? "standard" : "premium";
 
-  let officialsQuery = service
-    .from("officials")
-    .select("id,first_name,last_name,active,home_latitude,home_longitude")
-    .order("last_name")
-    .order("first_name");
-  if (organizationOfficialIds.length)
-    officialsQuery = officialsQuery.in("id", organizationOfficialIds);
-  else officialsQuery = officialsQuery.eq("id", "00000000-0000-0000-0000-000000000000");
-  let assignmentsQuery = service
-    .from("assignments")
+  let assignmentsQuery = scopeReportLeagues(service.from("assignments")
     .select(
-      "id,official_id,status,game_fee,mileage_miles,mileage_rate,payment_status,paid_at,officials(id,first_name,last_name,home_latitude,home_longitude),sport_positions(name),games(id,game_number,starts_at,status,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name,city,state,latitude,longitude),levels(name),leagues(name,mileage_plan))",
+      "id,official_id,status,game_fee,mileage_miles,mileage_rate,payment_status,paid_at,officials(id,first_name,last_name,home_latitude,home_longitude),sport_positions(name),games!inner(id,organization_id,league_id,game_number,starts_at,status,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name,city,state,latitude,longitude),levels(name),leagues(name,mileage_plan))",
     )
+    .eq("games.organization_id", organizationId), reportScope, "games.league_id")
     .in("status", ["accepted", "confirmed"])
     .order("assigned_at", { ascending: false });
-  if (officialId)
-    assignmentsQuery = assignmentsQuery.eq("official_id", officialId);
-  if (organizationGameIds.length)
-    assignmentsQuery = assignmentsQuery.in("game_id", organizationGameIds);
-  else assignmentsQuery = assignmentsQuery.eq("game_id", "00000000-0000-0000-0000-000000000000");
-  let originsQuery = service
-    .from("official_weekday_origins")
-    .select(
-      "official_id,weekday,use_home,alternate_latitude,alternate_longitude",
-    );
-  if (officialId) originsQuery = originsQuery.eq("official_id", officialId);
+  if (officialId) assignmentsQuery = assignmentsQuery.eq("official_id", officialId);
 
+  const originOfficialIds = officialId ? [officialId] : officialIds;
   const [officialResult, assignmentResult, originResult] = await Promise.all([
-    readAllPages<Record<string, any>>((from, to) => officialsQuery.order("id").range(from, to)),
+    readAllForChunks<Record<string, any>, string>(officialIds, (ids, from, to) => service
+      .from("officials").select("id,first_name,last_name,active,home_latitude,home_longitude")
+      .in("id", ids).order("last_name").order("first_name").order("id").range(from, to)),
     readAllPages<Record<string, any>>((from, to) => assignmentsQuery.order("id").range(from, to)),
-    readAllPages<Record<string, any>>((from, to) => originsQuery.order("official_id").order("weekday").range(from, to)),
+    // Always bound origins, including the manager's "all officials" view.
+    readAllForChunks<Record<string, any>, string>(originOfficialIds, (ids, from, to) => service
+      .from("official_weekday_origins")
+      .select("official_id,weekday,use_home,alternate_latitude,alternate_longitude")
+      .in("official_id", ids).order("official_id").order("weekday").range(from, to)),
   ]);
-  const error =
-    officialResult.error || assignmentResult.error || originResult.error;
+  const error = officialResult.error || assignmentResult.error || originResult.error;
   if (error)
     return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({
-    canManage: Boolean(managerScope && canManage),
+    canManage: managerScope,
     selectedOfficialId: officialId,
-    officials:
-      managerScope && canManage
-        ? officialResult.data || []
-        : (officialResult.data || []).filter((item) => item.id === officialId),
+    officials: officialResult.data || [],
     reportingAccess,
     assignments: (assignmentResult.data || []).map((assignment) =>
-      reportingAccess === "premium"
-        ? assignment
-        : {
-            ...assignment,
-            game_fee: 0,
-            mileage_rate: 0,
-            payment_status: "unpaid",
-            paid_at: null,
-          },
+      reportingAccess === "premium" ? assignment : {
+        ...assignment,
+        game_fee: 0,
+        mileage_rate: 0,
+        payment_status: "unpaid",
+        paid_at: null,
+      },
     ),
     weekdayOrigins: originResult.data || [],
   });

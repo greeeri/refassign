@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
+import { requireManagedOrganization, requirePayrollBatchScope } from "../../../../lib/server/organizationScope";
 import { stripeConnectRequest } from "../../../../lib/stripe/connect";
 import { releasePayrollBatch } from "../../../../lib/stripe/payroll";
 import { stripeConnectConfig } from "../../../../lib/stripe/runtime";
@@ -16,6 +16,8 @@ export async function POST(request: NextRequest) {
   const session = await stripeConnectRequest<{ id: string; payment_status: string; payment_intent: string | null; client_reference_id: string | null; metadata?: Record<string, string> }>(`checkout/sessions/${encodeURIComponent(body.sessionId)}`, key);
   const batchId = session.metadata?.refassign_payroll_batch_id || session.client_reference_id;
   if (!batchId) return NextResponse.json({ error: "This is not a payroll checkout." }, { status: 400 });
+  const batchAccessError = await requirePayrollBatchScope(context, batchId);
+  if (batchAccessError) return batchAccessError;
   const { data: batch } = await service.from("payroll_batches").select("id,league_id,status").eq("id", batchId).eq("organization_id", organizationId).eq("stripe_checkout_session_id", session.id).maybeSingle();
   if (!batch) return NextResponse.json({ error: "Payroll batch was not found." }, { status: 404 });
   if (leagueIds && !leagueIds.includes(batch.league_id)) return NextResponse.json({ error: "You do not have billing access to this league." }, { status: 403 });

@@ -36,6 +36,7 @@ export async function POST(request: NextRequest) {
   const frequency = body.frequency === "monthly" ? "monthly" : "weekly";
   const sendDay = Math.min(frequency === "weekly" ? 6 : 28, Math.max(frequency === "weekly" ? 0 : 1, Math.round(Number(body.sendDay ?? 1))));
   const scheduleEnabled = context.premium && Boolean(body.scheduleEnabled);
+  if (scheduleEnabled && !context.fullOrganizationAccess) return NextResponse.json({ error: "Only organization owners can schedule report deliveries." }, { status: 403 });
   const recipientEmail = String(body.recipientEmail || context.user.email || "").trim().slice(0, 320);
   if (scheduleEnabled && !/^\S+@\S+\.\S+$/.test(recipientEmail)) return NextResponse.json({ error: "Enter a valid delivery email." }, { status: 400 });
   const name = String(body.name || "My saved view").trim().slice(0, 100);

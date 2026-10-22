@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireManagedOrganization } from "../../../../../lib/server/organizationScope";
+import { requireManagedOrganization, requireGameScope } from "../../../../../lib/server/organizationScope";
 import { readAllPages } from "../../../../../lib/supabase/readAll";
 
 type Row = { spreadsheetRow?: number; gameId?: string; positionId?: string; gameFee?: number };
@@ -16,6 +16,8 @@ export async function POST(request: NextRequest) {
     if (!body.templateRows.length || body.templateRows.length > 5000)
       return NextResponse.json({ error: "Include between 1 and 5,000 game rows." }, { status: 400 });
     const templateGameIds = [...new Set(body.templateRows.map((row) => row.gameId).filter(Boolean))] as string[];
+  const accessError = await requireGameScope(context, templateGameIds);
+  if (accessError) return accessError;
     const templateGames: Array<{ id: string; sport_id: string }> = [];
     for (let offset = 0; offset < templateGameIds.length; offset += 200) {
       const { data, error } = await service.from("games").select("id,sport_id")
@@ -49,6 +51,8 @@ export async function POST(request: NextRequest) {
     seen.add(key);
   }
   const gameIds = [...new Set(rows.map((row) => row.gameId!))];
+  const accessError = await requireGameScope(context, gameIds);
+  if (accessError) return accessError;
   const games: Array<{ id: string; sport_id: string; league_id: string | null; officials_needed: number }> = [];
   for (let offset = 0; offset < gameIds.length; offset += 200) {
     const { data, error } = await service.from("games").select("id,sport_id,league_id,officials_needed").eq("organization_id", organizationId).in("id", gameIds.slice(offset, offset + 200));

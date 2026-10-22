@@ -1,3 +1,4 @@
+import { isCurrentReportOwner } from "../../reports/reportScope";
 import { NextRequest, NextResponse } from "next/server";
 import { addReportCopyright } from "../../../../lib/pdfCopyright";
 import { jsPDF } from "jspdf";
@@ -20,10 +21,31 @@ export async function GET(request: NextRequest) {
   let sent = 0; const failures: string[] = [];
   for (const schedule of schedules || []) {
     try {
-      const definition = schedule.definition as CustomReportDefinition, selectedIds = Array.isArray(definition.organizationIds) ? definition.organizationIds : [], { data: memberships } = await service.from("organization_memberships").select("organization_id,role").eq("user_id", schedule.user_id), managedIds = [...new Set((memberships || []).filter((item) => ["owner", "admin", "assignor"].includes(item.role)).map((item) => item.organization_id))], { data: subscriptions } = managedIds.length ? await service.from("refassign_subscriptions").select("organization_id,reporting_access,created_at").in("organization_id", managedIds).in("status", ["active", "trialing", "pending"]).order("created_at", { ascending: false }) : { data: [] }, latest = new Map<string, string>();
+      const definition = schedule.definition as CustomReportDefinition;
+      // Empty legacy selections mean the schedule's organization, never all
+      // organizations the creator happens to own at delivery time.
+      const requestedIds: string[] = [...new Set(
+        Array.isArray(definition.organizationIds) && definition.organizationIds.length
+          ? definition.organizationIds
+          : [schedule.organization_id],
+      )];
+      const ownerAccess = await Promise.all(requestedIds.map((id) =>
+        isCurrentReportOwner(service, schedule.user_id, id)));
+      if (!requestedIds.includes(schedule.organization_id) || ownerAccess.some((allowed) => !allowed)) {
+        await service.from("custom_report_templates").update({ schedule_enabled: false, next_send_at: null, updated_at: now }).eq("id", schedule.id);
+        throw new Error(`${schedule.name}: schedule disabled because organization owner access ended`);
+      }
+      const { data: subscriptions, error: subscriptionError } = await service.from("refassign_subscriptions")
+        .select("organization_id,reporting_access,created_at").in("organization_id", requestedIds)
+        .in("status", ["active", "trialing", "pending"]).order("created_at", { ascending: false });
+      if (subscriptionError) throw subscriptionError;
+      const latest = new Map<string, string>();
       (subscriptions || []).forEach((item) => { if (item.organization_id && !latest.has(item.organization_id)) latest.set(item.organization_id, item.reporting_access); });
-      const premiumIds = managedIds.filter((id) => latest.get(id) !== "standard"), requestedIds = selectedIds.length ? selectedIds : premiumIds, allowedIds = requestedIds.filter((id) => premiumIds.includes(id));
-      if (!allowedIds.includes(schedule.organization_id) || allowedIds.length !== requestedIds.length) { await service.from("custom_report_templates").update({ schedule_enabled: false, next_send_at: null, updated_at: now }).eq("id", schedule.id); throw new Error(`${schedule.name}: schedule disabled because organization access or Premium Reporting changed`); }
+      const allowedIds = requestedIds.filter((id) => latest.get(id) !== "standard");
+      if (allowedIds.length !== requestedIds.length) {
+        await service.from("custom_report_templates").update({ schedule_enabled: false, next_send_at: null, updated_at: now }).eq("id", schedule.id);
+        throw new Error(`${schedule.name}: schedule disabled because Premium Reporting changed`);
+      }
       const [{ data: organizations }, { data: games, error: gamesError }] = await Promise.all([service.from("organizations").select("id,name").in("id", allowedIds), readAllPages<any>((from, to) => service.from("games").select("id,organization_id,game_number,status,starts_at,officials_needed,leagues(id,name),levels(id,name),location:locations(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name)").in("organization_id", allowedIds).order("starts_at", { ascending: false }).order("id").range(from, to))]);
       if (gamesError) throw gamesError;
       const gameIds = (games || []).map((game) => game.id), { data: assignments, error: assignmentError } = gameIds.length ? await readAllForChunks<any, string>(gameIds, (ids, from, to) => service.from("assignments").select("id,game_id,official_id,status,game_fee,mileage_miles,mileage_rate,payment_status,officials(id,first_name,last_name),sport_positions(id,name)").in("game_id", ids).order("id").range(from, to)) : { data: [], error: null };

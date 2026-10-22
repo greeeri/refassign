@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
+import { requireManagedOrganization, requireAssignmentScope } from "../../../../lib/server/organizationScope";
 
 type FeeRow = {
   spreadsheetRow?: number;
@@ -40,6 +40,8 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
 
+  const accessError = await requireAssignmentScope(context, ids);
+  if (accessError) return accessError;
   const { data: assignments, error: loadError } = await service
     .from("assignments")
     .select("id,game_id,status,payment_status,games!inner(organization_id,league_id)")

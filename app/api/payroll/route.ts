@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireManagedOrganization } from "../../../lib/server/organizationScope";
+import { scopeGameQuery, requireGameScope, requireAssignmentScope, requireBillToScope, requireManagedOrganization } from "../../../lib/server/organizationScope";
 import { stripeConnectMode } from "../../../lib/stripe/runtime";
 import { readAllPages } from "../../../lib/supabase/readAll";
 
@@ -37,6 +37,7 @@ export async function GET(request: NextRequest) {
       });
     assignmentQuery = assignmentQuery.in("games.league_id", leagueIds);
   }
+  assignmentQuery = scopeGameQuery(assignmentQuery, context, "games");
   const assignmentResult = await readAllPages<Record<string, any>>(
     (from, to) =>
       assignmentQuery
@@ -51,7 +52,7 @@ export async function GET(request: NextRequest) {
     let query = service.from("game_position_pay")
       .select("game_id,position_id,amount,payment_status,sport_positions(name),games!inner(id,game_number,level,starts_at,organization_id,league_id,bill_to_id,bill_to:bill_to_accounts(name,email),leagues(id,name,mileage_plan),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(id,name,state,latitude,longitude))")
       .eq("games.organization_id", organizationId).order("game_id").order("position_id").range(from, to);
-    if (leagueIds) query = query.in("games.league_id", leagueIds);
+    query = scopeGameQuery(query, context, "games");
     return query;
   });
   if (quotedResult.error) return NextResponse.json({ error: quotedResult.error.message }, { status: 400 });
@@ -160,6 +161,8 @@ export async function PATCH(request: NextRequest) {
     const [, gameId, positionId] = body.assignmentId.split(":");
     if (!gameId || !positionId || !["void", "unpaid"].includes(body.paymentStatus || ""))
       return NextResponse.json({ error: "Only void or unpaid is allowed for a position without a payee." }, { status: 400 });
+    const denied = await requireGameScope(context, [gameId]);
+    if (denied) return denied;
     const { data: game } = await service.from("games").select("id,league_id").eq("id", gameId).eq("organization_id", organizationId).maybeSingle();
     if (!game || (leagueIds && (!game.league_id || !leagueIds.includes(game.league_id))))
       return NextResponse.json({ error: "Game is not available." }, { status: 404 });
@@ -189,6 +192,8 @@ export async function PATCH(request: NextRequest) {
       { error: "Payroll amounts cannot be negative." },
       { status: 400 },
     );
+  const denied = await requireAssignmentScope(context, [body.assignmentId]);
+  if (denied) return denied;
   const { data: assignment, error: assignmentError } = await service
     .from("assignments")
     .select("id,game_id,paid_at,games!inner(organization_id,league_id)")
@@ -209,6 +214,8 @@ export async function PATCH(request: NextRequest) {
       { status: 403 },
     );
   if (body.billToId) {
+    const billToAccessError = await requireBillToScope(context, [body.billToId]);
+    if (billToAccessError) return billToAccessError;
     const { data: billTo } = await service
       .from("bill_to_accounts")
       .select("id")

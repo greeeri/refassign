@@ -1,3 +1,4 @@
+import { scopeReportLeagues, readReportOfficialLinks } from "../reportScope";
 import { NextRequest, NextResponse } from "next/server";
 import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
 import { readAllPages } from "../../../../lib/supabase/readAll";
@@ -5,7 +6,7 @@ import { readAllPages } from "../../../../lib/supabase/readAll";
 export async function GET(request: NextRequest) {
   const scope = await requireManagedOrganization(request);
   if (scope.error) return scope.error;
-  const { service, organizationId } = scope;
+  const { service, organizationId, leagueIds } = scope;
   const organizationIds = [organizationId];
   if (!organizationIds.length)
     return NextResponse.json({
@@ -54,7 +55,7 @@ export async function GET(request: NextRequest) {
       .in("id", premiumOrganizationIds)
       .order("name"),
     readAllPages<Record<string, any>>((from, to) =>
-      service
+      scopeReportLeagues(service
         .from("games")
         .select(
           "id,organization_id,game_number,status,starts_at,officials_needed,leagues(id,name),levels(id,name),location:locations(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name)",
@@ -64,16 +65,9 @@ export async function GET(request: NextRequest) {
         .lte("starts_at", latest)
         .order("starts_at", { ascending: false })
         .order("id")
-        .range(from, to),
+        .range(from, to), scope, "league_id"),
     ),
-    readAllPages<Record<string, any>>((from, to) =>
-      service
-        .from("organization_officials")
-        .select("organization_id,official_id,active")
-        .in("organization_id", premiumOrganizationIds)
-        .order("official_id")
-        .range(from, to),
-    ),
+    readReportOfficialLinks(scope),
   ]);
   const firstError =
     organizationsResult.error || gamesResult.error || rosterResult.error;

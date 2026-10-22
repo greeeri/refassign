@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { sendOfficialNotification } from "../../../../lib/communications/officialCc";
-import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
-import { readAllPages } from "../../../../lib/supabase/readAll";
+import { scopeGameQuery, requireManagedOrganization } from "../../../../lib/server/organizationScope";
+import { readAllPages, readAllForChunks } from "../../../../lib/supabase/readAll";
 
 type RecipientRow = {
   official_id: string;
@@ -60,8 +60,7 @@ export async function POST(request: NextRequest) {
     )
     .eq("organization_id", organizationId)
     .in("id", gameIds);
-  if (!fullOrganizationAccess)
-    gameQuery = gameQuery.in("league_id", leagueIds || []);
+  gameQuery = scopeGameQuery(gameQuery, context);
   const { data: games, error: gameError } = await gameQuery;
   if (gameError)
     return NextResponse.json({ error: gameError.message }, { status: 400 });
@@ -124,20 +123,31 @@ export async function POST(request: NextRequest) {
   if (openError)
     return NextResponse.json({ error: openError.message }, { status: 400 });
 
-  const { data: recipients, error: recipientError } =
-    await readAllPages<RecipientRow>(
-      (from, to) =>
-        service
-          .from("organization_officials")
-          .select("official_id,officials(first_name,last_name,email,active)")
-          .eq("organization_id", organizationId)
-          .eq("active", true)
-          .order("official_id")
-          .range(from, to) as unknown as PromiseLike<{
-          data: RecipientRow[] | null;
-          error: { message: string } | null;
-        }>,
-    );
+  // A scoped manager may not use broadcasts as organization-wide outreach.
+  let scopedRecipientIds: string[] | null = null;
+  if (!fullOrganizationAccess) {
+    const selectedLeagues = [...new Set((games || []).map((game) => game.league_id).filter(Boolean))];
+    const fullLeagues = selectedLeagues.filter((id) => context.leagueAccess?.some((access) => access.league_id === id && access.all_locations));
+    const [eligible, assigned] = await Promise.all([
+      readAllForChunks<{ official_id: string }, string>(fullLeagues, (ids, from, to) => service
+        .from("official_league_eligibility").select("official_id").in("league_id", ids)
+        .order("official_id").order("league_id").range(from, to)),
+      readAllForChunks<{ official_id: string }, string>(selectedLeagues, (ids, from, to) => scopeGameQuery(service
+        .from("assignments").select("official_id,games!inner(organization_id,league_id)")
+        .eq("games.organization_id", organizationId).in("games.league_id", ids)
+        .not("official_id", "is", null).order("id").range(from, to), context, "games")),
+    ]);
+    if (eligible.error || assigned.error)
+      return NextResponse.json({ error: "Could not verify broadcast recipients." }, { status: 500 });
+    scopedRecipientIds = [...new Set([...(eligible.data || []), ...(assigned.data || [])].map((row) => row.official_id))];
+  }
+  const { data: recipients, error: recipientError } = scopedRecipientIds === null
+    ? await readAllPages<RecipientRow>((from, to) => service
+        .from("organization_officials").select("official_id,officials(first_name,last_name,email,active)")
+        .eq("organization_id", organizationId).eq("active", true).order("official_id").range(from, to))
+    : await readAllForChunks<RecipientRow, string>(scopedRecipientIds, (ids, from, to) => service
+        .from("organization_officials").select("official_id,officials(first_name,last_name,email,active)")
+        .eq("organization_id", organizationId).eq("active", true).in("official_id", ids).order("official_id").range(from, to));
   if (recipientError)
     return NextResponse.json(
       { error: recipientError.message },

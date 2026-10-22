@@ -1,5 +1,5 @@
+import { scopeReportLeagues, readReportOfficialLinks } from "../reportScope";
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "../../../../lib/supabase/admin";
 import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
 import { readAllForChunks, readAllPages } from "../../../../lib/supabase/readAll";
 
@@ -9,7 +9,7 @@ const one = (value: unknown) =>
 export async function GET(request: NextRequest) {
   const scope = await requireManagedOrganization(request);
   if (scope.error) return scope.error;
-  const { session: supabase, service, organizationId } = scope;
+  const { session: supabase, service, organizationId, leagueIds } = scope;
   let subscriptionQuery = service
     .from("refassign_subscriptions")
     .select("reporting_access")
@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
   const { data: rawAssignments, error: assignmentError } = await readAllPages<
     Record<string, any>
   >((from, to) =>
-    supabase
+    scopeReportLeagues(supabase
       .from("assignments")
       .select(
         "id,game_id,position_id,official_id,status,assigned_at,published_at,responded_at,decline_reason,officials(id,first_name,last_name),sport_positions(id,name),games!inner(id,organization_id,game_number,status,starts_at,leagues(id,name),levels(name),location:locations(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name))",
@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
       .not("official_id", "is", null)
       .order("assigned_at", { ascending: false })
       .order("id")
-      .range(from, to),
+      .range(from, to), scope, "games.league_id"),
   );
   if (assignmentError)
     return NextResponse.json(
@@ -65,7 +65,7 @@ export async function GET(request: NextRequest) {
   );
   const { data: recordedDeclines, error: recordedDeclinesError } =
     await readAllPages<Record<string, any>>((from, to) =>
-      service
+      scopeReportLeagues(service
         .from("assignment_declines")
         .select(
           "id,game_id,official_id,position_id,declined_at,decline_reason,officials(id,first_name,last_name),sport_positions(id,name),games!inner(id,organization_id,game_number,status,starts_at,leagues(id,name),levels(name),location:locations(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name))",
@@ -73,7 +73,7 @@ export async function GET(request: NextRequest) {
         .eq("games.organization_id", organizationId)
         .order("declined_at", { ascending: false })
         .order("id")
-        .range(from, to),
+        .range(from, to), scope, "games.league_id"),
     );
   if (recordedDeclinesError)
     return NextResponse.json(
@@ -81,15 +81,7 @@ export async function GET(request: NextRequest) {
       { status: 400 },
     );
   const { data: officialLinks, error: officialLinksError } =
-    await readAllPages<{ official_id: string }>((from, to) =>
-      service
-        .from("organization_officials")
-        .select("official_id")
-        .eq("organization_id", organizationId)
-        .eq("active", true)
-        .order("official_id")
-        .range(from, to),
-    );
+    await readReportOfficialLinks(scope);
   if (officialLinksError)
     return NextResponse.json(
       { error: officialLinksError.message },

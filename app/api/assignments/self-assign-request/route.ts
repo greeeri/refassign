@@ -24,14 +24,28 @@ export async function POST(request: NextRequest) {
   const service = createServiceClient();
   const [{ data: detail }, { data: memberships }] = await Promise.all([
     service.from("self_assign_override_requests").select(
-      "eligibility_reason,officials(first_name,last_name),assignment_self_assign_slots(sport_positions(name),games(game_number,starts_at,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name)))",
+      "eligibility_reason,officials(first_name,last_name),assignment_self_assign_slots(sport_positions(name),games(league_id,location_id,game_number,starts_at,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name)))",
     ).eq("id", requestId).single(),
     service.from("organization_memberships").select("user_id,role").eq("organization_id", body.organizationId).in("role", ["owner", "admin", "assignor"]),
   ]);
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) return NextResponse.json({ requestId, notified: 0 });
+  const requestedSlot: any = Array.isArray((detail as any)?.assignment_self_assign_slots) ? (detail as any).assignment_self_assign_slots[0] : (detail as any)?.assignment_self_assign_slots;
+  const requestedGame: any = Array.isArray(requestedSlot?.games) ? requestedSlot.games[0] : requestedSlot?.games;
+  const { data: coverage, error: coverageError } = await service.from("organization_league_coverage").select("league_id")
+    .eq("organization_id", body.organizationId).eq("league_id", requestedGame?.league_id || "00000000-0000-0000-0000-000000000000").eq("active", true).limit(1);
+  const { data: leagueAccess, error: leagueAccessError } = await service.from("organization_member_league_access").select("user_id,all_locations,location_ids")
+    .eq("organization_id", body.organizationId).eq("league_id", requestedGame?.league_id || "00000000-0000-0000-0000-000000000000");
+  if (coverageError || leagueAccessError) return NextResponse.json({ requestId, notified: 0 });
+  const locationLink = requestedGame?.location_id ? await service.from("organization_locations")
+    .select("location_id,locations!inner(active)").eq("organization_id", body.organizationId)
+    .eq("location_id", requestedGame.location_id).eq("active", true).eq("locations.active", true).maybeSingle()
+    : { data: null, error: null };
+  if (locationLink.error) return NextResponse.json({ requestId, notified: 0 });
+  const scopedManagerIds = new Set((coverage || []).length ? (leagueAccess || []).filter((row) => row.all_locations === true || (locationLink.data && requestedGame?.location_id && row.location_ids?.includes(requestedGame.location_id))).map((row) => row.user_id) : []);
   const recipients: string[] = [];
   for (const membership of memberships || []) {
+    if (membership.role !== "owner" && !scopedManagerIds.has(membership.user_id)) continue;
     const { data } = await service.auth.admin.getUserById(membership.user_id);
     if (data.user?.email && !recipients.includes(data.user.email)) recipients.push(data.user.email);
   }

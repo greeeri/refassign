@@ -1,5 +1,5 @@
 "use client";
-import { FormEvent, Fragment, useEffect, useMemo, useState } from "react";
+import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../lib/supabase/client";
 import { fieldComplexRpcMissing } from "../lib/field-complex-support";
 import { coordinatesForVenue } from "../lib/client-geocode";
@@ -10,6 +10,7 @@ import SharedDirectorySearch from "./SharedDirectorySearch";
 import TeamOfficialLinks from "./TeamOfficialLinks";
 import LeagueTeamSelection from "./LeagueTeamSelection";
 import { LeagueLevelSetting } from "../lib/league-levels";
+import { LeagueGameAccess, leagueGameAccessKey } from "./leagueGameScope";
 type Sport = { id: string; name: string };
 type Level = { id: string; name: string; officials_needed: number };
 type MileagePlan = "one_way" | "round_trip" | "actual" | "none";
@@ -61,13 +62,36 @@ type DirectoryLocation = Pick<
 export default function GameSetup({
   view,
   organizationId,
-  canManageLeagueDirectory = true,
+  canManageLeagueDirectory = false,
+  allowedLeagueIds = [],
+  fullOrganizationAccess = false,
+  leagueGameAccess = [],
 }: {
   view: View;
   organizationId?: string;
   canManageLeagueDirectory?: boolean;
+  allowedLeagueIds?: string[];
+  fullOrganizationAccess?: boolean;
+  leagueGameAccess?: LeagueGameAccess[];
 }) {
   const supabase = useMemo(() => createClient(), []);
+  const leagueScopeKey = [...new Set(allowedLeagueIds)].sort().join("|");
+  const scopedLeagueIds = useMemo(() => leagueScopeKey ? leagueScopeKey.split("|") : [], [leagueScopeKey]);
+  const canManageDirectory = fullOrganizationAccess && canManageLeagueDirectory;
+  const hasSetupAccess = view === "Leagues"
+    ? fullOrganizationAccess || scopedLeagueIds.length > 0
+    : canManageDirectory;
+  const accessScopeKey = JSON.stringify([organizationId, view, fullOrganizationAccess, canManageLeagueDirectory, leagueScopeKey, leagueGameAccessKey(leagueGameAccess)]);
+  const activeScope = useRef<string | null>(accessScopeKey);
+  activeScope.current = accessScopeKey;
+  const loadVersion = useRef(0);
+  const locationSearchVersion = useRef(0);
+  const [loadedScopeKey, setLoadedScopeKey] = useState("");
+  const isCurrentScope = () => activeScope.current === accessScopeKey;
+  const canEditDirectory = () => isCurrentScope() && allowed && loadedScopeKey === accessScopeKey && canManageDirectory;
+  const canEditLeague = (id: string) => isCurrentScope() && allowed && loadedScopeKey === accessScopeKey &&
+    (fullOrganizationAccess || (scopedLeagueIds.includes(id) && leagueGameAccess.some((grant) => grant.league_id === id && grant.all_locations === true))) &&
+    leagues.some((league) => league.id === id);
   const [allowed, setAllowed] = useState(false),
     [sports, setSports] = useState<Sport[]>([]),
     [levels, setLevels] = useState<Level[]>([]),
@@ -138,7 +162,7 @@ export default function GameSetup({
     setLevelSelection(saved?.level_ids ?? levels.map((level) => level.id));
   }, [levelLeagueId, leagueLevelSettings, levels]);
   async function saveLeagueLevels() {
-    if (!organizationId || !levelLeagueId || !levelSettingsReady) return;
+    if (!canEditDirectory() || !organizationId || !levelLeagueId || !levelSettingsReady || !canEditLeague(levelLeagueId)) return;
     setSavingLevels(true);
     setError("");
     setLevelMessage("");
@@ -146,14 +170,15 @@ export default function GameSetup({
       const { error: saveError } = await supabase.rpc("save_organization_league_levels", {
         p_organization_id: organizationId, p_league_id: levelLeagueId, p_level_ids: levelSelection,
       });
+      if (!isCurrentScope()) return;
       if (saveError) { setError(saveError.message); return; }
       setLeagueLevelSettings((current) => [...current.filter((item) => item.league_id !== levelLeagueId), { league_id: levelLeagueId, level_ids: levelSelection }]);
       setLevelMessage("League levels saved.");
-    } finally { setSavingLevels(false); }
+    } finally { if (isCurrentScope()) setSavingLevels(false); }
   }
 
   async function copyLeagueConnectionLink(league: League) {
-    if (!organizationId) return;
+    if (!organizationId || !canEditLeague(league.id)) return;
     setCopyingLeagueId(league.id);
     setError("");
     setLeagueMessage("");
@@ -165,6 +190,7 @@ export default function GameSetup({
         p_regenerate: false,
       },
     );
+    if (!isCurrentScope()) return;
     if (linkError || !data) {
       setError(
         linkError?.message ||
@@ -176,8 +202,10 @@ export default function GameSetup({
     const link = `${window.location.origin}/join/league/${data}`;
     try {
       await navigator.clipboard.writeText(link);
+      if (!isCurrentScope()) return;
       setLeagueMessage(`${league.name} official connection link copied.`);
     } catch {
+      if (!isCurrentScope()) return;
       window.prompt("Copy this official connection link:", link);
       setLeagueMessage(`${league.name} official connection link is ready.`);
     }
@@ -193,10 +221,13 @@ export default function GameSetup({
     query = locationQuery,
     includeRealPlaces = false,
   ) {
-    if (!organizationId || query.trim().length < 2) {
+    if (!canEditDirectory() || !organizationId || query.trim().length < 2) {
+      locationSearchVersion.current += 1;
       setDirectoryLocations([]);
       return;
     }
+    const request = ++locationSearchVersion.current;
+    const isCurrentSearch = () => isCurrentScope() && request === locationSearchVersion.current;
     setSearchingLocations(true);
     setError("");
     setLocationMessage("");
@@ -207,6 +238,7 @@ export default function GameSetup({
         p_query: query.trim(),
       },
     );
+    if (!isCurrentSearch()) return;
     if (searchError) {
       setSearchingLocations(false);
       setError(searchError.message);
@@ -215,6 +247,7 @@ export default function GameSetup({
     let results = (data || []) as DirectoryLocation[];
     if (includeRealPlaces) {
       const { data: sessionData } = await supabase.auth.getSession();
+      if (!isCurrentSearch()) return;
       const params = new URLSearchParams({
         q: query.trim(),
         organization: organizationId,
@@ -228,6 +261,7 @@ export default function GameSetup({
         results?: DirectoryLocation[];
         error?: string;
       };
+      if (!isCurrentSearch()) return;
       if (!response.ok)
         setError(external.error || "Real-world location search failed.");
       else {
@@ -242,21 +276,22 @@ export default function GameSetup({
         ];
       }
     }
+    if (!isCurrentSearch()) return;
     setDirectoryLocations(results);
     setSearchingLocations(false);
   }
 
   useEffect(() => {
-    if (!organizationId || view !== "Locations") return;
+    if (!organizationId || view !== "Locations" || !canEditDirectory()) return;
     const timer = window.setTimeout(
       () => void runLocationSearch(locationQuery),
       350,
     );
     return () => window.clearTimeout(timer);
-  }, [locationQuery, organizationId, view]);
+  }, [locationQuery, accessScopeKey, allowed, loadedScopeKey]);
 
   async function connectLocation(item: DirectoryLocation) {
-    if (!organizationId || item.already_connected) return;
+    if (!canEditDirectory() || !organizationId || item.already_connected) return;
     setConnectingLocation(item.id);
     setError("");
     const external = item.id.startsWith("osm-");
@@ -275,6 +310,7 @@ export default function GameSetup({
           p_organization_id: organizationId,
           p_location_id: item.id,
         });
+    if (!isCurrentScope()) return;
     setConnectingLocation("");
     if (connectError) {
       setError(connectError.message);
@@ -289,131 +325,112 @@ export default function GameSetup({
     await load();
   }
   async function load() {
+    if (!isCurrentScope()) return;
+    const request = ++loadVersion.current;
+    const isCurrentRequest = () => isCurrentScope() && request === loadVersion.current;
     setError("");
-    const { data: u } = await supabase.auth.getUser();
-    if (!u.user) return;
-    const { data: p } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", u.user.id)
-      .maybeSingle();
-    const ok =
-      Boolean(organizationId) || ["admin", "assignor"].includes(p?.role || "");
-    setAllowed(ok);
-    if (!ok) return;
-    const locationRequest = organizationId
-      ? supabase.rpc("get_organization_locations", {
-          p_organization_id: organizationId,
-        })
-      : supabase
-          .from("locations")
-          .select(
-            "id,name,address,city,state,directions,parking_instructions,entrance_information,map_url,contact_name,contact_phone,contact_email",
-          )
-          .eq("active", true)
-          .order("name");
-    const organizationSetupRequest = organizationId
-      ? supabase.rpc("get_organization_setup_directory", {
-          p_organization_id: organizationId,
-        })
-      : Promise.resolve({ data: null, error: null });
-    const fieldComplexRequest = organizationId
-      ? supabase.rpc("get_organization_field_complexes", { p_organization_id: organizationId })
-      : Promise.resolve({ data: [], error: null });
-    setLevelSettingsReady(false);
-    const [s, l, lg, t, loc, pw, organizationSetup, complexes, levelSettings] = await Promise.all([
-      supabase
-        .from("sports")
-        .select("id,name")
-        .eq("active", true)
-        .order("name"),
-      supabase
-        .from("levels")
-        .select("id,name,officials_needed")
-        .eq("active", true)
-        .order("name"),
-      supabase
-        .from("leagues")
-        .select("id,name,mileage_plan")
-        .eq("active", true)
-        .order("name"),
-      supabase
-        .from("teams")
-        .select("id,name,sport_id,level_id,level")
-        .order("name"),
-      locationRequest,
-      supabase.from("assignor_team_power_rankings").select("team_id,power"),
-      organizationSetupRequest,
-      fieldComplexRequest,
-      organizationId ? supabase.rpc("get_organization_league_levels", { p_organization_id: organizationId }) : Promise.resolve({ data: [], error: null }),
-    ]);
-    const err =
-      s.error ||
-      l.error ||
-      lg.error ||
-      t.error ||
-      loc.error ||
-      pw.error ||
-      organizationSetup.error ||
-      levelSettings.error ||
-      (fieldComplexRpcMissing(complexes.error) ? null : complexes.error);
-    if (err) setError(err.message);
-    else {
-      const powerMap: Record<string, string> = {};
-      const savedPowerMap: Record<string, number> = {};
-      ((pw.data || []) as Power[]).forEach((item) => {
-        powerMap[item.team_id] = String(Number(item.power));
-        savedPowerMap[item.team_id] = Number(item.power);
-      });
-      setSports(s.data || []);
-      const scoped = organizationSetup.data as {
-        leagues: League[];
-        levels: Level[];
-        teams: Team[];
-      } | null;
-      const visibleLevels = organizationId
-        ? scoped?.levels || []
-        : ((l.data || []) as Level[]);
-      const visibleLeagues = organizationId
-        ? scoped?.leagues || []
-        : ((lg.data || []) as League[]);
-      const visibleTeams = organizationId
-        ? scoped?.teams || []
-        : ((t.data || []) as Team[]);
-      setLeagueLevelSettings((levelSettings.data || []) as LeagueLevelSetting[]);
-      setLevelSettingsReady(true);
-      setLevels(visibleLevels);
-      setLeagues(visibleLeagues);
-      setLeagueDrafts(
-        Object.fromEntries(
-          visibleLeagues.map((league) => [league.id, league.mileage_plan]),
-        ),
-      );
-      setDeclineEmailDrafts(
-        Object.fromEntries(
-          visibleLeagues.map((league) => [
-            league.id,
-            Boolean(league.email_assignor_on_decline),
-          ]),
-        ),
-      );
-      setTeams(visibleTeams);
-      setPowers(powerMap);
-      setSavedPowers(savedPowerMap);
-      setLocations((loc.data || []) as Location[]);
-      setFieldComplexAvailable(Boolean(organizationId && !complexes.error));
-      if (organizationId) {
-        const values = Object.fromEntries((complexes.data || []).map((row) => [row.location_id, row.field_complex || ""]));
-        setLocationComplexes(values);
-        setComplexDrafts(values);
-      } else { setLocationComplexes({}); setComplexDrafts({}); }
+    if (!hasSetupAccess || (!organizationId && !fullOrganizationAccess)) {
+      setAllowed(false);
+      setLoadedScopeKey(accessScopeKey);
+      return;
     }
+    if (!organizationId) {
+      const { data: user } = await supabase.auth.getUser();
+      if (!isCurrentRequest()) return;
+      if (!user.user) { setAllowed(false); return; }
+      const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.user.id).maybeSingle();
+      if (!isCurrentRequest()) return;
+      if (!["admin", "assignor"].includes(profile?.role || "")) { setAllowed(false); return; }
+    }
+    setLevelSettingsReady(false);
+    const empty = { data: [], error: null };
+    // Scoped managers only need their selected leagues, never organization-wide catalogs.
+    const scopedLeagues = Boolean(organizationId && !fullOrganizationAccess && view === "Leagues");
+    const setupRequest = organizationId && fullOrganizationAccess && view !== "Locations"
+      ? supabase.rpc("get_organization_setup_directory", { p_organization_id: organizationId })
+      : Promise.resolve({ data: null, error: null });
+    const [s, l, lg, t, loc, pw, organizationSetup, complexes, levelSettings, coverage] = await Promise.all([
+      view === "Teams" ? supabase.from("sports").select("id,name").eq("active", true).order("name") : Promise.resolve(empty),
+      !organizationId && (view === "Levels" || view === "Teams")
+        ? supabase.from("levels").select("id,name,officials_needed").eq("active", true).order("name") : Promise.resolve(empty),
+      scopedLeagues
+        ? supabase.from("leagues").select("id,name,mileage_plan").in("id", scopedLeagueIds).eq("active", true).order("name")
+        : !organizationId && view !== "Locations"
+          ? supabase.from("leagues").select("id,name,mileage_plan").eq("active", true).order("name") : Promise.resolve(empty),
+      !organizationId && view === "Teams"
+        ? supabase.from("teams").select("id,name,sport_id,level_id,level").order("name") : Promise.resolve(empty),
+      view === "Locations"
+        ? organizationId
+          ? supabase.rpc("get_organization_locations", { p_organization_id: organizationId })
+          : supabase.from("locations").select("id,name,address,city,state,directions,parking_instructions,entrance_information,map_url,contact_name,contact_phone,contact_email").eq("active", true).order("name")
+        : Promise.resolve(empty),
+      view === "Teams" ? supabase.from("assignor_team_power_rankings").select("team_id,power") : Promise.resolve(empty),
+      setupRequest,
+      organizationId && view === "Locations"
+        ? supabase.rpc("get_organization_field_complexes", { p_organization_id: organizationId }) : Promise.resolve(empty),
+      organizationId && view === "Levels"
+        ? supabase.rpc("get_organization_league_levels", { p_organization_id: organizationId }) : Promise.resolve(empty),
+      scopedLeagues
+        ? supabase.from("organization_league_coverage").select("league_id,email_assignor_on_decline")
+            .eq("organization_id", organizationId).eq("active", true).in("league_id", scopedLeagueIds)
+        : Promise.resolve(empty),
+    ]);
+    if (!isCurrentRequest()) return;
+    const err = s.error || l.error || lg.error || t.error || loc.error || pw.error || organizationSetup.error || levelSettings.error || coverage.error ||
+      (fieldComplexRpcMissing(complexes.error) ? null : complexes.error);
+    setAllowed(!err);
+    setLoadedScopeKey(accessScopeKey);
+    if (err) { setError(err.message); return; }
+    const powerMap: Record<string, string> = {};
+    const savedPowerMap: Record<string, number> = {};
+    ((pw.data || []) as Power[]).forEach((item) => {
+      powerMap[item.team_id] = String(Number(item.power));
+      savedPowerMap[item.team_id] = Number(item.power);
+    });
+    const scoped = organizationSetup.data as { leagues: League[]; levels: Level[]; teams: Team[] } | null;
+    const visibleLevels = organizationId ? scoped?.levels || [] : ((l.data || []) as Level[]);
+    const coverageRows = (coverage.data || []) as { league_id: string; email_assignor_on_decline: boolean }[];
+    const coverageByLeague = new Map(coverageRows.map((row) => [row.league_id, row.email_assignor_on_decline]));
+    const visibleLeagues = (scopedLeagues
+      ? ((lg.data || []) as League[]).filter((league) => coverageByLeague.has(league.id))
+          .map((league) => ({ ...league, email_assignor_on_decline: Boolean(coverageByLeague.get(league.id)) }))
+      : organizationId ? scoped?.leagues || [] : ((lg.data || []) as League[])
+    ).filter((league) => fullOrganizationAccess || scopedLeagueIds.includes(league.id));
+    setSports(s.data || []);
+    setLeagueLevelSettings(((levelSettings.data || []) as LeagueLevelSetting[]).filter((setting) => visibleLeagues.some((league) => league.id === setting.league_id)));
+    setLevelSettingsReady(view === "Levels");
+    setLevels(visibleLevels);
+    setLeagues(visibleLeagues);
+    setLeagueDrafts(Object.fromEntries(visibleLeagues.map((league) => [league.id, league.mileage_plan])));
+    setDeclineEmailDrafts(Object.fromEntries(visibleLeagues.map((league) => [league.id, Boolean(league.email_assignor_on_decline)])));
+    setTeams(organizationId ? scoped?.teams || [] : ((t.data || []) as Team[]));
+    setPowers(powerMap);
+    setSavedPowers(savedPowerMap);
+    setLocations((loc.data || []) as Location[]);
+    setFieldComplexAvailable(Boolean(organizationId && view === "Locations" && !complexes.error));
+    const values = Object.fromEntries((complexes.data || []).map((row) => [row.location_id, row.field_complex || ""]));
+    setLocationComplexes(values);
+    setComplexDrafts(values);
   }
   useEffect(() => {
-    load();
-  }, [organizationId]);
+    activeScope.current = accessScopeKey;
+    setAllowed(false);
+    setLoadedScopeKey("");
+    setSports([]); setLevels([]); setLeagues([]); setTeams([]); setLocations([]);
+    setPowers({}); setSavedPowers({}); setLocationComplexes({}); setComplexDrafts({});
+    setLeagueDrafts({}); setDeclineEmailDrafts({}); setLeagueLevelSettings([]); setLevelSettingsReady(false);
+    setLevelLeagueId(""); setLevelSelection([]); setTeamLeagueScope(null);
+    setOpenLeagueDocuments(null); setEditingTeamId(null); setEditingLocationId(null); setLinkTeamId(null);
+    setDirectoryLocations([]); setLocationQuery(""); setShowTeamImport(false); setShowLocationImport(false);
+    setLeagueMessage(""); setLocationMessage(""); setLocationSaveMessage(""); setLevelMessage("");
+    setSavingLeagueId(""); setCopyingLeagueId(""); setSavingPower(""); setSavingComplex("");
+    setSavingLevels(false); setSavingLocation(false); setConnectingLocation(""); setSearchingLocations(false);
+    void load();
+    return () => { activeScope.current = null; loadVersion.current += 1; locationSearchVersion.current += 1; };
+  }, [accessScopeKey]);
   async function addLevel(e: FormEvent) {
     e.preventDefault();
+    if (!canEditDirectory()) return;
     const n = Number(levelOfficials);
     if (!Number.isInteger(n) || n < 1 || n > 20) {
       setError("Officials Needed must be a whole number from 1-20.");
@@ -428,6 +445,7 @@ export default function GameSetup({
       : await supabase
           .from("levels")
           .insert({ name: levelName.trim(), officials_needed: n });
+    if (!isCurrentScope()) return;
     if (r.error) setError(r.error.message);
     else {
       setLevelName("");
@@ -436,6 +454,7 @@ export default function GameSetup({
     }
   }
   async function updateOfficialsNeeded(id: string, value: string) {
+    if (!canEditDirectory() || !levels.some((level) => level.id === id)) return;
     const n = Number(value);
     if (!Number.isInteger(n) || n < 1 || n > 20) {
       setError("Officials Needed must be a whole number from 1-20.");
@@ -445,11 +464,13 @@ export default function GameSetup({
       .from("levels")
       .update({ officials_needed: n })
       .eq("id", id);
+    if (!isCurrentScope()) return;
     if (r.error) setError(r.error.message);
     else load();
   }
   async function addLeague(e: FormEvent) {
     e.preventDefault();
+    if (!canEditDirectory()) return;
     const r = organizationId
       ? await supabase.rpc("create_organization_league", {
           p_organization_id: organizationId,
@@ -459,6 +480,7 @@ export default function GameSetup({
       : await supabase
           .from("leagues")
           .insert({ name: leagueName.trim(), mileage_plan: leagueMileagePlan });
+    if (!isCurrentScope()) return;
     if (r.error) setError(r.error.message);
     else {
       setLeagueName("");
@@ -467,6 +489,7 @@ export default function GameSetup({
     }
   }
   async function updateLeagueMileagePlan(id: string, mileagePlan: MileagePlan) {
+    if (!canEditDirectory() || !canEditLeague(id)) return;
     setError("");
     setLeagueMessage("");
     setSavingLeagueId(id);
@@ -480,6 +503,7 @@ export default function GameSetup({
           .from("leagues")
           .update({ mileage_plan: mileagePlan })
           .eq("id", id);
+    if (!isCurrentScope()) return;
     setSavingLeagueId("");
     if (updateError) setError(updateError.message);
     else {
@@ -492,7 +516,7 @@ export default function GameSetup({
     }
   }
   async function updateDeclineEmailCopy(id: string, enabled: boolean) {
-    if (!organizationId) return;
+    if (!organizationId || !canEditLeague(id)) return;
     setError("");
     setLeagueMessage("");
     setSavingLeagueId(id);
@@ -504,6 +528,7 @@ export default function GameSetup({
         p_enabled: enabled,
       },
     );
+    if (!isCurrentScope()) return;
     setSavingLeagueId("");
     if (updateError) setError(updateError.message);
     else {
@@ -519,6 +544,7 @@ export default function GameSetup({
   }
   async function saveTeam(e: FormEvent) {
     e.preventDefault();
+    if (!canEditDirectory()) return;
     const level = levels.find((l) => l.id === team.level_id);
     const payload = {
       name: team.name.trim(),
@@ -536,6 +562,7 @@ export default function GameSetup({
             p_level_id: payload.level_id,
           })
         : await supabase.from("teams").insert(payload);
+    if (!isCurrentScope()) return;
     if (r.error) setError(r.error.message);
     else {
       setTeam({ name: "", sport_id: "", level_id: "" });
@@ -552,6 +579,7 @@ export default function GameSetup({
     });
   }
   async function savePower(teamId: string) {
+    if (!canEditDirectory() || !teams.some((item) => item.id === teamId)) return;
     const power = Number(powers[teamId] ?? 1);
     if (!Number.isFinite(power) || power < 1 || power > 10) {
       setError("Power ranking must be between 1.0 and 10.0.");
@@ -563,6 +591,7 @@ export default function GameSetup({
       p_team_id: teamId,
       p_power: Math.round(power * 10) / 10,
     });
+    if (!isCurrentScope()) return;
     if (e) setError(e.message);
     else {
       const savedPower = Math.round(power * 10) / 10;
@@ -573,6 +602,7 @@ export default function GameSetup({
   }
   async function saveLocation(e: FormEvent) {
     e.preventDefault();
+    if (!canEditDirectory()) return;
     if (savingLocation) return;
     setSavingLocation(true);
     setError("");
@@ -597,6 +627,7 @@ export default function GameSetup({
             : "The venue address could not be located.";
       }
     }
+    if (!isCurrentScope()) return;
     const payload = {
       name: location.name.trim(),
       level_id: null,
@@ -637,6 +668,7 @@ export default function GameSetup({
             .update(payload)
             .eq("id", editingLocationId)
         : await supabase.from("locations").insert(payload);
+    if (!isCurrentScope()) return;
     if (r.error) {
       setError(r.error.message);
     } else {
@@ -663,7 +695,7 @@ export default function GameSetup({
       );
       await load();
     }
-    setSavingLocation(false);
+    if (isCurrentScope()) setSavingLocation(false);
   }
   function editLocation(v: Location) {
     setEditingLocationId(v.id);
@@ -682,13 +714,14 @@ export default function GameSetup({
     });
   }
   async function saveFieldComplex(locationId: string) {
-    if (!organizationId || savingComplex) return;
+    if (!canEditDirectory() || !organizationId || savingComplex || !locations.some((item) => item.id === locationId)) return;
     setSavingComplex(locationId);
     setError("");
     const value = complexDrafts[locationId]?.trim().slice(0, 80) || null;
     const { error: saveError } = await supabase.rpc("set_organization_field_complex", {
       p_organization_id: organizationId, p_location_id: locationId, p_field_complex: value,
     });
+    if (!isCurrentScope()) return;
     if (saveError) setError(saveError.message);
     else {
       setLocationComplexes((current) => ({ ...current, [locationId]: value || "" }));
@@ -701,6 +734,7 @@ export default function GameSetup({
     table: "levels" | "leagues" | "teams" | "locations",
     id: string,
   ) {
+    if (!canEditDirectory()) return;
     if (
       !confirm(
         "Remove this setup option? Existing records may prevent deletion.",
@@ -716,6 +750,7 @@ export default function GameSetup({
             p_record_id: id,
           })
         : await supabase.from(table).delete().eq("id", id);
+    if (!isCurrentScope()) return;
     if (r.error) setError(r.error.message);
     else load();
   }
@@ -744,11 +779,12 @@ export default function GameSetup({
       ({ team: rankedTeam }) =>
         !team.level_id || rankedTeam.level_id === team.level_id,
     );
-  if (!allowed)
+  if (!hasSetupAccess || !allowed || loadedScopeKey !== accessScopeKey)
     return (
       <section className="card">
         <h2>{view}</h2>
-        <p>Only Administrators and Assignors can manage Game Setup.</p>
+        <p>{view === "Leagues" ? "League settings are available only for leagues assigned to you." : "Only the organization owner can manage shared game setup."}</p>
+        {error && <div className="errorBox">{error}</div>}
       </section>
     );
   return (
@@ -758,14 +794,14 @@ export default function GameSetup({
         <section className="card">
           <h2>Leagues</h2>
           {leagueMessage && <div className="loginMessage">{leagueMessage}</div>}
-          {organizationId && canManageLeagueDirectory && (
+          {organizationId && canManageDirectory && (
             <SharedDirectorySearch
               organizationId={organizationId}
               entity="league"
               onConnected={load}
             />
           )}
-          {canManageLeagueDirectory && (
+          {canManageDirectory && (
             <form className="toolbar" onSubmit={addLeague}>
               <input
                 required
@@ -807,6 +843,7 @@ export default function GameSetup({
                     <tr>
                       <td>
                         <b>{l.name}</b>
+                        {!canEditLeague(l.id) && <p>League-wide settings are read-only for location-limited access.</p>}
                       </td>
                       <td>
                         <label>
@@ -825,7 +862,7 @@ export default function GameSetup({
                               void updateDeclineEmailCopy(l.id, enabled);
                             }}
                             disabled={
-                              !organizationId || savingLeagueId === l.id
+                              !organizationId || !canEditLeague(l.id) || savingLeagueId === l.id
                             }
                           />{" "}
                           Email assignor when an official declines
@@ -835,6 +872,7 @@ export default function GameSetup({
                         <div className="headerActions">
                           <select
                             aria-label={`Mileage plan for ${l.name}`}
+                            disabled={!canManageDirectory || !canEditLeague(l.id)}
                             value={leagueDrafts[l.id] ?? l.mileage_plan}
                             onChange={(e) =>
                               setLeagueDrafts((current) => ({
@@ -853,7 +891,7 @@ export default function GameSetup({
                             className="primary"
                             type="button"
                             disabled={
-                              savingLeagueId === l.id ||
+                              !canManageDirectory || !canEditLeague(l.id) || savingLeagueId === l.id ||
                               (leagueDrafts[l.id] ?? l.mileage_plan) ===
                                 l.mileage_plan
                             }
@@ -869,12 +907,13 @@ export default function GameSetup({
                               : "Save changes"}
                           </button>
                         </div>
+                        {!canManageDirectory && <p>Only organization owners can change the shared league mileage plan.</p>}
                       </td>
                       <td>
                         <button
                           className="secondary"
                           type="button"
-                          disabled={copyingLeagueId === l.id}
+                          disabled={!canEditLeague(l.id) || copyingLeagueId === l.id}
                           onClick={() => void copyLeagueConnectionLink(l)}
                         >
                           {copyingLeagueId === l.id
@@ -886,6 +925,7 @@ export default function GameSetup({
                         <button
                           className="secondary"
                           type="button"
+                          disabled={!canEditLeague(l.id)}
                           onClick={() =>
                             setOpenLeagueDocuments(
                               openLeagueDocuments === l.id ? null : l.id,
@@ -898,7 +938,7 @@ export default function GameSetup({
                         </button>
                       </td>
                       <td>
-                        {canManageLeagueDirectory && (
+                        {canManageDirectory && (
                           <button
                             className="tableButton"
                             onClick={() => remove("leagues", l.id)}
@@ -908,7 +948,7 @@ export default function GameSetup({
                         )}
                       </td>
                     </tr>
-                    {openLeagueDocuments === l.id && (
+                    {openLeagueDocuments === l.id && canEditLeague(l.id) && (
                       <tr className="leagueDocumentsTableRow">
                         <td colSpan={5}>
                           <LeagueDocumentsManager

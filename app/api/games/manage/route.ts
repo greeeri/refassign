@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
+import { scopeGameQuery, requireManagedOrganization, requireGameScope } from "../../../../lib/server/organizationScope";
 
 const actions = ["archive", "archive_cancelled", "restore", "delete"] as const;
 type Action = (typeof actions)[number];
@@ -18,6 +18,10 @@ export async function POST(request: NextRequest) {
       { error: "Choose a valid action." },
       { status: 400 },
     );
+  if (gameIds.length) {
+    const accessError = await requireGameScope(context, gameIds);
+    if (accessError) return accessError;
+  }
   if (body.action === "archive_cancelled") {
     if (gameIds.length > 500)
       return NextResponse.json({ error: "Archive up to 500 selected games at a time." }, { status: 400 });
@@ -28,7 +32,7 @@ export async function POST(request: NextRequest) {
       .eq("organization_id", organizationId)
       .is("archived_at", null)
       .in("status", ["canceled", "cancelled"]);
-    if (leagueIds) query = query.in("league_id", leagueIds);
+    query = scopeGameQuery(query, context);
     if (gameIds.length) query = query.in("id", gameIds);
     const { count, error } = await query;
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
@@ -42,20 +46,7 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
 
-  const { data: ownedGames, error: ownershipError } = await service
-    .from("games")
-    .select("id")
-    .eq("organization_id", organizationId)
-    .in("id", gameIds);
-  if (ownershipError)
-    return NextResponse.json({ error: ownershipError.message }, { status: 400 });
-  if ((ownedGames || []).length !== gameIds.length)
-    return NextResponse.json(
-      { error: "One or more games do not belong to this organization." },
-      { status: 403 },
-    );
-
-  const query =
+  let query =
     body.action === "delete"
       ? service.from("games").delete().eq("organization_id", organizationId).in("id", gameIds)
       : service
@@ -63,6 +54,7 @@ export async function POST(request: NextRequest) {
           .update({ archived_at: body.action === "archive" ? new Date().toISOString() : null })
           .eq("organization_id", organizationId)
           .in("id", gameIds);
+  query = scopeGameQuery(query, context);
   const { data: changedGames, error } = await query.select("id");
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   if ((changedGames || []).length !== gameIds.length)

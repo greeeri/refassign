@@ -94,10 +94,10 @@ async function setup(db) {
       ('${LOC3}','Other','Elsewhere','Grimes','IA',41.8,-93.8),
       ('${LOC4}','Green 3','1002 Heritage Drive','Grimes','IA',41.7001,-93.8001);
     insert into public.games(id,game_number,sport_id,league_id,level_id,organization_id,location_id,starts_at,status,officials_needed) values
-      ('${GAME1}','100','${SPORT}','${LEAGUE}','${LEVEL}','${ORG}','${LOC1}','2026-10-03 15:00+00','active',2),
-      ('${GAME2}','101','${SPORT}','${LEAGUE}','${LEVEL}','${ORG}','${LOC2}','2026-10-03 15:00+00','active',2),
-      ('${GAME3}','102','${SPORT}','${LEAGUE}','${LEVEL}','${ORG}','${LOC3}','2026-10-03 15:00+00','active',2),
-      ('${GAME4}','103','${SPORT}','${LEAGUE}','${LEVEL}','${ORG}','${LOC4}','2026-10-03 15:00+00','active',2);
+      ('${GAME1}','100','${SPORT}','${LEAGUE}','${LEVEL}','${ORG}','${LOC1}',(now()+interval '7 days'),'active',2),
+      ('${GAME2}','101','${SPORT}','${LEAGUE}','${LEVEL}','${ORG}','${LOC2}',(now()+interval '7 days'),'active',2),
+      ('${GAME3}','102','${SPORT}','${LEAGUE}','${LEVEL}','${ORG}','${LOC3}',(now()+interval '7 days'),'active',2),
+      ('${GAME4}','103','${SPORT}','${LEAGUE}','${LEVEL}','${ORG}','${LOC4}',(now()+interval '7 days'),'active',2);
     insert into public.sport_positions values('${POS1}','${SPORT}','Center Referee',1),('${POS2}','${SPORT}','Assistant Referee 1',2),('${MENTOR}','${SPORT}','Mentor',3);
     insert into public.officials values('${OFF1}',true,array['Soccer']),('${OFF2}',true,array['Soccer']);
     insert into public.organization_officials values('${ORG}','${OFF1}',true),('${ORG}','${OFF2}',true);

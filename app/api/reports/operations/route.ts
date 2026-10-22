@@ -1,3 +1,4 @@
+import { scopeReportLeagues } from "../reportScope";
 import { NextRequest, NextResponse } from "next/server";
 import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
 import { readAllPages } from "../../../../lib/supabase/readAll";
@@ -7,7 +8,7 @@ type ReportRow = Record<string, any>;
 export async function GET(request: NextRequest) {
   const scope = await requireManagedOrganization(request);
   if (scope.error) return scope.error;
-  const { session: supabase, service, organizationId } = scope;
+  const { session: supabase, service, organizationId, leagueIds } = scope;
   let subscriptionQuery = service
     .from("refassign_subscriptions")
     .select("reporting_access")
@@ -24,7 +25,7 @@ export async function GET(request: NextRequest) {
   const [gamesResult, assignmentsResult, declinesResult, auditResult] =
     await Promise.all([
       readAllPages<ReportRow>((from, to) =>
-        supabase
+        scopeReportLeagues(supabase
           .from("games")
           .select(
             "id,game_number,status,starts_at,officials_needed,leagues(id,name),levels(name),location:locations(name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name)",
@@ -32,10 +33,10 @@ export async function GET(request: NextRequest) {
           .eq("organization_id", organizationId)
           .order("starts_at", { ascending: false })
           .order("id")
-          .range(from, to),
+          .range(from, to), scope, "league_id"),
       ),
       readAllPages<ReportRow>((from, to) =>
-        supabase
+        scopeReportLeagues(supabase
           .from("assignments")
           .select(
             "id,game_id,official_id,status,game_fee,mileage_miles,mileage_rate,payment_status,published_at,accept_by,responded_at,officials(id,first_name,last_name),sport_positions(name),games!inner(organization_id)",
@@ -43,10 +44,10 @@ export async function GET(request: NextRequest) {
           .eq("games.organization_id", organizationId)
           .order("assigned_at", { ascending: false })
           .order("id")
-          .range(from, to),
+          .range(from, to), scope, "games.league_id"),
       ),
       readAllPages<ReportRow>((from, to) =>
-        supabase
+        scopeReportLeagues(supabase
           .from("assignment_declines")
           .select(
             "id,game_id,official_id,position_id,declined_at,decline_reason,games!inner(organization_id)",
@@ -54,7 +55,7 @@ export async function GET(request: NextRequest) {
           .eq("games.organization_id", organizationId)
           .order("declined_at", { ascending: false })
           .order("id")
-          .range(from, to),
+          .range(from, to), scope, "games.league_id"),
       ),
       readAllPages<ReportRow>((from, to) =>
         supabase

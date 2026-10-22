@@ -1,3 +1,4 @@
+const scopeHelpers = require("./support/load-scope.cjs");
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -5,12 +6,13 @@ const ts = require('typescript');
 const vm = require('node:vm');
 const today = new Date().toISOString().slice(0, 10);
 
-function setup({ user = { id: 'mentor' }, memberships = [{ role: 'mentor' }], subscription = { status: 'active' }, leagues = [{ league_id: 'allowed-league' }], games = [{ id: 'allowed-game' }], errors = {}, rpcError = null } = {}) {
+function setup({ user = { id: 'mentor' }, memberships = [{ role: 'mentor' }], subscription = { status: 'active' }, leagues = [{ league_id: 'allowed-league', all_locations:true, location_ids:[] }], coverage = [{ league_id: 'allowed-league' }], games = [{ id: 'allowed-game' }], errors = {}, rpcError = null } = {}) {
   const calls = [];
   const responses = {
     organization_memberships: { data: memberships },
     refassign_subscriptions: { data: subscription },
     organization_member_league_access: { data: leagues },
+    organization_league_coverage: { data: coverage },
     games: { data: games },
   };
   const service = { from: table => {
@@ -22,7 +24,7 @@ function setup({ user = { id: 'mentor' }, memberships = [{ role: 'mentor' }], su
       if (table === 'games' && range) result.data = games.slice(range[1], range[2] + 1);
       return Promise.resolve(result).then(resolve, reject);
     } };
-    for (const method of ['select', 'eq', 'is', 'order', 'limit', 'maybeSingle', 'in', 'gte', 'range'])
+    for (const method of ['select', 'eq', 'is', 'order', 'limit', 'maybeSingle', 'in', 'gte', 'range', 'or'])
       q[method] = (...args) => { call.filters.push([method, ...args]); return q; };
     return q;
   } };
@@ -33,6 +35,7 @@ function setup({ user = { id: 'mentor' }, memberships = [{ role: 'mentor' }], su
   const module = { exports: {} };
   const mockRequire = name => name === 'next/server'
     ? { NextResponse: { json: (body, opts) => ({ body, status: opts?.status || 200, headers: opts?.headers }) } }
+    : name.endsWith('/server/organizationScope') ? scopeHelpers
     : name.endsWith('/supabase/server') ? { createServerSupabaseClient: async () => session }
     : name.endsWith('/supabase/admin') ? { createServiceClient: () => service } : require(name);
   vm.runInNewContext(ts.transpileModule(fs.readFileSync('app/api/assignments/read-only/route.ts', 'utf8'), {
@@ -79,7 +82,7 @@ test('reads only granted organization and leagues with safe fields and stable or
   const q = t.calls.find(c => c.table === 'games');
   assert(q.filters.some(f => f[0] === 'eq' && f[1] === 'organization_id' && f[2] === 'selected-org'));
   assert(q.filters.some(f => f[0] === 'is' && f[1] === 'archived_at' && f[2] === null));
-  assert.deepEqual(q.filters.find(f => f[0] === 'in')[2], ['allowed-league']);
+  assert.deepEqual(Array.from(q.filters.find(f => f[0] === 'in')[2]), ['allowed-league']);
   assert.deepEqual(q.filters.filter(f => f[0] === 'order').map(f => f[1]), ['starts_at', 'id']);
   assert.deepEqual(q.filters.find(f => f[0] === 'range'), ['range', 0, 499]);
   const projection = q.filters.find(f => f[0] === 'select')[1];
@@ -119,7 +122,7 @@ test('paged schedule includes more than 5,000 games with an exact-boundary final
 });
 
 test('database errors fail closed instead of returning incomplete schedules', async () => {
-  for (const table of ['organization_memberships', 'refassign_subscriptions', 'organization_member_league_access', 'games']) {
+  for (const table of ['organization_memberships', 'refassign_subscriptions', 'organization_member_league_access', 'organization_league_coverage', 'games']) {
     const result = await setup({ errors: { [table]: { message: 'failed' } } }).run();
     assert.equal(result.status, table === 'organization_memberships' ? 403 : 500);
     assert.equal(result.body.games, undefined);
@@ -141,4 +144,12 @@ test('self-assignment uses the authenticated RPC, forwarding permission and vali
     assert.equal(call.args.p_game_id, 'selected-game');
     assert(!t.calls.some(c => c.table)); // Never bypass SQL authorization via the service client.
   }
+});
+
+ test('removed active organization coverage revokes read-only league access', async () => {
+  const t = setup({ coverage: [] });
+  const result = await t.run();
+  assert.equal(result.status, 200);
+  assert.equal(result.body.games.length, 0);
+  assert(!t.calls.some(c => c.table === 'games'));
 });

@@ -55,9 +55,10 @@ function nodes(node) {
 test('Calendar is a direct, accessible toolbar button next to Date, not a hidden manager action or new route', () => {
   const s = setup();
   assert.equal(calendar.parent, dateRange.parent.parent);
-  assert.equal(attr(calendar.parent, 'className'), 'assignmentFilterPanel assignmentCompactToolbar');
+  assert.equal(attr(calendar.parent, 'className'), 'assignmentCalendarControls');
+  assert.equal(attr(calendar.parent.parent, 'className'), 'assignmentCalendarGroup');
   assert(calendar.pos > dateRange.end);
-  assert(calendar.end < source.indexOf('<MultiSelectGameFilter', dateRange.end));
+  assert(calendar.end < picker.pos, 'the inline picker stays in the same calendar group');
   const button = s.renderCalendar();
   assert.equal(button.type, 'button');
   assert.equal(button.props.type, 'button');

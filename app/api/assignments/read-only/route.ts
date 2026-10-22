@@ -1,3 +1,4 @@
+import { scopeGameQuery, readCurrentLeagueAccess } from "../../../../lib/server/organizationScope";
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "../../../../lib/supabase/server";
 import { createServiceClient } from "../../../../lib/supabase/admin";
@@ -28,16 +29,17 @@ export async function GET(request: NextRequest) {
   if (memberError || (!mentor && !viewer)) return NextResponse.json({ error: "Read-only game and assignment access has not been granted for this organization." }, { status: 403 });
   const [{ data: subscription, error: subscriptionError }, { data: access, error: accessError }] = await Promise.all([
     service.from("refassign_subscriptions").select("status,access_override").eq("organization_id", organizationId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
-    service.from("organization_member_league_access").select("league_id").eq("organization_id", organizationId).eq("user_id", user.id),
+    readCurrentLeagueAccess(service, organizationId, user.id),
   ]);
   if (subscriptionError || accessError) return NextResponse.json({ error: "Could not verify assignment access." }, { status: 500 });
   if (!subscription || (!subscription.access_override && !["active", "trialing"].includes(subscription.status))) return NextResponse.json({ error: "This organization needs an active subscription." }, { status: 402 });
-  if (!access?.length) return NextResponse.json({ games: [], hasMore: false, nextOffset: null, from, isMentor: mentor }, { headers });
+  const leagueIds = (access || []).map(row => row.league_id);
+  if (!leagueIds.length) return NextResponse.json({ games: [], hasMore: false, nextOffset: null, from, isMentor: mentor }, { headers });
   // Explicit projection excludes response tokens, personal contact data, rankings and pay.
-  const { data: games, error } = await service.from("games")
+  const { data: games, error } = await scopeGameQuery(service.from("games")
     .select("id,game_number,starts_at,status,officials_needed,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name),leagues(name),assignments(id,status,published_at,officials(first_name,last_name),sport_positions(name))")
-    .eq("organization_id", organizationId).is("archived_at", null).in("league_id", access.map(row => row.league_id))
-    .gte("starts_at", `${from}T00:00:00Z`).order("starts_at").order("id").range(offset, offset + pageSize - 1);
+    .eq("organization_id", organizationId).is("archived_at", null).in("league_id", leagueIds)
+    .gte("starts_at", `${from}T00:00:00Z`).order("starts_at").order("id").range(offset, offset + pageSize - 1), { fullOrganizationAccess: false, leagueAccess: access || [] });
   if (error) return NextResponse.json({ error: "Could not load assignments." }, { status: 500 });
   const rows = games || [];
   const hasMore = rows.length === pageSize;

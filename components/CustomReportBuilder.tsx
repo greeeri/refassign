@@ -2,7 +2,7 @@
 
 import { addReportCopyright } from "../lib/pdfCopyright";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   buildCustomReport,
   defaultCustomReport,
@@ -92,9 +92,17 @@ const format = (metric: ReportMetric, value: number) =>
 
 export default function CustomReportBuilder({
   organizationId,
+  fullOrganizationAccess = false,
 }: {
   organizationId?: string;
+  fullOrganizationAccess?: boolean;
 }) {
+  const scopeKey = JSON.stringify([organizationId, fullOrganizationAccess]);
+  const activeScope = useRef<string | null>(scopeKey);
+  activeScope.current = scopeKey;
+  const loadVersion = useRef(0);
+  const [loadedScopeKey, setLoadedScopeKey] = useState("");
+  const isCurrentScope = () => activeScope.current === scopeKey;
   const [access, setAccess] = useState<"loading" | "standard" | "premium">(
       "loading",
     ),
@@ -115,14 +123,19 @@ export default function CustomReportBuilder({
     [error, setError] = useState("");
   const endpoint = `/api/reports/custom?organizationId=${encodeURIComponent(organizationId || "")}`;
   const load = async () => {
+    if (!isCurrentScope()) return;
+    const request = ++loadVersion.current;
+    const current = () => isCurrentScope() && request === loadVersion.current;
     setError("");
     try {
       const response = await fetch(endpoint, { cache: "no-store" }),
         result = await response.json();
+      if (!current()) return;
       if (!response.ok)
         throw new Error(
           result.error || "Custom reporting could not be loaded.",
         );
+      setLoadedScopeKey(scopeKey);
       const premium = result.reportingAccess === "premium";
       setAccess(premium ? "premium" : "standard");
       if (premium) {
@@ -133,6 +146,8 @@ export default function CustomReportBuilder({
         setRecipientEmail((current) => current || result.defaultEmail || "");
       }
     } catch (reason) {
+      if (!current()) return;
+      setLoadedScopeKey(scopeKey);
       setError(
         reason instanceof Error
           ? reason.message
@@ -142,8 +157,13 @@ export default function CustomReportBuilder({
     }
   };
   useEffect(() => {
+    activeScope.current = scopeKey;
+    setLoadedScopeKey(""); setAccess("loading"); setGames([]); setAssignments([]); setOrganizations([]); setTemplates([]);
+    setDefinition(defaultCustomReport); setTemplateId(""); setTemplateName(""); setRecipientEmail("");
+    setScheduleEnabled(false); setFrequency("weekly"); setSendDay(1); setBusy(false); setMessage("");
     void load();
-  }, [organizationId]);
+    return () => { activeScope.current = null; loadVersion.current += 1; };
+  }, [scopeKey]);
   const facts = useMemo(
       () => normalizeReportFacts(games, assignments, organizations),
       [games, assignments, organizations],
@@ -276,37 +296,33 @@ export default function CustomReportBuilder({
     );
   };
   const save = async () => {
-    setBusy(true);
-    setMessage("");
-    setError("");
-    const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+    if (!isCurrentScope() || loadedScopeKey !== scopeKey || access !== "premium" || busy) return;
+    // This endpoint lists and writes only the authenticated user's personal templates.
+    if (templateId && !templates.some((template) => template.id === templateId)) {
+      setError("Choose one of your saved templates or create a new report."); return;
+    }
+    setBusy(true); setMessage(""); setError("");
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: templateId || undefined,
-          name: templateName || definition.title,
-          definition,
-          recipientEmail,
-          frequency,
-          sendDay,
-          scheduleEnabled,
+          id: templateId || undefined, name: templateName || definition.title, definition,
+          recipientEmail: fullOrganizationAccess ? recipientEmail : "",
+          frequency, sendDay, scheduleEnabled: fullOrganizationAccess && scheduleEnabled,
         }),
-      }),
-      result = await response.json();
-    setBusy(false);
-    if (!response.ok)
-      return setError(
-        result.error || "The report template could not be saved.",
-      );
-    setTemplateId(result.template.id);
-    setTemplateName(result.template.name);
-    setTemplates((current) => [
-      result.template,
-      ...current.filter((item) => item.id !== result.template.id),
-    ]);
-    setMessage("Report template saved.");
+      });
+      const result = await response.json();
+      if (!isCurrentScope()) return;
+      if (!response.ok) throw new Error(result.error || "The report template could not be saved.");
+      setTemplateId(result.template.id); setTemplateName(result.template.name);
+      setTemplates((current) => [result.template, ...current.filter((item) => item.id !== result.template.id)]);
+      setMessage("Report template saved.");
+    } catch (reason) {
+      if (isCurrentScope()) setError(reason instanceof Error ? reason.message : "The report template could not be saved.");
+    } finally { if (isCurrentScope()) setBusy(false); }
   };
   const openTemplate = (template: Template) => {
+    if (!isCurrentScope() || loadedScopeKey !== scopeKey || !templates.some((item) => item.id === template.id)) return;
     setDefinition({
       ...defaultCustomReport,
       ...template.definition,
@@ -317,10 +333,11 @@ export default function CustomReportBuilder({
     setRecipientEmail(template.recipient_email || "");
     setFrequency(template.frequency);
     setSendDay(template.send_day);
-    setScheduleEnabled(template.schedule_enabled);
-    setMessage("");
+    setScheduleEnabled(fullOrganizationAccess && template.schedule_enabled);
+    setMessage(!fullOrganizationAccess && template.schedule_enabled ? "Saving this personal report will turn off its scheduled delivery." : "");
   };
   const removeTemplate = async (template: Template) => {
+    if (!isCurrentScope() || loadedScopeKey !== scopeKey || !templates.some((item) => item.id === template.id)) return;
     if (!window.confirm(`Delete “${template.name}”?`)) return;
     const response = await fetch(endpoint, {
         method: "POST",
@@ -328,6 +345,7 @@ export default function CustomReportBuilder({
         body: JSON.stringify({ action: "delete", id: template.id }),
       }),
       result = await response.json();
+    if (!isCurrentScope()) return;
     if (!response.ok)
       return setError(result.error || "The template could not be deleted.");
     setTemplates((current) =>
@@ -371,7 +389,7 @@ export default function CustomReportBuilder({
       },
       { end: 0, stops: [] as string[] },
     );
-  if (access === "loading")
+  if (access === "loading" || loadedScopeKey !== scopeKey)
     return (
       <section className="card">
         <p>Loading Custom Report Builder…</p>
@@ -772,10 +790,9 @@ export default function CustomReportBuilder({
           </div>
           <div className="customBuilderSection customSavePanel">
             <div>
-              <h3>4. Save and schedule</h3>
+              <h3>{fullOrganizationAccess ? "4. Save and schedule" : "4. Save report"}</h3>
               <p>
-                Save this configuration for reuse or have Ref Pro Group email it
-                automatically.
+                {fullOrganizationAccess ? "Save this configuration for reuse or have Ref Pro Group email it automatically." : "Save your personal report configuration for reuse. Scheduled delivery is managed by the organization owner."}
               </p>
             </div>
             <div className="reportFilters">
@@ -788,15 +805,15 @@ export default function CustomReportBuilder({
                   onChange={(event) => setTemplateName(event.target.value)}
                 />
               </label>
-              <label className="customScheduleToggle">
+              {fullOrganizationAccess && <label className="customScheduleToggle">
                 <input
                   type="checkbox"
                   checked={scheduleEnabled}
                   onChange={(event) => setScheduleEnabled(event.target.checked)}
                 />
                 Schedule email delivery
-              </label>
-              {scheduleEnabled && (
+              </label>}
+              {fullOrganizationAccess && scheduleEnabled && (
                 <>
                   <label>
                     Recipient email

@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
+import { scopeGameQuery, requireManagedOrganization, requireAssignmentScope } from "../../../../lib/server/organizationScope";
 import { stripeConnectRequest } from "../../../../lib/stripe/connect";
 import { stripeConnectConfig } from "../../../../lib/stripe/runtime";
 
@@ -119,6 +119,10 @@ export async function POST(request: NextRequest) {
       { error: "Process no more than 250 payroll records at once." },
       { status: 400 },
     );
+  if (assignmentIds.length) {
+    const accessError = await requireAssignmentScope(context, assignmentIds);
+    if (accessError) return accessError;
+  }
   const { data, error } = assignmentIds.length ? await service
     .from("assignments")
     .select(
@@ -130,10 +134,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 400 });
   const assignments = (data || []) as unknown as Assignment[];
   if (correctionIds.length) {
-    const { data: corrections, error: correctionError } = await service
+    const { data: corrections, error: correctionError } = await scopeGameQuery(service
       .from("payroll_fee_corrections")
       .select("id,difference,status,paid_at,assignments!inner(id,status,official_id,game_id,officials(first_name,last_name),games!inner(organization_id,league_id,bill_to_id,leagues(name)))")
-      .in("id", correctionIds).eq("organization_id", organizationId);
+      .in("id", correctionIds).eq("organization_id", organizationId), context, "assignments.games");
     if (correctionError) return NextResponse.json({ error: correctionError.message }, { status: 400 });
     if ((corrections || []).length !== correctionIds.length)
       return NextResponse.json({ error: "One or more fee corrections were not found." }, { status: 400 });

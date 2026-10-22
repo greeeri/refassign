@@ -1,6 +1,6 @@
 import { sendOfficialNotification } from "../../../../lib/communications/officialCc";
 import { NextRequest, NextResponse } from "next/server";
-import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
+import { requireManagedOrganization, requireGameScope, requireAssignmentScope } from "../../../../lib/server/organizationScope";
 import { eventLocalToIso } from "../../../../lib/event-time";
 
 function esc(v: unknown) {
@@ -25,6 +25,15 @@ export async function POST(req: NextRequest) {
   };
   if (!body.gameId)
     return NextResponse.json({ error: "Game is required." }, { status: 400 });
+  const accessError = await requireGameScope(context, [body.gameId]);
+  if (accessError) return accessError;
+  const selectedIds = body.assignmentIds ? [...new Set(body.assignmentIds)] : null;
+  if (selectedIds && (!selectedIds.length || selectedIds.length > 2))
+    return NextResponse.json({ error: "Choose one or two assignments to notify." }, { status: 400 });
+  if (selectedIds) {
+    const assignmentAccessError = await requireAssignmentScope(context, selectedIds, body.gameId);
+    if (assignmentAccessError) return assignmentAccessError;
+  }
   const { data: ownedGame, error: ownedGameError } = await service
     .from("games")
     .select(
@@ -53,9 +62,6 @@ export async function POST(req: NextRequest) {
     .select("id,response_token")
     .eq("game_id", body.gameId)
     .not("official_id", "is", null);
-  const selectedIds = body.assignmentIds ? [...new Set(body.assignmentIds)] : null;
-  if (selectedIds && (!selectedIds.length || selectedIds.length > 2))
-    return NextResponse.json({ error: "Choose one or two assignments to notify." }, { status: 400 });
   if (selectedIds) assignmentQuery.in("id", selectedIds);
   const { data: targetAssignments, error: targetError } = body.retryFailed
     ? await assignmentQuery

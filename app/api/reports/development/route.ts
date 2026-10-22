@@ -1,5 +1,5 @@
+import { scopeReportLeagues, readReportOfficialLinks } from "../reportScope";
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "../../../../lib/supabase/admin";
 import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
 import { iowaEntryRulesAnswers } from "../../../../lib/server/iowaEntryRulesQuizAnswers";
 import { readAllForChunks, readAllPages } from "../../../../lib/supabase/readAll";
@@ -60,7 +60,7 @@ function topicScores(attempt: QuizAttempt) {
 export async function GET(request: NextRequest) {
   const scope = await requireManagedOrganization(request);
   if (scope.error) return scope.error;
-  const { session: supabase, service, organizationId } = scope;
+  const { session: supabase, service, organizationId, leagueIds } = scope;
   const organizationIds = [organizationId];
   let subscriptionQuery = service
     .from("refassign_subscriptions")
@@ -80,12 +80,7 @@ export async function GET(request: NextRequest) {
   let organizations: Array<{ id: string; name: string }> = [];
   if (organizationIds.length) {
     const [links, organizationRows] = await Promise.all([
-      readAllPages<{ organization_id: string; official_id: string }>((from, to) => service
-        .from("organization_officials")
-        .select("organization_id,official_id")
-        .in("organization_id", organizationIds)
-        .eq("active", true)
-        .order("organization_id").order("official_id").range(from, to)),
+      readReportOfficialLinks(scope),
       service
         .from("organizations")
         .select("id,name")
@@ -153,7 +148,8 @@ export async function GET(request: NextRequest) {
 
   const programMembershipsResult = await readAllForChunks<any, string>(officialIds, (ids, from, to) => service
     .from("registration_program_officials")
-    .select("program_id,official_id,added_at")
+    .select("program_id,official_id,added_at,registration_programs!inner(organization_id)")
+    .eq("registration_programs.organization_id", organizationId)
     .in("official_id", ids).order("official_id").order("program_id").range(from, to));
   if (programMembershipsResult.error)
     return NextResponse.json(
@@ -196,13 +192,15 @@ export async function GET(request: NextRequest) {
       .order("sort_order").order("id").range(from, to)),
     readAllForChunks<any, string>(officialIds, (ids, from, to) => service
       .from("official_development_progress")
-      .select("module_id,official_id,status,completed_at,updated_at")
+      .select("module_id,official_id,status,completed_at,updated_at,development_modules!inner(program_id)")
+      .in("development_modules.program_id", programIds)
       .in("official_id", ids).order("official_id").order("module_id").range(from, to)),
     readAllForChunks<QuizAttempt, string>(officialIds, (ids, from, to) => service
       .from("development_quiz_attempts")
       .select(
-        "id,module_id,official_id,answers,correct_count,total_questions,score_percent,passed,completed_at",
+        "id,module_id,official_id,answers,correct_count,total_questions,score_percent,passed,completed_at,development_modules!inner(program_id)",
       )
+      .in("development_modules.program_id", programIds)
       .in("official_id", ids)
       .order("completed_at", { ascending: false }).order("id").range(from, to)),
     readAllForChunks<any, string>(officialIds, (ids, from, to) => service
@@ -223,7 +221,7 @@ export async function GET(request: NextRequest) {
       .in("program_id", programIds)
       .in("official_id", ids).order("asked_at").order("id").range(from, to)),
     reportingAccess === "premium"
-      ? readAllForChunks<any, string>(officialIds, (ids, from, to) => supabase
+      ? readAllForChunks<any, string>(officialIds, (ids, from, to) => scopeReportLeagues(supabase
           .from("assignments")
           .select(
             "id,official_id,status,assigned_at,games!inner(id,starts_at,organization_id,level_id,levels(name)),sport_positions(name)",
@@ -232,7 +230,7 @@ export async function GET(request: NextRequest) {
           .eq("games.organization_id", organizationId)
           .in("status", ["accepted", "confirmed"])
           .lte("games.starts_at", new Date().toISOString())
-          .order("assigned_at").order("id").range(from, to))
+          .order("assigned_at").order("id").range(from, to), scope, "games.league_id"))
       : Promise.resolve({ data: [], error: null }),
   ]);
   const error =

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
+import { scopeGameQuery, requireManagedOrganization, requireGameScope } from "../../../../lib/server/organizationScope";
 import { gameHoldReason, normalizeGameStatus } from "../../../../lib/game-status";
 
 export async function GET(request: NextRequest) {
@@ -7,6 +7,8 @@ export async function GET(request: NextRequest) {
   if (scope.error) return scope.error;
   const id = request.nextUrl.searchParams.get("gameId");
   if (!id || !/^[0-9a-f-]{36}$/i.test(id)) return NextResponse.json({ error: "Select a game." }, { status: 400 });
+  const accessError = await requireGameScope(scope, [id]);
+  if (accessError) return accessError;
   const selection = "id,game_number,league_id,status,starts_at,duration_minutes,location_id,home_team_id,away_team_id,time_tbd,field_tbd,venue_conflict_hold,notes,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),levels(name),location:locations(name,city,state)";
   const { data: game, error } = await scope.service.from("games").select(selection).eq("id", id).eq("organization_id", scope.organizationId).maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -25,7 +27,7 @@ export async function GET(request: NextRequest) {
     let query = scope.service.from("games").select(selection).eq("organization_id", scope.organizationId).neq("id", id).is("archived_at", null)
       .not("status", "in", "(canceled,cancelled,rained_out,rain_out)").eq("time_tbd", false)
       .gte("starts_at", new Date(start - 1440 * 60000).toISOString()).lt("starts_at", new Date(end).toISOString()).or(filters.join(",")).order("starts_at").limit(500);
-    if (!scope.fullOrganizationAccess) query = query.in("league_id", scope.leagueIds || []);
+    query = scopeGameQuery(query, scope);
     const result = await query;
     if (result.error) return NextResponse.json({ error: result.error.message }, { status: 500 });
     conflicts = (result.data || []).flatMap(other => {

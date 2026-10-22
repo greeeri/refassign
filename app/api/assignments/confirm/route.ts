@@ -1,6 +1,6 @@
 import { sendOfficialNotification } from "../../../../lib/communications/officialCc";
 import { NextRequest, NextResponse } from "next/server";
-import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
+import { requireManagedOrganization, requireAssignmentScope } from "../../../../lib/server/organizationScope";
 function esc(v: unknown) {
   return String(v ?? "").replace(
     /[&<>'"]/g,
@@ -22,6 +22,8 @@ export async function POST(req: NextRequest) {
       { error: "Assignment is required." },
       { status: 400 },
     );
+  const accessError = await requireAssignmentScope(context, [body.assignmentId]);
+  if (accessError) return accessError;
   const { data: raw, error } = await service
     .from("assignments")
     .select(

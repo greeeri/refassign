@@ -1,6 +1,6 @@
 import { sendOfficialNotification } from "../../../../lib/communications/officialCc";
 import { NextRequest, NextResponse } from "next/server";
-import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
+import { requireManagedOrganization, requireGameScope } from "../../../../lib/server/organizationScope";
 
 function esc(v: unknown) {
   return String(v ?? "").replace(
@@ -25,6 +25,8 @@ export async function POST(req: NextRequest) {
       { error: "Game and status are required." },
       { status: 400 },
     );
+  const accessError = await requireGameScope(context, [body.gameId]);
+  if (accessError) return accessError;
   const { data: ownedGame, error: ownedGameError } = await service
     .from("games")
     .select("id")

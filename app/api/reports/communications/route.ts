@@ -1,12 +1,12 @@
+import { scopeReportLeagues, readReportOfficialLinks } from "../reportScope";
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "../../../../lib/supabase/admin";
 import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
 import { readAllPages } from "../../../../lib/supabase/readAll";
 
 export async function GET(request: NextRequest) {
   const scope = await requireManagedOrganization(request);
   if (scope.error) return scope.error;
-  const { session: supabase, service, organizationId } = scope;
+  const { session: supabase, service, organizationId, leagueIds } = scope;
   const organizationIds = [organizationId];
   let subscriptionQuery = service
     .from("refassign_subscriptions")
@@ -26,16 +26,7 @@ export async function GET(request: NextRequest) {
   let organizations: Array<{ id: string; name: string }> = [];
   if (organizationIds.length) {
     const [links, organizationRows] = await Promise.all([
-      readAllPages<{ organization_id: string; official_id: string }>(
-        (from, to) =>
-          service
-            .from("organization_officials")
-            .select("organization_id,official_id")
-            .in("organization_id", organizationIds)
-            .eq("active", true)
-            .order("official_id")
-            .range(from, to),
-      ),
+      readReportOfficialLinks(scope),
       service
         .from("organizations")
         .select("id,name")
@@ -104,12 +95,12 @@ export async function GET(request: NextRequest) {
 
   // The signed-in client keeps game access inside the current manager's RLS scope.
   const gamesResult = await readAllPages<{ id: string }>((from, to) =>
-    supabase
+    scopeReportLeagues(supabase
       .from("games")
       .select("id")
       .eq("organization_id", organizationId)
       .order("id")
-      .range(from, to),
+      .range(from, to), scope, "league_id"),
   );
   if (gamesResult.error)
     return NextResponse.json(
@@ -135,7 +126,7 @@ export async function GET(request: NextRequest) {
           )
         : Promise.resolve({ data: [], error: null }),
       readAllPages<Record<string, any>>((from, to) =>
-        supabase
+        scopeReportLeagues(supabase
           .from("assignments")
           .select(
             "id,game_id,official_id,status,published_at,email_sent_at,email_error,reminder_sent_at,responded_at,games!inner(organization_id,leagues(name),levels(name))",
@@ -147,14 +138,15 @@ export async function GET(request: NextRequest) {
           )
           .order("published_at", { ascending: false })
           .order("id")
-          .range(from, to),
+          .range(from, to), scope, "games.league_id"),
       ),
       readAllPages<Record<string, any>>((from, to) =>
         supabase
           .from("development_communications")
           .select(
-            "id,program_id,official_id,channel,delivery_status,error_message,sent_at,created_at,registration_programs(name)",
+            "id,program_id,official_id,channel,delivery_status,error_message,sent_at,created_at,registration_programs!inner(name,organization_id)",
           )
+          .eq("registration_programs.organization_id", organizationId)
           .in("official_id", officialIds)
           .order("created_at", { ascending: false })
           .order("id")

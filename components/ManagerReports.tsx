@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { ReportSchedulingAccessContext } from "./ReportSavedViews";
 import AssignmentCoverageReport from "./AssignmentCoverageReport";
 import AuditHistoryManager from "./AuditHistoryManager";
 import ComplianceEligibilityReport from "./ComplianceEligibilityReport";
@@ -62,8 +63,10 @@ const premiumKeys = new Set<ReportKey>(premiumReports.map((item) => item.key));
 export default function ManagerReports({
   organizationId,
   onOpenAction,
+  fullOrganizationAccess = false,
 }: {
   organizationId?: string;
+  fullOrganizationAccess?: boolean;
   onOpenAction?: (target: ReportActionTarget) => void;
 }) {
   const [group, setGroup] = useState<ReportGroup>("standard");
@@ -80,7 +83,7 @@ export default function ManagerReports({
     setReport(nextReport);
   };
   return (
-    <>
+    <ReportSchedulingAccessContext.Provider key={`${organizationId || ""}:${fullOrganizationAccess}`} value={fullOrganizationAccess}>
       <section className="card reportNavigationCard">
         <div className="reportGroupTabs" role="tablist" aria-label="Reporting level">
           <button
@@ -129,7 +132,7 @@ export default function ManagerReports({
         </label>
       </section>
       {report === "executive" ? (
-        <ExecutiveReportingDashboard key={organizationId} onOpenReport={openReport} organizationId={organizationId} />
+        <ExecutiveReportingDashboard fullOrganizationAccess={fullOrganizationAccess} key={organizationId} onOpenReport={openReport} organizationId={organizationId} />
       ) : report === "operations" ? (
         <OrganizationOperationsReport key={organizationId} organizationId={organizationId} onOpenAction={onOpenAction} />
       ) : report === "benchmarks" ? (
@@ -155,10 +158,10 @@ export default function ManagerReports({
       ) : report === "payroll" ? (
         <PayrollPaymentReport key={organizationId} organizationId={organizationId} onOpenAction={onOpenAction} />
       ) : report === "custom" ? (
-        <CustomReportBuilder key={organizationId} organizationId={organizationId} />
+        <CustomReportBuilder fullOrganizationAccess={fullOrganizationAccess} key={organizationId} organizationId={organizationId} />
       ) : (
         <OfficialReports managerView organizationId={organizationId} />
       )}
-    </>
+    </ReportSchedulingAccessContext.Provider>
   );
 }

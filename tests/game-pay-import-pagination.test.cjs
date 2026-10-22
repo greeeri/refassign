@@ -1,3 +1,4 @@
+const { applyScopeFilter } = require("./support/scope-query.cjs");
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -14,6 +15,12 @@ function loadModule(path, mockRequire = require) {
 }
 
 const paging = loadModule("lib/supabase/readAll.ts");
+const scopeGuards = loadModule("lib/server/organizationScope.ts", (name) => {
+  if (name === "next/server") return { NextResponse: { json: (body, options) => ({ body, status: options?.status || 200 }) } };
+  if (name.endsWith("/supabase/readAll")) return paging;
+  if (name.endsWith("/supabase/admin") || name.endsWith("/supabase/server")) return {};
+  throw new Error(`Unexpected dependency: ${name}`);
+});
 const copy = (value) => JSON.parse(JSON.stringify(value));
 const gameId = (index) => `game-${String(index).padStart(3, "0")}`;
 const positionId = (index) => `position-${String(index).padStart(2, "0")}`;
@@ -44,6 +51,7 @@ function setup({ gameCount = 100, assignmentsPerGame = 12, leagueIds = null, aut
           let rows = tables[table].slice();
           for (const [method, column, value] of call.filters) {
             if (method === "eq") rows = rows.filter((row) => row[column] === value);
+            if (method === "or") rows = rows.filter((row) => applyScopeFilter(row,column,value));
             if (method === "in") rows = rows.filter((row) => value.includes(row[column]));
           }
           const orders = call.filters.filter(([method]) => method === "order");
@@ -62,7 +70,7 @@ function setup({ gameCount = 100, assignmentsPerGame = 12, leagueIds = null, aut
           return Promise.resolve({ data: rows.map((row) => Object.fromEntries(columns.map((column) => [column, row[column]]))), error: null }).then(resolve, reject);
         },
       };
-      for (const method of ["select", "eq", "in", "order", "range"]) {
+      for (const method of ["select", "eq", "in", "order", "range", "or"]) {
         query[method] = (...args) => { call.filters.push(copy([method, ...args])); return query; };
       }
       return query;
@@ -74,9 +82,9 @@ function setup({ gameCount = 100, assignmentsPerGame = 12, leagueIds = null, aut
   };
   const route = loadModule("app/api/games/pay/import/route.ts", (name) => {
     if (name === "next/server") return { NextResponse: { json: (body, options) => ({ body: copy(body), status: options?.status || 200 }) } };
-    if (name.endsWith("/organizationScope")) return { requireManagedOrganization: async (request, roles) => {
+    if (name.endsWith("/organizationScope")) return { requireGameScope: scopeGuards.requireGameScope, requireManagedOrganization: async (request, roles) => {
       authorizationCalls.push({ request, roles: Array.from(roles) });
-      return authorizationError ? { error: authorizationError } : { service, organizationId: "selected-org", leagueIds };
+      return authorizationError ? { error: authorizationError } : { service, organizationId: "selected-org", leagueIds, leagueAccess: leagueIds?.map(league_id => ({ league_id, all_locations:true, location_ids:[] })), fullOrganizationAccess: leagueIds === null };
     } };
     if (name.endsWith("/supabase/readAll")) return paging;
     throw new Error(`Unexpected dependency: ${name}`);
@@ -169,7 +177,7 @@ test("pay import keeps management authorization and organization/league checks b
   for (const kind of ["organization", "league"]) {
     const t = setup({ gameCount: 1, leagueIds: ["allowed-league"] });
     t.games[0][kind === "organization" ? "organization_id" : "league_id"] = "not-allowed";
-    assert.equal((await t.run()).status, 400);
+    assert.equal((await t.run()).status, 403);
     assert(!t.reads.some((call) => call.table === "assignments"));
     assert.equal(t.rpcCalls.length, 0);
     assert(t.reads.find((call) => call.table === "games").filters.some(([method, column, value]) => method === "eq" && column === "organization_id" && value === "selected-org"));

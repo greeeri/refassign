@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
+import { scopeGameQuery, requireManagedOrganization, requireGameScope } from "../../../../lib/server/organizationScope";
 import { readAllPages } from "../../../../lib/supabase/readAll";
 
 export async function GET(request: NextRequest) {
@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
   if (selectedLeague && leagueIds && !leagueIds.includes(selectedLeague)) return NextResponse.json({error: "League is not available."}, {status:403});
   const games = await readAllPages<{ id: string; league_id: string | null }>((from, to) => {
     let query = service.from("games").select("id,league_id").eq("organization_id", organizationId).order("id");
-    if (leagueIds) query = query.in("league_id", leagueIds);
+    query = scopeGameQuery(query, context);
     if (selectedLeague) query = query.eq("league_id", selectedLeague);
     return query.range(from, to);
   });
@@ -39,6 +39,8 @@ export async function PUT(request: NextRequest) {
   if (!body.gameId || !Array.isArray(body.rates)) return NextResponse.json({ error: "Game and position pay are required." }, { status: 400 });
   if (body.rates.some((rate) => !Number.isFinite(rate.amount) || rate.amount < 0))
     return NextResponse.json({ error: "Pay must be a nonnegative number." }, { status: 400 });
+  const accessError = await requireGameScope(context, [body.gameId]);
+  if (accessError) return accessError;
   const { data: game } = await service.from("games").select("id,sport_id,league_id,officials_needed").eq("id", body.gameId).eq("organization_id", organizationId).single();
   if (!game || (leagueIds && (!game.league_id || !leagueIds.includes(game.league_id))))
     return NextResponse.json({ error: "Game is not available." }, { status: 404 });

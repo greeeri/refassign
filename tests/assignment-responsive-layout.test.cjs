@@ -13,8 +13,8 @@ const declaration = (selector, property) => rules.filter(rule => rule.selectors.
 test('responsive CSS is loaded after legacy widths and uses intrinsic toolbar columns', () => {
   const layout = fs.readFileSync('app/layout.tsx', 'utf8');
   assert(layout.indexOf('assignment-center-responsive.css') > layout.indexOf('workspace-table-layout.css'));
-  assert.equal(declaration('.assignmentFilterPanel.assignmentCompactToolbar', 'grid-template-columns'), 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))');
-  assert.equal(declaration('.assignmentCompactToolbar > small', 'grid-column'), '1 / -1');
+  assert.equal(declaration('.assignmentFilterPanel.assignmentCompactToolbar', 'grid-template-columns'), 'minmax(0, 1fr)');
+  assert.equal(declaration('.assignmentCompactToolbar .assignmentDirectFilters', 'grid-template-columns'), 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))');
   assert.equal(declaration('.assignmentGameRows', 'min-width'), '0');
   assert.equal(declaration('.assignmentGameTable', 'overflow'), 'visible');
   assert(!/\b(?:body|html)\b\s*\{/.test(css), 'do not hide viewport overflow to mask offscreen controls');

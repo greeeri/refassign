@@ -1,6 +1,6 @@
 import { sendOfficialNotification } from "../../../../lib/communications/officialCc";
 import { NextRequest, NextResponse } from "next/server";
-import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
+import { requireManagedOrganization, requireAssignmentScope } from "../../../../lib/server/organizationScope";
 
 function esc(value: unknown) {
   return String(value ?? "").replace(
@@ -28,14 +28,16 @@ export async function POST(req: NextRequest) {
     messageType?: keyof typeof labels;
     note?: string;
   };
-  const ids = [...new Set(body.assignmentIds || [])].slice(0, 100),
+  const ids = [...new Set(body.assignmentIds || [])],
     channel = body.channel,
     messageType = body.messageType;
-  if (!ids.length || !channel || !messageType || !labels[messageType])
+  if (!ids.length || ids.length > 100 || !channel || !messageType || !labels[messageType])
     return NextResponse.json(
       { error: "Assignments, channel, and message type are required." },
       { status: 400 },
     );
+  const accessError = await requireAssignmentScope(scope, ids);
+  if (accessError) return accessError;
   if (channel === "text" && !isSuperAdmin) {
     const [{ data: subscription }, { data: addon }] = await Promise.all([
       supabase

@@ -17,6 +17,7 @@ function loadModule(path) {
 const copy = value => JSON.parse(JSON.stringify(value));
 const venue = loadModule('lib/assignments/venueFilter.ts');
 const paging = loadModule('lib/supabase/readAll.ts');
+const scope = loadModule('components/leagueGameScope.ts');
 const { fieldComplexRpcMissing } = loadModule('lib/field-complex-support.ts');
 const source = fs.readFileSync('components/AssignmentsManagerV2.tsx', 'utf8');
 const ast = ts.createSourceFile('AssignmentsManagerV2.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -47,24 +48,32 @@ const game = (index, locationId, changes = {}) => ({
   location: { id: locationId, name: `Park Field ${locationId}`, address: '1 Same Address', venue_id: 'shared-venue' },
   ...changes,
 });
+function matchesScopeFilter(row, filter) {
+  const restricted = [];
+  const remaining = filter.replace(/and\(league_id\.eq\.("(?:[^"\\]|\\.)*"),location_id\.in\.\((.*?)\)\)/g, (_, league, locations) => {
+    restricted.push({ league: JSON.parse(league), locations: JSON.parse(`[${locations}]`) }); return '';
+  });
+  const all = [...remaining.matchAll(/league_id\.eq\.("(?:[^"\\]|\\.)*")/g)].map(match => JSON.parse(match[1]));
+  return all.includes(row.league_id) || restricted.some(grant => grant.league === row.league_id && grant.locations.includes(row.location_id));
+}
 function setup(options = {}) {
   const reads = [];
   const calls = [];
   const state = {
-    ...paging, ...venue, fieldComplexRpcMissing,
-    organizationId: 'selected-org', accessibleLeagueIds: ['allowed-league'], fullLeagueAccess: true,
+    ...paging, ...venue, ...scope, fieldComplexRpcMissing,
+    organizationId: 'selected-org', accessibleLeagueIds: ['allowed-league'], fullLeagueAccess: false,
     range: 'all', locationFilter: [], dayFilter: [], timeFilter: [], officialFilter: '', leagueFilter: '', levelFilter: '',
     unpublishedOnly: false, selfAssignOnly: false, replacementOnly: false, completenessFilter: [], focusGameId: undefined,
-    loadVersion: { current: 0 }, canManage: true, allowedLeagueIds: null, error: '', games: ['old-game'], initialGamesReady: false,
+    loadVersion: { current: 0 }, candidateCache: { current: null }, allowedGameAccess: [], canManage: true, allowedLeagueIds: null, error: '', games: ['old-game'], initialGamesReady: false,
     performance: { now: () => 0 }, document: { documentElement: { clientWidth: 1440 } }, console: { info() {} },
     ...options.state,
   };
-  for (const name of ['Error', 'CanManage', 'AllowedLeagueIds', 'VenueDirectory', 'Games', 'InitialGamesReady']) {
+  for (const name of ['Error', 'CanManage', 'AllowedLeagueIds', 'AllowedGameAccess', 'VenueDirectory', 'Games', 'InitialGamesReady', 'Officials', 'Assignments', 'Blocks', 'Ranks', 'PositionRanks', 'Powers', 'TeamSuggestions', 'LeagueElig', 'LevelElig', 'CandidateScheduleConflicts', 'LinkGroups', 'LinkMembers', 'AssignmentTemplates', 'SelfAssignSlots', 'MentorSlots']) {
     state[`set${name}`] = value => { state[name[0].toLowerCase() + name.slice(1)] = copy(value); };
   }
   const tables = {
     games: options.games || [],
-    organization_member_league_access: options.access || [{ organization_id: 'selected-org', user_id: 'current-user', league_id: 'allowed-league' }],
+    organization_member_league_access: options.access || [{ organization_id: 'selected-org', user_id: 'current-user', league_id: 'allowed-league', all_locations: true, location_ids: [] }],
     locations: options.fields || [],
     get_organization_field_complexes: options.complexes || [],
   };
@@ -81,6 +90,7 @@ function setup(options = {}) {
           if (method === 'eq' || method === 'is') rows = rows.filter(row => row[column] === value);
           if (method === 'in') rows = rows.filter(row => value.includes(row[column]));
           if (method === 'gte') rows = rows.filter(row => row[column] >= value);
+          if (method === 'or') rows = rows.filter(row => matchesScopeFilter(row, column));
         }
         const orders = call.operations.filter(([method]) => method === 'order');
         rows.sort((left, right) => {
@@ -98,7 +108,7 @@ function setup(options = {}) {
         return Promise.resolve({ data: rows, error: null }).then(resolve, reject);
       },
     };
-    for (const method of ['select', 'eq', 'is', 'in', 'gte', 'order', 'range']) {
+    for (const method of ['select', 'eq', 'is', 'in', 'gte', 'or', 'order', 'range']) {
       builder[method] = (...args) => { call.operations.push(copy([method, ...args])); return builder; };
     }
     return builder;
@@ -326,9 +336,9 @@ test('member league access is rechecked, organization-scoped, and cannot be bypa
   const games = [game(1, 'member'), game(2, 'member', { league_id: 'blocked-league' })];
   const complexes = [{ location_id: 'member', field_complex: 'North' }];
   const s = setup({ games, complexes, access: [
-    { organization_id: 'selected-org', user_id: 'current-user', league_id: 'allowed-league' },
-    { organization_id: 'foreign-org', user_id: 'current-user', league_id: 'blocked-league' },
-    { organization_id: 'selected-org', user_id: 'someone-else', league_id: 'blocked-league' },
+    { organization_id: 'selected-org', user_id: 'current-user', league_id: 'allowed-league', all_locations: true, location_ids: [] },
+    { organization_id: 'foreign-org', user_id: 'current-user', league_id: 'blocked-league', all_locations: true, location_ids: [] },
+    { organization_id: 'selected-org', user_id: 'someone-else', league_id: 'blocked-league', all_locations: true, location_ids: [] },
   ], state: { locationFilter: [token('North')], fullLeagueAccess: false, accessibleLeagueIds: ['blocked-league'] } });
   assert.deepEqual(resultIds(await s.run()), ['game-00001']);
   assert.deepEqual(s.state.allowedLeagueIds, ['allowed-league']);
@@ -336,7 +346,9 @@ test('member league access is rechecked, organization-scoped, and cannot be bypa
   assert.deepEqual(operation(access, 'eq', 'organization_id'), ['eq', 'organization_id', 'selected-org']);
   assert.deepEqual(operation(access, 'eq', 'user_id'), ['eq', 'user_id', 'current-user']);
   const empty = setup({ games, complexes, access: [], state: { fullLeagueAccess: false, locationFilter: [token('North')] } });
-  assert.deepEqual(resultIds(await empty.run()), []);
+  assert.equal(await empty.run(), undefined);
+  assert.deepEqual(empty.state.games, []);
+  assert.equal(empty.state.initialGamesReady, true);
   assert.equal(empty.gameReads().length, 0);
 });
 
@@ -489,4 +501,36 @@ test('production derived catalog ignores cached complex membership from another 
   assert.deepEqual(copy(state.locationComplexes), {});
   assert.deepEqual(copy(state.venueLocationIds), []);
   assert.deepEqual(copy(state.venueFilterOptions), [[state.locationFilter[0], 'Unavailable complex (clear to choose another)']]);
+});
+
+test('explicit owner or protected full access retains all organization leagues, even with no membership grants', async () => {
+  const s = setup({ games: [game(1, 'member'), game(2, 'member', { league_id: 'another-league' }), game(3, 'member', { organization_id: 'foreign' })],
+    state: { fullLeagueAccess: true, accessibleLeagueIds: [], locationFilter: [] }, access: [] });
+  assert.deepEqual(resultIds(await s.run()), ['game-00001', 'game-00002']);
+  assert.equal(s.state.allowedLeagueIds, null);
+  assert(!s.calls.some(call => call.name === 'organization_member_league_access'));
+  assert(!s.gameReads().some(call => operation(call, 'in', 'league_id')));
+});
+
+test('an unknown workspace without explicit full access fails closed before any game or directory reads', async () => {
+  const s = setup({ games: [game(1, 'member')], state: { organizationId: undefined, accessibleLeagueIds: undefined, fullLeagueAccess: false } });
+  assert.equal(await s.run(), undefined);
+  assert.deepEqual(s.state.allowedLeagueIds, []);
+  assert.deepEqual(s.state.games, []);
+  assert.equal(s.gameReads().length, 0);
+  assert(!s.calls.some(call => call.name === 'get_organization_field_complexes'));
+});
+
+test('assignments recheck per-league location grants before pagination and discard old candidate caches', async () => {
+  const s = setup({ games: [game(1, 'north'), game(2, 'south'), game(3, null), game(4, 'south', { league_id: 'all-location-league' })], access: [
+    { organization_id: 'selected-org', user_id: 'current-user', league_id: 'allowed-league', all_locations: false, location_ids: ['north'] },
+    { organization_id: 'selected-org', user_id: 'current-user', league_id: 'all-location-league', all_locations: true, location_ids: [] },
+  ], state: { allowedGameAccess: [{ league_id: 'allowed-league', all_locations: true, location_ids: [] }], candidateCache: { current: { key: 'old-full-league' } } } });
+  assert.deepEqual(resultIds(await s.run()), ['game-00001', 'game-00004']);
+  assert.equal(s.state.candidateCache.current, null);
+  assert.deepEqual(s.state.officials, []);
+  for (const call of s.gameReads()) {
+    assert(operation(call, 'or'));
+    assert(call.operations.findIndex(([method]) => method === 'or') < call.operations.findIndex(([method]) => method === 'range'));
+  }
 });
