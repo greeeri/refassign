@@ -75,6 +75,14 @@ test('real concurrent resource and official writes across scoped organizations',
       await race(update, ['2030-04-03 18:00Z', I.locationA, id(120)], update, ['2030-04-03 18:30Z', I.locationA, id(121)], '23514');
       assert.equal((await db.query('select location_id from public.games where id=$1', [id(121)])).rows[0].location_id, I.locationB);
     });
+    await t.test('simultaneous hold activation keeps the losing game on hold', async () => {
+      await db.query(insert, [id(125), I.org, I.a, I.locationA, null, '2030-04-05 18:00Z', 'suspended']);
+      await db.query('update public.games set venue_conflict_hold=true where id=$1', [id(125)]);
+      await db.query("insert into public.games(id,organization_id,league_id,location_id,starts_at,duration_minutes,status,venue_conflict_hold) values($1,$2,$3,$4,'2030-04-05 18:30Z',90,'suspended',true)", [id(126), I.otherOrg, I.c, I.locationA]);
+      const activate = "select public.set_game_status($1,'active')";
+      await race(activate, [id(125)], activate, [id(126)], '23514');
+      assert.deepEqual((await db.query('select status,venue_conflict_hold from public.games where id=$1', [id(126)])).rows[0], { status: 'suspended', venue_conflict_hold: true });
+    });
     await t.test('the existing global official lock still rejects a concurrent hidden-organization assignment', async () => {
       await db.exec(read('20260916124134_enforce_global_official_assignment_conflicts.sql'));
       await db.query(insert, [id(130), I.org, I.a, I.locationA, null, '2030-04-04 18:00Z', 'active']);
