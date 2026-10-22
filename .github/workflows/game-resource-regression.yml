@@ -1,0 +1,37 @@
+name: Global game resource regression
+on:
+  pull_request:
+    paths:
+      - 'supabase/migrations/**'
+      - 'tests/global-game-resource-*.test.cjs'
+      - 'tests/support/*fixture.cjs'
+      - '.github/workflows/game-resource-regression.yml'
+  push:
+    branches: ['fix/global-resource-conflict-guard']
+permissions:
+  contents: read
+jobs:
+  database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: fixture-only
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run test:game-resources
+        env:
+          REFASSIGN_TEST_POSTGRES_URL: postgres://postgres:fixture-only@127.0.0.1:5432/postgres
