@@ -4,6 +4,14 @@ import { showGameConflictPopup } from "../lib/game-conflict-popup";
 import { createPortal } from "react-dom";
 import { fieldComplexRpcMissing } from "../lib/field-complex-support";
 import {
+  assignmentVenueOptions,
+  fieldComplexMap,
+  isComplexVenueFilter,
+  resolveVenueLocationIds,
+  type FieldComplexMembership,
+  type VenueField,
+} from "../lib/assignments/venueFilter";
+import {
   gameAcceptsAssignments,
   inactiveGameStatusLabel,
   normalizeGameStatus,
@@ -394,7 +402,11 @@ export default function AssignmentsManagerV2({
     [fieldMoveLoading, setFieldMoveLoading] = useState(false),
     [fieldMoveLoadError, setFieldMoveLoadError] = useState(""),
     [fieldMovePreview, setFieldMovePreview] = useState<{ key: string; loading: boolean; error: string } | null>(null),
-    [locationComplexes, setLocationComplexes] = useState<Record<string, string>>({}),
+    [venueDirectory, setVenueDirectory] = useState<{
+      organizationId?: string;
+      fields: VenueField[];
+      complexes: Record<string, string>;
+    }>({ fields: [], complexes: {} }),
     [range, setRange] = useState<Range>("all"),
     [customDate, setCustomDate] = useState(""),
     [showCalendar, setShowCalendar] = useState(false),
@@ -531,6 +543,15 @@ export default function AssignmentsManagerV2({
     [calendarReviewSaving, setCalendarReviewSaving] = useState(false),
     [bulkResult, setBulkResult] = useState<BulkActionResult | null>(null);
   const [calendarReleaseSaving, setCalendarReleaseSaving] = useState<string | null>(null);
+  const locationComplexes = venueDirectory.organizationId === organizationId ? venueDirectory.complexes : {};
+  const venueLocationIds = resolveVenueLocationIds(locationFilter, organizationId, locationComplexes);
+  const venueFilterOptions = assignmentVenueOptions(
+    organizationId,
+    locationComplexes,
+    venueDirectory.organizationId === organizationId ? venueDirectory.fields : [],
+    games.flatMap((listedGame) => listedGame.location ? [listedGame.location] : []),
+    locationFilter,
+  );
   const calendarReleaseLock = useRef(false);
   const calendarReleaseOrganization = useRef(organizationId);
   calendarReleaseOrganization.current = organizationId;
@@ -634,44 +655,80 @@ export default function AssignmentsManagerV2({
     }
     if (version !== loadVersion.current) return;
     setAllowedLeagueIds(scopedLeagueIds || null);
-    const gamePromise =
-        readAllPages<Game>((from, to) => {
-          let query = supabase
-            .from("games")
-            .select(
-              "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,time_tbd,field_tbd,venue_conflict_hold,bound_source_status,bound_hold_reasons,bound_hold_resolution_candidate,bound_hold_checked_at,notes,calendar_needs_review,calendar_reviewed_at,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,address,city,state,latitude,longitude,venue_id)",
-            )
-            .is("archived_at", null)
-            .order("starts_at")
-            .order("id");
-          if (organizationId)
-            query = query.eq("organization_id", organizationId);
-          if (scopedLeagueIds?.length)
-            query = query.in("league_id", scopedLeagueIds);
-          else if (organizationId && scopedLeagueIds)
-            return Promise.resolve({ data: [], error: null });
-          if (leagueFilter) query = query.eq("league_id", leagueFilter);
-          if (levelFilter) query = query.eq("level_id", levelFilter);
-          if (locationFilter.length) query = query.in("location_id", locationFilter);
-          // Keep the existing client-side filters. Only the initial, unfiltered
-          // view is capped; a filter change fetches the broader game set.
-          const explicitFilter = range !== "all" || Boolean(
-            locationFilter.length || dayFilter.length || timeFilter.length ||
-            officialFilter || leagueFilter || levelFilter ||
-            unpublishedOnly || selfAssignOnly || replacementOnly || completenessFilter.length,
-          );
-          if (focusGameId && !explicitFilter) query = query.eq("id", focusGameId);
-          if (!explicitFilter && !focusGameId)
-            query = query.gte("starts_at", new Date().toISOString());
-          if (!explicitFilter && !focusGameId) {
-            if (from >= 50) return Promise.resolve({ data: [], error: null });
-            return query.range(from, Math.min(to, 49)) as unknown as PromiseLike<{ data: Game[] | null; error: { message: string } | null }>;
-          }
-          return query.range(from, to) as unknown as PromiseLike<{
-            data: Game[] | null;
-            error: { message: string } | null;
-          }>;
-        });
+    const { data: userRoles } = await rolePromise;
+    if (version !== loadVersion.current) return;
+    const hasManagerRole = ((userRoles || []) as string[]).some((role) =>
+      ["admin", "assignor"].includes(role),
+    );
+    let loadedComplexes: Record<string, string> = {};
+    if (organizationId && hasManagerRole) {
+      // Read explicit membership independently of the initial 50 games. A sibling
+      // field must still match even if none of its games are on the current list.
+      const complexes = await readAllPages<FieldComplexMembership>((from, to) =>
+        supabase.rpc("get_organization_field_complexes", { p_organization_id: organizationId })
+          .order("location_id").range(from, to));
+      if (version !== loadVersion.current) return;
+      // The membership RPC explicitly allows assignors and includes ungrouped
+      // fields. Do not use the owner/admin-only organization settings directory.
+      const fields = await readAllForChunks<VenueField, string>(
+        [...new Set((complexes.data || []).map((row) => row.location_id))],
+        (ids, from, to) => supabase.from("locations").select("id,name")
+          .in("id", ids).order("id").range(from, to),
+      );
+      if (version !== loadVersion.current) return;
+      loadedComplexes = fieldComplexMap(complexes.data || []);
+      setVenueDirectory({ organizationId, fields: fields.data || [], complexes: loadedComplexes });
+      const directoryError = fields.error || (fieldComplexRpcMissing(complexes.error) ? null : complexes.error);
+      if (directoryError) setError(directoryError.message);
+      if (complexes.error && !fieldComplexRpcMissing(complexes.error) && locationFilter.some(isComplexVenueFilter)) {
+        setGames([]);
+        setInitialGamesReady(true);
+        return;
+      }
+    } else setVenueDirectory({ organizationId, fields: [], complexes: {} });
+    const selectedLocationIds = resolveVenueLocationIds(locationFilter, organizationId, loadedComplexes);
+    const readGamePage = (from: number, to: number, locationIds = selectedLocationIds) => {
+      // A removed/foreign saved complex must not become an unfiltered query.
+      if (locationIds?.length === 0) return Promise.resolve({ data: [], error: null });
+      let query = supabase
+        .from("games")
+        .select(
+          "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,time_tbd,field_tbd,venue_conflict_hold,bound_source_status,bound_hold_reasons,bound_hold_resolution_candidate,bound_hold_checked_at,notes,calendar_needs_review,calendar_reviewed_at,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,address,city,state,latitude,longitude,venue_id)",
+        )
+        .is("archived_at", null)
+        .order("starts_at")
+        .order("id");
+      if (organizationId)
+        query = query.eq("organization_id", organizationId);
+      if (scopedLeagueIds?.length)
+        query = query.in("league_id", scopedLeagueIds);
+      else if (organizationId && scopedLeagueIds)
+        return Promise.resolve({ data: [], error: null });
+      if (leagueFilter) query = query.eq("league_id", leagueFilter);
+      if (levelFilter) query = query.eq("level_id", levelFilter);
+      if (locationIds) query = query.in("location_id", locationIds);
+      // Keep the existing client-side filters. Only the initial, unfiltered
+      // view is capped; a filter change fetches the broader game set.
+      const explicitFilter = range !== "all" || Boolean(
+        locationFilter.length || dayFilter.length || timeFilter.length ||
+        officialFilter || leagueFilter || levelFilter ||
+        unpublishedOnly || selfAssignOnly || replacementOnly || completenessFilter.length,
+      );
+      if (focusGameId && !explicitFilter) query = query.eq("id", focusGameId);
+      if (!explicitFilter && !focusGameId)
+        query = query.gte("starts_at", new Date().toISOString());
+      if (!explicitFilter && !focusGameId) {
+        if (from >= 50) return Promise.resolve({ data: [], error: null });
+        return query.range(from, Math.min(to, 49)) as unknown as PromiseLike<{ data: Game[] | null; error: { message: string } | null }>;
+      }
+      return query.range(from, to) as unknown as PromiseLike<{
+        data: Game[] | null;
+        error: { message: string } | null;
+      }>;
+    };
+    const gamePromise = selectedLocationIds
+      ? readAllForChunks<Game, string>(selectedLocationIds, (ids, from, to) => readGamePage(from, to, ids))
+      : readAllPages<Game>(readGamePage);
     const fetchCandidateData = async () => {
       const loadOfficialRoster = () => organizationId
         ? readAllPages<{ official_id: string; officials: Official }>((from, to) =>
@@ -879,20 +936,6 @@ export default function AssignmentsManagerV2({
         : fetchCandidateData();
     if (candidateCache.current?.promise !== candidatePromise)
       candidateCache.current = { key: candidateKey, createdAt: Date.now(), promise: candidatePromise };
-    const { data: userRoles } = await rolePromise;
-    if (version !== loadVersion.current) return;
-    const hasManagerRole = ((userRoles || []) as string[]).some((role) =>
-      ["admin", "assignor"].includes(role),
-    );
-    if (organizationId && hasManagerRole) {
-      void (async () => {
-        const complexes = await supabase.rpc("get_organization_field_complexes", { p_organization_id: organizationId });
-        if (version !== loadVersion.current) return;
-        if (complexes.error && !fieldComplexRpcMissing(complexes.error)) setError(complexes.error.message);
-        setLocationComplexes(Object.fromEntries((complexes.data || []).filter((row) => row.field_complex?.trim())
-          .map((row) => [row.location_id, row.field_complex!.trim()])));
-      })();
-    } else setLocationComplexes({});
     const candidate = await candidatePromise;
     if (version !== loadVersion.current) return;
     if (candidate.error) {
@@ -1341,7 +1384,7 @@ export default function AssignmentsManagerV2({
     );
   }
   function matchesLocationFilter(g: Game) {
-    return locationFilter.length === 0 || locationFilter.includes(g.location_id || "");
+    return venueLocationIds === null || venueLocationIds.includes(g.location_id || "");
   }
   function matchesDayFilter(g: Game) {
     return (
@@ -8966,12 +9009,21 @@ export default function AssignmentsManagerV2({
                 <option value="custom">Choose a Date</option>
               </select>
             </label>
+            <button
+              type="button"
+              className="secondary assignmentToolbarButton assignmentCalendarButton"
+              onClick={() => setShowCalendar((current) => !current)}
+              aria-expanded={showCalendar}
+              aria-controls="assignment-calendar-date-picker"
+            >
+              Calendar
+            </button>
             <MultiSelectGameFilter
-              label="Field"
-              allLabel="All Fields"
+              label="Venue"
+              allLabel="All Venues / Fields"
               values={locationFilter}
               onChange={(values) => { setLocationFilter(values); setLinkSelected([]); setSelected(""); }}
-              options={Array.from(new Map(games.filter((listedGame) => listedGame.location).map((listedGame) => [listedGame.location!.id, listedGame.location!.name])).entries()).sort((a, b) => a[1].localeCompare(b[1]))}
+              options={venueFilterOptions}
             />
             <MultiSelectGameFilter
               label="Day"
@@ -9144,7 +9196,7 @@ export default function AssignmentsManagerV2({
               </details>
             )}
             {showCalendar && (
-              <div className="assignmentCustomDateRow">
+              <div id="assignment-calendar-date-picker" className="assignmentCustomDateRow">
                 <label className="assignmentToolbarField">
                   <span>Specific Date</span>
                   <input
