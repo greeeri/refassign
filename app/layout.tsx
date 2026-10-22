@@ -10,6 +10,7 @@ import "./iowa-quiz.css";
 import "./iowa-support.css";
 import "./assignment-center-upgrades.css";
 import "./workspace-table-layout.css";
+import "./assignment-center-responsive.css";
 
 export const metadata = {
   title: "Ref Pro Group | Better Officiating, Connected",

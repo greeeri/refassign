@@ -9563,6 +9563,7 @@ export default function AssignmentsManagerV2({
                 </div>
               </div>
             )}
+            <div className="assignmentGameResults">
             <div className="assignmentGameTableHeader">
               <span />
               <button
@@ -9920,6 +9921,7 @@ export default function AssignmentsManagerV2({
                   </button>
                 </div>
               )}
+            </div>
             </div>
           </div>
           <div
@@ -10365,7 +10367,7 @@ export default function AssignmentsManagerV2({
                                         : undefined,
                                   }}
                                 >
-                                  <td>
+                                  <td data-label="Self Assign">
                                     {!current &&
                                     !isSelfAssignOpen(game.id, pos.id) ? (
                                       <input
@@ -10408,7 +10410,7 @@ export default function AssignmentsManagerV2({
                                       <span>—</span>
                                     )}
                                   </td>
-                                  <td>
+                                  <td data-label="Position">
                                     <div
                                       className="assignmentPositionSummary"
                                       style={{
@@ -10469,7 +10471,7 @@ export default function AssignmentsManagerV2({
                                         )}
                                     </div>
                                   </td>
-                                  <td>
+                                  <td data-label="Assigned Official">
                                     {current ? (
                                       <div>
                                         {officials.find(
@@ -10631,7 +10633,7 @@ export default function AssignmentsManagerV2({
                                       "Open"
                                     )}
                                   </td>
-                                  <td>
+                                  <td data-label="Status">
                                     {current && status ? (
                                       <>
                                         <span className={status.className}>
@@ -10655,7 +10657,7 @@ export default function AssignmentsManagerV2({
                                       <span>—</span>
                                     )}
                                   </td>
-                                  <td>
+                                  <td data-label="Assign">
                                     <button
                                       type="button"
                                       className="primary candidatePanelButton"
