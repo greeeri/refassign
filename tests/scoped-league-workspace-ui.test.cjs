@@ -200,9 +200,9 @@ test('workspace full-access formula is owner/protected-only and remounts scoped 
     vm.runInNewContext(formula, state); assert.equal(state.result, true);
   }
   assert.match(workspace.text, /manager && fullOrganizationAccess && testWorkspace && section === "Team & Roles"/);
-  assert.match(workspace.text, /<AssignmentsManager\s+key=\{workspaceScopeKey\}/);
-  assert.match(workspace.text, /<GamesManager key=\{workspaceScopeKey\}/);
-  assert.match(workspace.text, /<DashboardGames\s+key=\{workspaceScopeKey\}/);
+  assert.match(workspace.text, /<AssignmentsManager\s+key=\{`AssignmentsManager:\$\{workspaceScopeKey\}`\}/);
+  assert.match(workspace.text, /<GamesManager key=\{`GamesManager:\$\{workspaceScopeKey\}`\}/);
+  assert.match(workspace.text, /<DashboardGames\s+key=\{`DashboardGames:\$\{workspaceScopeKey\}`\}/);
 });
 
 test('superseded directory and dashboard effects cannot repopulate cleared state', async () => {
@@ -309,8 +309,8 @@ test('shared contacts and geocoding are owner-only; sport catalog is protected-s
   assert.match(workspace, /manager && fullOrganizationAccess && \(\s*<MileageCoordinatesManager/);
   assert.match(workspace, /isSuperAdmin && <button\s*className=\{`topNavButton \$\{section === "Sports & Rules"/);
   assert.match(workspace, /manager && isSuperAdmin && section === "Sports & Rules"/);
-  assert.match(workspace, /<AvailabilityCalendar\s*key=\{workspaceScopeKey\}\s*managerView\s*fullOrganizationAccess=\{fullOrganizationAccess\}/);
-  assert.match(workspace, /<BlockRemovalRequests\s*key=\{workspaceScopeKey\}\s*fullOrganizationAccess=\{fullOrganizationAccess\}/);
+  assert.match(workspace, /<AvailabilityCalendar\s*key=\{`AvailabilityCalendar:\$\{workspaceScopeKey\}`\}\s*managerView\s*fullOrganizationAccess=\{fullOrganizationAccess\}/);
+  assert.match(workspace, /<BlockRemovalRequests\s*key=\{`BlockRemovalRequests:\$\{workspaceScopeKey\}`\}\s*fullOrganizationAccess=\{fullOrganizationAccess\}/);
 });
 
 test('scoped payroll can read bill-to options but cannot mutate shared billing accounts', async () => {
