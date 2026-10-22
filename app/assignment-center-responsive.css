@@ -1,0 +1,134 @@
+/* Use available content width, not the display resolution. Windows scaling and
+   browser zoom reduce this further after the workspace sidebar and padding. */
+.assignmentCenterSplit,
+.assignmentCenterSplit > .card {
+  min-width: 0;
+  max-width: 100%;
+}
+.assignmentFilterPanel.assignmentCompactToolbar {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+}
+.assignmentCompactToolbar > small { grid-column: 1 / -1; }
+.assignmentCompactToolbar .assignmentDirectFilters {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+}
+.assignmentCompactToolbar > .assignmentMoreFilters { min-width: 0; }
+.assignmentCompactHead,
+.assignmentCompactActionStrip,
+.assignmentCustomDateRow,
+.assignmentGameTable > div:first-child,
+.assignmentPickedOfficial { flex-wrap: wrap; }
+.assignmentCompactPrimary { max-width: 100%; flex-wrap: wrap; }
+.assignmentCompactPrimary > .primary { max-width: 100%; white-space: normal; }
+.assignmentCompactPrimary > .muted { min-width: 0; overflow-wrap: anywhere; }
+.assignmentCompactHead > div,
+.assignmentSelectionSummary { min-width: 0; overflow-wrap: anywhere; }
+.assignmentCompactActionStrip { overflow: visible; white-space: normal; row-gap: 10px; }
+.assignmentSelectionBar > button { max-width: 100%; white-space: normal; }
+.assignmentSelectionBar .assignmentSelectionSummary { flex: 1 1 100%; }
+
+/* Disclosures stay in the document flow, so every option remains reachable
+   by scrolling and keyboard even beside the right edge or below the fold. */
+.assignmentMultiFilterOptions,
+.assignmentStatusFilterOptions,
+.assignmentMoreActions > div {
+  position: static;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  max-height: min(330px, 55vh);
+  margin-top: 6px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.assignmentMultiFilterOptions label,
+.assignmentStatusFilterOptions label { white-space: normal; overflow-wrap: anywhere; }
+.assignmentMoreActions[open] { flex: 1 1 100%; min-width: 0; }
+.assignmentSelectionBar:has(.assignmentMoreActions[open]) { position: static; }
+.assignmentCompactOverflow > div { left: auto; right: 0; transform: none; max-height: 65vh; overflow: auto; }
+
+/* Only the results are a query container. Keep viewport-fixed dialogs outside
+   it so opening a menu or editor never changes their positioning context. */
+.assignmentGameResults { container: assignment-results / inline-size; min-width: 0; }
+.assignmentGameTable { overflow: visible !important; }
+.assignmentGameTableHeader,
+.assignmentGameRows,
+.assignmentGameRow { min-width: 0; }
+.assignmentGameName,
+.assignmentGameLocation,
+.assignmentStatusCell { overflow-wrap: anywhere; }
+.assignmentStatusCell > * { max-width: 100%; }
+.assignmentStatusBadge { white-space: normal; }
+.assignmentCrewPreviewBody { min-width: 0; width: min(280px, 100%); max-width: 100%; }
+.assignmentCrewPreview[open] .assignmentCrewPreviewBody { position: static; width: 100%; }
+.assignmentPositionControls { flex-wrap: wrap; max-width: 100%; }
+.assignmentCenterSplit .availableOfficialsPanel { min-width: 0; }
+.assignmentMain { container: assignment-positions / inline-size; }
+.assignmentMain .assignmentPositionsScroll { overflow-x: auto; }
+.assignmentMain .assignmentPositionSummary > div { min-width: 0; }
+.assignmentMain .assignmentPositionSummary b,
+.assignmentMain .assignmentPositionSummary small,
+.assignmentMain .assignmentPositionSummary button { white-space: normal; overflow-wrap: anywhere; }
+
+@container assignment-results (max-width: 1100px) {
+  .assignmentGameTableHeader {
+    display: flex !important;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+    padding: 10px 14px;
+  }
+  .assignmentGameTableHeader > button { min-height: 36px; }
+  .assignmentGameTableHeader > span { display: none; }
+  .assignmentGameRow {
+    grid-template-columns: 30px minmax(0, 1fr) minmax(140px, .6fr) !important;
+    gap: 10px !important;
+    padding: 14px !important;
+  }
+  .assignmentGameRow > label { grid-column: 1; grid-row: 1; align-self: start; padding-top: 8px; }
+  .assignmentGameRow > .assignmentGameOpen { grid-column: 2 / 4; grid-row: 1; padding-right: 52px !important; }
+  .assignmentGameRow > .assignmentGameCollapse { grid-column: auto; grid-row: auto; top: 12px; right: 12px; }
+  .assignmentGameLocation { grid-column: 2; grid-row: 3; }
+  .assignmentGameLocation::before { content: "Location: "; font-weight: 800; }
+  .assignmentGameDate { grid-column: 2; grid-row: 2; flex-wrap: wrap; }
+  .assignmentGamePower { grid-column: 3; grid-row: 2; }
+  .assignmentGamePower::before { content: "Power "; font-weight: 700; }
+  .assignmentGameStatusSelect { grid-column: 3; grid-row: 3; min-width: 0 !important; width: 100% !important; }
+  .assignmentStatusCell { grid-column: 2 / 4; grid-row: 4; border-top: 1px solid #e2e8f0; padding-top: 10px; }
+  .assignmentCenterSplit.hasSelectedGame .assignmentLayout { grid-template-columns: minmax(0, 1fr); }
+  .assignmentCenterSplit.hasSelectedGame .availableOfficialsPanel { position: static; max-height: none; }
+}
+@container assignment-results (max-width: 560px) {
+  .assignmentGameRow { grid-template-columns: 30px minmax(0, 1fr) !important; }
+  .assignmentGameRow > .assignmentGameOpen,
+  .assignmentGameLocation,
+  .assignmentGameDate,
+  .assignmentGamePower,
+  .assignmentGameStatusSelect,
+  .assignmentStatusCell { grid-column: 2; }
+  .assignmentGamePower { grid-row: 4; }
+  .assignmentGameStatusSelect { grid-row: 5; }
+  .assignmentStatusCell { grid-row: 6; grid-template-columns: minmax(0, 1fr); }
+}
+
+/* A narrow editor becomes labelled rows, rather than compressing five columns
+   and clipping their position, status, or assignment controls. */
+@container assignment-positions (max-width: 780px) {
+  .assignmentMain .assignmentPositionsTable { min-width: 0 !important; }
+  .assignmentMain .assignmentPositionsTable,
+  .assignmentPositionsTable tbody,
+  .assignmentPositionsTable tr,
+  .assignmentMain .assignmentPositionsTable td { display: block; width: 100%; }
+  .assignmentPositionsTable thead { display: none; }
+  .assignmentPositionsTable tr { padding: 12px; border-bottom: 1px solid #dbe4ee; }
+  .assignmentMain .assignmentPositionsTable td { padding: 8px 0; border: 0; }
+  .assignmentMain .assignmentPositionsTable td::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 6px;
+    color: #52667a;
+    font-size: 11px;
+    font-weight: 800;
+  }
+  .assignmentPositionsTable button,
+  .assignmentPositionsTable select { max-width: 100%; }
+}

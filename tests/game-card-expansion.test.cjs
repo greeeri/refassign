@@ -155,3 +155,32 @@ test('expanded crew includes extra mentor slots without duplicating regular posi
   assert.match(source, /assignment && positionPayDetails\(listedGame.id, position.id, assignment\)/, 'unloaded unassigned fees are not reported as missing');
   assert(!css.includes('.assignmentGameRow>button:hover~.assignmentStatusCell'));
 });
+
+test('responsive production game row keeps selection, status, edit and hold safeguards', () => {
+  const s = setup();
+  s.canManage = true;
+  s.gameStatusSaving = '';
+  s.calendarReleaseSaving = '';
+  s.calendarReviewSaving = false;
+  s.gameStatusOptions = [['active', 'Active'], ['suspended', 'On Hold']];
+  s.openQuickEdit = value => { s.editedGame = value.id; };
+  s.requestGameStatusChange = (id, value) => { s.statusRequest = [id, value]; };
+  s.toggleLinkSelection = id => { s.bulkToggle = id; };
+  const held = { ...game('game-a'), status: 'suspended', bound_source_status: 'POSTPONED', calendar_needs_review: true };
+  const row = s.renderGameRow(held, false, false);
+  const elements = nodes(row);
+  const select = elements.find(node => node.type === 'select');
+  select.props.onChange({ target: { value: 'active' } });
+  assert.deepEqual(Array.from(s.statusRequest), ['game-a', 'active'], 'status still uses the guarded request handler');
+  elements.find(node => node.props?.['aria-label'] === 'Select game game-a').props.onChange();
+  assert.equal(s.bulkToggle, 'game-a');
+  elements.find(node => node.props?.children === 'Quick Edit').props.onClick({ stopPropagation() {} });
+  assert.equal(s.editedGame, 'game-a');
+  assert.equal(elements.find(node => node.props?.children === 'Review & release hold').props.disabled, true);
+  const html = require('react-dom/server').renderToStaticMarkup(row);
+  for (const control of ['Select game game-a', 'Status for game game-a', 'Preview crew for game game-a', 'Reviewed calendar game game-a', 'Quick Edit', 'Review &amp; release hold', 'Expand game game-a']) {
+    assert(html.includes(control), `Production markup retains ${control}`);
+  }
+  assert.equal(s.selected, 'game-a');
+  assert.equal(s.expandedGameIds.size, 0, 'bulk selection and status controls do not change expansion');
+});
