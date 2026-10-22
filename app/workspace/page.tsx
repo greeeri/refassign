@@ -926,7 +926,7 @@ export default function Workspace() {
         </header>
         {manager && section === "Dashboard" && (
           <DashboardGames
-            key={workspaceScopeKey}
+            key={`DashboardGames:${workspaceScopeKey}`}
             accessibleLeagueIds={accessibleLeagueIds}
             leagueGameAccess={leagueGameAccess}
             fullLeagueAccess={fullOrganizationAccess}
@@ -935,14 +935,14 @@ export default function Workspace() {
           />
         )}{" "}
         {viewRole === "iowa_development_admin" && section === "Dashboard" && (
-          <DashboardGames key={workspaceScopeKey} organizationId={testWorkspace?.organization_id} accessibleLeagueIds={accessibleLeagueIds} leagueGameAccess={leagueGameAccess} fullLeagueAccess={fullOrganizationAccess} />
+          <DashboardGames key={`DashboardGames:${workspaceScopeKey}`} organizationId={testWorkspace?.organization_id} accessibleLeagueIds={accessibleLeagueIds} leagueGameAccess={leagueGameAccess} fullLeagueAccess={fullOrganizationAccess} />
         )}{" "}
         {manager && section === "Games" && (
-          <GamesManager key={workspaceScopeKey} organizationId={testWorkspace?.organization_id} accessibleLeagueIds={accessibleLeagueIds} leagueGameAccess={leagueGameAccess} fullLeagueAccess={fullOrganizationAccess} />
+          <GamesManager key={`GamesManager:${workspaceScopeKey}`} organizationId={testWorkspace?.organization_id} accessibleLeagueIds={accessibleLeagueIds} leagueGameAccess={leagueGameAccess} fullLeagueAccess={fullOrganizationAccess} />
         )}
         {manager && isSetup && (fullOrganizationAccess || section === "Leagues") && (
           <GameSetup
-            key={workspaceScopeKey}
+            key={`GameSetup:${workspaceScopeKey}`}
             allowedLeagueIds={accessibleLeagueIds}
             leagueGameAccess={leagueGameAccess}
             fullOrganizationAccess={fullOrganizationAccess}
@@ -953,7 +953,7 @@ export default function Workspace() {
         )}{" "}
         {manager && section === "Officials" && (
           <OfficialsDirectory
-            key={workspaceScopeKey}
+            key={`OfficialsDirectory:${workspaceScopeKey}`}
             fullOrganizationAccess={fullOrganizationAccess}
             leagueGameAccess={leagueGameAccess}
             organizationId={testWorkspace?.organization_id}
@@ -977,7 +977,7 @@ export default function Workspace() {
         )}
         {manager && section === "Assignments" && (
           <AssignmentsManager
-            key={workspaceScopeKey}
+            key={`AssignmentsManager:${workspaceScopeKey}`}
             organizationId={testWorkspace?.organization_id}
             accessibleLeagueIds={accessibleLeagueIds}
             leagueGameAccess={leagueGameAccess}
@@ -993,19 +993,19 @@ export default function Workspace() {
         )}
         {manager && section === "Reports" && (
           <ManagerReports
-            key={workspaceScopeKey}
+            key={`ManagerReports:${workspaceScopeKey}`}
             fullOrganizationAccess={fullOrganizationAccess}
             organizationId={testWorkspace?.organization_id}
             onOpenAction={openReportAction}
           />
         )}
         {manager && section === "Auto Assign" && (
-          <AutoAssignManager key={workspaceScopeKey} organizationId={testWorkspace?.organization_id} fullOrganizationAccess={fullOrganizationAccess} leagueGameAccess={leagueGameAccess} />
+          <AutoAssignManager key={`AutoAssignManager:${workspaceScopeKey}`} organizationId={testWorkspace?.organization_id} fullOrganizationAccess={fullOrganizationAccess} leagueGameAccess={leagueGameAccess} />
         )}
         {(manager || billingManager) && section === "Payroll" && (
           <>
             <PayrollManager
-              key={workspaceScopeKey}
+              key={`PayrollManager:${workspaceScopeKey}`}
               organizationId={testWorkspace?.organization_id}
               canGeocode={manager && fullOrganizationAccess}
               fullOrganizationAccess={fullOrganizationAccess}
@@ -1017,7 +1017,7 @@ export default function Workspace() {
             />
             {manager && fullOrganizationAccess && (
               <MileageCoordinatesManager
-                key={workspaceScopeKey}
+                key={`MileageCoordinatesManager:${workspaceScopeKey}`}
                 organizationId={testWorkspace?.organization_id}
               />
             )}
@@ -1025,7 +1025,7 @@ export default function Workspace() {
         )}
         {manager && section === "Blocks" && (
           <AvailabilityCalendar
-            key={workspaceScopeKey}
+            key={`AvailabilityCalendar:${workspaceScopeKey}`}
             managerView
             fullOrganizationAccess={fullOrganizationAccess}
             organizationId={testWorkspace?.organization_id}
@@ -1033,13 +1033,13 @@ export default function Workspace() {
         )}
         {manager && section === "Block Removal Requests" && (
           <BlockRemovalRequests
-            key={workspaceScopeKey}
+            key={`BlockRemovalRequests:${workspaceScopeKey}`}
             fullOrganizationAccess={fullOrganizationAccess}
             organizationId={testWorkspace?.organization_id}
           />
         )}
         {manager && fullOrganizationAccess && section === "Contacts" && (
-          <ContactsManager key={workspaceScopeKey} organizationId={testWorkspace?.organization_id} />
+          <ContactsManager key={`ContactsManager:${workspaceScopeKey}`} organizationId={testWorkspace?.organization_id} />
         )}
         {manager && isSuperAdmin && section === "Sports & Rules" && <SportsRulesManager />}
         {viewRole === "official" && section === "Official Dashboard" && (
@@ -1128,7 +1128,7 @@ export default function Workspace() {
             )}
           </section>
         )}
-        {viewRole === "contact" && section === "Games" && <DashboardGames key={workspaceScopeKey} organizationId={testWorkspace?.organization_id} accessibleLeagueIds={accessibleLeagueIds} leagueGameAccess={leagueGameAccess} fullLeagueAccess={fullOrganizationAccess} />}
+        {viewRole === "contact" && section === "Games" && <DashboardGames key={`DashboardGames:${workspaceScopeKey}`} organizationId={testWorkspace?.organization_id} accessibleLeagueIds={accessibleLeagueIds} leagueGameAccess={leagueGameAccess} fullLeagueAccess={fullOrganizationAccess} />}
         {viewRole === "contact" &&
           section === "Assignments" &&
           testWorkspace?.viewer_permissions?.includes("assignments") && (
@@ -1268,7 +1268,7 @@ export default function Workspace() {
           <SupportCenter isSuperAdmin />
         )}
         {manager && fullOrganizationAccess && (
-          <UndoCenter key={workspaceScopeKey} organizationId={testWorkspace?.organization_id} />
+          <UndoCenter key={`UndoCenter:${workspaceScopeKey}`} organizationId={testWorkspace?.organization_id} />
         )}
       </main>
       {manager && (
