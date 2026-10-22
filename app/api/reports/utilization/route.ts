@@ -1,5 +1,5 @@
+import { scopeReportLeagues, readReportOfficialLinks } from "../reportScope";
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "../../../../lib/supabase/admin";
 import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
 import { readAllPages } from "../../../../lib/supabase/readAll";
 
@@ -9,7 +9,7 @@ const stringValue = (value: unknown) =>
 export async function GET(request: NextRequest) {
   const scope = await requireManagedOrganization(request);
   if (scope.error) return scope.error;
-  const { session: supabase, service, organizationId } = scope;
+  const { session: supabase, service, organizationId, leagueIds } = scope;
   let subscriptionQuery = service
     .from("refassign_subscriptions")
     .select("reporting_access")
@@ -20,17 +20,7 @@ export async function GET(request: NextRequest) {
   const { data: subscription } = await subscriptionQuery.maybeSingle();
   const reportingAccess =
     subscription?.reporting_access === "standard" ? "standard" : "premium";
-  const { data: officialLinks, error: officialLinkError } = await readAllPages<{
-    official_id: string;
-  }>((from, to) =>
-    service
-      .from("organization_officials")
-      .select("official_id")
-      .eq("organization_id", organizationId)
-      .eq("active", true)
-      .order("official_id")
-      .range(from, to),
-  );
+  const { data: officialLinks, error: officialLinkError } = await readReportOfficialLinks(scope);
   if (officialLinkError)
     return NextResponse.json(
       { error: officialLinkError.message },
@@ -52,7 +42,7 @@ export async function GET(request: NextRequest) {
         .range(from, to),
     ),
     readAllPages<Record<string, any>>((from, to) =>
-      supabase
+      scopeReportLeagues(supabase
         .from("assignments")
         .select(
           "id,game_id,official_id,status,assigned_at,published_at,responded_at,game_fee,mileage_miles,mileage_rate,payment_status,officials(id,first_name,last_name),sport_positions(name),games!inner(id,organization_id,game_number,starts_at,status,leagues(id,name),levels(name),location:locations(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name))",
@@ -61,7 +51,7 @@ export async function GET(request: NextRequest) {
         .not("official_id", "is", null)
         .order("assigned_at", { ascending: false })
         .order("id")
-        .range(from, to),
+        .range(from, to), scope, "games.league_id"),
     ),
     readAllPages<Record<string, any>>((from, to) =>
       supabase

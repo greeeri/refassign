@@ -11,7 +11,7 @@ export async function GET(_request:NextRequest,{params}:{params:Promise<{id:stri
  const{data:document}=await service.from("organization_tax_exemption_documents").select("id,organization_id,storage_path,original_name").eq("id",id).maybeSingle();
  if(!document)return NextResponse.json({error:"Tax document not found."},{status:404});
  const[{data:membership},{data:superAdmin}]=await Promise.all([
-  service.from("organization_memberships").select("role").eq("organization_id",document.organization_id).eq("user_id",user.id).in("role",["owner","admin"]).maybeSingle(),
+  service.from("organization_memberships").select("role").eq("organization_id",document.organization_id).eq("user_id",user.id).in("role",["owner"]).maybeSingle(),
   service.from("protected_accounts").select("user_id").eq("user_id",user.id).maybeSingle()
  ]);
  if(!membership&&!superAdmin)return NextResponse.json({error:"You do not have access to this tax document."},{status:403});

@@ -1,12 +1,12 @@
+import { scopeReportLeagues } from "../reportScope";
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "../../../../lib/supabase/admin";
 import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
 import { readAllPages } from "../../../../lib/supabase/readAll";
 
 export async function GET(request: NextRequest) {
   const scope = await requireManagedOrganization(request);
   if (scope.error) return scope.error;
-  const { session: supabase, service, organizationId } = scope;
+  const { session: supabase, service, organizationId, leagueIds } = scope;
   let subscriptionQuery = service
     .from("refassign_subscriptions")
     .select("reporting_access")
@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
   // and leagues granted by the current RLS policies.
   const [assignmentsResult, gamesResult] = await Promise.all([
     readAllPages<Record<string, any>>((from, to) =>
-      supabase
+      scopeReportLeagues(supabase
         .from("assignments")
         .select(
           "id,game_id,official_id,status,game_fee,mileage_miles,mileage_rate,payment_status,paid_at,officials(id,first_name,last_name),sport_positions(name),games!inner(id,organization_id,game_number,status,starts_at,officials_needed,leagues(id,name),levels(name),location:locations(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name))",
@@ -30,11 +30,11 @@ export async function GET(request: NextRequest) {
         .eq("games.organization_id", organizationId)
         .not("official_id", "is", null)
         .order("id")
-        .range(from, to),
+        .range(from, to), scope, "games.league_id"),
     ),
     reportingAccess === "premium"
       ? readAllPages<Record<string, any>>((from, to) =>
-          supabase
+          scopeReportLeagues(supabase
             .from("games")
             .select(
               "id,game_number,status,starts_at,officials_needed,leagues(id,name),levels(name),location:locations(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name)",
@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
             .gte("starts_at", new Date().toISOString())
             .order("starts_at")
             .order("id")
-            .range(from, to),
+            .range(from, to), scope, "league_id"),
         )
       : Promise.resolve({ data: [], error: null }),
   ]);

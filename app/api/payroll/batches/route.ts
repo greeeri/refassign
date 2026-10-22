@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
+import { requireManagedOrganization, accessiblePayrollBatchIds, requirePayrollBatchScope } from "../../../../lib/server/organizationScope";
 import { releasePayrollBatch } from "../../../../lib/stripe/payroll";
 import {
   stripeConnectConfig,
@@ -16,6 +16,9 @@ export async function GET(request: NextRequest) {
   const { service, organizationId, leagueIds } = context;
   if (leagueIds && !leagueIds.length)
     return NextResponse.json({ batches: [] });
+  const permitted = await accessiblePayrollBatchIds(context);
+  if (permitted.error) return NextResponse.json({ error: permitted.error.message }, { status: 500 });
+  if (permitted.data?.length === 0) return NextResponse.json({ batches: [] });
   let batchQuery = service
     .from("payroll_batches")
     .select(
@@ -24,6 +27,7 @@ export async function GET(request: NextRequest) {
     .eq("organization_id", organizationId)
     .eq("stripe_mode", stripeConnectMode());
   if (leagueIds) batchQuery = batchQuery.in("league_id", leagueIds);
+  if (permitted.data) batchQuery = batchQuery.in("id", permitted.data);
   const { data: batches, error } = await batchQuery
     .order("created_at", { ascending: false })
     .limit(50);
@@ -89,6 +93,8 @@ export async function POST(request: NextRequest) {
       { error: "Payroll batch is required." },
       { status: 400 },
     );
+  const batchAccessError = await requirePayrollBatchScope(context, batchId);
+  if (batchAccessError) return batchAccessError;
   const { data: batch } = await service
     .from("payroll_batches")
     .select("id,league_id,status,stripe_payment_intent_id,funding_failure_message")

@@ -1,12 +1,12 @@
+import { scopeReportLeagues, scopeReportEligibility, readReportOfficialLinks } from "../reportScope";
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "../../../../lib/supabase/admin";
 import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
 import { readAllPages } from "../../../../lib/supabase/readAll";
 
 export async function GET(request: NextRequest) {
   const scope = await requireManagedOrganization(request);
   if (scope.error) return scope.error;
-  const { session: supabase, service, organizationId } = scope;
+  const { session: supabase, service, organizationId, leagueIds } = scope;
   const organizationIds = [organizationId];
   let subscriptionQuery = service
     .from("refassign_subscriptions")
@@ -26,16 +26,7 @@ export async function GET(request: NextRequest) {
   let organizations: Array<{ id: string; name: string }> = [];
   if (organizationIds.length) {
     const [linksResult, organizationsResult] = await Promise.all([
-      readAllPages<{ organization_id: string; official_id: string }>(
-        (from, to) =>
-          service
-            .from("organization_officials")
-            .select("organization_id,official_id")
-            .in("organization_id", organizationIds)
-            .eq("active", true)
-            .order("official_id")
-            .range(from, to),
-      ),
+      readReportOfficialLinks(scope),
       service
         .from("organizations")
         .select("id,name")
@@ -124,6 +115,7 @@ export async function GET(request: NextRequest) {
         .select(
           "id,official_id,registration_year,status,payment_status,paid_at,reviewed_at,registration_program_id,registration_programs(id,name)",
         )
+        .eq("organization_id", organizationId)
         .in("official_id", officialIds)
         .order("id")
         .range(from, to),
@@ -131,20 +123,21 @@ export async function GET(request: NextRequest) {
     readAllPages<Record<string, any>>((from, to) =>
       service
         .from("registration_program_officials")
-        .select("program_id,official_id")
+        .select("program_id,official_id,registration_programs!inner(organization_id)")
+        .eq("registration_programs.organization_id", organizationId)
         .in("official_id", officialIds)
         .order("official_id")
         .order("program_id")
         .range(from, to),
     ),
     readAllPages<Record<string, any>>((from, to) =>
-      service
+      scopeReportEligibility(service
         .from("official_league_eligibility")
         .select("official_id,league_id,leagues(id,name)")
         .in("official_id", officialIds)
         .order("official_id")
         .order("league_id")
-        .range(from, to),
+        .range(from, to), leagueIds),
     ),
     readAllPages<Record<string, any>>((from, to) =>
       service
@@ -195,7 +188,8 @@ export async function GET(request: NextRequest) {
     readAllPages<Record<string, any>>((from, to) =>
       service
         .from("official_development_progress")
-        .select("module_id,official_id,status,completed_at")
+        .select("module_id,official_id,status,completed_at,development_modules!inner(program_id)")
+        .in("development_modules.program_id", programIds)
         .in("official_id", officialIds)
         .order("official_id")
         .order("module_id")
@@ -204,7 +198,8 @@ export async function GET(request: NextRequest) {
     readAllPages<Record<string, any>>((from, to) =>
       service
         .from("development_quiz_attempts")
-        .select("module_id,official_id,score_percent,passed,completed_at")
+        .select("module_id,official_id,score_percent,passed,completed_at,development_modules!inner(program_id)")
+        .in("development_modules.program_id", programIds)
         .in("official_id", officialIds)
         .eq("passed", true)
         .order("id")
@@ -212,7 +207,7 @@ export async function GET(request: NextRequest) {
     ),
     reportingAccess === "premium"
       ? readAllPages<Record<string, any>>((from, to) =>
-          supabase
+          scopeReportLeagues(supabase
             .from("assignments")
             .select(
               "id,official_id,status,games!inner(id,game_number,starts_at,status,league_id,level_id,organization_id,leagues(name),levels(name),location:locations(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name)),sport_positions(name)",
@@ -222,7 +217,7 @@ export async function GET(request: NextRequest) {
             .gte("games.starts_at", new Date().toISOString())
             .not("status", "in", "(declined,cancelled)")
             .order("id")
-            .range(from, to),
+            .range(from, to), scope, "games.league_id"),
         )
       : Promise.resolve({ data: [], error: null }),
   ]);

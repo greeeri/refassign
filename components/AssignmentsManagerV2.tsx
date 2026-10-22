@@ -18,6 +18,7 @@ import {
   gameHoldReason,
   boundCalendarReview,
 } from "../lib/game-status";
+import { applyLeagueGameAccess, canAccessLeagueGameLocation, leagueGameAccessKey, type LeagueGameAccess } from "./leagueGameScope";
 import { createClient } from "../lib/supabase/client";
 import { readAllForChunks, readAllPages } from "../lib/supabase/readAll";
 import { announceUndoAvailable } from "./UndoCenter";
@@ -348,6 +349,7 @@ function inRange(g: Game, r: Range, customDate = "") {
 export default function AssignmentsManagerV2({
   organizationId,
   accessibleLeagueIds,
+  leagueGameAccess = [],
   leagueOptions = [],
   fullLeagueAccess = false,
   focusGameId,
@@ -355,24 +357,36 @@ export default function AssignmentsManagerV2({
 }: {
   organizationId?: string;
   accessibleLeagueIds?: string[];
+  leagueGameAccess?: LeagueGameAccess[];
   leagueOptions?: { id: string; name: string }[];
   fullLeagueAccess?: boolean;
   focusGameId?: string;
   returnToListRequest?: number;
 }) {
   const supabase = useMemo(() => createClient(), []);
+  const leagueScopeKey = fullLeagueAccess ? "full" : leagueGameAccessKey(leagueGameAccess);
+  function notifyUndoAvailable(description?: string) {
+    if (fullLeagueAccess) announceUndoAvailable(description);
+  }
   const handledReportFocus = useRef("");
   const requestedFocusLoad = useRef("");
   const assignmentFeeImportInput = useRef<HTMLInputElement>(null);
   const handledListReturnRequest = useRef(returnToListRequest);
   const initialFilterLoad = useRef(true);
   const loadVersion = useRef(0);
+  const fullLeagueAccessRef = useRef(fullLeagueAccess);
+  fullLeagueAccessRef.current = fullLeagueAccess;
+  useEffect(() => {
+    fullLeagueAccessRef.current = fullLeagueAccess;
+    return () => { fullLeagueAccessRef.current = false; };
+  }, [fullLeagueAccess]);
   const candidateCache = useRef<{ key: string; createdAt: number; promise: Promise<unknown> } | null>(null);
   const [inlineAssignmentHost, setInlineAssignmentHost] =
     useState<HTMLDivElement | null>(null);
   const [games, setGames] = useState<Game[]>([]),
     [initialGamesReady, setInitialGamesReady] = useState(false),
-    [allowedLeagueIds, setAllowedLeagueIds] = useState<string[] | null>(null),
+    [allowedLeagueIds, setAllowedLeagueIds] = useState<string[] | null>([]),
+    [allowedGameAccess, setAllowedGameAccess] = useState<LeagueGameAccess[]>([]),
     [officials, setOfficials] = useState<Official[]>([]),
     [positions, setPositions] = useState<Position[]>([]),
     [assignments, setAssignments] = useState<Assignment[]>([]),
@@ -410,6 +424,7 @@ export default function AssignmentsManagerV2({
     [range, setRange] = useState<Range>("all"),
     [customDate, setCustomDate] = useState(""),
     [showCalendar, setShowCalendar] = useState(false),
+    [showMoreFilters, setShowMoreFilters] = useState(false),
     [unpublishedOnly, setUnpublishedOnly] = useState(false),
     [selfAssignOnly, setSelfAssignOnly] = useState(false),
     [replacementOnly, setReplacementOnly] = useState(false),
@@ -635,29 +650,51 @@ export default function AssignmentsManagerV2({
     // unavailable while the game list is being populated in stages.
     setCanManage(false);
     let candidateLeagueIds: string[] = [], candidateLevelIds: string[] = [], candidateTeamIds: string[] = [];
-    const loadAllLeagueEligibility = () => readAllForChunks<EligL,string>(candidateLeagueIds, (ids,from,to) =>
+    const loadAllLeagueEligibility = (officialIds: string[]) => readAllForChunks<EligL,string>(officialIds, (ids,from,to) =>
       supabase.from("official_league_eligibility").select("official_id,league_id")
-        .in("league_id",ids).order("official_id").order("league_id").range(from,to));
-    const loadAllLevelEligibility = () => readAllForChunks<EligV,string>(candidateLevelIds, (ids,from,to) =>
+        .in("official_id", ids).in("league_id", candidateLeagueIds).order("official_id").order("league_id").range(from,to));
+    const loadAllLevelEligibility = (officialIds: string[]) => readAllForChunks<EligV,string>(officialIds, (ids,from,to) =>
       supabase.from("official_level_eligibility").select("official_id,level_id,center_eligible,ar_eligible")
-        .in("level_id",ids).order("official_id").order("level_id").range(from,to));
+        .in("official_id", ids).in("level_id", candidateLevelIds).order("official_id").order("level_id").range(from,to));
     const { data: userData } = await supabase.auth.getUser();
     const rolePromise = userData.user
       ? supabase.rpc("current_user_roles")
       : Promise.resolve({ data: null });
-    let scopedLeagueIds = accessibleLeagueIds;
+    let scopedLeagueIds: string[] | null = fullLeagueAccess ? null : [];
+    let scopedGameAccess: LeagueGameAccess[] = [];
     if (organizationId && userData.user && !fullLeagueAccess) {
-      const access = await supabase.from("organization_member_league_access")
-        .select("league_id").eq("organization_id", organizationId)
-        .eq("user_id", userData.user.id);
-      if (access.error) { setError(access.error.message); return; }
-      scopedLeagueIds = (access.data || []).map((row) => row.league_id);
+      const access = await readAllPages<LeagueGameAccess>((from, to) =>
+        supabase.from("organization_member_league_access")
+          .select("league_id,all_locations,location_ids").eq("organization_id", organizationId)
+          .eq("user_id", userData.user.id).order("league_id").range(from, to));
+      if (version !== loadVersion.current) return;
+      if (access.error) {
+        candidateCache.current = null;
+        setAllowedLeagueIds([]); setAllowedGameAccess([]);
+        setGames([]); setOfficials([]); setAssignments([]); setBlocks([]);
+        setInitialGamesReady(true); setError(access.error.message); return;
+      }
+      scopedGameAccess = access.data || [];
+      scopedLeagueIds = scopedGameAccess.map((row) => row.league_id);
     }
     if (version !== loadVersion.current) return;
-    setAllowedLeagueIds(scopedLeagueIds || null);
+    if (!fullLeagueAccess && leagueGameAccessKey(allowedGameAccess) !== leagueGameAccessKey(scopedGameAccess)) {
+      candidateCache.current = null;
+      setGames([]); setOfficials([]); setAssignments([]); setBlocks([]);
+      setRanks({}); setPositionRanks({}); setPowers({}); setTeamSuggestions([]);
+      setLeagueElig([]); setLevelElig([]); setCandidateScheduleConflicts(new Set());
+      setLinkGroups([]); setLinkMembers([]); setAssignmentTemplates([]);
+      setSelfAssignSlots([]); setMentorSlots([]);
+    }
+    setAllowedLeagueIds(scopedLeagueIds);
+    setAllowedGameAccess(scopedGameAccess);
+    if (!fullLeagueAccess && !scopedGameAccess.some((grant) => grant.all_locations === true || grant.location_ids?.length)) {
+      setGames([]); setInitialGamesReady(true);
+      return;
+    }
     const { data: userRoles } = await rolePromise;
     if (version !== loadVersion.current) return;
-    const hasManagerRole = ((userRoles || []) as string[]).some((role) =>
+    const hasManagerRole = fullLeagueAccess || ((userRoles || []) as string[]).some((role) =>
       ["admin", "assignor"].includes(role),
     );
     let loadedComplexes: Record<string, string> = {};
@@ -700,10 +737,9 @@ export default function AssignmentsManagerV2({
         .order("id");
       if (organizationId)
         query = query.eq("organization_id", organizationId);
-      if (scopedLeagueIds?.length)
-        query = query.in("league_id", scopedLeagueIds);
-      else if (organizationId && scopedLeagueIds)
-        return Promise.resolve({ data: [], error: null });
+      const scopedQuery = applyLeagueGameAccess(query, scopedGameAccess, fullLeagueAccess);
+      if (!scopedQuery) return Promise.resolve({ data: [], error: null });
+      query = scopedQuery;
       if (leagueFilter) query = query.eq("league_id", leagueFilter);
       if (levelFilter) query = query.eq("level_id", levelFilter);
       if (locationIds) query = query.in("location_id", locationIds);
@@ -753,33 +789,28 @@ export default function AssignmentsManagerV2({
               }>,
             1000, 2,
           );
-      const results = await Promise.all([
-        loadOfficialRoster(),
-        readAllPages<Rank & PositionRank>((from, to) =>
-          supabase
-            .from("my_assignment_rankings")
+      const roster = await loadOfficialRoster();
+      const officialIds = (roster.data || []).map((official) => official.id);
+      const [rankings, le, ve, bl, suggestions] = await Promise.all([
+        readAllForChunks<Rank & PositionRank, string>(officialIds, (ids, from, to) =>
+          supabase.from("my_assignment_rankings")
             .select("official_id,rank,ref_rank,ar1_rank,ar2_rank,fourth_rank,mentor_certified")
-            .order("official_id").range(from, to),
-          1000, 2,
-        ),
-        loadAllLeagueEligibility(),
-        loadAllLevelEligibility(),
-        readAllPages<Block>((from, to) =>
+            .in("official_id", ids).order("official_id").range(from, to)),
+        candidateLeagueIds.length ? loadAllLeagueEligibility(officialIds) : Promise.resolve({ data: [], error: null }),
+        candidateLevelIds.length ? loadAllLevelEligibility(officialIds) : Promise.resolve({ data: [], error: null }),
+        readAllForChunks<Block, string>(officialIds, (ids, from, to) =>
           supabase.from("official_availability_blocks")
             .select("official_id,block_type,start_date,end_date,starts_at,ends_at,location_id,team_id")
-            .order("official_id").range(from, to),
-        ),
+            .in("official_id", ids).order("official_id").order("id").range(from, to)),
         organizationId && candidateTeamIds.length
           ? readAllForChunks<{team_id: string; official_id: string},string>(candidateTeamIds,(ids,from, to) =>
               supabase.from("team_quick_assign_officials")
-                .select("team_id,official_id")
-                .in("team_id",ids)
+                .select("team_id,official_id").in("team_id",ids)
                 .eq("organization_id", organizationId)
-                .order("team_id").order("official_id").range(from, to),
-            )
+                .order("team_id").order("official_id").range(from, to))
           : Promise.resolve({data: [], error: null}),
       ]);
-      const [roster, rankings, le, ve, bl, suggestions] = results;
+      const results = [roster, rankings, le, ve, bl, suggestions] as const;
       const error = roster.error || rankings.error || le.error || ve.error || bl.error || suggestions.error;
       const officialRows = (roster.data || []) as Official[];
       if (organizationId) officialRows.sort((a, b) =>
@@ -808,18 +839,14 @@ export default function AssignmentsManagerV2({
             .order("team_id")
             .range(from, to),
         ) : Promise.resolve({data: [] as Power[],error:null}),
-        supabase
-          .from("game_link_groups")
-          .select("id,name,created_at,organization_id")
-          .eq("organization_id", organizationId || "")
-          .order("created_at", { ascending: false }),
-        supabase
-          .from("assignment_templates")
-          .select(
+
+        readAllPages<AssignmentTemplate>((from, to) => {
+          let query = supabase.from("assignment_templates").select(
             "id,name,sport_id,league_id,created_by,updated_at,organization_id,assignment_template_slots(id,position_id,official_id,sort_order)",
-          )
-          .eq("organization_id", organizationId || "")
-          .order("updated_at", { ascending: false }),
+          ).eq("organization_id", organizationId || "");
+          if (scopedLeagueIds) query = query.in("league_id", scopedLeagueIds);
+          return query.order("updated_at", { ascending: false }).order("id").range(from, to);
+        }),
       ]);
     const scopedGames = (g.data || []) as unknown as Game[];
     const scopedGameIds = new Set(scopedGames.map((listedGame) => listedGame.id));
@@ -849,7 +876,12 @@ export default function AssignmentsManagerV2({
     const scopedError = assignmentResult.error || linkResult.error || slotResult.error || mentorResult.error || auditResult.error;
     if (scopedError) { setError(scopedError.message); return; }
     if (version !== loadVersion.current) return;
-    const [p, pw, lg, at] = await corePromise;
+    const [p, pw, at] = await corePromise;
+    const lg = await readAllForChunks<LinkGroup, string>(
+      [...new Set((linkResult.data || []).map((member) => member.group_id))],
+      (ids, from, to) => supabase.from("game_link_groups").select("id,name,created_at,organization_id")
+        .eq("organization_id", organizationId || "").in("id", ids)
+        .order("created_at", { ascending: false }).order("id").range(from, to));
     if (version !== loadVersion.current) return;
     const coreError = p.error || pw.error || lg.error || at.error;
     if (coreError) { setError(coreError.message); return; }
@@ -928,7 +960,7 @@ export default function AssignmentsManagerV2({
     // large candidate request batch. Filters can reuse a recent result.
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     if (version !== loadVersion.current) return;
-    const candidateKey = `${organizationId || ""}:${userData.user?.id || ""}:${candidateLeagueIds.join(",")}:${candidateLevelIds.join(",")}:${candidateTeamIds.join(",")}`;
+    const candidateKey = `${organizationId || ""}:${leagueScopeKey}:${leagueGameAccessKey(scopedGameAccess)}:${userData.user?.id || ""}:${candidateLeagueIds.join(",")}:${candidateLevelIds.join(",")}:${candidateTeamIds.join(",")}`;
     const candidatePromise: ReturnType<typeof fetchCandidateData> =
       reuseCandidates && candidateCache.current?.key === candidateKey &&
         Date.now() - candidateCache.current.createdAt < 60_000
@@ -972,6 +1004,13 @@ export default function AssignmentsManagerV2({
     logLoadMilestone("candidate data ready");
   }
   useEffect(() => {
+    candidateCache.current = null;
+    setCanManage(false); setAllowedLeagueIds([]); setAllowedGameAccess([]);
+    setGames([]); setOfficials([]); setAssignments([]); setBlocks([]);
+    setRanks({}); setPositionRanks({}); setPowers({}); setTeamSuggestions([]);
+    setLeagueElig([]); setLevelElig([]); setCandidateScheduleConflicts(new Set());
+    setLinkGroups([]); setLinkMembers([]); setAssignmentTemplates([]); setSelfAssignSlots([]); setMentorSlots([]);
+    setVenueDirectory({ organizationId, fields: [], complexes: {} });
     setInitialGamesReady(false);
     setLinkSelected([]);
     setSelfAssignSelected([]);
@@ -979,7 +1018,8 @@ export default function AssignmentsManagerV2({
     setSelected("");
     setReplacementOnly(false);
     void load();
-  }, [organizationId]);
+    return () => { loadVersion.current++; candidateCache.current = null; };
+  }, [organizationId, leagueScopeKey]);
   useEffect(() => {
     const sourceId = fieldMove?.sourceId;
     const sourceAssignment = assignments.find((item) => item.id === sourceId);
@@ -1003,7 +1043,9 @@ export default function AssignmentsManagerV2({
             .eq("starts_at", sourceGame.starts_at)
             .is("archived_at", null)
             .order("id");
-          if (allowedLeagueIds?.length) query = query.in("league_id", allowedLeagueIds);
+          const scopedQuery = applyLeagueGameAccess(query, allowedGameAccess, fullLeagueAccess);
+          if (!scopedQuery) return Promise.resolve({ data: [], error: null });
+          query = scopedQuery;
           return query.range(from, to) as unknown as PromiseLike<{ data: Game[] | null; error: { message: string } | null }>;
         });
       if (!active) return;
@@ -1027,7 +1069,7 @@ export default function AssignmentsManagerV2({
       else setFieldMoveOptions({ sourceId, games: eligibleGames.data || [], occupants: occupants.data || [] });
     })();
     return () => { active = false; };
-  }, [fieldMove?.sourceId, organizationId, allowedLeagueIds, games, assignments, supabase]);
+  }, [fieldMove?.sourceId, organizationId, allowedLeagueIds, allowedGameAccess, fullLeagueAccess, games, assignments, supabase]);
   useEffect(() => {
     if (!fieldMove?.targetGameId || !fieldMove.targetPositionId) {
       setFieldMovePreview(null);
@@ -1061,7 +1103,7 @@ export default function AssignmentsManagerV2({
     const refreshAfterUndo = () => { void load(); };
     window.addEventListener("refassign:undo-completed", refreshAfterUndo);
     return () => window.removeEventListener("refassign:undo-completed", refreshAfterUndo);
-  }, [organizationId]);
+  }, [organizationId, leagueScopeKey]);
   useEffect(() => {
     if (!initialGamesReady || !focusGameId || games.some((item) => item.id === focusGameId) ||
       requestedFocusLoad.current === focusGameId) return;
@@ -2127,6 +2169,12 @@ export default function AssignmentsManagerV2({
     setSelected("");
     setLinkSelected([]);
   }
+  function removeGameFilter(remove: () => void) {
+    remove();
+    setOverrideOfficial("");
+    setSelected("");
+    setLinkSelected([]);
+  }
   function clearGameFilters() {
     setRange("all");
     setCustomDate("");
@@ -2858,7 +2906,7 @@ export default function AssignmentsManagerV2({
       setNotice(
         `${official?.first_name} ${official?.last_name} assigned to ${position ? shortPositionName(position.name) : "the position"}${linkedCount > 1 ? ` across ${linkedCount} linked games` : ` on Game #${targetGame.game_number}`}${reasons.length ? " with an eligibility override" : ""}.`,
       );
-      announceUndoAvailable(
+      notifyUndoAvailable(
         `${official?.first_name || "Official"} ${official?.last_name || ""} assigned to ${position ? shortPositionName(position.name) : "the position"} on Game #${targetGame.game_number}.`.replace(
           /\s+/g,
           " ",
@@ -2872,7 +2920,7 @@ export default function AssignmentsManagerV2({
       const removedPosition = positions.find(
         (position) => position.id === positionId,
       );
-      announceUndoAvailable(
+      notifyUndoAvailable(
         `${removedOfficial ? `${removedOfficial.first_name} ${removedOfficial.last_name}` : "Official"} unassigned from ${removedPosition ? shortPositionName(removedPosition.name) : "the position"}.`,
       );
     }
@@ -2942,7 +2990,7 @@ export default function AssignmentsManagerV2({
         `${shortPositionName(position.name)} removed from Game #${game.game_number}.`,
       );
       setCandidatePositionId("");
-      announceUndoAvailable(
+      notifyUndoAvailable(
         `${shortPositionName(position.name)} removed from Game #${game.game_number}.`,
       );
     }
@@ -3584,19 +3632,27 @@ export default function AssignmentsManagerV2({
     setCrewTemplateMessage("");
     setShowCrewTemplates(true);
   }
+  function canManageLeagueSettings(leagueId: string | null | undefined) {
+    return canManage && (fullLeagueAccess || Boolean(leagueId &&
+      allowedGameAccess.some((grant) => grant.league_id === leagueId && grant.all_locations === true)));
+  }
   async function refreshCrewTemplates() {
-    const { data, error: templateError } = await supabase
-      .from("assignment_templates")
-      .select(
+    const { data, error: templateError } = await readAllPages<AssignmentTemplate>((from, to) => {
+      let query = supabase.from("assignment_templates").select(
         "id,name,sport_id,league_id,created_by,updated_at,organization_id,assignment_template_slots(id,position_id,official_id,sort_order)",
-      )
-      .eq("organization_id", organizationId || "")
-      .order("updated_at", { ascending: false });
+      ).eq("organization_id", organizationId || "");
+      if (!fullLeagueAccess) {
+        if (!allowedLeagueIds?.length) return Promise.resolve({ data: [], error: null });
+        query = query.in("league_id", allowedLeagueIds);
+      }
+      return query.order("updated_at", { ascending: false }).order("id").range(from, to);
+    });
     if (templateError) throw templateError;
-    setAssignmentTemplates((data || []) as AssignmentTemplate[]);
+    setAssignmentTemplates(data || []);
   }
   async function saveCurrentCrewTemplate() {
     const source = crewTemplateTargetGames()[0];
+    if (!source || !canManageLeagueSettings(source.league_id)) return;
     if (!source || !crewTemplateName.trim()) {
       setCrewTemplateMessage("Enter a template name first.");
       return;
@@ -3733,6 +3789,8 @@ export default function AssignmentsManagerV2({
     await applyCrewSlots(slots, `Crew from Game #${source.game_number}`);
   }
   async function deleteCrewTemplate(templateId: string) {
+    const template = assignmentTemplates.find((item) => item.id === templateId);
+    if (!template || !canManageLeagueSettings(template.league_id)) return;
     setCrewTemplateWorking(true);
     const { error: deleteError } = await supabase
       .from("assignment_templates")
@@ -3796,7 +3854,7 @@ export default function AssignmentsManagerV2({
         setNotice(
           `Replacement assigned and ${result.sent || 0} notification${result.sent === 1 ? "" : "s"} sent.`,
         );
-      announceUndoAvailable();
+      notifyUndoAvailable();
       await refreshAssignmentState();
       setCandidateSearch("");
       setCandidatePositionId(nextPositionId || positionId);
@@ -3857,7 +3915,7 @@ export default function AssignmentsManagerV2({
     else {
       const changeDescription = `${removedOfficial ? `${removedOfficial.first_name} ${removedOfficial.last_name}` : "Official"} unassigned from ${removedPosition ? shortPositionName(removedPosition.name) : "the position"}.`;
       setNotice(changeDescription);
-      announceUndoAvailable(changeDescription);
+      notifyUndoAvailable(changeDescription);
       if (selectedGameId) {
         setSelected(selectedGameId);
         setLinkSelected((current) =>
@@ -3924,7 +3982,12 @@ export default function AssignmentsManagerV2({
     });
   }
   async function saveQuickEdit() {
-    if (!quickEdit) return;
+    if (!quickEdit || !canManage) return;
+    const source = games.find((game) => game.id === quickEdit.gameId);
+    if (!source || !canAccessLeagueGameLocation(allowedGameAccess, source.league_id, quickEdit.locationId, fullLeagueAccess)) {
+      setError("Choose a location you are permitted to manage in this league.");
+      return;
+    }
     if (
       !quickEdit.startsAt ||
       quickEdit.durationMinutes < 15 ||
@@ -3968,7 +4031,7 @@ export default function AssignmentsManagerV2({
         : { label: `Target ${days}d`, color: "#475569" };
   }
   async function saveDeadlineSettings() {
-    if (!deadlineLeagueId) return;
+    if (!deadlineLeagueId || !canManageLeagueSettings(deadlineLeagueId)) return;
     setDeadlineSaving(true);
     const values = {
       assignment_fill_target_days: deadlineDraft.fill,
@@ -4739,10 +4802,10 @@ export default function AssignmentsManagerV2({
         if (deleteError) failures.push(deleteError.message);
         else {
           succeeded = selectedAssignments.length;
-          const { data: undoRows } = await supabase.rpc(
+          const { data: undoRows } = fullLeagueAccess ? await supabase.rpc(
             "latest_undo_operation",
             { p_organization_id: organizationId },
-          );
+          ) : { data: [] };
           const undoId = (undoRows as { id: string }[] | null)?.[0]?.id;
           if (undoId) undoOperationIds.push(undoId);
         }
@@ -4776,10 +4839,10 @@ export default function AssignmentsManagerV2({
           };
           if (response.ok) {
             succeeded++;
-            const { data: undoRows } = await supabase.rpc(
+            const { data: undoRows } = fullLeagueAccess ? await supabase.rpc(
               "latest_undo_operation",
               { p_organization_id: organizationId },
-            );
+            ) : { data: [] };
             const undoId = (undoRows as { id: string }[] | null)?.[0]?.id;
             if (undoId && !undoOperationIds.includes(undoId))
               undoOperationIds.push(undoId);
@@ -4837,7 +4900,7 @@ export default function AssignmentsManagerV2({
         failures: [...failures],
       });
       if (action === "publish") setShowBulkPublishReview(false);
-      if (succeeded && (action === "status" || action === "unassign")) {
+      if (fullLeagueAccess && succeeded && (action === "status" || action === "unassign")) {
         await supabase.rpc("group_undo_operations", {
           p_operation_ids: undoOperationIds,
           p_description:
@@ -4846,7 +4909,7 @@ export default function AssignmentsManagerV2({
               : "Bulk unassignment",
           p_organization_id: organizationId,
         });
-        announceUndoAvailable();
+        notifyUndoAvailable();
       }
       await load();
       if (action === "unassign") {
@@ -4874,6 +4937,48 @@ export default function AssignmentsManagerV2({
     ["thisWeek", "This Week"],
     ["nextWeek", "Next Week"],
   ];
+  // Direct game filters intentionally search across all dates (existing behavior).
+  // Only show a date chip when that range is actually applied to the result set.
+  const activeGameFilters: { key: string; label: string; remove: () => void }[] = [];
+  if (leagueFilter) activeGameFilters.push({
+    key: "league", label: `League: ${leagueOptions.find((league) => league.id === leagueFilter)?.name || "Selected league"}`,
+    remove: () => { setLeagueFilter(""); setLevelFilter(""); },
+  });
+  locationFilter.forEach((value) => activeGameFilters.push({
+    key: `venue:${value}`, label: `Venue: ${venueFilterOptions.find(([id]) => id === value)?.[1] || "Selected venue"}`,
+    remove: () => setLocationFilter((current) => current.filter((item) => item !== value)),
+  }));
+  if (range !== "all" && !hasDirectGameFilter) activeGameFilters.push({
+    key: "date", label: `Date: ${range === "custom" ? customDate || "Choose a Date" : filters.find(([key]) => key === range)?.[1] || range}`,
+    remove: () => { chooseRange("all"); setCustomDate(""); },
+  });
+  if (selfAssignOnly) activeGameFilters.push({ key: "view", label: "View: Open for Self Assign", remove: () => setSelfAssignOnly(false) });
+  dayFilter.forEach((value) => activeGameFilters.push({
+    key: `day:${value}`, label: `Day: ${value}`,
+    remove: () => setDayFilter((current) => current.filter((item) => item !== value)),
+  }));
+  timeFilter.forEach((value) => activeGameFilters.push({
+    key: `time:${value}`, label: `Time: ${/^([01]\d|2[0-3]):[0-5]\d$/.test(value) ? new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "UTC" }).format(new Date(`2000-01-01T${value}:00Z`)) : value}`,
+    remove: () => setTimeFilter((current) => current.filter((item) => item !== value)),
+  }));
+  if (levelFilter) activeGameFilters.push({
+    key: "level", label: `Level: ${games.find((listedGame) => listedGame.level_id === levelFilter)?.levels?.name || "Selected level"}`,
+    remove: () => setLevelFilter(""),
+  });
+  if (officialFilter) {
+    const official = officials.find((item) => item.id === officialFilter);
+    activeGameFilters.push({ key: "official", label: `Official: ${official ? `${official.last_name}, ${official.first_name}` : "Selected official"}`, remove: () => setOfficialFilter("") });
+  }
+  const completenessLabels: Record<string, string> = {
+    unassigned: "Unassigned", partial: "Partially Assigned", full: "Fully Assigned",
+    awaiting: "Awaiting Confirmation", confirmed: "Confirmed", attention: "Needs Attention",
+  };
+  completenessFilter.forEach((value) => activeGameFilters.push({
+    key: `status:${value}`, label: `Status: ${completenessLabels[value] || value}`,
+    remove: () => setCompletenessFilter((current) => current.filter((item) => item !== value)),
+  }));
+  if (unpublishedOnly) activeGameFilters.push({ key: "unpublished", label: "Not published", remove: () => setUnpublishedOnly(false) });
+  if (replacementOnly) activeGameFilters.push({ key: "replacement", label: "Replacement needed", remove: () => setReplacementOnly(false) });
   const attentionQueue = {
     replacements: rangeGames.filter(gameNeedsReplacement).length,
     needsAction: rangeGames.filter(
@@ -5007,6 +5112,7 @@ export default function AssignmentsManagerV2({
   async function resolveOverdue(
     action: "keep" | "remove" | "remove_and_block",
   ) {
+    if (action === "remove_and_block" && (!fullLeagueAccess || !fullLeagueAccessRef.current)) return;
     if (!overdueGroup || overdueSelected.length === 0) return;
     setOverdueResolving(true);
     setError("");
@@ -5017,6 +5123,7 @@ export default function AssignmentsManagerV2({
     // Give each game its own short transaction. A blocked delete must not roll
     // back other games in the review, and Undo can then track each change.
     for (const assignmentId of overdueSelected) {
+      if (action === "remove_and_block" && !fullLeagueAccessRef.current) break;
       const { data, error: resolveError } = await supabase.rpc(
         "resolve_overdue_assignments",
         { p_assignment_ids: [assignmentId], p_action: action },
@@ -5043,7 +5150,7 @@ export default function AssignmentsManagerV2({
           : `${name} was removed from ${resolved} selected unaccepted game(s)${action === "remove_and_block" ? ` and ${blocksCreated} time block(s) were created` : " without creating blocks"}.`,
       );
       setOverduePromptClosed(false);
-      if (action !== "keep") announceUndoAvailable();
+      if (action !== "keep") notifyUndoAvailable();
     }
     if (resolved > 0 || failure) await load();
     if (failure) setError(`${failure} ${resolved} of ${overdueSelected.length} selected games were updated. The remaining games are still listed below.`);
@@ -7017,8 +7124,9 @@ export default function AssignmentsManagerV2({
                     </button>
                     <button
                       type="button"
+                      disabled={!games.some((item) => canManageLeagueSettings(item.league_id))}
                       onClick={() => {
-                        const first = games.find((item) => item.league_id);
+                        const first = games.find((item) => canManageLeagueSettings(item.league_id));
                         if (first?.league_id) {
                           setDeadlineLeagueId(first.league_id);
                           setDeadlineDraft({
@@ -7092,8 +7200,9 @@ export default function AssignmentsManagerV2({
               </button>
               <button
                 type="button"
+                disabled={!games.some((item) => canManageLeagueSettings(item.league_id))}
                 onClick={() => {
-                  const first = games.find((item) => item.league_id);
+                  const first = games.find((item) => canManageLeagueSettings(item.league_id));
                   if (first?.league_id) {
                     setDeadlineLeagueId(first.league_id);
                     setDeadlineDraft({
@@ -7284,11 +7393,11 @@ export default function AssignmentsManagerV2({
                             })
                           }
                         >
-                          <option value="">TBD</option>
+                          {canAccessLeagueGameLocation(allowedGameAccess, target.league_id, null, fullLeagueAccess) && <option value="">TBD</option>}
                           {Array.from(
                             new Map(
                               games
-                                .filter((item) => item.location)
+                                .filter((item) => item.location && canAccessLeagueGameLocation(allowedGameAccess, target.league_id, item.location.id, fullLeagueAccess))
                                 .map((item) => [
                                   item.location!.id,
                                   item.location!.name,
@@ -7422,7 +7531,7 @@ export default function AssignmentsManagerV2({
                       {Array.from(
                         new Map(
                           games
-                            .filter((item) => item.league_id && item.leagues)
+                            .filter((item) => item.league_id && item.leagues && canManageLeagueSettings(item.league_id))
                             .map((item) => [
                               item.league_id!,
                               item.leagues!.name,
@@ -7507,7 +7616,7 @@ export default function AssignmentsManagerV2({
                   <button
                     type="button"
                     className="primary"
-                    disabled={!deadlineLeagueId || deadlineSaving}
+                    disabled={!canManageLeagueSettings(deadlineLeagueId) || deadlineSaving}
                     onClick={() => void saveDeadlineSettings()}
                   >
                     {deadlineSaving ? "Saving…" : "Save Deadlines"}
@@ -8480,7 +8589,7 @@ export default function AssignmentsManagerV2({
                       </button>
                     </div>
                     <div className="crewTemplateBody">
-                      <section className="crewTemplateCreate">
+                      {canManageLeagueSettings(source.league_id) ? <section className="crewTemplateCreate">
                         <div>
                           <b>Save this crew</b>
                           <span>
@@ -8506,7 +8615,7 @@ export default function AssignmentsManagerV2({
                         >
                           Save Current Crew
                         </button>
-                      </section>
+                      </section> : <p>Saving shared crews requires owner or all-location access for this league.</p>}
                       <section className="crewTemplateCopy">
                         <div>
                           <b>Copy from another game</b>
@@ -8611,7 +8720,7 @@ export default function AssignmentsManagerV2({
                                 >
                                   Apply
                                 </button>
-                                <button
+                                {canManageLeagueSettings(template.league_id) && <button
                                   type="button"
                                   className="secondary crewTemplateDelete"
                                   disabled={crewTemplateWorking}
@@ -8620,7 +8729,7 @@ export default function AssignmentsManagerV2({
                                   }
                                 >
                                   Delete
-                                </button>
+                                </button>}
                               </article>
                             ))}
                           </div>
@@ -8831,6 +8940,7 @@ export default function AssignmentsManagerV2({
                 Select the unaccepted games to update. Accepted assignments are
                 never included or removed.
               </p>
+              {!fullLeagueAccess && <p className="muted">Only organization owners can also create shared availability blocks.</p>}
               <div className="overduePromptActions">
                 <button
                   className="secondary"
@@ -8851,13 +8961,13 @@ export default function AssignmentsManagerV2({
                 >
                   Remove — No Block
                 </button>
-                <button
+                {fullLeagueAccess && <button
                   className="primary"
                   disabled={overdueResolving || overdueSelected.length === 0}
                   onClick={() => void resolveOverdue("remove_and_block")}
                 >
                   Remove + Create Blocks
-                </button>
+                </button>}
                 <button
                   className="secondary"
                   disabled={overdueResolving}
@@ -8941,143 +9051,196 @@ export default function AssignmentsManagerV2({
               </button>
             </section>
           )}
-          <div className="assignmentFilterPanel assignmentCompactToolbar">
-            {range === "all" && !locationFilter.length && !dayFilter.length &&
-              !timeFilter.length && !officialFilter && !leagueFilter && !levelFilter &&
-              !unpublishedOnly && !selfAssignOnly && !replacementOnly &&
-              !completenessFilter.length && (
-                <small>Showing the next 50 games that have not started. Select a filter to search beyond this list.</small>
+          <div className={`assignmentFilterPanel assignmentCompactToolbar${canManage ? " hasAdvancedFilters" : ""}${showMoreFilters ? " filtersExpanded" : ""}`}>
+            <div className="assignmentPrimaryFilters">
+              {canManage && (
+                <label className="assignmentToolbarField">
+                  <span>League</span>
+                  <select aria-label="Show games in league" value={leagueFilter}
+                    onChange={(event) => { setLeagueFilter(event.target.value); setLevelFilter(""); setLinkSelected([]); setSelected(""); }}>
+                    <option value="">All Leagues</option>
+                    {Array.from(new Map(leagueOptions.filter((league) =>
+                      !allowedLeagueIds || allowedLeagueIds.includes(league.id))
+                      .map((league) => [league.id, league.name])).entries())
+                      .sort((a, b) => a[1].localeCompare(b[1]))
+                      .map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                  </select>
+                </label>
               )}
-            <label className="assignmentToolbarField">
-              <span>View</span>
-              <select
-                aria-label="Game view"
-                value={selfAssignOnly ? "selfAssign" : "all"}
-                onChange={(event) => {
-                  const next = event.target.value === "selfAssign";
-                  setSelfAssignOnly(next);
-                  setLinkSelected([]);
-                  setSelected("");
-                }}
-              >
-                <option value="all">All Games</option>
-                <option value="selfAssign">
-                  Open for Self Assign ({selfAssignGameCount})
-                </option>
-              </select>
-            </label>
-            {canManage && (
-              <label className="assignmentToolbarField">
-                <span>League</span>
-                <select aria-label="Show games in league" value={leagueFilter}
-                  onChange={(event) => { setLeagueFilter(event.target.value); setLevelFilter(""); setLinkSelected([]); setSelected(""); }}>
-                  <option value="">All Leagues</option>
-                  {Array.from(new Map(leagueOptions.filter((league) =>
-                    !allowedLeagueIds || allowedLeagueIds.includes(league.id))
-                    .map((league) => [league.id, league.name])).entries())
-                    .sort((a, b) => a[1].localeCompare(b[1]))
-                    .map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-                </select>
-              </label>
-            )}
-            <label className="assignmentToolbarField">
-              <span>Date</span>
-              <select
-                aria-label="Date range"
-                value={range}
-                onChange={(event) => {
-                  const next = event.target.value as Range;
-                  if (next === "custom") {
-                    setRange("custom");
-                    setShowCalendar(true);
-                  } else chooseRange(next);
-                }}
-              >
-                {filters.map(([key, label]) => (
-                  <option key={key} value={key}>
-                    {label} (
-                    {
-                      games.filter(
-                        (g) =>
-                          inRange(g, key, customDate) &&
-                          matchesOfficialFilter(g),
-                      ).length
-                    }
-                    )
-                  </option>
-                ))}
-                <option value="custom">Choose a Date</option>
-              </select>
-            </label>
-            <button
-              type="button"
-              className="secondary assignmentToolbarButton assignmentCalendarButton"
-              onClick={() => setShowCalendar((current) => !current)}
-              aria-expanded={showCalendar}
-              aria-controls="assignment-calendar-date-picker"
-            >
-              Calendar
-            </button>
-            <MultiSelectGameFilter
-              label="Venue"
-              allLabel="All Venues / Fields"
-              values={locationFilter}
-              onChange={(values) => { setLocationFilter(values); setLinkSelected([]); setSelected(""); }}
-              options={venueFilterOptions}
-            />
-            <MultiSelectGameFilter
-              label="Day"
-              allLabel="All Days"
-              values={dayFilter}
-              onChange={(values) => { setDayFilter(values); setLinkSelected([]); setSelected(""); }}
-              options={Array.from(new Set(games.map((listedGame) => eventTimeParts(listedGame.starts_at, listedGame.location).date))).sort().map((date): [string, string] => [date, new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${date}T12:00:00Z`))])}
-            />
-            <MultiSelectGameFilter
-              label="Time"
-              allLabel="All Times"
-              values={timeFilter}
-              onChange={(values) => { setTimeFilter(values); setLinkSelected([]); setSelected(""); }}
-              options={Array.from(new Set(games.filter((listedGame) => !listedGame.time_tbd).map((listedGame) => eventTimeParts(listedGame.starts_at, listedGame.location).time))).sort().map((time): [string, string] => [time, new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "UTC" }).format(new Date(`2000-01-01T${time}:00Z`))])}
-            />
-            {canManage && (
-              <label className="assignmentToolbarField assignmentSavedViewField">
-                <span>Saved View</span>
-                <select
-                  aria-label="Open a saved view"
-                  defaultValue=""
-                  onChange={(event) => {
-                    const view = savedViews.find(
-                      (item) => item.id === event.target.value,
-                    );
-                    if (view) applySavedView(view);
-                    event.target.value = "";
-                  }}
+              <MultiSelectGameFilter
+                label="Venue"
+                allLabel="All Venues / Fields"
+                values={locationFilter}
+                onChange={(values) => { setLocationFilter(values); setLinkSelected([]); setSelected(""); }}
+                options={venueFilterOptions}
+              />
+              <div className="assignmentCalendarGroup">
+                <div className="assignmentCalendarControls">
+                  <label className="assignmentToolbarField">
+                    <span>Calendar</span>
+                    <select
+                      aria-label="Date range"
+                      value={range}
+                      onChange={(event) => {
+                        const next = event.target.value as Range;
+                        if (next === "custom") {
+                          setRange("custom");
+                          setShowCalendar(true);
+                        } else chooseRange(next);
+                      }}
+                    >
+                      {filters.map(([key, label]) => (
+                        <option key={key} value={key}>
+                          {label} (
+                          {
+                            games.filter(
+                              (g) =>
+                                inRange(g, key, customDate) &&
+                                matchesOfficialFilter(g),
+                            ).length
+                          }
+                          )
+                        </option>
+                      ))}
+                      <option value="custom">Choose a Date</option>
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    className="secondary assignmentToolbarButton assignmentCalendarButton"
+                    onClick={() => setShowCalendar((current) => !current)}
+                    aria-expanded={showCalendar}
+                    aria-controls="assignment-calendar-date-picker"
+                  >
+                    Calendar
+                  </button>
+                </div>
+                {showCalendar && (
+                  <div id="assignment-calendar-date-picker" className="assignmentCustomDateRow">
+                    <label className="assignmentToolbarField">
+                      <span>Specific Date</span>
+                      <input
+                        type="date"
+                        value={customDate}
+                        onChange={(event) => chooseDate(event.target.value)}
+                      />
+                    </label>
+                    {customDate && (
+                      <span className="assignmentCustomDateResult">
+                        {new Date(`${customDate}T00:00:00`).toLocaleDateString()} ·{" "}
+                        {filteredGames.length} games
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => setShowCalendar(false)}
+                    >
+                      Done
+                    </button>
+                  </div>
+                )}
+                {hasDirectGameFilter && (
+                  <small className="assignmentDateScopeNote">Other selected filters search across all dates.</small>
+                )}
+              </div>
+            </div>
+            <div className="assignmentSecondaryFilters">
+              {canManage && (
+                <button
+                  type="button"
+                  className="secondary assignmentToolbarButton assignmentMoreFiltersButton assignmentMoreFiltersMobile"
+                  onClick={() => setShowMoreFilters((current) => !current)}
+                  aria-expanded={showMoreFilters}
+                  aria-controls="assignment-secondary-fields assignment-saved-view-controls assignment-advanced-filters"
                 >
-                  <option value="">
-                    {savedViews.length
-                      ? "Choose a saved view"
-                      : "No saved views yet"}
-                  </option>
-                  {savedViews.map((view) => (
-                    <option value={view.id} key={view.id}>
-                      {view.name}
+                  More Filters
+                </button>
+              )}
+              <div id="assignment-secondary-fields" className="assignmentSecondaryFields">
+                <label className="assignmentToolbarField">
+                  <span>View</span>
+                  <select
+                    aria-label="Game view"
+                    value={selfAssignOnly ? "selfAssign" : "all"}
+                    onChange={(event) => {
+                      const next = event.target.value === "selfAssign";
+                      setSelfAssignOnly(next);
+                      setLinkSelected([]);
+                      setSelected("");
+                    }}
+                  >
+                    <option value="all">All Games</option>
+                    <option value="selfAssign">
+                      Open for Self Assign ({selfAssignGameCount})
                     </option>
-                  ))}
-                </select>
-              </label>
-            )}
+                  </select>
+                </label>
+                <MultiSelectGameFilter
+                  label="Day"
+                  allLabel="All Days"
+                  values={dayFilter}
+                  onChange={(values) => { setDayFilter(values); setLinkSelected([]); setSelected(""); }}
+                  options={Array.from(new Set(games.map((listedGame) => eventTimeParts(listedGame.starts_at, listedGame.location).date))).sort().map((date): [string, string] => [date, new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${date}T12:00:00Z`))])}
+                />
+                <MultiSelectGameFilter
+                  label="Time"
+                  allLabel="All Times"
+                  values={timeFilter}
+                  onChange={(values) => { setTimeFilter(values); setLinkSelected([]); setSelected(""); }}
+                  options={Array.from(new Set(games.filter((listedGame) => !listedGame.time_tbd).map((listedGame) => eventTimeParts(listedGame.starts_at, listedGame.location).time))).sort().map((time): [string, string] => [time, new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "UTC" }).format(new Date(`2000-01-01T${time}:00Z`))])}
+                />
+              </div>
+              {canManage && (
+                <button
+                  type="button"
+                  className="secondary assignmentToolbarButton assignmentMoreFiltersButton assignmentMoreFiltersDesktop"
+                  onClick={() => setShowMoreFilters((current) => !current)}
+                  aria-expanded={showMoreFilters}
+                  aria-controls="assignment-secondary-fields assignment-saved-view-controls assignment-advanced-filters"
+                >
+                  More Filters
+                </button>
+              )}
+              {canManage && (
+                <div id="assignment-saved-view-controls" className="assignmentSavedViewControls">
+                  <label className="assignmentToolbarField assignmentSavedViewField">
+                    <span>Saved View</span>
+                    <select
+                      aria-label="Open a saved view"
+                      defaultValue=""
+                      onChange={(event) => {
+                        const view = savedViews.find(
+                          (item) => item.id === event.target.value,
+                        );
+                        if (view) applySavedView(view);
+                        event.target.value = "";
+                      }}
+                    >
+                      <option value="">
+                        {savedViews.length
+                          ? "Choose a saved view"
+                          : "No saved views yet"}
+                      </option>
+                      {savedViews.map((view) => (
+                        <option value={view.id} key={view.id}>
+                          {view.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    className="secondary assignmentToolbarButton"
+                    onClick={saveCurrentView}
+                  >
+                    + Save View
+                  </button>
+                </div>
+              )}
+            </div>
             {canManage && (
-              <button
-                type="button"
-                className="secondary assignmentToolbarButton"
-                onClick={saveCurrentView}
-              >
-                + Save View
-              </button>
-            )}
-            {canManage && (
-              <details className="assignmentMoreFilters">
-                <summary>More Filters</summary>
+              <div id="assignment-advanced-filters" hidden={!showMoreFilters}>
                 <div className="assignmentDirectFilters">
                   <span className="assignmentFilterLabel">Filters</span>
                   <label>
@@ -9193,31 +9356,23 @@ export default function AssignmentsManagerV2({
                     </div>
                   )}
                 </div>
-              </details>
+              </div>
             )}
-            {showCalendar && (
-              <div id="assignment-calendar-date-picker" className="assignmentCustomDateRow">
-                <label className="assignmentToolbarField">
-                  <span>Specific Date</span>
-                  <input
-                    type="date"
-                    value={customDate}
-                    onChange={(event) => chooseDate(event.target.value)}
-                  />
-                </label>
-                {customDate && (
-                  <span className="assignmentCustomDateResult">
-                    {new Date(`${customDate}T00:00:00`).toLocaleDateString()} ·{" "}
-                    {filteredGames.length} games
-                  </span>
-                )}
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() => setShowCalendar(false)}
-                >
-                  Done
-                </button>
+            {activeGameFilters.length > 0 && (
+              <div className="assignmentActiveFilters" aria-label="Active filters">
+                <span>Active filters</span>
+                {activeGameFilters.map((filter) => (
+                  <button
+                    type="button"
+                    className="secondary assignmentFilterChip"
+                    key={filter.key}
+                    aria-label={`Remove ${filter.label} filter`}
+                    onClick={() => removeGameFilter(filter.remove)}
+                  >
+                    <span>{filter.label}</span><span aria-hidden="true">×</span>
+                  </button>
+                ))}
+                <button type="button" className="secondary assignmentClearFilters" onClick={clearGameFilters}>Clear</button>
               </div>
             )}
           </div>
@@ -9420,6 +9575,12 @@ export default function AssignmentsManagerV2({
               {bulkWorking && <span>Working…</span>}
             </div>
           )}
+            {range === "all" && !locationFilter.length && !dayFilter.length &&
+              !timeFilter.length && !officialFilter && !leagueFilter && !levelFilter &&
+              !unpublishedOnly && !selfAssignOnly && !replacementOnly &&
+              !completenessFilter.length && (
+                <p className="assignmentResultsNotice">Showing the next 50 games that have not started. Select a filter to search beyond this list.</p>
+              )}
           <div
             className="assignmentGameTable"
             style={{

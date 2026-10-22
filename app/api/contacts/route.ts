@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireManagedOrganization } from "../../../lib/server/organizationScope";
+import { requireOrganizationOwner } from "../../../lib/server/organizationScope";
 
 type Access = {
   locations?: string[];
@@ -16,7 +16,7 @@ const accessTables = [
 ] as const;
 
 export async function GET(request: NextRequest) {
-  const scope = await requireManagedOrganization(request);
+  const scope = await requireOrganizationOwner(request);
   if (scope.error) return scope.error;
   const { service, organizationId } = scope;
 
@@ -116,7 +116,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const scope = await requireManagedOrganization(request);
+  const scope = await requireOrganizationOwner(request);
   if (scope.error) return scope.error;
   const { service, organizationId } = scope;
   const body = (await request.json().catch(() => ({}))) as Record<

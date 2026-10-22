@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { applyLeagueGameAccess, leagueGameAccessKey, type LeagueGameAccess } from "./leagueGameScope";
 import { createClient } from "../lib/supabase/client";
 import { readAllForChunks, readAllPages } from "../lib/supabase/readAll";
 
@@ -36,10 +37,19 @@ const localDate = (d: Date) => {
 
 export default function AutoAssignManager({
   organizationId,
+  fullOrganizationAccess = false,
+  leagueGameAccess = [],
 }: {
   organizationId?: string;
+  fullOrganizationAccess?: boolean;
+  leagueGameAccess?: LeagueGameAccess[];
 }) {
   const supabase = useMemo(() => createClient(), []);
+  const scopeKey = `${organizationId || ""}:${fullOrganizationAccess ? "full" : leagueGameAccessKey(leagueGameAccess)}`;
+  const currentScope = useRef(scopeKey);
+  currentScope.current = scopeKey;
+  const current = () => currentScope.current === scopeKey;
+  const loadVersion = useRef(0);
   const today = useMemo(() => new Date(), []),
     weekEnd = useMemo(() => {
       const d = new Date();
@@ -65,7 +75,9 @@ export default function AutoAssignManager({
     [result, setResult] = useState<RunResult | null>(null),
     [canManage, setCanManage] = useState(false);
   async function load() {
-    if (!organizationId) {
+    const version = ++loadVersion.current;
+    setCanManage(false); setLevels([]); setRules([]); setPositions([]); setResult(null);
+    if (!organizationId || (!fullOrganizationAccess && !leagueGameAccess.some((grant) => grant.all_locations === true || grant.location_ids?.length))) {
       setLevels([]);
       setRules([]);
       setCanManage(false);
@@ -88,8 +100,9 @@ export default function AutoAssignManager({
           .select("*")
           .eq("organization_id", organizationId),
       ]);
-    let can = false;
-    if (u.user) {
+    if (!current() || version !== loadVersion.current) return;
+    let can = fullOrganizationAccess;
+    if (u.user && !can) {
       const { data: m } = await supabase
         .from("organization_memberships")
         .select("role")
@@ -99,6 +112,7 @@ export default function AutoAssignManager({
         ["owner", "admin", "assignor"].includes(row.role),
       );
     }
+    if (!current() || version !== loadVersion.current) return;
     setCanManage(can);
     const levelIds = (levelLinks || []).map((row) => row.level_id);
     const l = levelIds.length
@@ -108,6 +122,7 @@ export default function AutoAssignManager({
           .in("id", levelIds)
           .order("name")
       : { data: [], error: null };
+    if (!current() || version !== loadVersion.current) return;
     const e = levelLinkError || l.error || p.error || r.error;
     if (e) {
       setError(e.message);
@@ -119,8 +134,10 @@ export default function AutoAssignManager({
   }
   useEffect(() => {
     void load();
-  }, [organizationId]);
+    return () => { loadVersion.current++; };
+  }, [scopeKey]);
   async function save() {
+    if (!current() || !fullOrganizationAccess) return;
     if (!organizationId) {
       setError("Select an organization.");
       return;
@@ -172,7 +189,7 @@ export default function AutoAssignManager({
     setSaving(false);
   }
   async function remove(id: string) {
-    if (!organizationId) return;
+    if (!current() || !fullOrganizationAccess || !organizationId) return;
     const { error: e } = await supabase
       .from("auto_assign_rules")
       .delete()
@@ -185,6 +202,7 @@ export default function AutoAssignManager({
     }
   }
   async function runAutoAssign() {
+    if (!current()) return;
     if (!organizationId) {
       setError("Select an organization.");
       return;
@@ -229,7 +247,7 @@ export default function AutoAssignManager({
     setRunning(false);
   }
   async function publishAll() {
-    if (!result || !organizationId) return;
+    if (!current() || !canManage || !result || !organizationId) return;
     if (
       !window.confirm(
         `Publish all unpublished assignments for games from ${result.start_date} through ${result.end_date}? Officials will receive their assignment emails and be asked to accept or decline.`,
@@ -243,14 +261,13 @@ export default function AutoAssignManager({
       const start = new Date(`${result.start_date}T00:00:00`),
         end = new Date(`${result.end_date}T00:00:00`);
       end.setDate(end.getDate() + 1);
-      const { data: games, error: gamesError } = await readAllPages<{id:string}>((from, to) => supabase
-        .from("games")
-        .select("id")
-        .eq("organization_id", organizationId)
-        .gte("starts_at", start.toISOString())
-        .lt("starts_at", end.toISOString())
-        .order("id")
-        .range(from, to));
+      const { data: games, error: gamesError } = await readAllPages<{id:string}>((from, to) => {
+        const query = supabase.from("games").select("id")
+          .eq("organization_id", organizationId)
+          .gte("starts_at", start.toISOString()).lt("starts_at", end.toISOString());
+        const scoped = applyLeagueGameAccess(query, leagueGameAccess, fullOrganizationAccess);
+        return scoped ? scoped.order("id").range(from, to) : Promise.resolve({ data: [], error: null });
+      });
       if (gamesError) throw gamesError;
       const gameIds = (games || []).map((g) => g.id);
       if (!gameIds.length) {
@@ -448,7 +465,7 @@ export default function AutoAssignManager({
           </div>
         )}
       </section>
-      <section className="card">
+      {fullOrganizationAccess ? <section className="card">
         <div className="cardHead">
           <div>
             <h2>Auto Assign Settings</h2>
@@ -535,7 +552,7 @@ export default function AutoAssignManager({
             {saving ? "Saving…" : "Save Auto Assign Rule"}
           </button>
         </div>
-      </section>
+      </section> : <p>Only organization owners can change organization-wide AutoAssign rules. You can use the current rules for your selected leagues and locations.</p>}
       <section className="card">
         <div className="cardHead">
           <div>
@@ -569,12 +586,12 @@ export default function AutoAssignManager({
                     <td>{r.rest_days}</td>
                     <td>{r.same_team_days} days</td>
                     <td>
-                      <button
+                      {fullOrganizationAccess && <button
                         className="secondary"
                         onClick={() => void remove(r.id)}
                       >
                         Remove
-                      </button>
+                      </button>}
                     </td>
                   </tr>
                 ))

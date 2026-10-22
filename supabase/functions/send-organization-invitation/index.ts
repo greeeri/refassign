@@ -59,7 +59,8 @@ Deno.serve(async (request) => {
       p_email: email,
       p_role: role,
       p_viewer_permissions: role === "viewer" ? viewerPermissions : [],
-      p_league_ids: role === "assignor" || role === "viewer" ? leagueIds : [],
+      p_league_ids: leagueIds,
+      p_league_access: Array.isArray(body.leagueAccess) ? body.leagueAccess : [],
     });
     if (invitationError) return json(request, { error: invitationError.message }, 403);
 

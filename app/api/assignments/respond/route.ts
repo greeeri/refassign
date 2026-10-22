@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
   const { data: raw, error: loadError } = await service
     .from("assignments")
     .select(
-      "id,published_by,responded_at,decline_reason,officials(first_name,last_name),sport_positions(name),games!inner(game_number,starts_at,organization_id,league_id,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name),leagues(name),levels(name))",
+      "id,published_by,responded_at,decline_reason,officials(first_name,last_name),sport_positions(name),games!inner(game_number,starts_at,organization_id,league_id,location_id,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name),leagues(name),levels(name))",
     )
     .eq("response_token", body.token)
     .single();
@@ -79,32 +79,24 @@ export async function POST(request: NextRequest) {
     .limit(1)
     .maybeSingle();
   if (!coverage) return NextResponse.json({ ok: true, notified: 0 });
-  const recipientIds = new Set<string>();
-  if (assignment.published_by) recipientIds.add(assignment.published_by);
-  if (!recipientIds.size) {
-    const [{ data: memberships }, { data: profiles }] = await Promise.all([
-      service
-        .from("organization_memberships")
-        .select("user_id,role")
-        .eq("organization_id", game.organization_id)
-        .eq("role", "assignor"),
-      service
-        .from("organization_user_access_profiles")
-        .select("user_id,roles,league_ids")
-        .eq("organization_id", game.organization_id),
-    ]);
-    for (const membership of memberships || [])
-      recipientIds.add(membership.user_id);
-    for (const profile of profiles || []) {
-      const roles = (profile.roles || []) as string[],
-        leagues = (profile.league_ids || []) as string[];
-      if (
-        roles.includes("assignor") &&
-        (!leagues.length || leagues.includes(game.league_id))
-      )
-        recipientIds.add(profile.user_id);
-    }
-  }
+  // Re-check the publisher too: an old published_by value does not retain access after revocation.
+  const [{ data: memberships, error: memberError }, { data: access, error: accessError }, { data: protectedPublisher, error: protectedError }] = await Promise.all([
+    service.from("organization_memberships").select("user_id,role").eq("organization_id", game.organization_id).in("role", ["owner", "admin", "assignor"]),
+    service.from("organization_member_league_access").select("user_id,all_locations,location_ids").eq("organization_id", game.organization_id).eq("league_id", game.league_id),
+    assignment.published_by ? service.from("protected_accounts").select("user_id").eq("user_id", assignment.published_by).maybeSingle() : { data: null, error: null },
+  ]);
+  if (memberError || accessError || protectedError)
+    return NextResponse.json({ ok: true, notificationWarning: "The decline was saved, but current manager access could not be verified." });
+  const locationLink = game?.location_id ? await service.from("organization_locations")
+    .select("location_id,locations!inner(active)").eq("organization_id", game.organization_id)
+    .eq("location_id", game.location_id).eq("active", true).eq("locations.active", true).maybeSingle()
+    : { data: null, error: null };
+  if (locationLink.error) return NextResponse.json({ ok: true, notified: 0 });
+  const scopedIds = new Set((access || []).filter((row) => row.all_locations === true || (locationLink.data && game.location_id && row.location_ids?.includes(game.location_id))).map((row) => row.user_id));
+  const allowedIds = new Set<string>((memberships || []).filter((row) => row.role === "owner" || scopedIds.has(row.user_id)).map((row) => row.user_id));
+  if (protectedPublisher) allowedIds.add(protectedPublisher.user_id);
+  const recipientIds = assignment.published_by && allowedIds.has(assignment.published_by)
+    ? new Set<string>([assignment.published_by]) : allowedIds;
   const recipients: string[] = [];
   for (const userId of recipientIds) {
     const { data } = await service.auth.admin.getUserById(userId);

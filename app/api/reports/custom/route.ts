@@ -1,6 +1,5 @@
+import { scopeReportLeagues } from "../reportScope";
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "../../../../lib/supabase/admin";
-import { createServerSupabaseClient } from "../../../../lib/supabase/server";
 import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
 import { readAllPages } from "../../../../lib/supabase/readAll";
 
@@ -39,6 +38,9 @@ async function context(request: NextRequest) {
     (id) => latest.get(id) !== "standard",
   );
   return {
+    leagueIds: scope.leagueIds,
+    leagueAccess: scope.leagueAccess,
+    fullOrganizationAccess: scope.fullOrganizationAccess,
     supabase,
     service,
     user,
@@ -49,7 +51,7 @@ async function context(request: NextRequest) {
 export async function GET(request: NextRequest) {
   const value = await context(request);
   if (value.error) return value.error;
-  const { supabase, service, user, organizationIds, premium } = value;
+  const { supabase, service, user, organizationIds, premium, leagueIds } = value;
   if (!premium)
     return NextResponse.json({
       reportingAccess: "standard",
@@ -68,7 +70,7 @@ export async function GET(request: NextRequest) {
             .order("name")
         : Promise.resolve({ data: [], error: null }),
       readAllPages<Record<string, any>>((from, to) =>
-        supabase
+        scopeReportLeagues(supabase
           .from("games")
           .select(
             "id,organization_id,game_number,status,starts_at,officials_needed,leagues(id,name),levels(id,name),location:locations(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name)",
@@ -76,10 +78,10 @@ export async function GET(request: NextRequest) {
           .in("organization_id", organizationIds)
           .order("starts_at", { ascending: false })
           .order("id")
-          .range(from, to),
+          .range(from, to), value, "league_id"),
       ),
       readAllPages<Record<string, any>>((from, to) =>
-        supabase
+        scopeReportLeagues(supabase
           .from("assignments")
           .select(
             "id,game_id,official_id,status,game_fee,mileage_miles,mileage_rate,payment_status,officials(id,first_name,last_name),sport_positions(id,name),games!inner(organization_id)",
@@ -87,7 +89,7 @@ export async function GET(request: NextRequest) {
           .in("games.organization_id", organizationIds)
           .order("assigned_at", { ascending: false })
           .order("id")
-          .range(from, to),
+          .range(from, to), value, "games.league_id"),
       ),
       organizationIds.length
         ? service
@@ -168,6 +170,8 @@ export async function POST(request: NextRequest) {
       .trim()
       .slice(0, 320),
     enabled = Boolean(body.scheduleEnabled);
+  if (enabled && !value.fullOrganizationAccess)
+    return NextResponse.json({ error: "Only organization owners can schedule organization-wide reports." }, { status: 403 });
   if (enabled && !/^\S+@\S+\.\S+$/.test(recipient))
     return NextResponse.json(
       { error: "Enter a valid delivery email." },
@@ -177,7 +181,7 @@ export async function POST(request: NextRequest) {
     organization_id: organizationId,
     user_id: user.id,
     name,
-    definition: { ...definition, organizationIds: requested },
+    definition: { ...definition, organizationIds: [organizationId] },
     recipient_email: recipient || null,
     frequency,
     send_day: sendDay,

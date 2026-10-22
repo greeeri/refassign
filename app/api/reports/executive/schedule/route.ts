@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "../../../../../lib/supabase/admin";
-import { createServerSupabaseClient } from "../../../../../lib/supabase/server";
-import { requireManagedOrganization } from "../../../../../lib/server/organizationScope";
+import { requireOrganizationOwner } from "../../../../../lib/server/organizationScope";
 
 type Targets = {
   coverage: number;
@@ -31,7 +29,7 @@ const nextSend = (frequency: "weekly" | "monthly", day: number) => {
 };
 
 async function context(request: NextRequest) {
-  const scope = await requireManagedOrganization(request);
+  const scope = await requireOrganizationOwner(request);
   if (scope.error) return { error: scope.error };
   const { user, service, organizationId } = scope;
   const organizationIds = [organizationId];

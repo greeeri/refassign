@@ -1,3 +1,4 @@
+import { scopeReportLeagues } from "../reportScope";
 import { NextRequest, NextResponse } from "next/server";
 import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
 import { readAllPages } from "../../../../lib/supabase/readAll";
@@ -5,13 +6,13 @@ import { readAllPages } from "../../../../lib/supabase/readAll";
 export async function GET(request: NextRequest) {
   const scope = await requireManagedOrganization(request);
   if (scope.error) return scope.error;
-  const { session: supabase, organizationId } = scope;
+  const { session: supabase, organizationId, leagueIds } = scope;
 
   // Use the signed-in client so league and organization RLS policies remain
   // authoritative as organization workspaces are enabled.
   const [gamesResult, assignmentsResult] = await Promise.all([
     readAllPages<Record<string, any>>((from, to) =>
-      supabase
+      scopeReportLeagues(supabase
         .from("games")
         .select(
           "id,game_number,status,starts_at,officials_needed,leagues(id,name),levels(name),location:locations(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name)",
@@ -19,17 +20,17 @@ export async function GET(request: NextRequest) {
         .eq("organization_id", organizationId)
         .order("starts_at", { ascending: true })
         .order("id")
-        .range(from, to),
+        .range(from, to), scope, "league_id"),
     ),
     readAllPages<Record<string, any>>((from, to) =>
-      supabase
+      scopeReportLeagues(supabase
         .from("assignments")
         .select(
           "id,game_id,status,published_at,accept_by,responded_at,decline_reason,officials(first_name,last_name),sport_positions(name),games!inner(organization_id)",
         )
         .eq("games.organization_id", organizationId)
         .order("id")
-        .range(from, to),
+        .range(from, to), scope, "games.league_id"),
     ),
   ]);
   const error = gamesResult.error || assignmentsResult.error;

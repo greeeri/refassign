@@ -215,12 +215,17 @@ export default function PayrollManager({
   organizationId,
   focusAssignmentId,
   canGeocode = false,
+  fullOrganizationAccess = false,
 }: {
   organizationId?: string;
   focusAssignmentId?: string;
   canGeocode?: boolean;
+  fullOrganizationAccess?: boolean;
 }) {
   const supabase = useMemo(() => createClient(), []);
+  const access = useRef({ organizationId, fullOrganizationAccess });
+  access.current = { organizationId, fullOrganizationAccess };
+  const canEditSharedBilling = () => fullOrganizationAccess && access.current.fullOrganizationAccess && access.current.organizationId === organizationId;
   const fileInput = useRef<HTMLInputElement>(null);
   const geocodeBackfillOrganization = useRef("");
   const handledReportFocus = useRef("");
@@ -259,6 +264,8 @@ export default function PayrollManager({
   const [notice, setNotice] = useState("");
 
   async function load() {
+    setCanManageBillTos(false);
+    setBillTos([]);
     setLoading(true);
     setError("");
     try {
@@ -311,7 +318,7 @@ export default function PayrollManager({
           canManageBillTos?: boolean;
         };
         setBillTos(billToResult.billTos || []);
-        setCanManageBillTos(Boolean(billToResult.canManageBillTos));
+        setCanManageBillTos(canEditSharedBilling() && Boolean(billToResult.canManageBillTos));
       }
       if (batchResponse.ok) {
         const batchResult = (await batchResponse.json()) as {
@@ -663,6 +670,7 @@ export default function PayrollManager({
   }
 
   async function addBillTo() {
+    if (!canEditSharedBilling() || !canManageBillTos) return;
     const name = newBillToName.trim();
     const email = newBillToEmail.trim();
     if (!name || !email || !organizationId) return;
@@ -696,6 +704,7 @@ export default function PayrollManager({
   }
 
   async function saveBillToEmail() {
+    if (!canEditSharedBilling() || !canManageBillTos) return;
     const email = editingBillToEmail.trim();
     if (!editingBillToId || !email || !organizationId) return;
     setSaving("bill-to-email");
@@ -1218,7 +1227,7 @@ export default function PayrollManager({
       {error && <div className="errorBox">{error}</div>}
       {addressWarning && <p role="status">{addressWarning}</p>}
       {notice && <div className="loginMessage">{notice}</div>}
-      {canManageBillTos && (
+      {fullOrganizationAccess && canManageBillTos && (
         <div className="formGrid payrollFilters">
           <label>
             Add Bill To

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sendOfficialNotification } from "../../../../../lib/communications/officialCc";
-import { requireManagedOrganization } from "../../../../../lib/server/organizationScope";
+import { requireManagedOrganization, requireOfficialScope } from "../../../../../lib/server/organizationScope";
 
 function e164(value: string | null | undefined) {
   const digits = String(value || "").replace(/\D/g, "");
@@ -17,13 +17,16 @@ export async function POST(request: NextRequest) {
     officialIds?: string[];
     message?: string;
   };
-  const officialIds = [...new Set(body.officialIds || [])].slice(0, 100);
+  const officialIds = [...new Set(body.officialIds || [])];
   const message = body.message?.trim().slice(0, 1600) || "";
-  if (!officialIds.length || !message)
+  if (!officialIds.length || officialIds.length > 100 || !message)
     return NextResponse.json(
       { error: "Select at least one official and enter a message." },
       { status: 400 },
     );
+
+  const accessError = await requireOfficialScope(scope, officialIds);
+  if (accessError) return accessError;
 
   const sid = process.env.TWILIO_ACCOUNT_SID;
   const token = process.env.TWILIO_AUTH_TOKEN;

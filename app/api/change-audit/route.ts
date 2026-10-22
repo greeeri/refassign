@@ -1,31 +1,37 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireManagedOrganization } from "../../../lib/server/organizationScope";
+import { scopeGameQuery, requireManagedOrganization, requireOrganizationOwner } from "../../../lib/server/organizationScope";
 
 export async function GET(request: NextRequest) {
   const context = await requireManagedOrganization(request);
   if (context.error) return context.error;
-  const { session, service, organizationId } = context;
+  const { session, service, organizationId, leagueIds, fullOrganizationAccess } = context;
   let subscriptionQuery = service.from("refassign_subscriptions").select("reporting_access").in("status", ["active", "trialing", "pending"]).order("created_at", { ascending: false }).limit(1);
   subscriptionQuery = subscriptionQuery.eq("organization_id", organizationId);
   const { data: subscription } = await subscriptionQuery.maybeSingle();
   const reportingAccess = subscription?.reporting_access === "standard" ? "standard" : "premium";
 
-  const [auditResult, importResult, gamesResult, organizationsResult] = await Promise.all([
-    session.from("audit_history").select("id,organization_id,entity_type,entity_id,game_id,assignment_id,action,actor_name,summary,old_data,new_data,occurred_at").eq("organization_id", organizationId).order("occurred_at", { ascending: false }).limit(1000),
-    session.from("import_error_log").select("id,organization_id,import_type,file_name,error_message,row_number,resolved_at,created_at").eq("organization_id", organizationId).order("created_at", { ascending: false }).limit(500),
-    session.from("games").select("id,organization_id,game_number,starts_at,status,source_system,source_event_id,source_match_id,source_synced_at,leagues(name),levels(name),location:locations(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name)").eq("organization_id", organizationId),
-    service.from("organizations").select("id,name").eq("id", organizationId).limit(1),
-  ]);
-  const firstError = auditResult.error || importResult.error || gamesResult.error || organizationsResult.error;
-  if (firstError) return NextResponse.json({ error: firstError.message }, { status: 400 });
-
+  let gamesQuery = session.from("games").select("id,organization_id,game_number,starts_at,status,source_system,source_event_id,source_match_id,source_synced_at,leagues(name),levels(name),location:locations(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name)").eq("organization_id", organizationId);
+  gamesQuery = scopeGameQuery(gamesQuery, context);
+  const gamesResult = await gamesQuery;
+  if (gamesResult.error) return NextResponse.json({ error: gamesResult.error.message }, { status: 400 });
   const games = gamesResult.data || [];
   const gameIds = games.map((game) => game.id);
+  let auditQuery = session.from("audit_history").select("id,organization_id,entity_type,entity_id,game_id,assignment_id,action,actor_name,summary,old_data,new_data,occurred_at").eq("organization_id", organizationId).order("occurred_at", { ascending: false }).limit(1000);
+  if (!fullOrganizationAccess) auditQuery = auditQuery.in("game_id", gameIds);
+  const [auditResult, importResult, organizationsResult] = await Promise.all([
+    !fullOrganizationAccess && !gameIds.length ? { data: [], error: null } : auditQuery,
+    // Import errors and sync-run summaries may contain several leagues and lack a league key.
+    fullOrganizationAccess ? session.from("import_error_log").select("id,organization_id,import_type,file_name,error_message,row_number,resolved_at,created_at").eq("organization_id", organizationId).order("created_at", { ascending: false }).limit(500) : { data: [], error: null },
+    service.from("organizations").select("id,name").eq("id", organizationId).limit(1),
+  ]);
+  const firstError = auditResult.error || importResult.error || organizationsResult.error;
+  if (firstError) return NextResponse.json({ error: firstError.message }, { status: 400 });
+
   const assignmentsResult = gameIds.length ? await session.from("assignments").select("id,game_id,status,email_error,cancellation_email_error").in("game_id", gameIds) : { data: [], error: null };
   if (assignmentsResult.error) return NextResponse.json({ error: assignmentsResult.error.message }, { status: 400 });
   const sourceKeys = new Set(games.filter((game) => game.source_system && game.source_event_id).map((game) => `${game.source_system}:${game.source_event_id}`));
   let syncRuns: Array<Record<string, unknown>> = [];
-  if (sourceKeys.size || organizationId) {
+  if (fullOrganizationAccess && (sourceKeys.size || organizationId)) {
     const query = service.from("schedule_sync_runs").select("id,organization_id,source_system,source_event_id,started_at,finished_at,status,groups_checked,games_found,games_added,games_updated,games_cancelled,games_skipped,error_message").eq("organization_id", organizationId).order("started_at", { ascending: false }).limit(250);
     const { data, error } = await query;
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
@@ -41,7 +47,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const context = await requireManagedOrganization(request);
+  const context = await requireOrganizationOwner(request);
   if (context.error) return context.error;
   const body = await request.json().catch(() => ({})) as { importErrorId?: number; resolved?: boolean };
   if (!Number.isInteger(body.importErrorId)) return NextResponse.json({ error: "An import error is required." }, { status: 400 });

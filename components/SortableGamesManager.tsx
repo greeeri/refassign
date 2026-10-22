@@ -1,6 +1,7 @@
 // Organization context is passed through to enforce league-scoped workspace access.
 "use client";
 import { useEffect, useRef } from "react";
+import type { LeagueGameAccess } from "./leagueGameScope";
 import GamesManagerV3 from "./GamesManagerV3";
 
 function value(row: HTMLTableRowElement, index: number) {
@@ -23,8 +24,14 @@ function value(row: HTMLTableRowElement, index: number) {
 }
 export default function SortableGamesManager({
   organizationId,
+  accessibleLeagueIds,
+  leagueGameAccess,
+  fullLeagueAccess = false,
 }: {
   organizationId?: string;
+  accessibleLeagueIds?: string[];
+  leagueGameAccess?: LeagueGameAccess[];
+  fullLeagueAccess?: boolean;
 }) {
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -83,7 +90,7 @@ export default function SortableGamesManager({
   }, []);
   return (
     <div ref={root}>
-      <GamesManagerV3 organizationId={organizationId} />
+      <GamesManagerV3 organizationId={organizationId} accessibleLeagueIds={accessibleLeagueIds} leagueGameAccess={leagueGameAccess} fullLeagueAccess={fullLeagueAccess} />
     </div>
   );
 }

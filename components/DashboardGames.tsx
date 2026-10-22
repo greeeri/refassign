@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
+import { applyLeagueGameAccess, leagueGameAccessKey, type LeagueGameAccess } from "./leagueGameScope";
 import { createClient } from "../lib/supabase/client";
-import { readAllPages } from "../lib/supabase/readAll";
+import { readAllForChunks, readAllPages } from "../lib/supabase/readAll";
 
 type Game = {
   id: string;
@@ -93,9 +94,15 @@ function milesBetween(
 export default function DashboardGames({
   onNavigate,
   organizationId,
+  accessibleLeagueIds = [],
+  leagueGameAccess = [],
+  fullLeagueAccess = false,
 }: {
   onNavigate?: (view: string) => void;
   organizationId?: string;
+  accessibleLeagueIds?: string[];
+  leagueGameAccess?: LeagueGameAccess[];
+  fullLeagueAccess?: boolean;
 }) {
   const supabase = useMemo(() => createClient(), []),
     [games, setGames] = useState<Game[]>([]),
@@ -107,113 +114,92 @@ export default function DashboardGames({
     [focus, setFocus] = useState<Focus>("needs"),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true);
+  const leagueScopeKey = fullLeagueAccess ? "full" : leagueGameAccessKey(leagueGameAccess);
   useEffect(() => {
+    let active = true;
     async function load() {
-      setLoading(true);
-      async function loadAllAssignments() {
-        return readAllPages<Assignment>(
-          (from, to) =>
-            supabase
-              .from("assignments")
-              .select(
-                "id,game_id,official_id,status,published_at,officials(first_name,last_name),sport_positions(name)",
-              )
-              .order("id")
-              .range(from, to) as unknown as PromiseLike<{
-              data: Assignment[] | null;
-              error: { message: string } | null;
-            }>,
-        );
+      setLoading(true); setError("");
+      setGames([]); setAssignments([]); setDeclineRows([]);
+      setImportErrors([]); setOfficials([]); setAudit([]);
+      // An omitted or empty scope is not permission to read an organization.
+      if (!fullLeagueAccess && (!organizationId || !leagueGameAccess.some((grant) => grant.all_locations === true || grant.location_ids?.length))) {
+        setLoading(false);
+        return;
       }
-      async function loadAllDeclines() {
-        return readAllPages<Decline>((from, to) =>
-          supabase
-            .from("assignment_declines")
-            .select("id,game_id")
-            .order("id")
-            .range(from, to),
-        );
-      }
-      const importQuery = supabase
-          .from("import_error_log")
-          .select("id,error_message,row_number,created_at")
-          .is("resolved_at", null)
-          .order("created_at", { ascending: false })
-          .limit(100),
-        auditQuery = supabase
-          .from("audit_history")
-          .select("id,action,summary,occurred_at,actor_name,organization_id")
-          .order("occurred_at", { ascending: false })
-          .limit(8);
-      const [g, a, d, i, oo, h] = await Promise.all([
-        readAllPages<Game>((from, to) => {
-          let query = supabase
-            .from("games")
-            .select(
-              "id,game_number,location_id,starts_at,duration_minutes,officials_needed,status,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name,latitude,longitude),leagues(name),levels(name)",
-            )
-            .is("archived_at", null)
-            .order("starts_at")
-            .order("id");
-          if (organizationId)
-            query = query.eq("organization_id", organizationId);
-          return query.range(from, to) as unknown as PromiseLike<{
-            data: Game[] | null;
-            error: { message: string } | null;
-          }>;
-        }),
-        loadAllAssignments(),
-        loadAllDeclines(),
-        organizationId
-          ? importQuery.eq("organization_id", organizationId)
-          : importQuery,
+      const g = await readAllPages<Game>((from, to) => {
+        let query = supabase.from("games").select(
+          "id,game_number,location_id,starts_at,duration_minutes,officials_needed,status,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name,latitude,longitude),leagues(name),levels(name)",
+        ).is("archived_at", null).order("starts_at").order("id");
+        if (organizationId) query = query.eq("organization_id", organizationId);
+        const scopedQuery = applyLeagueGameAccess(query, leagueGameAccess, fullLeagueAccess);
+        if (!scopedQuery) return Promise.resolve({ data: [], error: null });
+        query = scopedQuery;
+        return query.range(from, to) as unknown as PromiseLike<{
+          data: Game[] | null; error: { message: string } | null;
+        }>;
+      });
+      if (!active) return;
+      if (g.error) { setError(g.error.message); setLoading(false); return; }
+      const gameIds = (g.data || []).map((game) => game.id);
+      const [a, d, i, oo, h] = await Promise.all([
+        readAllForChunks<Assignment, string>(gameIds, (ids, from, to) =>
+          supabase.from("assignments").select(
+            "id,game_id,official_id,status,published_at,officials(first_name,last_name),sport_positions(name)",
+          ).in("game_id", ids).order("id").range(from, to) as unknown as PromiseLike<{
+            data: Assignment[] | null; error: { message: string } | null;
+          }>),
+        readAllForChunks<Decline, string>(gameIds, (ids, from, to) =>
+          supabase.from("assignment_declines").select("id,game_id")
+            .in("game_id", ids).order("id").range(from, to)),
+        // Import errors have no reliable league attribution. Only owners may
+        // request the organization-wide log.
+        fullLeagueAccess ? (() => {
+          let query = supabase.from("import_error_log")
+            .select("id,error_message,row_number,created_at").is("resolved_at", null)
+            .order("created_at", { ascending: false });
+          if (organizationId) query = query.eq("organization_id", organizationId);
+          return query.limit(100);
+        })() : Promise.resolve({ data: [], error: null }),
         readAllPages<OrganizationOfficial>((from, to) => {
-          let query = supabase
-            .from("organization_officials")
+          let query = supabase.from("organization_officials")
             .select("organization_id,official_id,officials(id,active)")
-            .eq("active", true)
-            .order("organization_id")
-            .order("official_id");
-          if (organizationId)
-            query = query.eq("organization_id", organizationId);
+            .eq("active", true).order("organization_id").order("official_id");
+          if (organizationId) query = query.eq("organization_id", organizationId);
           return query.range(from, to) as unknown as PromiseLike<{
-            data: OrganizationOfficial[] | null;
-            error: { message: string } | null;
+            data: OrganizationOfficial[] | null; error: { message: string } | null;
           }>;
         }),
-        organizationId
-          ? auditQuery.eq("organization_id", organizationId)
-          : auditQuery,
+        fullLeagueAccess ? (() => {
+          // data-access: query-builder; the owner-only query is capped below after its organization filter.
+          let query = supabase.from("audit_history")
+            .select("id,action,summary,occurred_at,actor_name,organization_id")
+            .order("occurred_at", { ascending: false });
+          if (organizationId) query = query.eq("organization_id", organizationId);
+          return query.limit(8);
+        })() : readAllForChunks<Audit, string>(gameIds, (ids, from, to) =>
+          supabase.from("audit_history").select("id,action,summary,occurred_at,actor_name,organization_id")
+            .eq("organization_id", organizationId!).in("game_id", ids)
+            .order("occurred_at", { ascending: false }).order("id").range(from, to)),
       ]);
-      const firstError =
-        g.error || a.error || d.error || i.error || oo.error || h.error;
+      if (!active) return;
+      const firstError = a.error || d.error || i.error || oo.error || h.error;
       if (firstError) setError(firstError.message);
       else {
-        const nextGames = (g.data || []) as unknown as Game[],
-          gameIds = new Set(nextGames.map((game) => game.id));
-        setGames(nextGames);
-        setAssignments(
-          ((a.data || []) as unknown as Assignment[]).filter((assignment) =>
-            gameIds.has(assignment.game_id),
-          ),
-        );
-        setDeclineRows(
-          (d.data || []).filter((decline) => gameIds.has(decline.game_id)),
-        );
+        setGames(g.data || []);
+        setAssignments(a.data || []);
+        setDeclineRows(d.data || []);
         setImportErrors((i.data || []) as ImportError[]);
-        setOfficials(
-          (oo.data || []).flatMap((row: OrganizationOfficial) => {
-            const value = row.officials as unknown as
-              Official | Official[] | null;
-            return Array.isArray(value) ? value : value ? [value] : [];
-          }),
-        );
-        setAudit((h.data || []) as Audit[]);
+        setOfficials((oo.data || []).flatMap((row) => {
+          const value = row.officials;
+          return Array.isArray(value) ? value : value ? [value] : [];
+        }));
+        setAudit(((h.data || []) as Audit[]).sort((a, b) => b.occurred_at.localeCompare(a.occurred_at)).slice(0, 8));
       }
       setLoading(false);
     }
     void load();
-  }, [supabase, organizationId]);
+    return () => { active = false; };
+  }, [supabase, organizationId, leagueScopeKey]);
   const now = Date.now(),
     future = games.filter((g) => new Date(g.starts_at).getTime() >= now),
     map = new Map(games.map((g) => [g.id, g]));
@@ -399,7 +385,7 @@ export default function DashboardGames({
       <div className="dashboardHero">
         <div>
           <h2>Welcome to Ref Pro Group</h2>
-          <p>Here’s what is happening with your games and assignments.</p>
+          <p>{fullLeagueAccess ? "Here’s what is happening with your games and assignments." : "Games and assignments in your selected leagues and locations."}</p>
         </div>
         <div className="dashboardDate">
           Today
@@ -641,7 +627,7 @@ export default function DashboardGames({
           </span>
         </div>
         <div className="dashboardActionStrip">
-          {cards.map(([key, label]) => (
+          {cards.filter(([key]) => fullLeagueAccess || key !== "imports").map(([key, label]) => (
             <button
               className="dashboardActionCard"
               key={key}

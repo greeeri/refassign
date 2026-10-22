@@ -1,3 +1,4 @@
+import { isCurrentReportOwner } from "../../reports/reportScope";
 import { NextRequest, NextResponse } from "next/server";
 import { addReportCopyright } from "../../../../lib/pdfCopyright";
 import { createServiceClient } from "../../../../lib/supabase/admin";
@@ -19,8 +20,8 @@ export async function GET(request: NextRequest) {
   let sent = 0; const failures: string[] = [];
   for (const schedule of schedules || []) {
     try {
-      const { data: membership } = await service.from("organization_memberships").select("role").eq("organization_id", schedule.organization_id).eq("user_id", schedule.user_id).maybeSingle();
-      if (!membership || !["owner", "admin", "assignor"].includes(membership.role)) { await service.from("executive_report_schedules").update({ enabled: false, next_send_at: null, updated_at: now }).eq("id", schedule.id); throw new Error("Schedule disabled because manager access ended"); }
+      const canSend = await isCurrentReportOwner(service, schedule.user_id, schedule.organization_id);
+      if (!canSend) { await service.from("executive_report_schedules").update({ enabled: false, next_send_at: null, updated_at: now }).eq("id", schedule.id); throw new Error("Schedule disabled because organization owner access ended"); }
       const { data: subscription } = await service.from("refassign_subscriptions").select("reporting_access").eq("organization_id", schedule.organization_id).in("status", ["active", "trialing", "pending"]).order("created_at", { ascending: false }).limit(1).maybeSingle();
       if (subscription?.reporting_access === "standard") throw new Error("Premium reporting is not active");
       const summary = await getExecutiveSummary(service, schedule.organization_id), targets = schedule.kpi_targets as Record<string, number>;

@@ -9,7 +9,7 @@ async function context(request: NextRequest) {
   let query = scope.service.from("calendar_sync_feeds").select("id,name,league_id,source_system,enabled,bootstrapped,last_attempt_at,last_success_at,next_run_at,last_error,event_count,lease_until").eq("organization_id", scope.organizationId).order("name").limit(100);
   if (!scope.fullOrganizationAccess) {
     if (!scope.leagueIds?.length) return { ...scope, feeds: [] };
-    query = query.in("league_id", scope.leagueIds);
+    query = query.in("league_id", (scope.leagueAccess || []).filter((access) => access.all_locations).map((access) => access.league_id));
   }
   const league = request.nextUrl.searchParams.get("leagueId");
   if (league) query = query.eq("league_id", league);

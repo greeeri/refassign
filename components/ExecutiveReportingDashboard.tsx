@@ -2,7 +2,7 @@
 
 import { addReportCopyright } from "../lib/pdfCopyright";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Named = { name: string } | null;
 type Game = {
@@ -101,10 +101,17 @@ const one = <T,>(value: T | T[] | null | undefined) =>
 export default function ExecutiveReportingDashboard({
   onOpenReport,
   organizationId: workspaceOrganizationId,
+  fullOrganizationAccess = false,
 }: {
   onOpenReport: (report: ReportKey) => void;
   organizationId?: string;
+  fullOrganizationAccess?: boolean;
 }) {
+  const scopeKey = JSON.stringify([workspaceOrganizationId, fullOrganizationAccess]);
+  const activeScope = useRef<string | null>(scopeKey);
+  activeScope.current = scopeKey;
+  const [loadedScopeKey, setLoadedScopeKey] = useState("");
+  const isCurrentScope = () => activeScope.current === scopeKey;
   const [data, setData] = useState<Data | null>(null),
     [organizations, setOrganizations] = useState<Organization[]>([]),
     [schedules, setSchedules] = useState<Schedule[]>([]),
@@ -120,6 +127,12 @@ export default function ExecutiveReportingDashboard({
     [error, setError] = useState("");
 
   useEffect(() => {
+    const controller = new AbortController();
+    activeScope.current = scopeKey;
+    setLoadedScopeKey(""); setLoading(true); setData(null); setError("");
+    setOrganizations([]); setSchedules([]); setOrganizationId(""); setEmail("");
+    setFrequency("weekly"); setSendDay(1); setEnabled(false); setTargets(defaults); setSaved(""); setSaving(false);
+    const current = () => !controller.signal.aborted && isCurrentScope();
     void (async () => {
       try {
         const query = `?organizationId=${encodeURIComponent(workspaceOrganizationId || "")}`,
@@ -131,15 +144,16 @@ export default function ExecutiveReportingDashboard({
             "communications",
           ].map((name) => `/api/reports/${name}${query}`),
           responses = await Promise.all([
-            ...urls.map((url) => fetch(url, { cache: "no-store" })),
-            fetch(`/api/reports/executive/schedule${query}`, {
-              cache: "no-store",
-            }),
+            ...urls.map((url) => fetch(url, { cache: "no-store", signal: controller.signal })),
+            ...(fullOrganizationAccess ? [fetch(`/api/reports/executive/schedule${query}`, {
+              cache: "no-store", signal: controller.signal,
+            })] : []),
           ]),
           results = await Promise.all(
             responses.map((response) => response.json()),
           );
-        const failed = responses.findIndex((response) => !response.ok);
+        if (!current()) return;
+        const failed = responses.slice(0, urls.length).findIndex((response) => !response.ok);
         if (failed >= 0)
           throw new Error(
             results[failed].error || "Executive reporting could not be loaded.",
@@ -150,8 +164,10 @@ export default function ExecutiveReportingDashboard({
           compliance,
           development,
           communications,
-          preferences,
+          schedulePreferences,
         ] = results;
+        const preferences = fullOrganizationAccess && responses[5]?.ok ? schedulePreferences || {} : {};
+        if (fullOrganizationAccess && responses[5] && !responses[5].ok) setSaved(schedulePreferences?.error || "Executive schedule settings could not be loaded.");
         setData({
           reportingAccess:
             operations.reportingAccess === "premium" ? "premium" : "standard",
@@ -174,15 +190,17 @@ export default function ExecutiveReportingDashboard({
         if (preferences.organizations?.[0])
           setOrganizationId(preferences.organizations[0].id);
       } catch (reason) {
+        if (!current()) return;
         setError(
           reason instanceof Error
             ? reason.message
             : "Executive reporting could not be loaded.",
         );
       }
-      setLoading(false);
+      if (current()) { setLoadedScopeKey(scopeKey); setLoading(false); }
     })();
-  }, []);
+    return () => { controller.abort(); activeScope.current = null; };
+  }, [scopeKey]);
 
   useEffect(() => {
     if (!organizationId) return;
@@ -401,7 +419,7 @@ export default function ExecutiveReportingDashboard({
     : [];
   const premium = data?.reportingAccess === "premium";
   const saveSchedule = async () => {
-    if (!organizationId) return;
+    if (!isCurrentScope() || loadedScopeKey !== scopeKey || !fullOrganizationAccess || !organizationId || saving || !organizations.some((item) => item.id === organizationId)) return;
     setSaving(true);
     setSaved("");
     try {
@@ -421,6 +439,7 @@ export default function ExecutiveReportingDashboard({
           },
         ),
         result = await response.json();
+      if (!isCurrentScope()) return;
       if (!response.ok)
         throw new Error(result.error || "Settings could not be saved.");
       setSchedules((rows) => [
@@ -433,13 +452,14 @@ export default function ExecutiveReportingDashboard({
           : "KPI targets saved; email delivery is off.",
       );
     } catch (reason) {
+      if (!isCurrentScope()) return;
       setSaved(
         reason instanceof Error
           ? reason.message
           : "Settings could not be saved.",
       );
     }
-    setSaving(false);
+    if (isCurrentScope()) setSaving(false);
   };
   const exportPdf = async () => {
     if (!premium || !summary) return;
@@ -501,7 +521,7 @@ export default function ExecutiveReportingDashboard({
     addReportCopyright(document); document.save("refassign-executive-summary.pdf");
   };
 
-  if (loading)
+  if (loading || loadedScopeKey !== scopeKey)
     return (
       <section className="card">
         <p>Loading executive reporting…</p>
@@ -703,7 +723,8 @@ export default function ExecutiveReportingDashboard({
               </button>
             ))}
           </div>
-          {premium && (
+          {!fullOrganizationAccess && <p>Scheduled organization reports and KPI settings are managed by the organization owner.</p>}
+          {premium && fullOrganizationAccess && (
             <div className="executiveSettings">
               <div className="executiveSectionHead">
                 <div>

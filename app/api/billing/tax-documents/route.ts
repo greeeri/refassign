@@ -2,7 +2,7 @@ import {NextRequest,NextResponse} from "next/server";
 import {createServerSupabaseClient} from "../../../../lib/supabase/server";
 import {createServiceClient} from "../../../../lib/supabase/admin";
 
-const allowedOrganizationRoles=["owner","admin"];
+const allowedOrganizationRoles=["owner"];
 
 export async function GET(request:NextRequest){
  const auth=await createServerSupabaseClient();

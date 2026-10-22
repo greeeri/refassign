@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { geocodeVenue } from "../../../../lib/geocode";
-import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
+import { requireOrganizationOwner } from "../../../../lib/server/organizationScope";
 
 type AddressRow = {
   id: string;
@@ -15,7 +15,7 @@ const addressText = (row: AddressRow) =>
   [row.address, row.city, row.state, row.zip].filter(Boolean).join(", ");
 
 export async function POST(request: NextRequest) {
-  const context = await requireManagedOrganization(request);
+  const context = await requireOrganizationOwner(request);
   if (context.error) return context.error;
   const { service, organizationId } = context;
   const [locationLinks, officialLinks] = await Promise.all([

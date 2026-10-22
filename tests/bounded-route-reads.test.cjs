@@ -32,13 +32,18 @@ function mockService(resultFor) {
       const call = { table, methods: [] };
       calls.push(call);
       const query = { then: (resolve, reject) => Promise.resolve(resultFor(call)).then(resolve, reject) };
-      for (const method of ["select", "eq", "in", "limit", "maybeSingle", "single", "insert", "update", "delete"]) {
+      for (const method of ["select", "eq", "in", "limit", "maybeSingle", "single", "insert", "update", "delete", "order", "range"]) {
         query[method] = (...args) => { call.methods.push([method, ...args]); return query; };
       }
       return query;
     },
   };
 }
+
+const paging = loadRoute("lib/supabase/readAll.ts", {});
+const scopeGuards = loadRoute("lib/server/organizationScope.ts", {
+  "/supabase/readAll": paging, "/supabase/admin": {}, "/supabase/server": {},
+});
 
 function setupEmail({ scopeError, linkError } = {}) {
   const notifications = [];
@@ -56,8 +61,9 @@ function setupEmail({ scopeError, linkError } = {}) {
   });
   const route = loadRoute("app/api/communications/officials/email/route.ts", {
     "/server/organizationScope": {
+      requireOfficialScope: scopeGuards.requireOfficialScope,
       requireManagedOrganization: async () => scopeError ? { error: scopeError } : {
-        service, user: { id: "manager" }, organizationId: "selected-org",
+        service, user: { id: "manager" }, organizationId: "selected-org", fullOrganizationAccess: true, leagueIds: null,
       },
     },
     "/communications/officialCc": {
@@ -89,7 +95,7 @@ test("group email accepts all 500 officials and keeps organization and active fi
   assert.equal(result.status, 200);
   assert.equal(result.body.sent, 500);
   assert.deepEqual(state.notifications, ids);
-  const lookup = state.service.calls.find((call) => call.table === "organization_officials");
+  const lookup = state.service.calls.find((call) => call.table === "organization_officials" && call.methods.some(([method]) => method === "limit"));
   assert(lookup.methods.some(([method, key, value]) => method === "eq" && key === "organization_id" && value === "selected-org"));
   assert(lookup.methods.some(([method, key, value]) => method === "eq" && key === "active" && value === true));
   assert(lookup.methods.some(([method, value]) => method === "limit" && value === 500));
@@ -109,7 +115,7 @@ test("group email preserves authorization and stops before writes on lookup erro
   assert.equal((await denied.run(["official-1"])).status, 403);
   assert.equal(denied.service.calls.length, 0);
   const failed = setupEmail({ linkError: { message: "lookup failed" } });
-  assert.equal((await failed.run(["official-1"])).body.error, "lookup failed");
+  assert.equal((await failed.run(["official-1"])).status, 500);
   assert.equal(failed.service.calls.length, 1);
   assert.equal(failed.notifications.length, 0);
 });

@@ -10,6 +10,7 @@ import CommunicationCenter from "./CommunicationCenter";
 import SharedDirectorySearch from "./SharedDirectorySearch";
 import TeamOfficialLinks from "./TeamOfficialLinks";
 import DirectoryOfficialSchedule from "./DirectoryOfficialSchedule";
+import type { LeagueGameAccess } from "./leagueGameScope";
 
 type Official = {
   id: string;
@@ -66,6 +67,8 @@ type PositionRank = {
 };
 
 type Choice = { id: string; name: string };
+
+const SHARED_OFFICIAL_OWNER_NOTE = "Only organization owners can edit shared official records.";
 
 function leagueInitials(name: string) {
   const words = name.trim().split(/\s+/).filter(Boolean);
@@ -202,9 +205,13 @@ type LinkOfficialResult = {
 export default function OfficialsDirectory({
   organizationId,
   focusOfficialId,
+  fullOrganizationAccess = false,
+  leagueGameAccess = [],
 }: {
   organizationId?: string;
   focusOfficialId?: string;
+  fullOrganizationAccess?: boolean;
+  leagueGameAccess?: LeagueGameAccess[];
 }) {
   const supabase = useMemo(() => createClient(), []);
   const handledReportFocus = useRef("");
@@ -253,6 +260,22 @@ export default function OfficialsDirectory({
     string[]
   >([]);
   const [sendingInvitationEmail, setSendingInvitationEmail] = useState("");
+  const canEditSharedRecords = canManage && fullOrganizationAccess;
+  const sharedAccessRef = useRef(canEditSharedRecords);
+  sharedAccessRef.current = canEditSharedRecords;
+  const editableLeagueIdsRef = useRef(new Set<string>());
+  editableLeagueIdsRef.current = new Set(
+    leagueGameAccess.filter((grant) => grant.all_locations === true).map((grant) => grant.league_id),
+  );
+  const canEditLeagueEligibility = (leagueId: string) =>
+    sharedAccessRef.current || editableLeagueIdsRef.current.has(leagueId);
+  const editableLeagues = leagues.filter((league) => canEditLeagueEligibility(league.id));
+
+  function requireSharedOfficialAccess() {
+    if (sharedAccessRef.current) return true;
+    setError(SHARED_OFFICIAL_OWNER_NOTE);
+    return false;
+  }
 
   function parsedBulkRows() {
     const lines = bulkEmailText
@@ -301,6 +324,7 @@ export default function OfficialsDirectory({
   }
 
   async function previewBulkOfficials() {
+    if (!requireSharedOfficialAccess()) return;
     if (!organizationId) return;
     const rows = parsedBulkRows();
     const emails = rows.map((row) => row.email);
@@ -332,6 +356,7 @@ export default function OfficialsDirectory({
   }
 
   async function addBulkOfficials(sendInvitations: boolean) {
+    if (!requireSharedOfficialAccess()) return;
     if (!organizationId) return;
     const emails = bulkResults
       .filter((item) => item.valid !== false && !item.already_connected)
@@ -396,6 +421,7 @@ export default function OfficialsDirectory({
   }
 
   async function readBulkFile(file?: File) {
+    if (!requireSharedOfficialAccess()) return;
     if (!file) {
       setBulkFileName("");
       return;
@@ -424,7 +450,7 @@ export default function OfficialsDirectory({
 
   async function searchOfficialByEmail(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!organizationId || !officialEmail.trim()) return;
+    if (!requireSharedOfficialAccess() || !organizationId || !officialEmail.trim()) return;
     setLinkingOfficial(true);
     setError("");
     setLinkMessage("");
@@ -442,6 +468,7 @@ export default function OfficialsDirectory({
   }
 
   async function connectOfficial() {
+    if (!requireSharedOfficialAccess()) return;
     if (!organizationId || !officialMatch) return;
     setLinkingOfficial(true);
     setError("");
@@ -503,7 +530,7 @@ export default function OfficialsDirectory({
   }
 
   async function sendOfficialInvitation(email: string) {
-    if (!organizationId) return false;
+    if (!requireSharedOfficialAccess() || !organizationId) return false;
     const response = await postOfficialInvitations([email]);
     const notification = (await response.json().catch(() => ({}))) as {
       error?: string;
@@ -545,6 +572,7 @@ export default function OfficialsDirectory({
   }
 
   async function resendDirectoryInvitation(email: string) {
+    if (!requireSharedOfficialAccess()) return;
     setSendingInvitationEmail(email);
     setError("");
     setLinkMessage("");
@@ -699,7 +727,7 @@ export default function OfficialsDirectory({
     setLeagues((lg.data || []) as Choice[]);
     setOfficialLeagueIds(nextOfficialLeagueIds);
     setLevels((lv.data || []) as Choice[]);
-    if (organizationId) {
+    if (organizationId && fullOrganizationAccess) {
       const { data: invitations, error: invitationError } = await supabase
         .from("organization_official_invitations")
         .select("email")
@@ -781,6 +809,7 @@ export default function OfficialsDirectory({
   }
 
   function toggleChoice(field: "league_ids" | "center_level_ids" | "ar_level_ids", id: string) {
+    if (field === "league_ids" ? !canEditLeagueEligibility(id) : !sharedAccessRef.current) return;
     setForm((current) => ({
       ...current,
       [field]: current[field].includes(id)
@@ -793,15 +822,20 @@ export default function OfficialsDirectory({
     field: "league_ids" | "center_level_ids" | "ar_level_ids",
     choices: Choice[],
   ) {
+    if (field !== "league_ids" && !sharedAccessRef.current) return;
     setForm((current) => {
-      const allIds = choices.map((choice) => choice.id);
+      const allIds = choices
+        .filter((choice) => field !== "league_ids" || canEditLeagueEligibility(choice.id))
+        .map((choice) => choice.id);
       const allSelected =
         allIds.length > 0 && allIds.every((id) => current[field].includes(id));
-      return { ...current, [field]: allSelected ? [] : allIds };
+      const unchangedIds = current[field].filter((id) => !allIds.includes(id));
+      return { ...current, [field]: allSelected ? unchangedIds : [...unchangedIds, ...allIds] };
     });
   }
 
   function startAdd() {
+    if (!requireSharedOfficialAccess()) return;
     setRankMessage("");
     setEditingId(null);
     setForm(newForm());
@@ -920,7 +954,7 @@ export default function OfficialsDirectory({
           p_ar1_rank: ar1_rank,
           p_ar2_rank: ar2_rank,
           p_fourth_rank: fourth_rank,
-          p_mentor_certified: form.mentor_certified,
+          p_mentor_certified: sharedAccessRef.current ? form.mentor_certified : null,
         },
       );
       if (saveError) throw saveError;
@@ -933,10 +967,14 @@ export default function OfficialsDirectory({
           ar1_rank,
           ar2_rank,
           fourth_rank,
-          mentor_certified: form.mentor_certified,
+          mentor_certified: sharedAccessRef.current
+            ? form.mentor_certified
+            : current[editingId]?.mentor_certified ?? false,
         },
       }));
-      setRankMessage("Your rankings and the mentor certification were saved.");
+      setRankMessage(sharedAccessRef.current
+        ? "Your rankings and the mentor certification were saved."
+        : "Your rankings were saved.");
     } catch (saveError) {
       setError(
         saveError && typeof saveError === "object" && "message" in saveError
@@ -950,7 +988,9 @@ export default function OfficialsDirectory({
 
   async function saveOfficial(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!form.sports.length) {
+    if (!canManage || saving) return;
+    if (!editingId && !requireSharedOfficialAccess()) return;
+    if (sharedAccessRef.current && !form.sports.length) {
       setError("Select at least one sport.");
       return;
     }
@@ -1013,14 +1053,16 @@ export default function OfficialsDirectory({
 
     let officialId = editingId;
     if (officialId) {
-      const result = await supabase
-        .from("officials")
-        .update(payload)
-        .eq("id", officialId);
-      if (result.error) {
-        setSaving(false);
-        setError(result.error.message);
-        return;
+      if (sharedAccessRef.current) {
+        const result = await supabase
+          .from("officials")
+          .update(payload)
+          .eq("id", officialId);
+        if (result.error) {
+          setSaving(false);
+          setError(result.error.message);
+          return;
+        }
       }
     } else if (organizationId && payload.email) {
       const result = await supabase.rpc("add_organization_official_by_email", {
@@ -1082,7 +1124,7 @@ export default function OfficialsDirectory({
         p_ar1_rank: ar1_rank,
         p_ar2_rank: ar2_rank,
         p_fourth_rank: fourth_rank,
-        p_mentor_certified: form.mentor_certified,
+        p_mentor_certified: sharedAccessRef.current ? form.mentor_certified : null,
       });
       if (rankResult.error) {
         setSaving(false);
@@ -1090,15 +1132,17 @@ export default function OfficialsDirectory({
         return;
       }
 
-      if (organizationId) {
+      // Only send leagues this manager can change. The RPC preserves all
+      // other leagues and treats null level arrays as "leave unchanged".
+      if (organizationId && (sharedAccessRef.current || leagues.some((league) => canEditLeagueEligibility(league.id)))) {
         const eligibilityResult = await supabase.rpc(
           "set_organization_official_position_eligibility",
           {
             p_organization_id: organizationId,
             p_official_id: officialId,
-            p_league_ids: form.league_ids,
-            p_center_level_ids: form.center_level_ids,
-            p_ar_level_ids: form.ar_level_ids,
+            p_league_ids: form.league_ids.filter(canEditLeagueEligibility),
+            p_center_level_ids: sharedAccessRef.current ? form.center_level_ids : null,
+            p_ar_level_ids: sharedAccessRef.current ? form.ar_level_ids : null,
           },
         );
         if (eligibilityResult.error) {
@@ -1106,7 +1150,7 @@ export default function OfficialsDirectory({
           setError(eligibilityResult.error.message);
           return;
         }
-      } else {
+      } else if (sharedAccessRef.current) {
       const [leagueDelete, levelDelete] = await Promise.all([
         leagues.length
           ? supabase
@@ -1167,7 +1211,11 @@ export default function OfficialsDirectory({
       }
     }
 
-    setRankMessage("Official profile and eligibility settings saved.");
+    setRankMessage(sharedAccessRef.current
+      ? "Official profile and eligibility settings saved."
+      : editableLeagues.length > 0
+        ? "Your rankings and league eligibility settings were saved."
+        : "Your rankings were saved.");
     setSaving(false);
     setShowForm(false);
     setEditingId(null);
@@ -1176,6 +1224,7 @@ export default function OfficialsDirectory({
   }
 
   async function toggleActive(o: Official) {
+    if (!requireSharedOfficialAccess()) return;
     const request = organizationId
       ? supabase
           .from("organization_officials")
@@ -1324,7 +1373,7 @@ export default function OfficialsDirectory({
   }
 
   const allLeaguesSelected =
-    leagues.length > 0 && leagues.every((x) => form.league_ids.includes(x.id));
+    editableLeagues.length > 0 && editableLeagues.every((x) => form.league_ids.includes(x.id));
   const allCenterLevelsSelected = levels.length > 0 && levels.every((x) => form.center_level_ids.includes(x.id));
   const allArLevelsSelected = levels.length > 0 && levels.every((x) => form.ar_level_ids.includes(x.id));
 
@@ -1352,7 +1401,9 @@ export default function OfficialsDirectory({
         <div className="actionbar">
           <div>
             <h2>Officials</h2>
-            <p>Add individually or manage the entire roster with CSV.</p>
+            <p>{canEditSharedRecords
+              ? "Add individually or manage the entire roster with CSV."
+              : "Manage your rankings and eligibility in your assigned leagues."}</p>
           </div>
           <div className="headerActions">
             <button
@@ -1367,7 +1418,7 @@ export default function OfficialsDirectory({
                 ? "Back to Official Directory"
                 : "Communications"}
             </button>
-            <button
+            {canEditSharedRecords && <button
               className="secondary"
               onClick={() => {
                 setShowRoster(!showRoster);
@@ -1376,11 +1427,12 @@ export default function OfficialsDirectory({
               }}
             >
               {showRoster ? "Close Roster Manager" : "Roster Import / Export"}
-            </button>
+            </button>}
           </div>
         </div>
       )}
-      {organizationId && (
+      {canManage && !canEditSharedRecords && <p>{SHARED_OFFICIAL_OWNER_NOTE}</p>}
+      {organizationId && canEditSharedRecords && (
         <section className="card directoryConnectCard">
           <SharedDirectorySearch
             organizationId={organizationId}
@@ -1622,7 +1674,7 @@ export default function OfficialsDirectory({
           )}
         </section>
       )}
-      {showRoster && <OfficialsRosterManager organizationId={organizationId} />}
+      {showRoster && canEditSharedRecords && <OfficialsRosterManager organizationId={organizationId} />}
       {textNotice && <div className="loginMessage">{textNotice}</div>}
       {showTextComposer && (
         <div
@@ -1720,12 +1772,12 @@ export default function OfficialsDirectory({
                   </button>
                 </>
               )}
-              <button
+              {canEditSharedRecords && <button
                 className="primary"
                 onClick={showForm ? () => setShowForm(false) : startAdd}
               >
                 {showForm ? "Cancel" : "+ Add Official"}
-              </button>
+              </button>}
             </div>
           </div>
           <div className="toolbar">
@@ -1744,7 +1796,7 @@ export default function OfficialsDirectory({
               ))}
             </select>
           </div>
-          {showForm &&
+          {showForm && (editingId || canEditSharedRecords) &&
             placeOfficialEditor(
               <>
                 <form
@@ -1756,6 +1808,12 @@ export default function OfficialsDirectory({
               }
               onSubmit={saveOfficial}
             >
+              <fieldset
+                className="officialForm"
+                disabled={!canEditSharedRecords || saving}
+                style={{ gridColumn: "1 / -1", margin: 0, padding: 0, border: 0 }}
+              >
+              <legend>Shared official profile</legend>
               <label>
                 First name
                 <input
@@ -2167,6 +2225,7 @@ export default function OfficialsDirectory({
                   ))}
                 </div>
               </fieldset>
+              </fieldset>
               {canManage && (
                 <>
                   <p style={{ gridColumn: "1 / -1" }}>
@@ -2185,7 +2244,7 @@ export default function OfficialsDirectory({
                       type="checkbox"
                       style={{ width: "auto" }}
                       checked={form.mentor_certified}
-                      disabled={saving}
+                      disabled={!canEditSharedRecords || saving}
                       onChange={(event) => {
                         setRankMessage("");
                         setForm((current) => ({
@@ -2204,18 +2263,22 @@ export default function OfficialsDirectory({
                         disabled={saving}
                         onClick={() => void saveOnlyMyRankings()}
                       >
-                        {saving ? "Saving…" : "Save Rankings & Certification"}
+                        {saving ? "Saving…" : canEditSharedRecords ? "Save Rankings & Certification" : "Save My Rankings"}
                       </button>
                       {rankMessage && <p role="status">{rankMessage}</p>}
                     </div>
                   )}
                   <fieldset>
                     <legend>Eligible Leagues</legend>
+                    {!canEditSharedRecords && leagues.some((league) => !canEditLeagueEligibility(league.id)) && (
+                      <p>All-location access is required to change a league’s eligibility.</p>
+                    )}
                     <div className="sportChecks">
                       <label>
                         <input
                           type="checkbox"
                           checked={allLeaguesSelected}
+                          disabled={saving || editableLeagues.length === 0}
                           onChange={() =>
                             toggleAllChoices("league_ids", leagues)
                           }
@@ -2231,6 +2294,7 @@ export default function OfficialsDirectory({
                           <input
                             type="checkbox"
                             checked={form.league_ids.includes(x.id)}
+                            disabled={saving || !canEditLeagueEligibility(x.id)}
                             onChange={() => toggleChoice("league_ids", x.id)}
                           />
                           {x.name}
@@ -2238,7 +2302,7 @@ export default function OfficialsDirectory({
                       ))}
                     </div>
                   </fieldset>
-                  <fieldset>
+                  <fieldset disabled={!canEditSharedRecords || saving}>
                     <legend>Eligible Levels by Position</legend>
                     <div className="sportChecks">
                       <label>
@@ -2277,12 +2341,14 @@ export default function OfficialsDirectory({
                 >
                   Cancel
                 </button>
-                <button className="primary" disabled={saving}>
+                <button className="primary" disabled={saving || !canManage}>
                   {saving
                     ? "Saving…"
-                    : editingId
-                      ? "Save Changes"
-                      : "Save Official"}
+                    : !canEditSharedRecords
+                      ? editableLeagues.length > 0 ? "Save Rankings & League Eligibility" : "Save My Rankings"
+                      : editingId
+                        ? "Save Changes"
+                        : "Save Official"}
                 </button>
               </div>
                 </form>
@@ -2290,7 +2356,7 @@ export default function OfficialsDirectory({
                   <TeamOfficialLinks key={`${organizationId}:${editingId}`} organizationId={organizationId} officialId={editingId} />
                 )}
                 {editingId && (
-                  <OfficialCcContact key={editingId} officialId={editingId} />
+                  <OfficialCcContact key={editingId} officialId={editingId} readOnly={!canEditSharedRecords} />
                 )}
               </>,
             )}
@@ -2426,7 +2492,7 @@ export default function OfficialsDirectory({
                           </span>
                         </td>
                         <td>
-                          {organizationId && o.email && (
+                          {canEditSharedRecords && organizationId && o.email && (
                             <button
                               className="tableButton"
                               disabled={sendingInvitationEmail === o.email}
@@ -2443,12 +2509,12 @@ export default function OfficialsDirectory({
                                   : "Send invitation"}
                             </button>
                           )}{" "}
-                          <button
+                          {canManage && <button
                             className="tableButton"
                             onClick={() => void startEdit(o)}
                           >
-                            Edit
-                          </button>{" "}
+                            {canEditSharedRecords ? "Edit" : "Rankings & Eligibility"}
+                          </button>}{" "}
                           <button
                             type="button"
                             className="tableButton"
@@ -2457,12 +2523,12 @@ export default function OfficialsDirectory({
                           >
                             Schedule
                           </button>{" "}
-                          <button
+                          {canEditSharedRecords && <button
                             className="tableButton"
                             onClick={() => void toggleActive(o)}
                           >
                             {o.active ? "Deactivate" : "Activate"}
-                          </button>
+                          </button>}
                         </td>
                       </tr>
                       <tr

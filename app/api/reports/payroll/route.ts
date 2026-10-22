@@ -1,12 +1,12 @@
+import { scopeReportLeagues } from "../reportScope";
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "../../../../lib/supabase/admin";
 import { requireManagedOrganization } from "../../../../lib/server/organizationScope";
 import { readAllPages } from "../../../../lib/supabase/readAll";
 
 export async function GET(request: NextRequest) {
   const scope = await requireManagedOrganization(request);
   if (scope.error) return scope.error;
-  const { session: supabase, service, organizationId } = scope;
+  const { session: supabase, service, organizationId, leagueIds } = scope;
   let subscriptionQuery = service
     .from("refassign_subscriptions")
     .select("reporting_access")
@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
 
   // The signed-in client preserves organization and league RLS filtering.
   const { data, error } = await readAllPages<Record<string, any>>((from, to) =>
-    supabase
+    scopeReportLeagues(supabase
       .from("assignments")
       .select(
         "id,position_id,status,game_fee,mileage_miles,mileage_rate,payment_status,paid_at,officials(id,first_name,last_name),sport_positions(name),games!inner(id,organization_id,game_number,starts_at,leagues(id,name),levels(name),location:locations(name),home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name))",
@@ -36,14 +36,14 @@ export async function GET(request: NextRequest) {
       .in("status", ["accepted", "confirmed"])
       .order("assigned_at", { ascending: false })
       .order("id")
-      .range(from, to),
+      .range(from, to), scope, "games.league_id"),
   );
   if (error)
     return NextResponse.json({ error: error.message }, { status: 400 });
   const gameIds = [...new Set((data || []).map((row) => row.games?.id).filter(Boolean))] as string[];
   // Include empty game positions for games the signed-in user may view.
   const visibleGames = await readAllPages<{ id: string }>((from, to) =>
-    supabase.from("games").select("id").eq("organization_id", organizationId).order("id").range(from, to),
+    scopeReportLeagues(supabase.from("games").select("id").eq("organization_id", organizationId).order("id").range(from, to), scope, "league_id"),
   );
   if (visibleGames.error) return NextResponse.json({ error: visibleGames.error.message }, { status: 400 });
   const allowedIds = [...new Set([...gameIds, ...(visibleGames.data || []).map((game) => game.id)])];

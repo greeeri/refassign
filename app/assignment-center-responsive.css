@@ -5,14 +5,104 @@
   min-width: 0;
   max-width: 100%;
 }
+/* Reuse the existing toolbar colors, typography and controls; only regroup them. */
 .assignmentFilterPanel.assignmentCompactToolbar {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px !important;
 }
-.assignmentCompactToolbar > small { grid-column: 1 / -1; }
+.assignmentPrimaryFilters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.4fr);
+  align-items: start;
+  gap: 12px;
+  min-width: 0;
+}
+.assignmentCalendarGroup,
+.assignmentSecondaryFilters,
+.assignmentSecondaryFields,
+.assignmentSavedViewControls { min-width: 0; }
+.assignmentCalendarControls,
+.assignmentSavedViewControls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+.assignmentCalendarControls > .assignmentToolbarButton,
+.assignmentSavedViewControls > .assignmentToolbarButton { width: auto; }
+.assignmentCalendarGroup .assignmentCustomDateRow { margin-top: 12px; }
+.assignmentDateScopeNote { display: block; margin-top: 8px; color: #52667a; }
+.assignmentSecondaryFilters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid #dbe4ee;
+}
+.assignmentSecondaryFields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  flex: 3 1 460px;
+  gap: 12px;
+  align-items: start;
+}
+.assignmentSecondaryFilters > .assignmentMoreFiltersDesktop { margin-top: 25px; }
+.assignmentSecondaryFilters > .assignmentMoreFiltersMobile { display: none; }
+.assignmentSavedViewControls { flex: 2 1 310px; }
 .assignmentCompactToolbar .assignmentDirectFilters {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  margin-top: 0 !important;
 }
-.assignmentCompactToolbar > .assignmentMoreFilters { min-width: 0; }
+.assignmentCompactToolbar select,
+.assignmentCompactToolbar input[type="date"],
+.assignmentCompactToolbar button,
+.assignmentCompactToolbar summary { min-height: 44px; }
+.assignmentCompactToolbar .assignmentToolbarButton { height: auto; white-space: normal; }
+.assignmentCompactToolbar select { text-overflow: ellipsis; }
+.assignmentCompactToolbar button:focus-visible,
+.assignmentCompactToolbar select:focus-visible,
+.assignmentCompactToolbar input:focus-visible,
+.assignmentCompactToolbar summary:focus-visible { outline: 2px solid #16416a; outline-offset: 3px; }
+.assignmentCompactToolbar .assignmentMultiFilterOptions label,
+.assignmentCompactToolbar .assignmentStatusFilterOptions label,
+.assignmentCompactToolbar .assignmentCheckboxFilter { min-height: 44px; }
+.assignmentActiveFilters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.assignmentActiveFilters > span { color: #52667a; font-size: 13px; }
+.assignmentActiveFilters .assignmentFilterChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-size: 14px;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.assignmentFilterChip > span:first-child { min-width: 0; }
+.assignmentFilterChip > span:last-child { flex: none; font-size: 18px; }
+.assignmentActiveFilters .assignmentClearFilters { border-color: transparent; background: transparent; }
+.assignmentResultsNotice { margin: 14px 0 6px; font-size: 13px; }
+@media (max-width: 1200px) {
+  .assignmentPrimaryFilters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .assignmentCalendarGroup { grid-column: 1 / -1; }
+}
+@media (max-width: 600px) {
+  .assignmentPrimaryFilters { grid-template-columns: minmax(0, 1fr); }
+  .assignmentSecondaryFields { grid-template-columns: minmax(0, 1fr); flex-basis: 100%; }
+  .assignmentSavedViewControls { flex-basis: 100%; }
+  .assignmentSecondaryFilters > .assignmentMoreFiltersMobile { display: inline-flex; width: 100%; margin-top: 0; }
+  .assignmentSecondaryFilters > .assignmentMoreFiltersDesktop { display: none; }
+  .hasAdvancedFilters:not(.filtersExpanded) .assignmentSecondaryFields,
+  .hasAdvancedFilters:not(.filtersExpanded) .assignmentSavedViewControls { display: none; }
+}
+@media (max-width: 360px) {
+  .assignmentCalendarControls,
+  .assignmentSavedViewControls { grid-template-columns: minmax(0, 1fr); }
+}
 .assignmentCompactHead,
 .assignmentCompactActionStrip,
 .assignmentCustomDateRow,

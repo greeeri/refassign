@@ -1,10 +1,12 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../lib/supabase/client";
 
 type Contact = { date_of_birth: string; name: string; email: string; phone: string };
 const blank: Contact = { date_of_birth: "", name: "", email: "", phone: "" };
-export default function OfficialCcContact({ officialId }: { officialId: string }) {
+export default function OfficialCcContact({ officialId, readOnly = false }: { officialId: string; readOnly?: boolean }) {
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
   const supabase = useMemo(() => createClient(), []);
   const [contact, setContact] = useState<Contact>(blank);
   const [loading, setLoading] = useState(true), [saving, setSaving] = useState(false);
@@ -31,6 +33,7 @@ export default function OfficialCcContact({ officialId }: { officialId: string }
   const required = !!contact.date_of_birth && contact.date_of_birth > cutoffDate;
   const update = (key: keyof Contact, value: string) => setContact(old => ({ ...old, [key]: value }));
   async function save() {
+    if (readOnlyRef.current) return;
     setSaving(true); setError(""); setNotice("");
     const digits = contact.phone.replace(/\D/g, "");
     const phone = !digits ? null : contact.phone.trim().startsWith("+") ? `+${digits}` : digits.length === 10 ? `+1${digits}` : digits.length === 11 && digits.startsWith("1") ? `+${digits}` : contact.phone.trim();
@@ -42,14 +45,15 @@ export default function OfficialCcContact({ officialId }: { officialId: string }
     <h3>Additional contact (CC){required ? " — Required" : " — Optional"}</h3>
     <p>Receives a copy through the same email or text channel as the referee. Add both an email and mobile number to receive either. This contact applies across the referee’s organizations.</p>
     <p>A contact name and email or mobile number are required for referees under 13. Secure login and assignment-response links stay with the referee.</p>
-    {loading ? <p>Loading CC contact…</p> : <div className="officialForm">
+    {readOnly && <p>Only organization owners can edit shared official records.</p>}
+    {loading ? <p>Loading CC contact…</p> : <fieldset disabled={readOnly || saving} className="officialForm" style={{ margin: 0, padding: 0, border: 0 }}>
       <label>Referee date of birth<input type="date" value={contact.date_of_birth} onChange={e => update("date_of_birth", e.target.value)} /></label>
       <label>Contact name<input value={contact.name} aria-required={required} onChange={e => update("name", e.target.value)} /></label>
       <label>Contact email<input type="email" value={contact.email} onChange={e => update("email", e.target.value)} /></label>
       <label>Contact mobile number<input type="tel" placeholder="(515) 555-0123" value={contact.phone} onChange={e => update("phone", e.target.value)} /></label>
-      <div className="formActions"><button type="button" className="primary" disabled={saving} onClick={() => void save()}>{saving ? "Saving…" : "Save CC Contact"}</button></div>
+      {!readOnly && <div className="formActions"><button type="button" className="primary" disabled={saving} onClick={() => void save()}>{saving ? "Saving…" : "Save CC Contact"}</button></div>}
       <small>For referees 13 and older, clear the contact name, email, and phone and save to stop copies.</small>
-    </div>}
+    </fieldset>}
     {error && <p role="alert" className="errorBox">{error}</p>}
     {notice && <p role="status" className="successBox">{notice}</p>}
     {failure && <p role="status" className="errorBox">Last CC delivery: {failure}</p>}

@@ -1,3 +1,4 @@
+import { isCurrentReportOwner } from "../../reports/reportScope";
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "../../../../lib/supabase/admin";
 
@@ -15,12 +16,12 @@ export async function GET(request: NextRequest) {
   let sent = 0; const failures: string[] = [];
   for (const view of views || []) {
     try {
-      const [{ data: membership }, { data: subscription }, { data: organization }] = await Promise.all([
-        service.from("organization_memberships").select("role").eq("organization_id", view.organization_id).eq("user_id", view.user_id).in("role", ["owner", "admin", "assignor"]).limit(1).maybeSingle(),
+      const [canSend, { data: subscription }, { data: organization }] = await Promise.all([
+        isCurrentReportOwner(service, view.user_id, view.organization_id),
         service.from("refassign_subscriptions").select("reporting_access").eq("organization_id", view.organization_id).in("status", ["active", "trialing", "pending"]).order("created_at", { ascending: false }).limit(1).maybeSingle(),
         service.from("organizations").select("name").eq("id", view.organization_id).single(),
       ]);
-      if (!membership || subscription?.reporting_access === "standard") { await service.from("report_saved_views").update({ schedule_enabled: false, next_send_at: null, updated_at: now }).eq("id", view.id); throw new Error(`${view.name}: delivery disabled because Premium manager access ended`); }
+      if (!canSend || subscription?.reporting_access === "standard") { await service.from("report_saved_views").update({ schedule_enabled: false, next_send_at: null, updated_at: now }).eq("id", view.id); throw new Error(`${view.name}: delivery disabled because Premium organization owner access ended`); }
       const filterRows = Object.entries((view.filters || {}) as Record<string, unknown>).map(([key, value]) => `<tr><td style="padding:8px;border-bottom:1px solid #e2e8f0">${esc(key.replaceAll("_", " "))}</td><td style="padding:8px;border-bottom:1px solid #e2e8f0"><b>${esc(value || "All")}</b></td></tr>`).join("");
       const url = `${request.nextUrl.origin}/workspace?section=reports&report=${encodeURIComponent(view.report_key)}&savedView=${encodeURIComponent(view.id)}`;
       const html = `<div style="font-family:Arial,sans-serif;background:#f5f7fb;padding:28px"><div style="max-width:680px;margin:auto;background:#fff;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden"><div style="background:#14233b;color:#fff;padding:24px 28px"><h2 style="margin:0">${esc(view.name)}</h2><p>${esc(organization?.name || "Ref Pro Group")} • ${esc(labels[view.report_key] || view.report_key)}</p></div><div style="padding:28px"><p>Your scheduled saved report view is ready.</p><table style="width:100%;border-collapse:collapse">${filterRows}</table><p style="margin-top:24px"><a href="${esc(url)}" style="background:#2563eb;color:#fff;text-decoration:none;padding:11px 17px;border-radius:8px;font-weight:700">Open saved report</a></p><p style="margin-top:28px;color:#64748b;font-size:12px">© 2026 Ref Pro Group LLC</p></div></div></div>`;

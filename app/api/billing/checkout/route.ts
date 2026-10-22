@@ -1,3 +1,4 @@
+import {isCurrentOrganizationOwner} from "../../../../lib/server/organizationScope";
 import {NextRequest,NextResponse} from "next/server";
 import {createServerSupabaseClient} from "../../../../lib/supabase/server";
 import {createServiceClient} from "../../../../lib/supabase/admin";
@@ -45,8 +46,9 @@ export async function POST(request:NextRequest){
  const textingAddon=Boolean(body.texting_addon);
  let pendingId=String(body.prepared_subscription_id||"").trim();
  if(pendingId){
-  const{data:owned}=await service.from("refassign_subscriptions").select("id").eq("id",pendingId).eq("user_id",user.id).maybeSingle();
+  const{data:owned}=await service.from("refassign_subscriptions").select("id,organization_id").eq("id",pendingId).eq("user_id",user.id).maybeSingle();
   if(!owned)return NextResponse.json({error:"The saved organization billing record could not be found."},{status:404});
+  if(!owned.organization_id||!await isCurrentOrganizationOwner(service,owned.organization_id,user.id))return NextResponse.json({error:"Only organization owners can manage billing."},{status:403});
  }else{
   const{data,error}=await service.rpc("create_pending_organization_subscription",{p_user_id:user.id,p_organization_name:organizationName,p_plan:plan,p_official_limit:price.limit,p_stripe_price_id:price.id,p_founding_offer:price.founding});
   if(error||!data)return NextResponse.json({error:error?.message||"Could not prepare subscription."},{status:500});
