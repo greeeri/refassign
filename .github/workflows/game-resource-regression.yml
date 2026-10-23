@@ -32,6 +32,8 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run test:data-access
       - run: npm run test:game-resources
         env:
           REFASSIGN_TEST_POSTGRES_URL: postgres://postgres:fixture-only@127.0.0.1:5432/postgres

@@ -114,6 +114,8 @@
 .assignmentCompactHead > div,
 .assignmentSelectionSummary { min-width: 0; overflow-wrap: anywhere; }
 .assignmentCompactActionStrip { overflow: visible; white-space: normal; row-gap: 10px; }
+.assignmentResultsActions { min-width: 0; max-width: 100%; }
+.assignmentResultsActions > button { min-height: 44px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .assignmentSelectionBar > button { max-width: 100%; white-space: normal; }
 .assignmentSelectionBar .assignmentSelectionSummary { flex: 1 1 100%; }
 
@@ -200,9 +202,9 @@
   .assignmentStatusCell { grid-row: 6; grid-template-columns: minmax(0, 1fr); }
 }
 
-/* A narrow editor becomes labelled rows, rather than compressing five columns
-   and clipping their position, status, or assignment controls. */
-@container assignment-positions (max-width: 780px) {
+/* Only mobile-width viewports use labelled position rows. A desktop editor can
+   be narrow beside Officials; keep its compact table and contained scroll. */
+@media (max-width: 760px) {
   .assignmentMain .assignmentPositionsTable { min-width: 0 !important; }
   .assignmentMain .assignmentPositionsTable,
   .assignmentPositionsTable tbody,

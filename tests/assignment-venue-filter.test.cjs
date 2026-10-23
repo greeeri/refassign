@@ -16,7 +16,7 @@ function loadModule(path) {
 }
 const copy = value => JSON.parse(JSON.stringify(value));
 const venue = loadModule('lib/assignments/venueFilter.ts');
-const paging = loadModule('lib/supabase/readAll.ts');
+const paging = { ...loadModule('lib/supabase/readAll.ts'), ...loadModule('lib/assignments/boundedGamePage.ts') };
 const scope = loadModule('components/leagueGameScope.ts');
 const { fieldComplexRpcMissing } = loadModule('lib/field-complex-support.ts');
 const source = fs.readFileSync('components/AssignmentsManagerV2.tsx', 'utf8');
@@ -35,7 +35,7 @@ const functionNode = name => findNode(node => ts.isFunctionDeclaration(node) && 
 const functionSource = name => functionNode(name).getText(ast);
 const declares = (statement, name) => ts.isVariableStatement(statement) && statement.declarationList.declarations.some(declaration => declaration.name.getText(ast) === name);
 // Execute the actual production load setup and query. Do not copy the query into the test.
-const loadStatements = functionNode('load').body.statements;
+const loadStatements = functionNode('loadPage').body.statements;
 const gamePromiseIndex = loadStatements.findIndex(statement => declares(statement, 'gamePromise'));
 assert(gamePromiseIndex >= 0, 'Production load must define its game query');
 const loadQuerySource = `async function runLoadQuery() {\n${loadStatements.slice(0, gamePromiseIndex + 1).map(statement => statement.getText(ast)).join('\n')}\nreturn await gamePromise;\n}`;
@@ -62,13 +62,13 @@ function setup(options = {}) {
   const state = {
     ...paging, ...venue, ...scope, fieldComplexRpcMissing,
     organizationId: 'selected-org', accessibleLeagueIds: ['allowed-league'], fullLeagueAccess: false,
-    range: 'all', locationFilter: [], dayFilter: [], timeFilter: [], officialFilter: '', leagueFilter: '', levelFilter: '',
+    range: 'all', customDate: '', locationFilter: [], dayFilter: [], timeFilter: [], officialFilter: '', leagueFilter: '', levelFilter: '',
     unpublishedOnly: false, selfAssignOnly: false, replacementOnly: false, completenessFilter: [], focusGameId: undefined,
-    loadVersion: { current: 0 }, candidateCache: { current: null }, allowedGameAccess: [], canManage: true, allowedLeagueIds: null, error: '', games: ['old-game'], initialGamesReady: false,
+    gamePaging: { current: { key: '', offsets: [], previous: [], next: null, asOf: '2026-10-23T00:00:00Z' } }, loadVersion: { current: 0 }, candidateCache: { current: null }, allowedGameAccess: [], canManage: true, allowedLeagueIds: null, error: '', games: ['old-game'], initialGamesReady: false,
     performance: { now: () => 0 }, document: { documentElement: { clientWidth: 1440 } }, console: { info() {} },
     ...options.state,
   };
-  for (const name of ['Error', 'CanManage', 'AllowedLeagueIds', 'AllowedGameAccess', 'VenueDirectory', 'Games', 'InitialGamesReady', 'Officials', 'Assignments', 'Blocks', 'Ranks', 'PositionRanks', 'Powers', 'TeamSuggestions', 'LeagueElig', 'LevelElig', 'CandidateScheduleConflicts', 'LinkGroups', 'LinkMembers', 'AssignmentTemplates', 'SelfAssignSlots', 'MentorSlots']) {
+  for (const name of ['GamePageNumber', 'GamePageHasMore', 'LinkSelected', 'SelfAssignSelected', 'ExpandedGameIds', 'Error', 'CanManage', 'AllowedLeagueIds', 'AllowedGameAccess', 'VenueDirectory', 'Games', 'InitialGamesReady', 'Officials', 'CandidateOfficialIds', 'Assignments', 'Blocks', 'Ranks', 'PositionRanks', 'Powers', 'TeamSuggestions', 'LeagueElig', 'LevelElig', 'CandidateScheduleConflicts', 'LinkGroups', 'LinkMembers', 'AssignmentTemplates', 'SelfAssignSlots', 'MentorSlots']) {
     state[`set${name}`] = value => { state[name[0].toLowerCase() + name.slice(1)] = copy(value); };
   }
   const tables = {
@@ -261,7 +261,7 @@ test('initial view stays capped at 50, but selecting a complex searches past tha
   const shared = { games, complexes: [{ location_id: 'member', field_complex: 'North' }] };
   const initial = setup(shared);
   assert.equal((await initial.run()).data.length, 50);
-  assert.deepEqual(operation(initial.gameReads()[0], 'range'), ['range', 0, 49]);
+  assert.deepEqual(operation(initial.gameReads()[0], 'range'), ['range', 0, 50]);
   assert(operation(initial.gameReads()[0], 'gte', 'starts_at'));
   const filtered = setup({ ...shared, state: { locationFilter: [token('North')] } });
   const result = await filtered.run();
@@ -269,7 +269,7 @@ test('initial view stays capped at 50, but selecting a complex searches past tha
   assert(resultIds(result).includes('game-00100'));
   assert(result.data.every(row => row.location_id === 'member'));
   assert.equal(operation(filtered.gameReads()[0], 'gte', 'starts_at'), undefined);
-  assert.deepEqual(operation(filtered.gameReads()[0], 'range'), ['range', 0, 999]);
+  assert.deepEqual(operation(filtered.gameReads()[0], 'range'), ['range', 0, 50]);
 });
 
 test('production complex filters apply before every game page and keep organization, league and archive scope', async () => {
@@ -277,9 +277,10 @@ test('production complex filters apply before every game page and keep organizat
   games.push(game(2000, 'member', { organization_id: 'foreign-org' }), game(2001, 'member', { league_id: 'blocked-league' }), game(2002, 'member', { archived_at: '2026-01-01' }), game(2003, 'same-venue-not-member'));
   const s = setup({ games, complexes: [{ location_id: 'member', field_complex: 'North' }], state: { locationFilter: [token('North')] } });
   const result = await s.run();
-  assert.equal(result.data.length, 1005);
-  assert.equal(new Set(resultIds(result)).size, 1005);
-  assert.deepEqual(s.gameReads().map(call => operation(call, 'range').slice(1)), [[0, 999], [1000, 1999]]);
+  assert.equal(result.data.length, 50);
+  assert.equal(new Set(resultIds(result)).size, 50);
+  assert.equal(result.hasMore, true);
+  assert.deepEqual(s.gameReads().map(call => operation(call, 'range').slice(1)), [[0, 50]]);
   for (const call of s.gameReads()) {
     assert.deepEqual(operation(call, 'in', 'location_id'), ['in', 'location_id', ['member']]);
     assert.deepEqual(operation(call, 'eq', 'organization_id'), ['eq', 'organization_id', 'selected-org']);
@@ -298,8 +299,9 @@ test('large complexes chunk more than 200 field IDs and overlapping selections n
   const games = complexes.map((row, index) => game(index, row.location_id));
   const s = setup({ complexes, games, state: { locationFilter: [token('North'), id(0), token('South'), id(204), token('North')] } });
   const result = await s.run();
-  assert.equal(result.data.length, 205);
-  assert.equal(new Set(resultIds(result)).size, 205);
+  assert.equal(result.data.length, 50);
+  assert.equal(new Set(resultIds(result)).size, 50);
+  assert.equal(result.hasMore, true);
   const requestedIds = s.gameReads().flatMap(call => operation(call, 'in', 'location_id')[2]);
   assert.equal(requestedIds.length, 205);
   assert.equal(new Set(requestedIds).size, 205);
@@ -533,4 +535,145 @@ test('assignments recheck per-league location grants before pagination and disca
     assert(operation(call, 'or'));
     assert(call.operations.findIndex(([method]) => method === 'or') < call.operations.findIndex(([method]) => method === 'range'));
   }
+});
+
+test('every explicit filter keeps a bounded 50-game page and preserves past-game inclusion', async () => {
+  const games = Array.from({ length: 180 }, (_, index) => game(index, 'member', { starts_at: '2000-01-01T00:00:00Z' }));
+  for (const filter of [ { leagueFilter: 'allowed-league' }, { levelFilter: 'u16' }, { officialFilter: 'ref' }, { range: 'custom', customDate: '2000-01-01' }, { dayFilter: ['2000-01-01'] }, { timeFilter: ['18:00'] }, { unpublishedOnly: true }, { selfAssignOnly: true }, { replacementOnly: true }, { completenessFilter: ['partial'] } ]) {
+    const s = setup({ games, state: filter });
+    const first = await s.run();
+    assert.equal(first.data.length, 50, JSON.stringify(filter));
+    assert.equal(first.hasMore, true);
+    assert.deepEqual(resultIds(first), games.slice(0, 50).map(row => row.id));
+    assert.equal(s.gameReads().length, 1, 'one bounded query, never readAllPages');
+    assert.deepEqual(operation(s.gameReads()[0], 'range'), ['range', 0, 50]);
+    assert.equal(operation(s.gameReads()[0], 'gte', 'starts_at'), undefined, 'no new blanket future-only rule');
+  }
+});
+
+test('production query traverses bounded pages without dropping or duplicating games and resets on filter or scope changes', async () => {
+  const games = Array.from({ length: 123 }, (_, index) => game(index, 'member'));
+  const s = setup({ games, state: { leagueFilter: 'allowed-league' } });
+  const all = [];
+  let result;
+  do {
+    const before = s.gameReads().length;
+    result = await s.run();
+    all.push(...resultIds(result));
+    assert(result.data.length <= 50);
+    assert.equal(s.gameReads().length - before, 1);
+    if (result.nextOffsets) s.state.gamePaging.current.offsets = result.nextOffsets;
+  } while (result.hasMore);
+  assert.deepEqual(all, games.map(row => row.id));
+  assert.equal(new Set(all).size, 123);
+  s.state.levelFilter = 'u16';
+  assert.deepEqual(resultIds(await s.run()), games.slice(0, 50).map(row => row.id));
+  assert.deepEqual(copy(s.state.gamePaging.current.offsets), []);
+});
+
+test('multi-chunk production venue queries merge globally before the 50-game bound', async () => {
+  const complexes = Array.from({ length: 205 }, (_, index) => ({ location_id: id(index), field_complex: 'North' }));
+  const games = Array.from({ length: 180 }, (_, index) => game(index, index % 2 ? id(204) : id(0)));
+  const s = setup({ games, complexes, state: { locationFilter: [token('North')] } });
+  const first = await s.run();
+  assert.deepEqual(resultIds(first), games.slice(0, 50).map(row => row.id));
+  s.state.gamePaging.current.offsets = first.nextOffsets;
+  const second = await s.run();
+  assert.deepEqual(resultIds(second), games.slice(50, 100).map(row => row.id));
+  assert(s.gameReads().every(call => operation(call, 'range')[2] - operation(call, 'range')[1] <= 50));
+});
+
+test('production page navigation clears off-page selections and repeated clicks are locked during load', async () => {
+  const code = functionSource('changeGamePage');
+  const state = { gamePaging: { current: { offsets: [], previous: [], next: [50] } }, gamePageLoadingRef: { current: false }, gamePageActionBusy: false };
+  for (const name of ['bulkWorking', 'linking', 'saving', 'publishing', 'confirming', 'bulkCrewWorking', 'crewTemplateWorking', 'replacementPublishing', 'calendarReviewSaving', 'fieldMoveSaving']) state[name] = false;
+  for (const name of new Set(code.match(/\bset[A-Z]\w+/g))) state[name] = value => { state[name.slice(3)] = value; };
+  let loads = 0;
+  state.load = () => { loads++; state.gamePageLoadingRef.current = true; };
+  vm.runInNewContext(compile(code), state);
+  state.changeGamePage(1);
+  assert.deepEqual(copy(state.gamePaging.current.offsets), [50]);
+  assert.deepEqual(copy(state.LinkSelected), []);
+  assert.deepEqual(copy(state.SelfAssignSelected), []);
+  assert.deepEqual(copy(state.Games), []);
+  assert.equal(state.Selected, '');
+  assert.equal(state.GamePageNumber, 2);
+  assert.equal(state.QuickEdit, null);
+  assert.equal(state.PendingGameStatus, null);
+  assert.equal(state.ShowBroadcastReview, false);
+  state.changeGamePage(1);
+  assert.equal(loads, 1);
+  state.gamePageLoadingRef.current = false;
+  state.changeGamePage(-1);
+  assert.deepEqual(copy(state.gamePaging.current.offsets), []);
+  assert.equal(loads, 2);
+});
+
+test('linked membership metadata is fetched by full page-discovered group IDs, while whole-group RPC enforcement remains', () => {
+  const body = functionSource('loadPage');
+  assert.match(body, /const completeMembers = await readAllForChunks[\s\S]*?\.in\("group_id", ids\)/);
+  assert.match(body, /setLinkMembers\(completeMembers\.data \|\| \[\]\)/);
+  assert.match(source, /shown of \{linkMembers\.filter/);
+  assert.match(source, /Linked-game assignments still apply to the whole authorized group/);
+  const migration = fs.readFileSync('supabase/migrations/20261022195617_scope_administrators_to_selected_leagues.sql', 'utf8');
+  assert.match(migration, /perform private\.require_linked_game_scope\(p_game_id\)/);
+});
+
+test('unlinking one visible member does not delete an off-page three-member group', async () => {
+  const code = functionSource('unlinkOneGame');
+  const deletes = [];
+  const state = { canManage: true, linking: false, linkMembers: [
+    { group_id: 'group', game_id: 'visible' }, { group_id: 'group', game_id: 'off-page-1' }, { group_id: 'group', game_id: 'off-page-2' },
+  ], load: async () => {}, supabase: { from(table) { const call = { table, filters: [] }; deletes.push(call); const query = { delete() { return query; }, eq(...values) { call.filters.push(values); return query; }, then(resolve) { return Promise.resolve({ error: null }).then(resolve); } }; return query; } } };
+  for (const name of new Set(code.match(/\bset[A-Z]\w+/g))) state[name] = () => {};
+  vm.runInNewContext(compile(code), state);
+  await state.unlinkOneGame('group', 'visible');
+  assert.deepEqual(deletes.map(call => call.table), ['game_link_members']);
+  assert.deepEqual(deletes[0].filters, [['group_id', 'group'], ['game_id', 'visible']]);
+});
+
+test('loading wrapper clears pending state after failure without letting stale requests unlock a newer page', async () => {
+  const code = functionSource('load');
+  const finishes = [];
+  const state = { loadVersion: { current: 0 }, gamePageLoadingRef: { current: false }, gamePageActionBusy: false };
+  for (const name of new Set(code.match(/\bset[A-Z]\w+/g))) state[name] = value => { state[name.slice(3)] = value; };
+  state.loadPage = () => { state.loadVersion.current++; return new Promise((resolve, reject) => finishes.push({ resolve, reject })); };
+  vm.runInNewContext(compile(code), state);
+  const first = state.load(); const second = state.load();
+  finishes[0].resolve(); await first;
+  assert.equal(state.gamePageLoadingRef.current, true);
+  finishes[1].reject(new Error('offline')); await second;
+  assert.equal(state.gamePageLoadingRef.current, false);
+  assert.equal(state.GamePageLoading, false);
+  assert.equal(state.GamePageHasMore, false);
+});
+
+test('split-group move controls use complete membership rather than page-local row index', () => {
+  const code = functionSource('linkedGameNeighbor');
+  const state = { linkMembers: [
+    { group_id: 'group', game_id: 'first', sort_order: 0 },
+    { group_id: 'group', game_id: 'middle-off-page', sort_order: 1 },
+    { group_id: 'group', game_id: 'last', sort_order: 2 },
+  ] };
+  vm.runInNewContext(compile(code), state);
+  assert.equal(state.linkedGameNeighbor('group', 'first', -1), null);
+  assert.equal(state.linkedGameNeighbor('group', 'first', 1), 'middle-off-page');
+  assert.equal(state.linkedGameNeighbor('group', 'last', -1), 'middle-off-page');
+  assert.equal(state.linkedGameNeighbor('group', 'last', 1), null);
+  assert(source.includes('disabled={linking || !linkedGameNeighbor(unit.groupId!, listedGame.id, -1)}'));
+  assert(source.includes('linking || !linkedGameNeighbor(unit.groupId!, listedGame.id, 1)'));
+});
+
+test('sparse first pages preserve Next and never claim that no games match globally', async () => {
+  const games = Array.from({ length: 101 }, (_, index) => game(index, 'member'));
+  const s = setup({ games, state: { officialFilter: 'ref-only-on-later-page' } });
+  const first = await s.run();
+  assert.equal(first.data.length, 50);
+  assert.equal(first.hasMore, true);
+  s.state.gamePaging.current.offsets = first.nextOffsets;
+  const second = await s.run();
+  assert(second.data.some(row => row.id === games[75].id));
+  assert(source.includes('No games on this page match these filters'));
+  assert(source.includes('Use Next 50 games to continue searching. Later pages may have matches.'));
+  assert(!source.includes('"No games match these filters"'));
 });

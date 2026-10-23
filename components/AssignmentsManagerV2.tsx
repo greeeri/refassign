@@ -21,6 +21,8 @@ import {
 import { applyLeagueGameAccess, canAccessLeagueGameLocation, leagueGameAccessKey, type LeagueGameAccess } from "./leagueGameScope";
 import { createClient } from "../lib/supabase/client";
 import { readAllForChunks, readAllPages } from "../lib/supabase/readAll";
+import { readBoundedGamePage } from "../lib/assignments/boundedGamePage";
+import { assignmentCandidateLeagueScope, isLeagueCandidate, loadAssignmentOfficialRoster } from "../lib/assignments/candidateRoster";
 import { announceUndoAvailable } from "./UndoCenter";
 import SelfAssignOverrideRequests from "./SelfAssignOverrideRequests";
 import CalendarSyncPanel from "./CalendarSyncPanel";
@@ -369,11 +371,17 @@ export default function AssignmentsManagerV2({
     if (fullLeagueAccess) announceUndoAvailable(description);
   }
   const handledReportFocus = useRef("");
+  const reviewedLinkedAssignments = useRef(new Set<string>());
   const requestedFocusLoad = useRef("");
   const assignmentFeeImportInput = useRef<HTMLInputElement>(null);
   const handledListReturnRequest = useRef(returnToListRequest);
   const initialFilterLoad = useRef(true);
   const loadVersion = useRef(0);
+  const gamePaging = useRef<{ key: string; offsets: number[]; previous: number[][]; next: number[] | null; asOf: string }>({ key: "", offsets: [], previous: [], next: null, asOf: new Date().toISOString() });
+  const [gamePageNumber, setGamePageNumber] = useState(1);
+  const [gamePageHasMore, setGamePageHasMore] = useState(false);
+  const [gamePageLoading, setGamePageLoading] = useState(false);
+  const gamePageLoadingRef = useRef(false);
   const fullLeagueAccessRef = useRef(fullLeagueAccess);
   fullLeagueAccessRef.current = fullLeagueAccess;
   useEffect(() => {
@@ -388,6 +396,7 @@ export default function AssignmentsManagerV2({
     [allowedLeagueIds, setAllowedLeagueIds] = useState<string[] | null>([]),
     [allowedGameAccess, setAllowedGameAccess] = useState<LeagueGameAccess[]>([]),
     [officials, setOfficials] = useState<Official[]>([]),
+    [candidateOfficialIds, setCandidateOfficialIds] = useState<Set<string>>(new Set()),
     [positions, setPositions] = useState<Position[]>([]),
     [assignments, setAssignments] = useState<Assignment[]>([]),
     [positionPay, setPositionPay] = useState<Record<string, { amount: number; payment_status: string }>>({}),
@@ -523,6 +532,10 @@ export default function AssignmentsManagerV2({
     [bulkPublishResponseBy, setBulkPublishResponseBy] = useState(""),
     [showBroadcastReview, setShowBroadcastReview] = useState(false),
     [broadcasting, setBroadcasting] = useState(false),
+    [broadcastPreview, setBroadcastPreview] = useState<{
+      key: string; recipients: Pick<Official, "id" | "first_name" | "last_name" | "email" | "active">[];
+      recipientVersion: string; error: string;
+    } | null>(null),
     [showActivityTimeline, setShowActivityTimeline] = useState(false),
     [activityRows, setActivityRows] = useState<AuditEvent[]>([]),
     [activityLoading, setActivityLoading] = useState(false),
@@ -558,6 +571,10 @@ export default function AssignmentsManagerV2({
     [calendarReviewSaving, setCalendarReviewSaving] = useState(false),
     [bulkResult, setBulkResult] = useState<BulkActionResult | null>(null);
   const [calendarReleaseSaving, setCalendarReleaseSaving] = useState<string | null>(null);
+  const gamePageActionBusy = Boolean(bulkWorking || linking || saving || publishing || confirming ||
+    bulkCrewWorking || crewTemplateWorking || replacementPublishing || calendarReviewSaving || fieldMoveSaving ||
+    quickEditSaving || gameStatusSaving || selfAssignSaving || mentorSlotSaving || movingAssignment || overdueResolving ||
+    calendarReleaseSaving || checkInSaving || bulkRetryingGame || deadlineSaving || teamSuggestionSaving || broadcasting || retryingNotifications);
   const locationComplexes = venueDirectory.organizationId === organizationId ? venueDirectory.complexes : {};
   const venueLocationIds = resolveVenueLocationIds(locationFilter, organizationId, locationComplexes);
   const venueFilterOptions = assignmentVenueOptions(
@@ -618,6 +635,46 @@ export default function AssignmentsManagerV2({
       setCalendarReviewSaving(false);
     }
   }
+  async function assignLinkedOfficial(parameters: { p_game_id: string; p_position_id: string; p_official_id: string }) {
+    const fail = (message: string) => ({ data: null, error: { message } });
+    if (!organizationId || !canManage) return fail("Assignment access is unavailable. Reload this page.");
+    // Re-read the target's group at action time: cached page membership may have
+    // changed. The final RPC still rechecks all-game authority atomically.
+    const group = await readAllPages<{ group_id: string }>((from, to) =>
+      supabase.from("game_link_members").select("group_id")
+        .eq("game_id", parameters.p_game_id).order("group_id").range(from, to));
+    if (group.error) return fail(group.error.message);
+    if ((group.data || []).length > 1) return fail("The linked group changed. Reload before assigning.");
+    const groupId = group.data?.[0]?.group_id;
+    const members = groupId ? await readAllPages<{ game_id: string }>((from, to) =>
+      supabase.from("game_link_members").select("game_id").eq("group_id", groupId)
+        .order("game_id").range(from, to)) : { data: [{ game_id: parameters.p_game_id }], error: null };
+    if (members.error) return fail(members.error.message);
+    const memberIds = [...new Set((members.data || []).map((member) => member.game_id))];
+    if (!memberIds.includes(parameters.p_game_id)) return fail("The complete linked group is unavailable. Reload before assigning.");
+    const targets = await readAllForChunks<{ id: string; league_id: string | null }, string>(memberIds, (ids, from, to) => {
+      const query = applyLeagueGameAccess(supabase.from("games").select("id,league_id")
+        .eq("organization_id", organizationId).in("id", ids), allowedGameAccess, fullLeagueAccess);
+      return query ? query.order("id").range(from, to) : Promise.resolve({ data: [], error: null });
+    });
+    if (targets.error) return fail(targets.error.message);
+    if ((targets.data || []).length !== memberIds.length) return fail("Every linked game must be inside your current access. No assignments were changed.");
+    const leagues = [...new Set((targets.data || []).map((target) => target.league_id).filter((id): id is string => Boolean(id)))];
+    const eligibility = leagues.length ? await readAllForChunks<{ league_id: string }, string>(leagues, (ids, from, to) =>
+      supabase.from("official_league_eligibility").select("league_id")
+        .eq("official_id", parameters.p_official_id).in("league_id", ids)
+        .order("league_id").range(from, to)) : { data: [], error: null };
+    if (eligibility.error) return fail(eligibility.error.message);
+    const eligibleLeagues = new Set((eligibility.data || []).map((row) => row.league_id));
+    if (leagues.some((league) => !eligibleLeagues.has(league))) return fail("This official is not league-eligible for every linked game. No assignments were changed.");
+    const offPage = memberIds.filter((id) => !games.some((game) => game.id === id));
+    const reviewKey = [parameters.p_official_id, ...memberIds.slice().sort(), ...leagues.slice().sort()].join(":");
+    if (offPage.length && !reviewedLinkedAssignments.current.has(reviewKey)) {
+      if (!window.confirm(`Assign to all ${memberIds.length} linked games, including ${offPage.length} not shown on this page? League eligibility and access were checked for the whole group. Other candidate warnings shown here cover the loaded games only; the server rechecks access and schedule conflicts.`)) return fail("Linked-group assignment cancelled. No assignments were changed.");
+      reviewedLinkedAssignments.current.add(reviewKey);
+    }
+    return supabase.rpc("assign_official_to_linked_games", parameters);
+  }
   async function loadCandidateScheduleConflicts(targetGames: Game[], version?: number) {
     if (!targetGames.length) {
       if (version === undefined || version === loadVersion.current)
@@ -639,6 +696,40 @@ export default function AssignmentsManagerV2({
     return null;
   }
   async function load(reuseCandidates = false) {
+    gamePageLoadingRef.current = true;
+    setGamePageLoading(true); setGamePageHasMore(false);
+    const pending = loadPage(reuseCandidates);
+    const version = loadVersion.current;
+    try { await pending; }
+    catch (cause) { if (version === loadVersion.current) setError(cause instanceof Error ? cause.message : "Unable to load games."); }
+    finally { if (version === loadVersion.current) { gamePageLoadingRef.current = false; setGamePageLoading(false); } }
+  }
+  function changeGamePage(direction: -1 | 1) {
+    if (gamePageLoadingRef.current || gamePageActionBusy) return;
+    const cursor = gamePaging.current;
+    if (direction === 1) {
+      if (!cursor.next) return;
+      cursor.previous.push([...cursor.offsets]);
+      cursor.offsets = [...cursor.next];
+    } else {
+      const previous = cursor.previous.pop();
+      if (!previous) return;
+      cursor.offsets = previous;
+    }
+    cursor.next = null;
+    setGamePageNumber(cursor.previous.length + 1);
+    setGamePageHasMore(false);
+    setLinkSelected([]); setSelfAssignSelected([]); setExpandedGameIds(new Set());
+    setGames([]); setAssignments([]); setLinkGroups([]); setLinkMembers([]);
+    setSelected(""); setPendingTapAssignment(null); setPendingReplacement(null); setFieldMove(null); setScheduleOfficialId("");
+    setPickedOfficial(""); setDraggingOfficial(""); setOverdueSelected([]);
+    setQuickEdit(null); setPendingGameStatus(null); setShowBroadcastReview(false);
+    setShowBulkAssign(false); setShowBulkCrew(false); setShowBulkPublishReview(false);
+    setShowCrewTemplates(false); setShowPublishReview(false); setShowSelfAssignDialog(false);
+    setBulkAssignmentResult(null); setBulkResult(null); setCheckInGameIds([]);
+    void load(true);
+  }
+  async function loadPage(reuseCandidates = false) {
     const version = ++loadVersion.current;
     const startedAt = performance.now();
     const logLoadMilestone = (stage: string) => {
@@ -671,7 +762,7 @@ export default function AssignmentsManagerV2({
       if (access.error) {
         candidateCache.current = null;
         setAllowedLeagueIds([]); setAllowedGameAccess([]);
-        setGames([]); setOfficials([]); setAssignments([]); setBlocks([]);
+        setGames([]); setOfficials([]); setCandidateOfficialIds(new Set()); setAssignments([]); setBlocks([]);
         setInitialGamesReady(true); setError(access.error.message); return;
       }
       scopedGameAccess = access.data || [];
@@ -680,7 +771,7 @@ export default function AssignmentsManagerV2({
     if (version !== loadVersion.current) return;
     if (!fullLeagueAccess && leagueGameAccessKey(allowedGameAccess) !== leagueGameAccessKey(scopedGameAccess)) {
       candidateCache.current = null;
-      setGames([]); setOfficials([]); setAssignments([]); setBlocks([]);
+      setGames([]); setOfficials([]); setCandidateOfficialIds(new Set()); setAssignments([]); setBlocks([]);
       setRanks({}); setPositionRanks({}); setPowers({}); setTeamSuggestions([]);
       setLeagueElig([]); setLevelElig([]); setCandidateScheduleConflicts(new Set());
       setLinkGroups([]); setLinkMembers([]); setAssignmentTemplates([]);
@@ -723,7 +814,19 @@ export default function AssignmentsManagerV2({
         return;
       }
     } else setVenueDirectory({ organizationId, fields: [], complexes: {} });
-    const selectedLocationIds = resolveVenueLocationIds(locationFilter, organizationId, loadedComplexes);
+    const resolvedLocationIds = resolveVenueLocationIds(locationFilter, organizationId, loadedComplexes);
+    const selectedLocationIds = resolvedLocationIds === null ? null : [...resolvedLocationIds].sort();
+    const pageKey = JSON.stringify([organizationId, fullLeagueAccess, leagueGameAccessKey(scopedGameAccess), selectedLocationIds,
+      range, customDate, dayFilter, timeFilter, officialFilter, leagueFilter, levelFilter,
+      unpublishedOnly, selfAssignOnly, replacementOnly, completenessFilter, focusGameId]);
+    if (gamePaging.current.key !== pageKey) {
+      gamePaging.current = { key: pageKey, offsets: [], previous: [], next: null, asOf: new Date().toISOString() };
+      setLinkSelected([]); setSelfAssignSelected([]); setExpandedGameIds(new Set());
+      setGames([]); setAssignments([]); setLinkGroups([]); setLinkMembers([]);
+    }
+    const cursor = gamePaging.current;
+    setGamePageNumber(cursor.previous.length + 1);
+    setGamePageHasMore(false);
     const readGamePage = (from: number, to: number, locationIds = selectedLocationIds) => {
       // A removed/foreign saved complex must not become an unfiltered query.
       if (locationIds?.length === 0) return Promise.resolve({ data: [], error: null });
@@ -743,8 +846,8 @@ export default function AssignmentsManagerV2({
       if (leagueFilter) query = query.eq("league_id", leagueFilter);
       if (levelFilter) query = query.eq("level_id", levelFilter);
       if (locationIds) query = query.in("location_id", locationIds);
-      // Keep the existing client-side filters. Only the initial, unfiltered
-      // view is capped; a filter change fetches the broader game set.
+      // Preserve existing date inclusion rules. Pagination applies in EVERY
+      // filter mode; choosing a filter must never trigger an all-games read.
       const explicitFilter = range !== "all" || Boolean(
         locationFilter.length || dayFilter.length || timeFilter.length ||
         officialFilter || leagueFilter || levelFilter ||
@@ -752,44 +855,30 @@ export default function AssignmentsManagerV2({
       );
       if (focusGameId && !explicitFilter) query = query.eq("id", focusGameId);
       if (!explicitFilter && !focusGameId)
-        query = query.gte("starts_at", new Date().toISOString());
-      if (!explicitFilter && !focusGameId) {
-        if (from >= 50) return Promise.resolve({ data: [], error: null });
-        return query.range(from, Math.min(to, 49)) as unknown as PromiseLike<{ data: Game[] | null; error: { message: string } | null }>;
-      }
+        query = query.gte("starts_at", cursor.asOf);
       return query.range(from, to) as unknown as PromiseLike<{
         data: Game[] | null;
         error: { message: string } | null;
       }>;
     };
-    const gamePromise = selectedLocationIds
-      ? readAllForChunks<Game, string>(selectedLocationIds, (ids, from, to) => readGamePage(from, to, ids))
-      : readAllPages<Game>(readGamePage);
+    const gameSources = selectedLocationIds === null ? [null] : Array.from(
+      { length: Math.ceil(selectedLocationIds.length / 200) },
+      (_, index) => selectedLocationIds.slice(index * 200, (index + 1) * 200),
+    );
+    const gamePromise = readBoundedGamePage<Game>({
+      sourceCount: gameSources.length,
+      offsets: cursor.offsets.length ? cursor.offsets : undefined,
+      readPage: (source, from, to) => readGamePage(from, to, gameSources[source]),
+      // Assignment-derived and venue-local filters remain exactly as before.
+      // They can produce a sparse page, never an unbounded background scan.
+      matches: () => true,
+      pageSize: 50, batchSize: 51, maxScanned: 500, maxRequests: 20,
+    });
     const fetchCandidateData = async () => {
-      const loadOfficialRoster = () => organizationId
-        ? readAllPages<{ official_id: string; officials: Official }>((from, to) =>
-            supabase.from("organization_officials")
-              .select("official_id,officials!inner(id,first_name,last_name,email,phone,sports,active,home_city,home_state,home_latitude,home_longitude)")
-              .eq("organization_id", organizationId)
-              .eq("active", true)
-              .eq("officials.active", true)
-              .order("official_id").range(from, to),
-            1000, 2,
-          ).then(({ data, error }) => ({
-            data: (data || []).map((link) => link.officials), error,
-          }))
-        : readAllPages<Official>((from, to) =>
-            supabase.from("officials")
-              .select("id,first_name,last_name,email,phone,sports,active,home_city,home_state,home_latitude,home_longitude")
-              .eq("active", true)
-              .order("last_name").order("first_name").order("id")
-              .range(from, to) as unknown as PromiseLike<{
-                data: Official[] | null;
-                error: { message: string } | null;
-              }>,
-            1000, 2,
-          );
-      const roster = await loadOfficialRoster();
+      const roster = await loadAssignmentOfficialRoster<Official>(
+        supabase, organizationId, assignmentCandidateLeagueScope(scopedGames),
+        scopedAssignments.map((assignment) => assignment.official_id),
+      );
       const officialIds = (roster.data || []).map((official) => official.id);
       const [rankings, le, ve, bl, suggestions] = await Promise.all([
         readAllForChunks<Rank & PositionRank, string>(officialIds, (ids, from, to) =>
@@ -816,11 +905,13 @@ export default function AssignmentsManagerV2({
       if (organizationId) officialRows.sort((a, b) =>
         a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name),
       );
-      return { results, officialRows, error };
+      return { results, officialRows, candidateIds: roster.candidateIds, error };
     };
     const g = await gamePromise;
     if (version !== loadVersion.current) return;
     if (g.error) { setError(g.error.message); return; }
+    cursor.next = g.nextOffsets;
+    setGamePageHasMore(g.hasMore);
     candidateLeagueIds = Array.from(new Set((g.data || []).map((game) => game.league_id).filter((id): id is string => Boolean(id)))).sort();
     candidateLevelIds = Array.from(new Set((g.data || []).map((game) => game.level_id).filter((id): id is string => Boolean(id)))).sort();
     candidateTeamIds = Array.from(new Set((g.data || []).flatMap((game) => [game.home?.id,game.away?.id]).filter((id): id is string => Boolean(id)))).sort();
@@ -912,11 +1003,18 @@ export default function AssignmentsManagerV2({
     );
     setAssignments(scopedAssignments);
     setLinkGroups((lg.data || []) as LinkGroup[]);
-    setLinkMembers(
-      ((linkResult.data || []) as LinkMember[]).filter((member) =>
-        scopedGameIds.has(member.game_id),
-      ),
+    // Group IDs are discovered from this page only. Fetch their membership IDs
+    // (not off-page games/assignments) so reordering/unlinking never mistakes a
+    // partial page for a complete group. RLS requires the entire group in scope.
+    const completeMembers = await readAllForChunks<LinkMember, string>(
+      [...new Set((linkResult.data || []).map((member) => member.group_id))],
+      (ids, from, to) => supabase.from("game_link_members")
+        .select("group_id,game_id,sort_order").in("group_id", ids)
+        .order("group_id").order("sort_order").order("game_id").range(from, to),
     );
+    if (version !== loadVersion.current) return;
+    if (completeMembers.error) { setError(completeMembers.error.message); return; }
+    setLinkMembers(completeMembers.data || []);
     setSelfAssignSlots(
       ((slotResult.data || []) as SelfAssignSlot[]).filter((slot) =>
         scopedGameIds.has(slot.game_id),
@@ -960,7 +1058,7 @@ export default function AssignmentsManagerV2({
     // large candidate request batch. Filters can reuse a recent result.
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     if (version !== loadVersion.current) return;
-    const candidateKey = `${organizationId || ""}:${leagueScopeKey}:${leagueGameAccessKey(scopedGameAccess)}:${userData.user?.id || ""}:${candidateLeagueIds.join(",")}:${candidateLevelIds.join(",")}:${candidateTeamIds.join(",")}`;
+    const candidateKey = `${organizationId || ""}:${leagueScopeKey}:${leagueGameAccessKey(scopedGameAccess)}:${userData.user?.id || ""}:${candidateLeagueIds.join(",")}:${candidateLevelIds.join(",")}:${candidateTeamIds.join(",")}:${assignmentCandidateLeagueScope(scopedGames) === null ? "no-league" : "league-scoped"}:${[...new Set(scopedAssignments.map((assignment) => assignment.official_id))].sort().join(",")}`;
     const candidatePromise: ReturnType<typeof fetchCandidateData> =
       reuseCandidates && candidateCache.current?.key === candidateKey &&
         Date.now() - candidateCache.current.createdAt < 60_000
@@ -994,6 +1092,7 @@ export default function AssignmentsManagerV2({
     if (version !== loadVersion.current) return;
     if (candidateConflictError) { setError(candidateConflictError.message); return; }
     setOfficials(candidate.officialRows);
+    setCandidateOfficialIds(new Set(candidate.candidateIds));
     setRanks(rm);
     setPositionRanks(prm);
     setTeamSuggestions(suggestions.data || []);
@@ -1005,8 +1104,9 @@ export default function AssignmentsManagerV2({
   }
   useEffect(() => {
     candidateCache.current = null;
+    reviewedLinkedAssignments.current.clear();
     setCanManage(false); setAllowedLeagueIds([]); setAllowedGameAccess([]);
-    setGames([]); setOfficials([]); setAssignments([]); setBlocks([]);
+    setGames([]); setOfficials([]); setCandidateOfficialIds(new Set()); setAssignments([]); setBlocks([]);
     setRanks({}); setPositionRanks({}); setPowers({}); setTeamSuggestions([]);
     setLeagueElig([]); setLevelElig([]); setCandidateScheduleConflicts(new Set());
     setLinkGroups([]); setLinkMembers([]); setAssignmentTemplates([]); setSelfAssignSlots([]); setMentorSlots([]);
@@ -1166,10 +1266,11 @@ export default function AssignmentsManagerV2({
   useEffect(() => {
     void loadSavedViews();
   }, []);
+  const pagePayGameIds = games.map((item) => item.id).sort().join(",");
   useEffect(() => {
-    if (!selected || !organizationId) return;
+    if (!selected || !organizationId || !pagePayGameIds) { setPositionPay({}); return; }
     let active = true;
-    fetch(`/api/games/pay?organizationId=${encodeURIComponent(organizationId)}`, { cache: "no-store" })
+    fetch(`/api/games/pay?organizationId=${encodeURIComponent(organizationId)}&gameIds=${encodeURIComponent(pagePayGameIds)}`, { cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) throw new Error("Could not load game pay.");
         return response.json() as Promise<{ rates: Array<{ game_id: string; position_id: string; amount: number; payment_status: string }> }>;
@@ -1179,7 +1280,7 @@ export default function AssignmentsManagerV2({
       })
       .catch(() => { if (active) setPositionPay({}); });
     return () => { active = false; };
-  }, [selected, organizationId]);
+  }, [selected, organizationId, pagePayGameIds]);
   function positionPayDetails(gameId: string, positionId: string, assignment?: Assignment) {
     const quote = positionPay[`${gameId}:${positionId}`];
     const amount = assignment ? Number(assignment.game_fee || 0) : quote?.amount;
@@ -1582,7 +1683,31 @@ export default function AssignmentsManagerV2({
           ),
       ),
   );
-  const broadcastOfficials = officials.filter((official) => official.active);
+  const broadcastPreviewKey = `${organizationId || ""}:${leagueScopeKey}:${leagueGameAccessKey(allowedGameAccess)}:${[...linkSelected].sort().join(",")}`;
+  const currentBroadcastPreview = broadcastPreview?.key === broadcastPreviewKey ? broadcastPreview : null;
+  const broadcastPreviewReady = Boolean(currentBroadcastPreview?.recipientVersion && !currentBroadcastPreview.error);
+  const broadcastOfficials = (currentBroadcastPreview?.recipients || []).filter((official) => official.active);
+  useEffect(() => {
+    setBroadcastPreview(null);
+    if (!showBroadcastReview || !canManage || !organizationId || !linkSelected.length) return;
+    const controller = new AbortController();
+    const key = broadcastPreviewKey;
+    void (async () => {
+      try {
+        const query = new URLSearchParams({ organizationId, gameIds: [...linkSelected].sort().join(",") });
+        const response = await fetch(`/api/assignments/broadcast?${query.toString()}`, { signal: controller.signal, cache: "no-store" });
+        const result = await response.json();
+        if (!response.ok || !Array.isArray(result.recipients) || !result.recipientVersion)
+          throw new Error(result.error || "Unable to load broadcast recipients.");
+        if (!controller.signal.aborted)
+          setBroadcastPreview({ key, recipients: result.recipients, recipientVersion: result.recipientVersion, error: "" });
+      } catch (error) {
+        if (!controller.signal.aborted)
+          setBroadcastPreview({ key, recipients: [], recipientVersion: "", error: error instanceof Error ? error.message : "Unable to load broadcast recipients." });
+      }
+    })();
+    return () => controller.abort();
+  }, [showBroadcastReview, canManage, broadcastPreviewKey]);
   const broadcastMissingEmails = broadcastOfficials.filter(
     (official) => !official.email,
   ).length;
@@ -1675,7 +1800,7 @@ export default function AssignmentsManagerV2({
   async function unlinkGames(groupId: string) {
     if (
       !window.confirm(
-        "Unlink these games? The games and assignments will remain.",
+        "Unlink the entire group, including linked games on other pages? The games and assignments will remain.",
       )
     )
       return;
@@ -1745,6 +1870,8 @@ export default function AssignmentsManagerV2({
     for (let index = 1; index < groupGames.length; index++) {
       const first = groupGames[index - 1],
         second = groupGames[index];
+      const groupId = linkMembers.find((member) => member.game_id === second.id)?.group_id;
+      if (groupId && linkedGameNeighbor(groupId, second.id, -1) !== first.id) continue;
       const details = travelDetails(first, second);
       if (!details.impossible || !details.shared.length) continue;
       const names = details.shared.map((officialId) => {
@@ -1795,17 +1922,19 @@ export default function AssignmentsManagerV2({
     await load();
     setLinking(false);
   }
+  function linkedGameNeighbor(groupId: string, gameId: string, direction: -1 | 1) {
+    const ordered = linkMembers.filter((member) => member.group_id === groupId)
+      .sort((a, b) => a.sort_order - b.sort_order || a.game_id.localeCompare(b.game_id));
+    const index = ordered.findIndex((member) => member.game_id === gameId);
+    return index < 0 ? null : ordered[index + direction]?.game_id || null;
+  }
   async function moveLinkedGame(
     groupId: string,
     gameId: string,
     direction: -1 | 1,
   ) {
-    const ordered = linkMembers
-      .filter((member) => member.group_id === groupId)
-      .sort((a, b) => a.sort_order - b.sort_order);
-    const index = ordered.findIndex((member) => member.game_id === gameId);
-    const target = ordered[index + direction];
-    if (target) await reorderLinkedGame(groupId, gameId, target.game_id);
+    const target = linkedGameNeighbor(groupId, gameId, direction);
+    if (target) await reorderLinkedGame(groupId, gameId, target);
   }
   async function unlinkOneGame(groupId: string, gameId: string) {
     if (!canManage || linking) return;
@@ -2613,6 +2742,10 @@ export default function AssignmentsManagerV2({
       return "REF";
     return "Rank";
   }
+  function leagueCandidates(targets: Game[]) {
+    return officials.filter((official) =>
+      isLeagueCandidate(official.id, targets, candidateOfficialIds, leagueElig));
+  }
   function candidates(pos: Position) {
     if (!game) return [];
     const current = assignments.find(
@@ -2631,7 +2764,7 @@ export default function AssignmentsManagerV2({
           )
           .map((a) => a.official_id),
       );
-    return officials
+    return leagueCandidates(linkedAssignmentGames())
       .filter(
         (o) =>
           (eligible(o) || canManage || current?.official_id === o.id) &&
@@ -2746,7 +2879,7 @@ export default function AssignmentsManagerV2({
     });
   }
   const availableOfficialsBase = game
-    ? officials
+    ? leagueCandidates(linkedAssignmentGames())
         .filter((o) => eligible(o) && !workingAtGameTime(o))
         .map((o) => ({
           ...o,
@@ -2772,7 +2905,7 @@ export default function AssignmentsManagerV2({
     officialListSort,
   );
   const ineligibleOfficials = game
-    ? officials
+    ? leagueCandidates(linkedAssignmentGames())
         .map((o) => ({ ...o, reasons: ineligibleReasons(o) }))
         .filter((o) => o.reasons.length > 0)
         .sort(
@@ -2889,7 +3022,7 @@ export default function AssignmentsManagerV2({
             p_game_id: targetGame.id,
             p_official_id: officialId,
           })
-        : await supabase.rpc("assign_official_to_linked_games", {
+        : await assignLinkedOfficial({
             p_game_id: targetGame.id,
             p_position_id: positionId,
             p_official_id: officialId,
@@ -3226,7 +3359,7 @@ export default function AssignmentsManagerV2({
           });
           continue;
         }
-        const result = await supabase.rpc("assign_official_to_linked_games", {
+        const result = await assignLinkedOfficial({
           p_game_id: target.id,
           p_position_id: positionId,
           p_official_id: bulkAssignOfficial,
@@ -3324,7 +3457,7 @@ export default function AssignmentsManagerV2({
       return;
     }
     setBulkRetryingGame(item.gameId);
-    const result = await supabase.rpc("assign_official_to_linked_games", {
+    const result = await assignLinkedOfficial({
       p_game_id: item.gameId,
       p_position_id: item.positionId,
       p_official_id: item.officialId || bulkAssignmentResult.officialId,
@@ -3371,7 +3504,7 @@ export default function AssignmentsManagerV2({
     selections = bulkCrewSelections,
   ) {
     const key = crewSlotKey(target.id, position.id);
-    return officials
+    return leagueCandidates([target])
       .map((official) => {
         const blocking = [
           ...assignmentConflictReasonsForGame(official, target, position.id),
@@ -3528,7 +3661,7 @@ export default function AssignmentsManagerV2({
           });
           continue;
         }
-        const result = await supabase.rpc("assign_official_to_linked_games", {
+        const result = await assignLinkedOfficial({
           p_game_id: review.target.id,
           p_position_id: review.position.id,
           p_official_id: officialId,
@@ -3745,7 +3878,7 @@ export default function AssignmentsManagerV2({
           skipped += 1;
           continue;
         }
-        const result = await supabase.rpc("assign_official_to_linked_games", {
+        const result = await assignLinkedOfficial({
           p_game_id: target.id,
           p_position_id: slot.position_id,
           p_official_id: slot.official_id,
@@ -3819,8 +3952,7 @@ export default function AssignmentsManagerV2({
     setError("");
     setNotice("");
     try {
-      const { error: assignmentError } = await supabase.rpc(
-        "assign_official_to_linked_games",
+      const { error: assignmentError } = await assignLinkedOfficial(
         {
           p_game_id: game.id,
           p_position_id: positionId,
@@ -4235,7 +4367,7 @@ export default function AssignmentsManagerV2({
     setShowBulkPublishReview(true);
   }
   async function broadcastAssignments() {
-    if (!linkSelected.length || broadcasting) return;
+    if (!linkSelected.length || broadcasting || !canManage || !broadcastPreviewReady) return;
     setBroadcasting(true);
     setError("");
     setNotice("");
@@ -4248,6 +4380,7 @@ export default function AssignmentsManagerV2({
           body: JSON.stringify({
             gameIds: linkSelected,
             requestId: crypto.randomUUID(),
+            recipientVersion: currentBroadcastPreview!.recipientVersion,
           }),
         },
       );
@@ -4351,8 +4484,12 @@ export default function AssignmentsManagerV2({
     return value ? new Date(value).toLocaleString() : "";
   }
   async function exportAssignments(gameIds?: string[]) {
+    const exportGames = gameIds?.length
+      ? filteredGames.filter((listedGame) => gameIds.includes(listedGame.id))
+      : filteredGames;
+    if (!exportGames.length) return;
     const XLSX = await import("xlsx");
-    const payResponse = await fetch(`/api/games/pay?organizationId=${encodeURIComponent(organizationId || "")}`, { cache: "no-store" });
+    const payResponse = await fetch(`/api/games/pay?organizationId=${encodeURIComponent(organizationId || "")}&gameIds=${encodeURIComponent(exportGames.map((item) => item.id).join(","))}`, { cache: "no-store" });
     if (!payResponse.ok) {
       const detail = await payResponse.json().catch(() => ({}));
       setError(detail.error || "Game position pay could not be loaded for export.");
@@ -4360,9 +4497,7 @@ export default function AssignmentsManagerV2({
     }
     const payData = await payResponse.json() as { rates: Array<{ game_id: string; position_id: string; amount: number; payment_status: string }> };
     const quotedPay = new Map(payData.rates.map((rate) => [`${rate.game_id}:${rate.position_id}`, rate]));
-    const exportGames = gameIds?.length
-      ? filteredGames.filter((listedGame) => gameIds.includes(listedGame.id))
-      : filteredGames;
+
     const positionNames: string[] = [];
     for (const g of exportGames) {
       for (const position of positions
@@ -6202,7 +6337,7 @@ export default function AssignmentsManagerV2({
           const official = officials.find(
             (item) => item.id === bulkAssignOfficial,
           );
-          const officialAssessments = officials
+          const officialAssessments = leagueCandidates(review.targets)
             .map((item) => {
               const assessment = bulkAssignmentReview(item.id);
               const status = assessment.blocking.length
@@ -7150,7 +7285,7 @@ export default function AssignmentsManagerV2({
                       disabled={!filteredGames.length}
                       onClick={() => void exportAssignments()}
                     >
-                      Export Assignments
+                      Export This Page
                     </button>
                     <button type="button" disabled={bulkWorking} onClick={() => void archiveCancelledGames()}>
                       Archive Cancelled Games
@@ -7165,21 +7300,7 @@ export default function AssignmentsManagerV2({
                         : "Upload Game Fees"}
                     </button>
                     <button type="button" disabled={!filteredGames.length} onClick={() => void downloadGameFeeTemplate()}>
-                      Download Game Fees Template
-                    </button>
-                    <button
-                      type="button"
-                      disabled={
-                        selfAssignSaving ||
-                        (!selfAssignSelected.length &&
-                          !linkSelected.length &&
-                          !game)
-                      }
-                      onClick={prepareSelfAssignPositions}
-                    >
-                      {selfAssignSaving
-                        ? "Opening…"
-                        : "Open Positions for Self Assign"}
+                      Game fee template
                     </button>
                   </div>
                 </details>
@@ -7224,7 +7345,7 @@ export default function AssignmentsManagerV2({
                 disabled={!filteredGames.length}
                 onClick={() => void exportAssignments()}
               >
-                Export Assignments
+                Export This Page
               </button>
               <button type="button" disabled={bulkWorking} onClick={() => void archiveCancelledGames()}>
                 Archive Cancelled Games
@@ -7239,19 +7360,7 @@ export default function AssignmentsManagerV2({
                   : "Upload Game Fees"}
               </button>
               <button type="button" disabled={!filteredGames.length} onClick={() => void downloadGameFeeTemplate()}>
-                Download Game Fees Template
-              </button>
-              <button
-                type="button"
-                disabled={
-                  selfAssignSaving ||
-                  (!selfAssignSelected.length && !linkSelected.length && !game)
-                }
-                onClick={prepareSelfAssignPositions}
-              >
-                {selfAssignSaving
-                  ? "Opening…"
-                  : "Open Positions for Self Assign"}
+                Game fee template
               </button>
             </nav>
           )}
@@ -7283,7 +7392,8 @@ export default function AssignmentsManagerV2({
             (() => {
               const target = games.find(
                 (item) => item.id === quickEdit.gameId,
-              )!;
+              );
+              if (!target) return null;
               const active = assignments.filter(
                 (item) =>
                   item.game_id === target.id &&
@@ -8127,7 +8237,7 @@ export default function AssignmentsManagerV2({
                   <div>
                     <h3 id="coverageForecastTitle">14-Day Coverage Forecast</h3>
                     <p>
-                      Select a date to open its games in the Assignment Center.
+                      Counts include only games loaded on this page. Select a date to filter the Assignment Center.
                     </p>
                   </div>
                   <button
@@ -8986,7 +9096,7 @@ export default function AssignmentsManagerV2({
             >
               <div>
                 <h3 id="attentionQueueTitle">Needs Attention</h3>
-                <p>Open the work that should be handled next.</p>
+                <p>Counts reflect this page only. Open the work that should be handled next.</p>
               </div>
               <button
                 type="button"
@@ -9473,7 +9583,7 @@ export default function AssignmentsManagerV2({
                 disabled={
                   bulkWorking || broadcasting || !broadcastOpenPositions.length
                 }
-                onClick={() => setShowBroadcastReview(true)}
+                onClick={() => { setBroadcastPreview(null); setShowBroadcastReview(true); }}
               >
                 Broadcast
               </button>
@@ -9575,12 +9685,17 @@ export default function AssignmentsManagerV2({
               {bulkWorking && <span>Working…</span>}
             </div>
           )}
-            {range === "all" && !locationFilter.length && !dayFilter.length &&
-              !timeFilter.length && !officialFilter && !leagueFilter && !levelFilter &&
-              !unpublishedOnly && !selfAssignOnly && !replacementOnly &&
-              !completenessFilter.length && (
-                <p className="assignmentResultsNotice">Showing the next 50 games that have not started. Select a filter to search beyond this list.</p>
-              )}
+            <div className="assignmentResultsNotice" role="status">
+              Page {gamePageNumber}: {filteredGames.length} matching games from {games.length} loaded (maximum 50).
+              {" "}Filters may leave fewer matches on a page. Counts, sorting, selections and exports apply to this page only.
+              {" "}Linked-game assignments still apply to the whole authorized group, including games on other pages.
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <button type="button" className="secondary" disabled={gamePageLoading || gamePageNumber === 1 || gamePageActionBusy} onClick={() => changeGamePage(-1)}>Previous 50 games</button>
+                <button type="button" className="secondary" disabled={gamePageLoading || !gamePageHasMore || gamePageActionBusy} onClick={() => changeGamePage(1)}>Next 50 games</button>
+                {error && <button type="button" className="secondary" disabled={gamePageLoading || gamePageActionBusy} onClick={() => void load(true)}>Retry this page</button>}
+                {gamePageLoading && <span>Loading page…</span>}
+              </div>
+            </div>
           <div
             className="assignmentGameTable"
             style={{
@@ -9602,9 +9717,10 @@ export default function AssignmentsManagerV2({
               }}
             >
               <b>
-                Games <small>{filteredGames.length} results</small>
+                Games <small>{filteredGames.length} results on this page</small>
               </b>
               <span
+                className="assignmentResultsActions"
                 style={{
                   display: "flex",
                   gap: 7,
@@ -9622,6 +9738,21 @@ export default function AssignmentsManagerV2({
                 >
                   {showSelectedDetails ? "Close Selected Details" : "Open Selected Details"}
                 </button>
+                {canManage && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={
+                      selfAssignSaving ||
+                      (!selfAssignSelected.length && !linkSelected.length && !game)
+                    }
+                    onClick={prepareSelfAssignPositions}
+                  >
+                    {selfAssignSaving
+                      ? "Opening…"
+                      : "Open Positions for Self Assign"}
+                  </button>
+                )}
                 <button
                   type="button"
                   className="secondary"
@@ -9636,7 +9767,7 @@ export default function AssignmentsManagerV2({
                 >
                   {linkSelected.length === filteredGames.length
                     ? "Clear Selection"
-                    : "Select All Games"}
+                    : "Select All on This Page"}
                 </button>
               </span>
             </div>
@@ -9707,8 +9838,7 @@ export default function AssignmentsManagerV2({
                       {linkSelected.length === 1 ? "" : "s"}
                     </span>
                     <span>
-                      <b>{broadcastOfficials.length}</b> active official
-                      {broadcastOfficials.length === 1 ? "" : "s"}
+                      {broadcastPreviewReady ? <><b>{broadcastOfficials.length}</b> active official{broadcastOfficials.length === 1 ? "" : "s"}</> : "Recipients not loaded"}
                     </span>
                     <span>
                       <b>{broadcastOpenPositions.length}</b> open position
@@ -9717,10 +9847,11 @@ export default function AssignmentsManagerV2({
                     <span
                       className={broadcastMissingEmails ? "warning" : "ready"}
                     >
-                      <b>{broadcastMissingEmails}</b> missing email
-                      {broadcastMissingEmails === 1 ? "" : "s"}
+                      {broadcastPreviewReady ? <><b>{broadcastMissingEmails}</b> missing email{broadcastMissingEmails === 1 ? "" : "s"}</> : "Email check pending"}
                     </span>
                   </div>
+                  {!currentBroadcastPreview && <p role="status">Loading broadcast recipients…</p>}
+                  {currentBroadcastPreview?.error && <p role="alert">{currentBroadcastPreview.error} Close and reopen this review to retry.</p>}
                   <div className="publishRecipientList">
                     {broadcastOfficials.map((official) => (
                       <div key={official.id}>
@@ -9762,7 +9893,7 @@ export default function AssignmentsManagerV2({
                       type="button"
                       className="primary assignmentBroadcastButton"
                       disabled={
-                        broadcasting ||
+                        broadcasting || !canManage || !broadcastPreviewReady ||
                         !broadcastOfficials.length ||
                         Boolean(broadcastMissingEmails)
                       }
@@ -9770,7 +9901,7 @@ export default function AssignmentsManagerV2({
                     >
                       {broadcasting
                         ? "Sending Broadcast…"
-                        : `Broadcast to ${broadcastOfficials.length} Official${broadcastOfficials.length === 1 ? "" : "s"}`}
+                        : !broadcastPreviewReady ? "Waiting for recipient review" : `Broadcast to ${broadcastOfficials.length} Official${broadcastOfficials.length === 1 ? "" : "s"}`}
                     </button>
                   </div>
                 </div>
@@ -9896,7 +10027,7 @@ export default function AssignmentsManagerV2({
                             <span>
                               🔗 Linked Games{" "}
                               <small style={{ fontWeight: 600 }}>
-                                • Drag games to set crew order
+                                • {unit.games.length} shown of {linkMembers.filter((member) => member.group_id === unit.groupId).length} linked games. Drag to set whole-group crew order
                               </small>
                             </span>
                             <button
@@ -9928,8 +10059,9 @@ export default function AssignmentsManagerV2({
                         </>
                       )}
                       {unit.games.map((listedGame, index) => {
-                        const previous =
-                          index > 0 ? unit.games[index - 1] : null;
+                        const priorVisible = index > 0 ? unit.games[index - 1] : null;
+                        const previous = priorVisible && unit.groupId &&
+                          linkedGameNeighbor(unit.groupId, listedGame.id, -1) === priorVisible.id ? priorVisible : null;
                         const travel = previous
                           ? travelDetails(previous, listedGame)
                           : null;
@@ -10009,7 +10141,7 @@ export default function AssignmentsManagerV2({
                                   className="secondary"
                                   aria-label={`Move ${listedGame.game_number} earlier`}
                                   title="Move earlier"
-                                  disabled={linking || index === 0}
+                                  disabled={linking || !linkedGameNeighbor(unit.groupId!, listedGame.id, -1)}
                                   onClick={() =>
                                     void moveLinkedGame(
                                       unit.groupId!,
@@ -10027,7 +10159,7 @@ export default function AssignmentsManagerV2({
                                   aria-label={`Move ${listedGame.game_number} later`}
                                   title="Move later"
                                   disabled={
-                                    linking || index === unit.games.length - 1
+                                    linking || !linkedGameNeighbor(unit.groupId!, listedGame.id, 1)
                                   }
                                   onClick={() =>
                                     void moveLinkedGame(
@@ -10119,11 +10251,13 @@ export default function AssignmentsManagerV2({
                 <div className="assignmentNoGames">
                   <b>
                     {selfAssignOnly
-                      ? "No games are open for Self Assign"
-                      : "No games match these filters"}
+                      ? "No games on this page are open for Self Assign"
+                      : "No games on this page match these filters"}
                   </b>
                   <span>
-                    Change the filters or reset them to see all games.
+                    {gamePageLoading ? "Loading this page…" : error ? "This page could not be loaded. Retry it or return to the previous page." : gamePageHasMore
+                      ? "Use Next 50 games to continue searching. Later pages may have matches."
+                      : "This is the last page. Use Previous 50 games or change the filters."}
                   </span>
                   <button
                     type="button"
@@ -10277,7 +10411,7 @@ export default function AssignmentsManagerV2({
                 })
               ) : (
                 <div style={{ padding: 14, color: "#64748b" }}>
-                  No games in this selection.
+                  No matching games on this page.
                 </div>
               )}
             </div>
@@ -10291,7 +10425,7 @@ export default function AssignmentsManagerV2({
               <option value="">
                 {filteredGames.length
                   ? "Select a game"
-                  : "No games on this date"}
+                  : "No games on this date within this page"}
               </option>
               <div
                 style={{
@@ -11005,9 +11139,9 @@ export default function AssignmentsManagerV2({
                 </div>
                 <p>
                   Select an official, then choose a game to fill its next open
-                  position. Ineligible officials remain visible in red and
-                  require an override; overlapping assignments cannot be
-                  overridden.
+                  position. Only league-eligible officials are searchable. Other
+                  eligibility warnings remain visible in red and require an
+                  override; overlapping assignments cannot be overridden.
                 </p>
                 <div className="officialListTools">
                   <input

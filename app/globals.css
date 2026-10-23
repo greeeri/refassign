@@ -3792,3 +3792,20 @@ td small {
   color: #64748b;
   font-weight: 500;
 }
+
+/* Directory filters stay usable when the extra league control wraps on mobile. */
+.officialsDirectoryToolbar {
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.officialsDirectoryToolbar input {
+  flex: 1 1 280px;
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+.officialsDirectoryToolbar select {
+  flex: 0 1 260px;
+  min-width: 0;
+  max-width: 100%;
+}
