@@ -60,15 +60,15 @@ function setup(options = {}) {
   const reads = [];
   const calls = [];
   const state = {
-    ...paging, ...venue, ...scope, ...loadModule('lib/assignments/matchingGames.ts'), fieldComplexRpcMissing,
+    ...paging, ...venue, ...scope, fieldComplexRpcMissing,
     organizationId: 'selected-org', accessibleLeagueIds: ['allowed-league'], fullLeagueAccess: false,
-    range: 'all', customDate: '', fromDate: '', toDate: '', locationFilter: [], dayFilter: [], timeFilter: [], officialFilter: '', leagueFilter: '', levelFilter: '',
+    range: 'all', customDate: '', locationFilter: [], dayFilter: [], timeFilter: [], officialFilter: '', leagueFilter: '', levelFilter: '',
     unpublishedOnly: false, selfAssignOnly: false, replacementOnly: false, completenessFilter: [], focusGameId: undefined,
-    gamePaging: { current: { key: '', page: 1, asOf: '2026-10-23T00:00:00Z' } }, loadVersion: { current: 0 }, candidateCache: { current: null }, allowedGameAccess: [], canManage: true, allowedLeagueIds: null, error: '', games: ['old-game'], initialGamesReady: false,
+    gamePaging: { current: { key: '', offsets: [], previous: [], next: null, asOf: '2026-10-23T00:00:00Z' } }, loadVersion: { current: 0 }, candidateCache: { current: null }, allowedGameAccess: [], canManage: true, allowedLeagueIds: null, error: '', games: ['old-game'], initialGamesReady: false,
     performance: { now: () => 0 }, document: { documentElement: { clientWidth: 1440 } }, console: { info() {} },
     ...options.state,
   };
-  for (const name of ['MatchingTotals', 'TotalsError', 'GamePageNumber', 'GamePageHasMore', 'LinkSelected', 'SelfAssignSelected', 'ExpandedGameIds', 'Error', 'CanManage', 'AllowedLeagueIds', 'AllowedGameAccess', 'VenueDirectory', 'Games', 'InitialGamesReady', 'Officials', 'CandidateOfficialIds', 'Assignments', 'Blocks', 'Ranks', 'PositionRanks', 'Powers', 'TeamSuggestions', 'LeagueElig', 'LevelElig', 'CandidateScheduleConflicts', 'LinkGroups', 'LinkMembers', 'AssignmentTemplates', 'SelfAssignSlots', 'MentorSlots']) {
+  for (const name of ['GamePageNumber', 'GamePageHasMore', 'LinkSelected', 'SelfAssignSelected', 'ExpandedGameIds', 'Error', 'CanManage', 'AllowedLeagueIds', 'AllowedGameAccess', 'VenueDirectory', 'Games', 'InitialGamesReady', 'Officials', 'CandidateOfficialIds', 'Assignments', 'Blocks', 'Ranks', 'PositionRanks', 'Powers', 'TeamSuggestions', 'LeagueElig', 'LevelElig', 'CandidateScheduleConflicts', 'LinkGroups', 'LinkMembers', 'AssignmentTemplates', 'SelfAssignSlots', 'MentorSlots']) {
     state[`set${name}`] = value => { state[name[0].toLowerCase() + name.slice(1)] = copy(value); };
   }
   const tables = {
@@ -118,32 +118,11 @@ function setup(options = {}) {
     from: name => query('from', name),
     rpc(name, parameters) {
       if (name === 'current_user_roles') return Promise.resolve({ data: options.roles || ['assignor'], error: null });
-      if (name === 'get_assignment_matching_game_page' || name === 'get_assignment_matching_game_totals') {
-        const call = { kind: 'rpc', name, parameters: copy(parameters), operations: [] }; calls.push(call); reads.push(call);
-        const f = parameters.p_filters;
-        // This mock is the documented server contract; actual SQL predicates and RLS
-        // are tested separately using executable PostgreSQL fixtures.
-        let rows = tables.games.filter(row => row.organization_id === parameters.p_organization_id && row.archived_at === null);
-        rows = rows.filter(row => state.fullLeagueAccess || tables.organization_member_league_access.some(a => a.organization_id === state.organizationId && a.user_id === 'current-user' && a.league_id === row.league_id && (a.all_locations || a.location_ids.includes(row.location_id))));
-        if (f.locationIds !== null) rows = rows.filter(row => f.locationIds.includes(row.location_id));
-        if (f.leagueId) rows = rows.filter(row => row.league_id === f.leagueId);
-        if (f.levelId) rows = rows.filter(row => row.level_id === f.levelId);
-        if (f.officialId && options.matchingOfficialIds) rows = rows.filter(row => options.matchingOfficialIds.includes(row.id));
-        const explicit = f.range !== 'all' || f.locationIds !== null || f.days.length || f.times.length || f.officialId || f.leagueId || f.levelId || f.unpublishedOnly || f.selfAssignOnly || f.replacementOnly || f.completeness.length;
-        if (!explicit && f.focusGameId) rows = rows.filter(row => row.id === f.focusGameId);
-        else if (!explicit) rows = rows.filter(row => row.starts_at >= f.asOf);
-        rows.sort((a,b) => a.starts_at.localeCompare(b.starts_at) || a.id.localeCompare(b.id));
-        const error = options.fail?.(call); if (error) return Promise.resolve({ data: null, error });
-        if (options.rpcOverride) { const result = options.rpcOverride(call, state); if (result) return result; }
-        if (name.endsWith('_totals')) return Promise.resolve({ data: { total: rows.length, ranges: {}, completeness: {}, queue: {}, unpublished: 0, selfAssign: 0, replacement: 0, allStatuses: rows.length }, error: null });
-        const start = (parameters.p_page - 1) * parameters.p_page_size;
-        return Promise.resolve({ data: rows.slice(start, start + parameters.p_page_size).map(row => ({ game_id: row.id })), error: null });
-      }
       return query('rpc', name, parameters);
     },
   };
   vm.runInNewContext(compile(loadQuerySource), state);
-  return { state, reads, calls, run: () => state.runLoadQuery(), gameReads: () => reads.filter(call => call.name === 'games'), pageReads: () => reads.filter(call => call.name === 'get_assignment_matching_game_page') };
+  return { state, reads, calls, run: () => state.runLoadQuery(), gameReads: () => reads.filter(call => call.name === 'games') };
 }
 const operation = (call, method, column) => call.operations.find(([m, c]) => m === method && (column === undefined || column === c));
 const resultIds = result => Array.from(result.data, row => row.id);
@@ -282,47 +261,59 @@ test('initial view stays capped at 50, but selecting a complex searches past tha
   const shared = { games, complexes: [{ location_id: 'member', field_complex: 'North' }] };
   const initial = setup(shared);
   assert.equal((await initial.run()).data.length, 50);
-  assert.equal(operation(initial.gameReads()[0], 'in', 'id')[2].length, 50);
-  assert.equal(initial.pageReads()[0].parameters.p_filters.range, 'all');
+  assert.deepEqual(operation(initial.gameReads()[0], 'range'), ['range', 0, 50]);
+  assert(operation(initial.gameReads()[0], 'gte', 'starts_at'));
   const filtered = setup({ ...shared, state: { locationFilter: [token('North')] } });
   const result = await filtered.run();
   assert.equal(result.data.length, 26);
   assert(resultIds(result).includes('game-00100'));
   assert(result.data.every(row => row.location_id === 'member'));
   assert.equal(operation(filtered.gameReads()[0], 'gte', 'starts_at'), undefined);
-  assert.equal(operation(filtered.gameReads()[0], 'in', 'id')[2].length, 26);
+  assert.deepEqual(operation(filtered.gameReads()[0], 'range'), ['range', 0, 50]);
 });
 
-test('production complex filters select server IDs before bounded hydration and preserve scope', async () => {
+test('production complex filters apply before every game page and keep organization, league and archive scope', async () => {
   const games = Array.from({ length: 1005 }, (_, index) => game(index, 'member')).reverse();
   games.push(game(2000, 'member', { organization_id: 'foreign-org' }), game(2001, 'member', { league_id: 'blocked-league' }), game(2002, 'member', { archived_at: '2026-01-01' }), game(2003, 'same-venue-not-member'));
   const s = setup({ games, complexes: [{ location_id: 'member', field_complex: 'North' }], state: { locationFilter: [token('North')] } });
-  const result = await s.run(); assert.equal(result.data.length, 50); assert.equal(new Set(resultIds(result)).size, 50);
-  assert.equal(s.state.matchingTotals.total, 1005); assert.equal(s.state.gamePageHasMore, true);
-  assert.deepEqual(s.pageReads()[0].parameters.p_filters.locationIds, ['member']);
+  const result = await s.run();
+  assert.equal(result.data.length, 50);
+  assert.equal(new Set(resultIds(result)).size, 50);
+  assert.equal(result.hasMore, true);
+  assert.deepEqual(s.gameReads().map(call => operation(call, 'range').slice(1)), [[0, 50]]);
   for (const call of s.gameReads()) {
-    assert.equal(operation(call, 'in', 'id')[2].length, 50);
+    assert.deepEqual(operation(call, 'in', 'location_id'), ['in', 'location_id', ['member']]);
     assert.deepEqual(operation(call, 'eq', 'organization_id'), ['eq', 'organization_id', 'selected-org']);
     assert.deepEqual(operation(call, 'in', 'league_id'), ['in', 'league_id', ['allowed-league']]);
     assert.deepEqual(operation(call, 'is', 'archived_at'), ['is', 'archived_at', null]);
-    assert.equal(operation(call, 'range'), undefined);
+    assert.deepEqual(call.operations.filter(([method]) => method === 'order'), [['order', 'starts_at'], ['order', 'id']]);
+    const rangeIndex = call.operations.findIndex(([method]) => method === 'range');
+    assert(call.operations.findIndex(([method, column]) => method === 'in' && column === 'location_id') < rangeIndex);
+    assert(call.operations.findIndex(([method, column]) => method === 'eq' && column === 'organization_id') < rangeIndex);
+    assert(call.operations.findIndex(([method, column]) => method === 'in' && column === 'league_id') < rangeIndex);
   }
 });
 
-test('large complex filter is deduplicated in POST RPC and hydrates no more than 50 IDs', async () => {
+test('large complexes chunk more than 200 field IDs and overlapping selections never duplicate games', async () => {
   const complexes = Array.from({ length: 205 }, (_, index) => ({ location_id: id(index), field_complex: index < 203 ? 'North' : 'South' }));
   const games = complexes.map((row, index) => game(index, row.location_id));
   const s = setup({ complexes, games, state: { locationFilter: [token('North'), id(0), token('South'), id(204), token('North')] } });
-  const result = await s.run(); assert.equal(result.data.length, 50); assert.equal(s.state.matchingTotals.total, 205);
-  const requestedIds = s.pageReads()[0].parameters.p_filters.locationIds;
-  assert.equal(requestedIds.length, 205); assert.equal(new Set(requestedIds).size, 205);
-  assert.equal(s.gameReads().length, 1); assert.equal(operation(s.gameReads()[0], 'in', 'id')[2].length, 50);
+  const result = await s.run();
+  assert.equal(result.data.length, 50);
+  assert.equal(new Set(resultIds(result)).size, 50);
+  assert.equal(result.hasMore, true);
+  const requestedIds = s.gameReads().flatMap(call => operation(call, 'in', 'location_id')[2]);
+  assert.equal(requestedIds.length, 205);
+  assert.equal(new Set(requestedIds).size, 205);
+  assert(s.gameReads().length >= 2, 'large location filters must not make one oversized URL');
+  assert(s.gameReads().every(call => operation(call, 'in', 'location_id')[2].length <= 200));
+  assert(s.gameReads().every(call => operation(call, 'range')[1] === 0), 'each bounded ID chunk starts at page zero');
 });
 
 test('a raw saved field ID searches games even when absent from the active location catalog', async () => {
   const s = setup({ games: [game(1, 'historic'), game(2, 'other')], state: { locationFilter: ['historic'] } });
   assert.deepEqual(resultIds(await s.run()), ['game-00001']);
-  assert.deepEqual(s.pageReads()[0].parameters.p_filters.locationIds, ['historic']);
+  assert.deepEqual(operation(s.gameReads()[0], 'in', 'location_id'), ['in', 'location_id', ['historic']]);
 });
 
 test('invalid or unavailable selected complexes return zero games without issuing an unrestricted game request', async () => {
@@ -337,8 +328,8 @@ test('explicit league and level filters intersect complex membership and existin
   const games = [game(1, 'member'), game(2, 'member', { level_id: 'u18' }), game(3, 'member', { league_id: 'blocked-league' })];
   const s = setup({ games, complexes: [{ location_id: 'member', field_complex: 'North' }], state: { locationFilter: [token('North')], leagueFilter: 'allowed-league', levelFilter: 'u16' } });
   assert.deepEqual(resultIds(await s.run()), ['game-00001']);
-  assert.equal(s.pageReads()[0].parameters.p_filters.leagueId, 'allowed-league');
-  assert.equal(s.pageReads()[0].parameters.p_filters.levelId, 'u16');
+  assert.deepEqual(operation(s.gameReads()[0], 'eq', 'league_id'), ['eq', 'league_id', 'allowed-league']);
+  assert.deepEqual(operation(s.gameReads()[0], 'eq', 'level_id'), ['eq', 'level_id', 'u16']);
   const denied = setup({ games, complexes: [{ location_id: 'member', field_complex: 'North' }], state: { locationFilter: [token('North')], leagueFilter: 'blocked-league' } });
   assert.deepEqual(resultIds(await denied.run()), []);
 });
@@ -394,7 +385,7 @@ test('an optional missing complex RPC leaves old field-only filters usable but n
 test('non-managers do not call management directory RPCs and old raw-field filtering still works', async () => {
   const s = setup({ roles: ['official'], games: [game(1, 'historic'), game(2, 'other')], state: { locationFilter: ['historic'] } });
   assert.deepEqual(resultIds(await s.run()), ['game-00001']);
-  assert(!s.reads.some(call => call.name === 'get_organization_field_complexes'));
+  assert(!s.reads.some(call => call.kind === 'rpc'));
   assert.deepEqual(s.state.venueDirectory, { organizationId: 'selected-org', fields: [], complexes: {} });
 });
 
@@ -411,14 +402,14 @@ test('stale directory loads do not replace a newer organization catalog or launc
 // Execute actual production UI handlers rather than matching their source text.
 function handlerSetup() {
   const state = {
-    require, exports: {}, range: 'custom', customDate: '2026-10-22', fromDate: '', toDate: '', showCalendar: true,
+    require, exports: {}, range: 'custom', customDate: '2026-10-22', showCalendar: true,
     dayFilter: ['2026-10-22'], timeFilter: ['15:00'], locationFilter: [token('North'), 'historic'],
     officialFilter: 'official', leagueFilter: 'allowed-league', levelFilter: 'u16', completenessFilter: ['partial'],
     unpublishedOnly: true, selfAssignOnly: true, replacementOnly: true,
     selected: 'selected-game', linkSelected: ['bulk-game'], error: '', notice: '',
     saved: [], loadCount: 0, window: { prompt: () => '  North venues  ' },
   };
-  for (const name of ['Range', 'CustomDate', 'FromDate', 'ToDate', 'ShowCalendar', 'DayFilter', 'TimeFilter', 'LocationFilter', 'OfficialFilter', 'LeagueFilter', 'LevelFilter', 'CompletenessFilter', 'UnpublishedOnly', 'SelfAssignOnly', 'ReplacementOnly', 'Selected', 'LinkSelected', 'Error', 'Notice']) {
+  for (const name of ['Range', 'CustomDate', 'ShowCalendar', 'DayFilter', 'TimeFilter', 'LocationFilter', 'OfficialFilter', 'LeagueFilter', 'LevelFilter', 'CompletenessFilter', 'UnpublishedOnly', 'SelfAssignOnly', 'ReplacementOnly', 'Selected', 'LinkSelected', 'Error', 'Notice']) {
     state[`set${name}`] = value => { state[name[0].toLowerCase() + name.slice(1)] = copy(value); };
   }
   state.supabase = {
@@ -542,7 +533,7 @@ test('assignments recheck per-league location grants before pagination and disca
   assert.deepEqual(s.state.officials, []);
   for (const call of s.gameReads()) {
     assert(operation(call, 'or'));
-    assert(operation(call, 'in', 'id')[2].length <= 50);
+    assert(call.operations.findIndex(([method]) => method === 'or') < call.operations.findIndex(([method]) => method === 'range'));
   }
 });
 
@@ -552,10 +543,10 @@ test('every explicit filter keeps a bounded 50-game page and preserves past-game
     const s = setup({ games, state: filter });
     const first = await s.run();
     assert.equal(first.data.length, 50, JSON.stringify(filter));
-    assert.equal(s.state.gamePageHasMore, true);
+    assert.equal(first.hasMore, true);
     assert.deepEqual(resultIds(first), games.slice(0, 50).map(row => row.id));
     assert.equal(s.gameReads().length, 1, 'one bounded query, never readAllPages');
-    assert.equal(operation(s.gameReads()[0], 'in', 'id')[2].length, 50);
+    assert.deepEqual(operation(s.gameReads()[0], 'range'), ['range', 0, 50]);
     assert.equal(operation(s.gameReads()[0], 'gte', 'starts_at'), undefined, 'no new blanket future-only rule');
   }
 });
@@ -571,13 +562,13 @@ test('production query traverses bounded pages without dropping or duplicating g
     all.push(...resultIds(result));
     assert(result.data.length <= 50);
     assert.equal(s.gameReads().length - before, 1);
-    s.state.gamePaging.current.page++;
-  } while (s.state.gamePageHasMore);
+    if (result.nextOffsets) s.state.gamePaging.current.offsets = result.nextOffsets;
+  } while (result.hasMore);
   assert.deepEqual(all, games.map(row => row.id));
   assert.equal(new Set(all).size, 123);
   s.state.levelFilter = 'u16';
   assert.deepEqual(resultIds(await s.run()), games.slice(0, 50).map(row => row.id));
-  assert.equal(s.state.gamePaging.current.page, 1);
+  assert.deepEqual(copy(s.state.gamePaging.current.offsets), []);
 });
 
 test('multi-chunk production venue queries merge globally before the 50-game bound', async () => {
@@ -586,22 +577,22 @@ test('multi-chunk production venue queries merge globally before the 50-game bou
   const s = setup({ games, complexes, state: { locationFilter: [token('North')] } });
   const first = await s.run();
   assert.deepEqual(resultIds(first), games.slice(0, 50).map(row => row.id));
-  s.state.gamePaging.current.page = 2;
+  s.state.gamePaging.current.offsets = first.nextOffsets;
   const second = await s.run();
   assert.deepEqual(resultIds(second), games.slice(50, 100).map(row => row.id));
-  assert(s.gameReads().every(call => operation(call, 'in', 'id')[2].length <= 50));
+  assert(s.gameReads().every(call => operation(call, 'range')[2] - operation(call, 'range')[1] <= 50));
 });
 
 test('production page navigation clears off-page selections and repeated clicks are locked during load', async () => {
   const code = functionSource('changeGamePage');
-  const state = { gamePaging: { current: { page: 1 } }, totalPages: 3, gamePageLoadingRef: { current: false }, gamePageActionBusy: false };
+  const state = { gamePaging: { current: { offsets: [], previous: [], next: [50] } }, gamePageLoadingRef: { current: false }, gamePageActionBusy: false };
   for (const name of ['bulkWorking', 'linking', 'saving', 'publishing', 'confirming', 'bulkCrewWorking', 'crewTemplateWorking', 'replacementPublishing', 'calendarReviewSaving', 'fieldMoveSaving']) state[name] = false;
   for (const name of new Set(code.match(/\bset[A-Z]\w+/g))) state[name] = value => { state[name.slice(3)] = value; };
   let loads = 0;
   state.load = () => { loads++; state.gamePageLoadingRef.current = true; };
   vm.runInNewContext(compile(code), state);
-  state.changeGamePage(2);
-  assert.equal(state.gamePaging.current.page, 2);
+  state.changeGamePage(1);
+  assert.deepEqual(copy(state.gamePaging.current.offsets), [50]);
   assert.deepEqual(copy(state.LinkSelected), []);
   assert.deepEqual(copy(state.SelfAssignSelected), []);
   assert.deepEqual(copy(state.Games), []);
@@ -613,8 +604,8 @@ test('production page navigation clears off-page selections and repeated clicks 
   state.changeGamePage(1);
   assert.equal(loads, 1);
   state.gamePageLoadingRef.current = false;
-  state.changeGamePage(1);
-  assert.equal(state.gamePaging.current.page, 1);
+  state.changeGamePage(-1);
+  assert.deepEqual(copy(state.gamePaging.current.offsets), []);
   assert.equal(loads, 2);
 });
 
@@ -673,112 +664,16 @@ test('split-group move controls use complete membership rather than page-local r
   assert(source.includes('linking || !linkedGameNeighbor(unit.groupId!, listedGame.id, 1)'));
 });
 
-test('server matching IDs fill a page even when matching officials occur late in the schedule', async () => {
-  const games = Array.from({ length: 151 }, (_, index) => game(index, 'member'));
-  const s = setup({ games, matchingOfficialIds: games.slice(75).map(row => row.id), state: { officialFilter: 'ref-only-on-later-page' } });
-  const first = await s.run(); assert.equal(first.data.length, 50); assert.equal(s.state.matchingTotals.total, 76);
-  assert.equal(first.data[0].id, games[75].id); assert.equal(s.state.gamePageHasMore, true);
-  s.state.gamePaging.current.page = 2; const second = await s.run(); assert.equal(second.data.length, 26);
-  assert.equal(s.state.gamePageHasMore, false);
-});
-
-test('matching page hydrates without waiting for slower totals and later totals complete navigation', async () => {
-  let resolveTotals;
-  const totals = new Promise(resolve => { resolveTotals = resolve; });
-  const games = Array.from({ length: 80 }, (_, i) => game(i, 'member'));
-  const s = setup({ games, state: { leagueFilter: 'allowed-league' }, rpcOverride(call) {
-    if (call.name.endsWith('_totals')) return totals;
-  } });
-  const result = await s.run();
-  assert.equal(result.data.length, 50); assert.equal(s.state.matchingTotals, null);
-  resolveTotals({ data: { total: 80, ranges: {}, completeness: {}, queue: {}, unpublished: 0, selfAssign: 0, replacement: 0, allStatuses: 80 }, error: null });
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(s.state.matchingTotals.total, 80); assert.equal(s.state.gamePageHasMore, true);
-});
-
-test('stale totals response cannot replace current filter totals or next-page state', async () => {
-  const pending = [];
-  const s = setup({ games: [game(1, 'member')], state: { leagueFilter: 'allowed-league' }, rpcOverride(call) {
-    if (call.name.endsWith('_totals')) return new Promise(resolve => pending.push(resolve));
-  } });
-  await s.run(); s.state.levelFilter = 'u16'; await s.run();
-  const response = total => ({ data: { total, ranges: {}, completeness: {}, queue: {}, unpublished: 0, selfAssign: 0, replacement: 0, allStatuses: total }, error: null });
-  pending[1](response(1)); await new Promise(resolve => setImmediate(resolve));
-  pending[0](response(1000)); await new Promise(resolve => setImmediate(resolve));
-  assert.equal(s.state.matchingTotals.total, 1); assert.equal(s.state.gamePageHasMore, false);
-});
-
-test('failed totals preserve a successful page and expose retry state instead of false zero', async () => {
-  const s = setup({ games: [game(1, 'member')], fail: call => call.name.endsWith('_totals') ? { message: 'Counts offline' } : null });
-  assert.equal((await s.run()).data.length, 1);
-  assert.equal(s.state.matchingTotals, null); assert.equal(s.state.totalsError, 'Counts offline');
-});
-
-test('page RPC failure or oversized response never triggers unrestricted hydration', async () => {
-  for (const oversized of [false, true]) {
-    const s = setup({ games: Array.from({ length: 80 }, (_, i) => game(i, 'member')), rpcOverride(call) {
-      if (call.name.endsWith('_page')) return Promise.resolve(oversized
-        ? { data: Array.from({ length: 51 }, (_, i) => ({ game_id: `game-${i}` })), error: null }
-        : { data: null, error: { message: 'Page offline' } });
-    } });
-    const result = await s.run(); assert(result.error); assert.equal(s.gameReads().length, 0);
-  }
-});
-
-test('reversed From/To dates fail before totals and matching-page RPCs', async () => {
-  const s = setup({ state: { range: 'dateRange', fromDate: '2026-10-24', toDate: '2026-10-23' } });
-  assert.equal(await s.run(), undefined);
-  assert.equal(s.state.error, 'From date must be on or before To date.');
-  assert.equal(s.pageReads().length, 0); assert.equal(s.gameReads().length, 0);
-});
-
-test('open date endpoints are forwarded without coercion and saved views round-trip both dates', async () => {
-  for (const dates of [{ fromDate: '2026-10-23', toDate: '' }, { fromDate: '', toDate: '2026-10-24' }]) {
-    const s = setup({ state: { range: 'dateRange', ...dates } }); await s.run();
-    assert.equal(s.pageReads()[0].parameters.p_filters.fromDate, dates.fromDate);
-    assert.equal(s.pageReads()[0].parameters.p_filters.toDate, dates.toDate);
-  }
-  const s = handlerSetup(); s.range = 'dateRange'; s.fromDate = '2026-10-23'; s.toDate = '2026-10-24';
-  await s.saveCurrentView(); s.clearGameFilters(); s.applySavedView({ ...s.saved[0].row.filters, id: 'dates', name: 'Dates' });
-  assert.equal(s.fromDate, '2026-10-23'); assert.equal(s.toDate, '2026-10-24'); assert.equal(s.range, 'dateRange');
-});
-
-test('numeric navigation validates pages and preserves action lockout before changing state', () => {
-  const code = functionSource('changeGamePage');
-  const state = { gamePaging: { current: { page: 2 } }, totalPages: 8, gamePageLoadingRef: { current: false }, gamePageActionBusy: false };
-  for (const name of new Set(code.match(/\bset[A-Z]\w+/g))) state[name] = value => { state[name.slice(3)] = value; };
-  let loads = 0; state.load = () => { loads++; };
-  vm.runInNewContext(compile(code), state);
-  for (const page of [0, -1, 9, NaN, 1.5, 2]) state.changeGamePage(page);
-  assert.equal(loads, 0); assert.equal(state.gamePaging.current.page, 2);
-  state.gamePageActionBusy = true; state.changeGamePage(8); assert.equal(loads, 0);
-  state.gamePageActionBusy = false; state.changeGamePage(8); assert.equal(state.gamePaging.current.page, 8);
-  state.changeGamePage(1); assert.equal(state.gamePaging.current.page, 1); assert.equal(loads, 2);
-});
-
-test('assignment refresh reloads matching IDs and totals, including an empty current page', async () => {
-  const code = functionSource('refreshAssignmentState'); const calls = [];
-  const state = { games: [], loadCandidateScheduleConflicts: async () => null, load: async reuse => calls.push(reuse) };
-  for (const name of new Set(code.match(/\bset[A-Z]\w+/g))) state[name] = () => {};
-  vm.runInNewContext(compile(code), state);
-  assert.equal(await state.refreshAssignmentState(), true); assert.deepEqual(calls, [true]);
-});
-
-test('every successful status update refreshes matching IDs while failed status leaves source rows unchanged', async () => {
-  const code = functionSource('changeGameStatus');
-  for (const status of ['active', 'suspended', 'canceled', 'rained_out']) {
-    for (const ok of [true, false]) {
-      let refreshes = 0;
-      const state = { canManage: true, organizationId: 'org', games: [{ id: 'game', status: 'active' }], gameStatusOptions: [],
-        fetch: async () => ({ ok, json: async () => ok ? {} : { error: 'Blocked by conflict' } }),
-        showGameConflictPopup: () => {}, refreshAssignmentState: async () => refreshes++ };
-      for (const name of new Set(code.match(/\bset[A-Z]\w+/g))) state[name] = value => {
-        const key = name.slice(3); state[key] = typeof value === 'function' ? value(state.games) : value;
-      };
-      vm.runInNewContext(compile(code), state); await state.changeGameStatus('game', status);
-      assert.equal(refreshes, ok ? 1 : 0, `${status}: success=${ok}`);
-      if (ok) assert.equal(state.Games[0].status, status); else assert.equal(state.games[0].status, 'active');
-      assert.equal(state.GameStatusSaving, '');
-    }
-  }
+test('sparse first pages preserve Next and never claim that no games match globally', async () => {
+  const games = Array.from({ length: 101 }, (_, index) => game(index, 'member'));
+  const s = setup({ games, state: { officialFilter: 'ref-only-on-later-page' } });
+  const first = await s.run();
+  assert.equal(first.data.length, 50);
+  assert.equal(first.hasMore, true);
+  s.state.gamePaging.current.offsets = first.nextOffsets;
+  const second = await s.run();
+  assert(second.data.some(row => row.id === games[75].id));
+  assert(source.includes('No games on this page match these filters'));
+  assert(source.includes('Use Next 50 games to continue searching. Later pages may have matches.'));
+  assert(!source.includes('"No games match these filters"'));
 });

@@ -224,10 +224,3 @@
   .assignmentPositionsTable button,
   .assignmentPositionsTable select { max-width: 100%; }
 }
-
-/* Inclusive From/To controls and bounded numeric paging reuse existing styles. */
-.assignmentDateRangeControls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
-.assignmentDateRangeControls input { min-width: 0; width: 100%; box-sizing: border-box; }
-.assignmentNumberedPages { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
-.assignmentNumberedPages button { min-height: 44px; min-width: 44px; }
-.assignmentNumberedPages [aria-current="page"] { font-weight: 700; }

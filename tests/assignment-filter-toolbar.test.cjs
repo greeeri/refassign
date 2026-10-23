@@ -21,7 +21,7 @@ const chipsEnd = source.indexOf('  const attentionQueue =', chipsStart);
 function setup(overrides = {}) {
   const state = {
     require, exports: {}, canManage: true, showMoreFilters: false, showCalendar: false,
-    range: 'all', customDate: '', fromDate: '', toDate: '', matchingTotals: null, leagueFilter: '', levelFilter: '', officialFilter: '',
+    range: 'all', customDate: '', leagueFilter: '', levelFilter: '', officialFilter: '',
     locationFilter: [], dayFilter: [], timeFilter: [], completenessFilter: [],
     selfAssignOnly: false, unpublishedOnly: false, replacementOnly: false,
     selected: 'game-a', linkSelected: ['game-a'], overrideOfficial: 'official-a',
@@ -39,7 +39,7 @@ function setup(overrides = {}) {
     saveCurrentView: () => {}, deleteSavedView: () => {}, setNotice: () => {},
     ...overrides,
   };
-  for (const key of ['showMoreFilters', 'showCalendar', 'range', 'customDate', 'fromDate', 'toDate', 'leagueFilter', 'levelFilter', 'officialFilter', 'locationFilter', 'dayFilter', 'timeFilter', 'completenessFilter', 'selfAssignOnly', 'unpublishedOnly', 'replacementOnly', 'selected', 'linkSelected', 'overrideOfficial']) {
+  for (const key of ['showMoreFilters', 'showCalendar', 'range', 'customDate', 'leagueFilter', 'levelFilter', 'officialFilter', 'locationFilter', 'dayFilter', 'timeFilter', 'completenessFilter', 'selfAssignOnly', 'unpublishedOnly', 'replacementOnly', 'selected', 'linkSelected', 'overrideOfficial']) {
     state[`set${key[0].toUpperCase()}${key.slice(1)}`] = value => { state[key] = typeof value === 'function' ? value(state[key]) : value; };
   }
   Object.defineProperties(state, {
@@ -62,7 +62,7 @@ function nodes(node) {
 }
 const byClass = (s, name) => nodes(s.renderToolbar()).find(node => node.props.className?.split(' ').includes(name));
 const byLabel = (s, name) => nodes(s.renderToolbar()).find(node => node.props['aria-label'] === name);
-const snapshot = s => JSON.stringify(Object.fromEntries(['range', 'customDate', 'fromDate', 'toDate', 'leagueFilter', 'levelFilter', 'officialFilter', 'locationFilter', 'dayFilter', 'timeFilter', 'completenessFilter', 'selfAssignOnly', 'unpublishedOnly', 'replacementOnly', 'selected', 'linkSelected'].map(key => [key, s[key]])));
+const snapshot = s => JSON.stringify(Object.fromEntries(['range', 'customDate', 'leagueFilter', 'levelFilter', 'officialFilter', 'locationFilter', 'dayFilter', 'timeFilter', 'completenessFilter', 'selfAssignOnly', 'unpublishedOnly', 'replacementOnly', 'selected', 'linkSelected'].map(key => [key, s[key]])));
 
 test('primary groups are League, Venue, Calendar and the saved view controls stay paired', () => {
   const s = setup();
@@ -145,12 +145,12 @@ test('removing League also clears its dependent Level, matching the existing lea
   assert.deepEqual(s.locationFilter, ['field-a']);
 });
 
-test('explicit dates remain effective alongside league filters and removable', () => {
+test('only effective date ranges are active chips and direct-filter all-dates semantics are explained', () => {
   const s = setup({ range: 'custom', customDate: '2026-10-22' });
   assert(byLabel(s, 'Remove Date: 2026-10-22 filter'));
   s.leagueFilter = 'league-a';
-  assert(s.activeGameFilters.some(chip => chip.key === 'date'));
-  assert(byLabel(s, 'From date')); assert(byLabel(s, 'To date'));
+  assert(!s.activeGameFilters.some(chip => chip.key === 'date'));
+  assert(byClass(s, 'assignmentDateScopeNote').props.children.includes('all dates'));
   assert.equal(s.range, 'custom'); assert.equal(s.customDate, '2026-10-22');
   s.leagueFilter = '';
   byLabel(s, 'Remove Date: 2026-10-22 filter').props.onClick();
@@ -191,25 +191,18 @@ test('non-managers retain their View, Venue, Day, Time and Calendar controls wit
   assert(!byLabel(s, 'Show games in league'));
 });
 
-test('numeric paging distinguishes global totals from page-only actions at both ends of results', () => {
-  const guidance = functions.get('renderGamePagination').getText(ast);
+test('bounded-page guidance stays adjacent to results and explicitly limits counts and selection', () => {
+  assert(!toolbar.getText(ast).includes('matching games from'));
+  const notice = source.indexOf('<div className="assignmentResultsNotice" role="status">');
+  const resultTable = source.indexOf('className="assignmentGameTable"', notice);
+  assert(notice > toolbar.end && resultTable > notice);
+  const guidance = source.slice(notice, resultTable);
   assert(guidance.includes('maximum 50'));
-  assert(guidance.includes('Sorting, selections and exports apply to this page only'));
-  assert(guidance.includes('Linked-game assignments still apply to the whole authorized group'));
-  assert.equal((source.match(/\{renderGamePagination\(\)\}/g) || []).length, 2);
-  assert(guidance.includes('>First<') && guidance.includes('>Previous<') && guidance.includes('>Next<') && guidance.includes('>Last<'));
+  assert(guidance.includes('Filters may leave fewer matches on a page'));
+  assert(guidance.includes('Counts, sorting, selections and exports apply to this page only'));
+  assert(guidance.includes('Previous 50 games') && guidance.includes('Next 50 games'));
   assert(source.includes('Select All on This Page'));
-});
-
-test('From and To callbacks select an inclusive range and preserve league/venue filters', () => {
-  const s = setup({ leagueFilter: 'league-a', locationFilter: ['field-a'] });
-  byLabel(s, 'From date').props.onChange({ target: { value: '2026-10-23' } });
-  byLabel(s, 'To date').props.onChange({ target: { value: '2026-10-24' } });
-  assert.equal(s.range, 'dateRange'); assert.equal(s.fromDate, '2026-10-23'); assert.equal(s.toDate, '2026-10-24');
-  assert.equal(s.leagueFilter, 'league-a'); assert.deepEqual(s.locationFilter, ['field-a']);
-  assert.equal(s.selected, ''); assert.equal(s.linkSelected.length, 0);
-  const chip = s.activeGameFilters.find(x => x.key === 'date'); assert(chip.label.includes('2026-10-23 to 2026-10-24'));
-  s.clearGameFilters(); assert.equal(s.fromDate, ''); assert.equal(s.toDate, '');
+  assert(!source.includes('Select a filter to search beyond this list.'));
 });
 
 test('responsive groups use basic grids/flex, 44px controls, visible focus and phone disclosure without new fonts or palette', () => {
@@ -229,23 +222,3 @@ test('responsive groups use basic grids/flex, 44px controls, visible focus and p
 });
 
 module.exports = { setup, nodes };
-
-test('actual numeric pager renders bounded numbers and wires First Previous Next Last to absolute pages', () => {
-  const module = { exports: {} };
-  vm.runInNewContext(ts.transpileModule(fs.readFileSync('lib/assignments/matchingGames.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { module, exports: module.exports });
-  const destinations = [];
-  const state = { require, exports: {}, matchingTotals: { total: 387 }, filteredGames: Array(50), totalPages: 8, gamePageNumber: 4,
-    gamePageLoading: false, gamePageActionBusy: false, gamePageHasMore: true, error: '', totalsError: '',
-    pageNumbers: module.exports.pageNumbers, changeGamePage: page => destinations.push(page), load: () => {} };
-  vm.runInNewContext(ts.transpileModule(functions.get('renderGamePagination').getText(ast), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText, state);
-  const controls = nodes(state.renderGamePagination());
-  const buttons = controls.filter(node => node.type === 'button');
-  for (const label of ['First', 'Previous', 'Next', 'Last']) buttons.find(node => node.props.children === label).props.onClick();
-  assert.deepEqual(destinations, [1, 3, 5, 8]);
-  assert.deepEqual(buttons.filter(node => typeof node.props.children === 'number').map(node => node.props.children), [2, 3, 4, 5, 6]);
-  assert.equal(buttons.find(node => node.props.children === 4).props['aria-current'], 'page');
-  state.gamePageLoading = true;
-  assert(nodes(state.renderGamePagination()).filter(node => node.type === 'button').every(node => node.props.disabled));
-  state.gamePageLoading = false; state.gamePageActionBusy = true;
-  assert(nodes(state.renderGamePagination()).filter(node => node.type === 'button').every(node => node.props.disabled));
-});
