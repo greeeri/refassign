@@ -150,7 +150,7 @@ test('explicit dates remain effective alongside league filters and removable', (
   assert(byLabel(s, 'Remove Date: 2026-10-22 filter'));
   s.leagueFilter = 'league-a';
   assert(s.activeGameFilters.some(chip => chip.key === 'date'));
-  assert(byLabel(s, 'From date')); assert(byLabel(s, 'To date'));
+  assert(!byLabel(s, 'From date')); assert(!byLabel(s, 'To date'));
   assert.equal(s.range, 'custom'); assert.equal(s.customDate, '2026-10-22');
   s.leagueFilter = '';
   byLabel(s, 'Remove Date: 2026-10-22 filter').props.onClick();
@@ -191,18 +191,38 @@ test('non-managers retain their View, Venue, Day, Time and Calendar controls wit
   assert(!byLabel(s, 'Show games in league'));
 });
 
-test('numeric paging distinguishes global totals from page-only actions at both ends of results', () => {
+test('numeric paging stays at both ends without the unsolicited explanatory paragraph', () => {
   const guidance = functions.get('renderGamePagination').getText(ast);
-  assert(guidance.includes('maximum 50'));
-  assert(guidance.includes('Sorting, selections and exports apply to this page only'));
-  assert(guidance.includes('Linked-game assignments still apply to the whole authorized group'));
+  assert(!guidance.includes('matching games'));
+  assert(!guidance.includes('maximum 50'));
+  assert(!guidance.includes('Sorting, selections and exports apply to this page only'));
+  assert(!guidance.includes('Linked-game assignments still apply to the whole authorized group'));
   assert.equal((source.match(/\{renderGamePagination\(\)\}/g) || []).length, 2);
   assert(guidance.includes('>First<') && guidance.includes('>Previous<') && guidance.includes('>Next<') && guidance.includes('>Last<'));
   assert(source.includes('Select All on This Page'));
 });
 
+test('pagination is compact and right aligned while retaining touch-sized controls on phones', () => {
+  const rules = postcss.parse(fs.readFileSync('app/assignment-center-responsive.css', 'utf8'));
+  const declarations = selector => {
+    const rule = rules.nodes.find(node => node.type === 'rule' && node.selector === selector);
+    assert(rule, `missing ${selector}`);
+    return Object.fromEntries(rule.nodes.filter(node => node.type === 'decl').map(node => [node.prop, node.value]));
+  };
+  const pager = declarations('.assignmentNumberedPages');
+  assert.equal(pager['justify-content'], 'flex-end');
+  assert.equal(pager['flex-wrap'], 'wrap');
+  assert.equal(pager.gap, '4px');
+  const button = declarations('.assignmentNumberedPages button');
+  assert.equal(button['min-height'], '28px');
+  assert.equal(button['font-size'], '12px');
+  const touch = rules.nodes.find(node => node.type === 'atrule' && node.params === '(max-width: 600px), (pointer: coarse)');
+  assert(touch?.toString().includes('min-height: 44px'));
+});
+
 test('From and To callbacks select an inclusive range and preserve league/venue filters', () => {
   const s = setup({ leagueFilter: 'league-a', locationFilter: ['field-a'] });
+  byLabel(s, 'Date range').props.onChange({ target: { value: 'dateRange' } });
   byLabel(s, 'From date').props.onChange({ target: { value: '2026-10-23' } });
   byLabel(s, 'To date').props.onChange({ target: { value: '2026-10-24' } });
   assert.equal(s.range, 'dateRange'); assert.equal(s.fromDate, '2026-10-23'); assert.equal(s.toDate, '2026-10-24');

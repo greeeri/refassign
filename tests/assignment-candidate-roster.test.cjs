@@ -10,12 +10,16 @@ function load(path, dependencies = {}) {
   return module.exports;
 }
 const paging = load('lib/supabase/readAll.ts');
-const { assignmentCandidateLeagueScope, isLeagueCandidate, loadAssignmentOfficialRoster } = load('lib/assignments/candidateRoster.ts', { '../supabase/readAll': paging });
+const personalRoster = load('lib/assignments/personalRoster.ts', { '../supabase/readAll': paging });
+const { assignmentCandidateLeagueScope, isLeagueCandidate, loadAssignmentOfficialRoster } = load('lib/assignments/candidateRoster.ts', { '../supabase/readAll': paging, './personalRoster': personalRoster });
 const copy = value => JSON.parse(JSON.stringify(value));
 const official = (id, leagues = [], changes = {}) => ({ id, first_name: id, last_name: 'Official', active: true, leagues, ...changes });
-function setup({ officials = [], links = officials.map(row => ({ organization_id: 'org', official_id: row.id, active: true })), fail } = {}) {
+function setup({ officials = [], links = officials.map(row => ({ organization_id: 'org', official_id: row.id, active: true })), fail, personalIds = null, rosterError = null } = {}) {
   const calls = [];
-  const client = { from(table) {
+  const client = { rpc(name) {
+    if (name === 'get_personal_roster_state') return Promise.resolve({ data: { enabled: personalIds !== null, owner_wide: false, prepared: true, can_manage: true }, error: rosterError });
+    const q = { order() { return q; }, range(from, to) { return Promise.resolve({ data: (personalIds || []).slice(from, to + 1).map(official_id => ({official_id})), error: null }); } }; return q;
+  }, from(table) {
     const call = { table, operations: [] }; calls.push(call);
     const query = { then(resolve, reject) {
       const error = fail?.(call);
@@ -159,4 +163,19 @@ test('candidate, sidebar, bulk and crew search use league-only gates; existing w
   vm.runInNewContext(compile(`${fn('leagueCandidates')}\n${fn('candidates')}\nresult = candidates({id: 'center'});`), runtime);
   assert.deepEqual(copy(runtime.result.map(row => row.id)), ['level-warning']);
   assert.deepEqual(copy(runtime.result[0].reasons), ['Not eligible as Center for level Varsity Boys', 'Availability block']);
+});
+
+ test('personal roster intersects candidates at query time but retains assigned display identities', async () => {
+  const t = setup({officials: [official('mine', ['a']), official('other', ['a']), official('old', ['a'])], personalIds: ['mine']});
+  const result = await loadAssignmentOfficialRoster(t.client, 'org', ['a'], ['old']);
+  assert.deepEqual(candidateIds(result), ['mine']); assert.deepEqual(ids(result), ['mine', 'old']);
+  assert.deepEqual(op(t.calls[0], 'in', 'official_id')[2], ['mine']);
+});
+test('empty personal roster never falls back and failed scope never downloads profiles', async () => {
+  for (const options of [{personalIds: []}, {rosterError: {message: 'Cannot verify'}}]) {
+    const t = setup({officials: [official('other', ['a'])], ...options});
+    const result = await loadAssignmentOfficialRoster(t.client, 'org', ['a'], []);
+    assert.deepEqual(candidateIds(result), []); assert.equal(t.calls.length, 0);
+    assert.equal(Boolean(result.error), Boolean(options.rosterError));
+  }
 });

@@ -5968,9 +5968,6 @@ export default function AssignmentsManagerV2({
     function renderGamePagination() {
     return (
 <div className="assignmentResultsNotice" role="status">
-              {matchingTotals ? `${matchingTotals.total} matching games` : "Loading game totals…"} · {filteredGames.length} displayed (maximum 50).
-              {" "}Sorting, selections and exports apply to this page only.
-              {" "}Linked-game assignments still apply to the whole authorized group, including games on other pages.
               <div className="assignmentNumberedPages" aria-label="Game pages">
                 <button type="button" className="secondary" disabled={gamePageLoading || gamePageNumber === 1 || gamePageActionBusy} onClick={() => changeGamePage(1)}>First</button>
                 <button type="button" className="secondary" disabled={gamePageLoading || gamePageNumber === 1 || gamePageActionBusy} onClick={() => changeGamePage(gamePageNumber - 1)}>Previous</button>
@@ -9271,10 +9268,10 @@ export default function AssignmentsManagerV2({
                     </button>
                   </div>
                 )}
-                <div className="assignmentDateRangeControls">
+                {range === "dateRange" && <div className="assignmentDateRangeControls">
                   <label className="assignmentToolbarField"><span>From</span><input type="date" aria-label="From date" value={fromDate} onChange={(event) => { setFromDate(event.target.value); setRange("dateRange"); setSelected(""); setLinkSelected([]); }} /></label>
                   <label className="assignmentToolbarField"><span>To</span><input type="date" aria-label="To date" value={toDate} onChange={(event) => { setToDate(event.target.value); setRange("dateRange"); setSelected(""); setLinkSelected([]); }} /></label>
-                </div>
+                </div>}
               </div>
             </div>
             <div className="assignmentSecondaryFilters">

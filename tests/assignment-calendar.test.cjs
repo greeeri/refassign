@@ -18,6 +18,7 @@ const attr = (node, name) => node.openingElement.attributes.properties.find(attr
 const calendar = elements.find(node => attr(node, 'className')?.includes('assignmentCalendarButton'));
 const picker = elements.find(node => attr(node, 'className') === 'assignmentCustomDateRow');
 const dateRange = elements.find(node => attr(node, 'aria-label') === 'Date range');
+const calendarGroup = elements.find(node => attr(node, 'className') === 'assignmentCalendarGroup');
 function setup() {
   assert(calendar, 'The production Calendar button is present');
   assert(picker, 'The existing Specific Date picker is present');
@@ -40,6 +41,7 @@ function setup() {
     `function renderCalendar() { return (${calendar.getText(ast)}); }`,
     `function renderPicker() { return showCalendar && (${picker.getText(ast)}); }`,
     `function renderDateRange() { return (${dateRange.getText(ast)}); }`,
+    `function renderCalendarGroup() { return (${calendarGroup.getText(ast)}); }`,
   ].join('\n');
   vm.runInNewContext(ts.transpileModule(code, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
@@ -117,6 +119,52 @@ test('the Date dropdown remains an alternative and preset ranges close the calen
   assert.equal(s.showCalendar, false);
   assert.equal(s.range, 'today');
   assert.deepEqual([...s.expandedGameIds], ['game-a', 'game-b']);
+});
+
+test('default and preset ranges do not render unsolicited date fields', () => {
+  const s = setup();
+  // Render the production group, including its actual visibility conditions.
+  // Rendering extracted inputs alone would miss an unconditional From/To row.
+  const dateInputs = () => nodes(s.renderCalendarGroup()).filter(node => node.type === 'input' && node.props.type === 'date');
+  assert.equal(dateInputs().length, 0, 'All Games initially keeps the calendar controls closed');
+  s.matchingTotals = { ranges: { all: 921, today: 0 } };
+  assert.equal(dateInputs().length, 0, 'loading counts does not open date controls');
+  for (const range of ['all', 'today', 'tomorrow', 'thisWeek', 'nextWeek']) {
+    s.renderDateRange().props.onChange({ target: { value: range } });
+    assert.equal(dateInputs().length, 0, `${range} keeps date controls closed`);
+  }
+  s.renderCalendar().props.onClick();
+  assert.equal(dateInputs().length, 1, 'Calendar only opens the existing Specific Date input');
+  nodes(s.renderCalendarGroup()).find(node => node.type === 'button' && node.props.children === 'Done').props.onClick();
+  assert.equal(dateInputs().length, 0, 'Done hides date controls');
+});
+
+test('From/To fields appear only for the selected date-range mode and still update the range', () => {
+  const s = setup();
+  const input = label => nodes(s.renderCalendarGroup()).find(node => node.type === 'input' && node.props['aria-label'] === label);
+  s.renderDateRange().props.onChange({ target: { value: 'dateRange' } });
+  assert.equal(s.range, 'dateRange');
+  assert.equal(s.showCalendar, false, 'choosing a range does not open the Specific Date picker');
+  assert.equal(input('From date').props.value, '');
+  assert.equal(input('To date').props.value, '');
+  input('From date').props.onChange({ target: { value: '2026-10-24' } });
+  input('To date').props.onChange({ target: { value: '2026-10-25' } });
+  assert.equal(input('From date').props.value, '2026-10-24');
+  assert.equal(input('To date').props.value, '2026-10-25');
+  assert.equal(s.range, 'dateRange');
+  assert.equal(s.selected, '');
+  assert.equal(s.linkSelected.length, 0);
+  assert.deepEqual(s.locationFilter, ['field-a']);
+  assert.deepEqual(s.timeFilter, ['15:00']);
+  assert.equal(s.leagueFilter, 'league-a');
+  s.renderDateRange().props.onChange({ target: { value: 'today' } });
+  assert.equal(input('From date'), undefined);
+  assert.equal(input('To date'), undefined);
+  assert.equal(s.fromDate, '');
+  assert.equal(s.toDate, '');
+  s.renderDateRange().props.onChange({ target: { value: 'custom' } });
+  assert.equal(input('From date'), undefined, 'Choose a Date does not expose From/To');
+  assert.equal(input('To date'), undefined);
 });
 
 test('workspace role routing and responsive toolbar styling stay unchanged', () => {

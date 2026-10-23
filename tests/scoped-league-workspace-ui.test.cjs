@@ -11,7 +11,7 @@ function moduleFrom(path, dependencies = {}) {
   return module.exports;
 }
 const paging = moduleFrom('lib/supabase/readAll.ts');
-const candidateRoster = moduleFrom('lib/assignments/candidateRoster.ts', { '../supabase/readAll': paging });
+const candidateRoster = moduleFrom('lib/assignments/candidateRoster.ts', { '../supabase/readAll': paging, './personalRoster': { readPersonalRosterScope: async () => ({ids: null, error: null}) } });
 const scope = moduleFrom('components/leagueGameScope.ts');
 function parse(path) {
   const text = fs.readFileSync(path, 'utf8');
