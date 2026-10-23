@@ -9703,7 +9703,6 @@ export default function AssignmentsManagerV2({
               {bulkWorking && <span>Working…</span>}
             </div>
           )}
-          {renderGamePagination()}
           <div
             className="assignmentGameTable"
             style={{

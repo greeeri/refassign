@@ -191,13 +191,23 @@ test('non-managers retain their View, Venue, Day, Time and Calendar controls wit
   assert(!byLabel(s, 'Show games in league'));
 });
 
-test('numeric paging stays at both ends without the unsolicited explanatory paragraph', () => {
+test('numeric paging appears once below the game table without the unsolicited explanatory paragraph', () => {
   const guidance = functions.get('renderGamePagination').getText(ast);
   assert(!guidance.includes('matching games'));
   assert(!guidance.includes('maximum 50'));
   assert(!guidance.includes('Sorting, selections and exports apply to this page only'));
   assert(!guidance.includes('Linked-game assignments still apply to the whole authorized group'));
-  assert.equal((source.match(/\{renderGamePagination\(\)\}/g) || []).length, 2);
+  const pagers = [];
+  function findPagers(node) {
+    if (ts.isJsxExpression(node) && node.expression?.getText(ast) === 'renderGamePagination()') pagers.push(node);
+    ts.forEachChild(node, findPagers);
+  }
+  findPagers(ast);
+  assert.equal(pagers.length, 1, 'render only the bottom pager, never a duplicate above the table');
+  const gameTable = elements.find(node => attr(node, 'className')?.text === 'assignmentGameTable');
+  assert(gameTable, 'the Games table remains present');
+  assert(pagers[0].pos > gameTable.end, 'the only pager follows the complete Games table');
+  assert.equal(pagers[0].parent, gameTable.parent, 'keep the bottom pager beside the Games table');
   assert(guidance.includes('>First<') && guidance.includes('>Previous<') && guidance.includes('>Next<') && guidance.includes('>Last<'));
   assert(source.includes('Select All on This Page'));
 });
