@@ -22,14 +22,14 @@ function setup() {
   assert(calendar, 'The production Calendar button is present');
   assert(picker, 'The existing Specific Date picker is present');
   const state = {
-    require, exports: {}, showCalendar: false, range: 'all', customDate: '', fromDate: '', toDate: '', matchingTotals: null,
+    require, exports: {}, showCalendar: false, range: 'all', customDate: '',
     selected: 'game-a', linkSelected: ['game-a'], overrideOfficial: 'official-a',
     expandedGameIds: new Set(['game-a', 'game-b']),
     locationFilter: ['field-a'], dayFilter: [], timeFilter: ['15:00'],
     leagueFilter: 'league-a', officialFilter: 'official-a',
     filteredGames: [], games: [], filters: [['all', 'All Games'], ['today', "Today's Games"]],
   };
-  for (const name of ['showCalendar', 'range', 'customDate', 'fromDate', 'toDate', 'selected', 'linkSelected', 'overrideOfficial']) {
+  for (const name of ['showCalendar', 'range', 'customDate', 'selected', 'linkSelected', 'overrideOfficial']) {
     state[`set${name[0].toUpperCase()}${name.slice(1)}`] = value => {
       state[name] = typeof value === 'function' ? value(state[name]) : value;
     };
