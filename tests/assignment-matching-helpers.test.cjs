@@ -16,3 +16,10 @@ test('page window never exceeds five numbers and reaches both edges',()=>{
  assert.deepEqual(Array.from(pageNumbers(8,8)),[4,5,6,7,8]);
  assert.deepEqual(Array.from(pageNumbers(1,1)),[1]);
 });
+
+const {normalizeGameSummary,emptyGameSummary}=moduleBox.exports;
+test('simple summary exposes only total games and games with open positions',()=>{
+ assert.equal(JSON.stringify(normalizeGameSummary({total:12,openGames:5,queue:{attention:9}})),JSON.stringify({total:12,openGames:5}));
+ assert.equal(JSON.stringify(emptyGameSummary()),JSON.stringify({total:0,openGames:0}));
+ for(const v of [null,[],{total:-1,openGames:0},{total:4},{total:4,openGames:-1},{total:4,openGames:5},{total:4,openGames:1.5},{total:'4',openGames:1}]) assert.equal(normalizeGameSummary(v),null);
+});

@@ -21,7 +21,7 @@ import {
 import { applyLeagueGameAccess, canAccessLeagueGameLocation, leagueGameAccessKey, type LeagueGameAccess } from "./leagueGameScope";
 import { createClient } from "../lib/supabase/client";
 import { readAllForChunks, readAllPages } from "../lib/supabase/readAll";
-import { emptyMatchingTotals, normalizeMatchingTotals, pageNumbers, type MatchingGameTotals } from "../lib/assignments/matchingGames";
+import { emptyGameSummary, normalizeGameSummary, pageNumbers, type MatchingGameSummary } from "../lib/assignments/matchingGames";
 import { assignmentCandidateLeagueScope, isLeagueCandidate, loadAssignmentOfficialRoster } from "../lib/assignments/candidateRoster";
 import { announceUndoAvailable } from "./UndoCenter";
 import SelfAssignOverrideRequests from "./SelfAssignOverrideRequests";
@@ -380,8 +380,8 @@ export default function AssignmentsManagerV2({
   const initialFilterLoad = useRef(true);
   const loadVersion = useRef(0);
   const gamePaging = useRef({ key: "", page: 1, asOf: new Date().toISOString() });
-  const matchingTotalsRequest = useRef<{ key: string; totals: MatchingGameTotals | null; pending?: boolean; start?: () => void } | null>(null);
-  const [matchingTotals, setMatchingTotals] = useState<MatchingGameTotals | null>(null);
+  const matchingTotalsRequest = useRef<{ key: string; totals: MatchingGameSummary | null; pending?: boolean; start?: () => void } | null>(null);
+  const [matchingTotals, setMatchingTotals] = useState<MatchingGameSummary | null>(null);
   const [totalsError, setTotalsError] = useState("");
   const [totalsLoading, setTotalsLoading] = useState(false);
   const totalPages = matchingTotals ? Math.max(1, Math.ceil(matchingTotals.total / 50)) : null;
@@ -718,7 +718,8 @@ export default function AssignmentsManagerV2({
     finally {
       if (version === loadVersion.current) {
         gamePageLoadingRef.current = false; setGamePageLoading(false);
-        // Totals are opt-in; loading a page never scans the matching history.
+        // Ready assignment controls do not wait for the two background counts.
+        matchingTotalsRequest.current?.start?.();
       }
     }
   }
@@ -801,7 +802,7 @@ export default function AssignmentsManagerV2({
     setAllowedGameAccess(scopedGameAccess);
     if (!fullLeagueAccess && !scopedGameAccess.some((grant) => grant.all_locations === true || grant.location_ids?.length)) {
       matchingTotalsRequest.current = null; setTotalsError(""); setTotalsLoading(false);
-      setGames([]); setMatchingTotals(emptyMatchingTotals()); setInitialGamesReady(true);
+      setGames([]); setMatchingTotals(emptyGameSummary()); setInitialGamesReady(true);
       return;
     }
     const { data: userRoles } = await rolePromise;
@@ -873,16 +874,16 @@ export default function AssignmentsManagerV2({
     // Reuse a pending or completed request while navigating that snapshot.
     const totalsKey = JSON.stringify([userData.user?.id, pageKey, cursor.asOf]);
     if (matchingTotalsRequest.current?.key !== totalsKey) {
-      const request = { key: totalsKey, totals: null as MatchingGameTotals | null, pending: false, start: undefined as (() => void) | undefined };
+      const request = { key: totalsKey, totals: null as MatchingGameSummary | null, pending: false, started: false, start: undefined as (() => void) | undefined };
       matchingTotalsRequest.current = request;
       setMatchingTotals(null); setTotalsError(""); setTotalsLoading(false);
       request.start = () => {
-        if (matchingTotalsRequest.current !== request || request.pending || request.totals) return;
-        request.pending = true;
+        if (matchingTotalsRequest.current !== request || request.started) return;
+        request.started = true; request.pending = true;
         setTotalsError(""); setTotalsLoading(true);
         void Promise.resolve().then(() => {
           if (matchingTotalsRequest.current !== request) return null;
-          return supabase.rpc("get_assignment_matching_game_totals", {
+          return supabase.rpc("get_assignment_game_summary", {
             p_organization_id: organizationId, p_filters: matchingFilters,
           });
         }).then((result) => {
@@ -890,7 +891,7 @@ export default function AssignmentsManagerV2({
           request.pending = false; setTotalsLoading(false);
           const { data, error: countError } = result;
           if (countError) { setMatchingTotals(null); setTotalsError(countError.message); return; }
-          const totals = normalizeMatchingTotals(data);
+          const totals = normalizeGameSummary(data);
           if (!totals) { setMatchingTotals(null); setTotalsError("Game totals could not be read."); return; }
           request.totals = totals;
           setMatchingTotals(totals); setTotalsError(""); setTotalsLoading(false);
@@ -1617,7 +1618,6 @@ export default function AssignmentsManagerV2({
       (slot) => slot.game_id === gameId && slot.status === "open",
     ).length;
   }
-  const selfAssignGameCount = matchingTotals?.selfAssign ?? "—";
   function gameNeedsReplacement(listedGame: Game) {
     return positions
       .filter((position) => position.sport_id === listedGame.sport_id)
@@ -1635,7 +1635,6 @@ export default function AssignmentsManagerV2({
   // The database applies every filter before its 50-row limit. Do not filter
   // this page a second time using incomplete client-side related records.
   const baseFilteredGames = games;
-  const unpublishedFilteredCount = matchingTotals?.unpublished ?? "—";
   function compareGames(a: Game, b: Game) {
     let n = 0;
     if (gameSort === "game")
@@ -5154,13 +5153,6 @@ export default function AssignmentsManagerV2({
   }));
   if (unpublishedOnly) activeGameFilters.push({ key: "unpublished", label: "Not published", remove: () => setUnpublishedOnly(false) });
   if (replacementOnly) activeGameFilters.push({ key: "replacement", label: "Replacement needed", remove: () => setReplacementOnly(false) });
-  const attentionQueue = {
-    replacements: matchingTotals?.queue.replacement ?? "—",
-    needsAction: matchingTotals?.queue.attention ?? "—",
-    unassigned: matchingTotals?.queue.unassigned ?? "—",
-    awaiting: matchingTotals?.queue.awaiting ?? "—",
-    unpublished: matchingTotals?.queue.unpublished ?? "—",
-  };
   type CoveragePeriod = "morning" | "afternoon" | "evening";
   const coveragePeriodLabels: { key: CoveragePeriod; label: string }[] = [
     { key: "morning", label: "Morning" },
@@ -6006,7 +5998,8 @@ export default function AssignmentsManagerV2({
                 <span>Page {gamePageNumber}{totalPages !== null ? ` of ${totalPages}` : ""}</span>
                 <button type="button" className="secondary" disabled={gamePageLoading || !gamePageHasMore || gamePageActionBusy} onClick={() => changeGamePage(gamePageNumber + 1)}>Next</button>
                 <button type="button" className="secondary" disabled={gamePageLoading || !totalPages || gamePageNumber >= totalPages || gamePageActionBusy} onClick={() => totalPages && changeGamePage(totalPages)}>Last</button>
-                {!matchingTotals && <button type="button" className="secondary" disabled={gamePageLoading || gamePageActionBusy || totalsLoading} onClick={() => matchingTotalsRequest.current?.start?.()}>{totalsLoading ? "Loading totals…" : totalsError ? "Retry totals" : "Load totals"}</button>}
+                {matchingTotals && <span>{matchingTotals.total} games · {matchingTotals.openGames} games with open positions</span>}
+                {totalsLoading && <span role="status">Loading totals…</span>}
                 {(error || totalsError) && <button type="button" className="secondary" disabled={gamePageLoading || gamePageActionBusy} onClick={() => void load(true)}>Retry this page</button>}
                 {totalsError && <span role="status">Totals unavailable. Your loaded games are still shown.</span>}
                 {gamePageLoading && <span>{games.length ? "Loading assignment details…" : "Loading page…"}</span>}
@@ -9151,7 +9144,7 @@ export default function AssignmentsManagerV2({
             >
               <div>
                 <h3 id="attentionQueueTitle">Needs Attention</h3>
-                <p>Counts include all matching games. Open the work that should be handled next.</p>
+                <p>Open the work that should be handled next.</p>
               </div>
               <button
                 type="button"
@@ -9167,7 +9160,6 @@ export default function AssignmentsManagerV2({
                   setLinkSelected([]);
                 }}
               >
-                <b>{attentionQueue.replacements}</b>
                 <span>Replacement needed</span>
               </button>
               <button
@@ -9182,7 +9174,6 @@ export default function AssignmentsManagerV2({
                 }
                 onClick={() => chooseCompleteness("unassigned")}
               >
-                <b>{attentionQueue.unassigned}</b>
                 <span>Unassigned games</span>
               </button>
               <button
@@ -9197,7 +9188,6 @@ export default function AssignmentsManagerV2({
                 }
                 onClick={() => chooseCompleteness("awaiting")}
               >
-                <b>{attentionQueue.awaiting}</b>
                 <span>Awaiting response</span>
               </button>
               <button
@@ -9211,7 +9201,6 @@ export default function AssignmentsManagerV2({
                   setSelected("");
                 }}
               >
-                <b>{attentionQueue.unpublished}</b>
                 <span>Not published</span>
               </button>
             </section>
@@ -9256,9 +9245,7 @@ export default function AssignmentsManagerV2({
                     >
                       {filters.map(([key, label]) => (
                         <option key={key} value={key}>
-                          {label} (
-                          {matchingTotals?.ranges[key] ?? "—"}
-                          )
+                          {label}
                         </option>
                       ))}
                       <option value="custom">Choose a Date</option>
@@ -9333,7 +9320,7 @@ export default function AssignmentsManagerV2({
                   >
                     <option value="all">All Games</option>
                     <option value="selfAssign">
-                      Open for Self Assign ({selfAssignGameCount})
+                      Open for Self Assign
                     </option>
                   </select>
                 </label>
@@ -9468,7 +9455,7 @@ export default function AssignmentsManagerV2({
                     <span>Assignment Status</span>
                     <details>
                       <summary>{completenessFilter.length === 0
-                        ? `All Assignment Statuses (${matchingTotals?.allStatuses ?? "—"})`
+                        ? "All Assignment Statuses"
                         : `${completenessFilter.length} status${completenessFilter.length === 1 ? "" : "es"} selected`}</summary>
                       <div className="assignmentStatusFilterOptions">
                         <label><input type="checkbox" checked={completenessFilter.length === 0} onChange={() => chooseCompleteness("all")} />All Assignment Statuses</label>
@@ -9491,8 +9478,7 @@ export default function AssignmentsManagerV2({
                       checked={unpublishedOnly}
                       onChange={toggleUnpublished}
                     />
-                    Show not published only (
-                    {unpublishedFilteredCount})
+                    Show not published only
                   </label>
                   {hasDirectGameFilter && (
                     <span>
