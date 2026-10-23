@@ -7,6 +7,7 @@ const sql = fs.readFileSync('supabase/migrations/20261023093720_assignment_match
  '20261023120507_optimize_assignment_matching_reads.sql',
  '20261023124553_optimize_assignment_matching_fact_joins.sql',
  '20261023125012_inline_assignment_matching_totals_predicates.sql',
+ '20261023155245_assignment_today_forward_page.sql',
  ].map(name => fs.readFileSync(`supabase/migrations/${name}`, 'utf8')).join('\n'));
 const asOf = '2026-10-23T12:00:00Z';
 async function setup() {
@@ -178,6 +179,47 @@ test('matching RPC security, counts, pagination, date and assignment semantics',
    await assert.rejects(asUser(db,I.admin,()=>page(db,filters)),/Invalid|must not be after/);
   }
  });
+ await t.test('today-forward includes earlier venue-local today, excludes yesterday even with league and status',async()=>{
+  await seed(db,770,{starts_at:'2026-10-23T05:00Z'});
+  await seed(db,771,{starts_at:'2026-10-23T04:59Z'});
+  await seed(db,772,{starts_at:'2026-10-24T18:00Z'});
+  await asUser(db,I.admin,async()=>{
+   const f={todayForward:true,leagueId:I.a}; const ids=await page(db,f,1,50);
+   assert(ids.includes(id(770))); assert(!ids.includes(id(771)));
+   assert((await page(db,{...f,completeness:['unassigned']})).includes(id(770)));
+   const all=[]; for(let n=1;n<10;n++){const ids=await page(db,f,n);all.push(...ids);if(ids.length<50)break;}
+   assert.equal((await total(db,f)).total,all.length);
+   const base={todayForward:true,asOf:'2026-10-23T12:00Z'};
+   const first=await page(db,base); assert(first.includes(id(770)));
+   for(const filters of [base,{...base,completeness:['unassigned']},{...f,completeness:['unassigned']}]) {
+    const ids=[];for(let n=1;n<10;n++){const chunk=await page(db,filters,n);ids.push(...chunk);if(chunk.length<50)break;}
+    assert.equal((await total(db,filters)).total,ids.length);
+   }
+   const past={...f,customDate:'2026-10-22'};
+   const pastCount=(await total(db,{...past,range:'custom'})).total;
+   assert(pastCount>0); assert.equal((await total(db,past)).ranges.custom,pastCount);
+   assert(!(await page(db,{...f,completeness:['unassigned']})).includes(id(771)));
+   assert((await page(db,{...f,range:'custom',customDate:'2026-10-22'})).includes(id(771)));
+   assert(!(await page(db,{...f,leagueId:I.b})).includes(I.gameB));
+   const a=await page(db,f,1,2),b=await page(db,f,2,2); assert.equal(new Set([...a,...b]).size,4);
+  });
+ });
+ await t.test('today-forward mapped zones and 25-hour fall-back day use venue midnight',async()=>{
+  await seed(db,780,{starts_at:'2026-11-01T04:00Z'}); await seed(db,781,{starts_at:'2026-11-01T03:59Z'});
+  for(const [state,midnight] of [['NY','04'],['IA','05'],['CO','06'],['CA','07'],['AZ','07'],['AK','08'],['HI','10']]) {
+   await db.query('update public.locations set state=$1 where id=$2',[state,I.locationA]);
+   await db.query('update public.games set starts_at=$1::timestamptz where id=$2',[`2026-11-01T${midnight}:00Z`,id(780)]);
+   await db.query("update public.games set starts_at=$1::timestamptz-interval '1 minute' where id=$2",[`2026-11-01T${midnight}:00Z`,id(781)]);
+   await asUser(db,I.admin,async()=>{
+    const ids=await page(db,{todayForward:true,leagueId:I.a,asOf:'2026-11-02T04:30Z'});
+    assert(ids.includes(id(780)),state+' includes midnight'); assert(!ids.includes(id(781)),state+' excludes yesterday');
+   });
+  }
+  await db.query('update public.locations set state=$1 where id=$2',['IA',I.locationA]);
+  await db.exec('revoke select on public.audit_history from authenticated');
+  await asUser(db,I.admin,async()=>assert((await page(db,{todayForward:true,leagueId:I.a})).length>0));
+  await db.exec('grant select on public.audit_history to authenticated');
+ });
  await t.test('1,395-game production-cardinality isolated benchmark',async()=>{
   await db.exec(`create index on public.assignments(game_id,position_id); create index on public.audit_history(game_id,action); create index on public.assignment_self_assign_slots(game_id);
    drop policy legacy_permissive on public.locations;
@@ -218,6 +260,8 @@ test('matching RPC security, counts, pagination, date and assignment semantics',
    assert.equal(c.total,345); console.log(`1395 games/155 locations/812 assignments/13929 audit/399 selfassign totals benchmark: ${Math.round(elapsed)} ms; ${c.total} upcoming`);
    const pstart=performance.now(); assert.equal((await page(db)).length,50);
    console.log(`1395-game default first page benchmark: ${Math.round(performance.now()-pstart)} ms`);
+   const todayStart=performance.now(); assert.equal((await page(db,{todayForward:true})).length,50);
+   console.log(`1395-game today-forward first page benchmark: ${Math.round(performance.now()-todayStart)} ms`);
   });
  });
  } finally {await db.close();}
