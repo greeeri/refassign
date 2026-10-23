@@ -121,3 +121,68 @@ test('desktop positions keep their existing compact table rules and accessible s
   assert(opening.includes('aria-label="Game assignment positions"'));
   assert(opening.includes('tabIndex={0}'));
 });
+
+const actionSyntax = ts.createSourceFile('AssignmentsManagerV2.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const actionElements = [];
+(function visit(node) { if (ts.isJsxElement(node)) actionElements.push(node); ts.forEachChild(node, visit); })(actionSyntax);
+const actionAttr = (node, key) => node.openingElement.attributes.properties.find(p => p.name?.text === key)?.initializer;
+const actionGroup = className => actionElements.find(node => actionAttr(node, 'className')?.text === className);
+const actionButtons = root => actionElements.filter(node => node.pos > root.pos && node.end < root.end && node.openingElement.tagName.getText(actionSyntax) === 'button');
+
+test('top strip and mobile menu keep six tools with the short fee-template label', () => {
+  for (const name of ['assignmentCompactActionStrip', 'assignmentCompactOverflow']) {
+    const root = actionGroup(name);
+    assert(root);
+    const buttons = actionButtons(root);
+    assert.equal(buttons.length, 6);
+    const handlers = buttons.map(node => actionAttr(node, 'onClick').expression.getText(actionSyntax));
+    assert(handlers[0].includes('setShowCoverageForecast(true)'));
+    assert(handlers[1].includes('setShowDeadlineSettings(true)'));
+    assert.equal(handlers[2], '() => void exportAssignments()');
+    assert.equal(handlers[3], '() => void archiveCancelledGames()');
+    assert.equal(handlers[4], '() => assignmentFeeImportInput.current?.click()');
+    assert.equal(handlers[5], '() => void downloadGameFeeTemplate()');
+    assert(buttons[5].getText(actionSyntax).includes('Game fee template'));
+    assert.equal(actionAttr(buttons[5], 'disabled').expression.getText(actionSyntax), '!filteredGames.length');
+    assert(!root.getText(actionSyntax).includes('prepareSelfAssignPositions'));
+  }
+});
+
+test('Self Assign has one manager-only Games-header home with unchanged handler and disabled rules', () => {
+  const root = actionGroup('assignmentResultsActions');
+  assert(root);
+  const buttons = actionButtons(root);
+  assert.equal(buttons.length, 3);
+  assert.equal(actionAttr(buttons[0], 'onClick').expression.getText(actionSyntax), 'toggleSelectedDetails');
+  const selfAssign = buttons[1];
+  assert.equal(actionAttr(selfAssign, 'onClick').expression.getText(actionSyntax), 'prepareSelfAssignPositions');
+  assert(selfAssign.getText(actionSyntax).includes('Open Positions for Self Assign'));
+  let guard = selfAssign.parent;
+  while (guard && !ts.isBinaryExpression(guard)) guard = guard.parent;
+  assert(guard);
+  assert.equal(guard.left.getText(actionSyntax), 'canManage');
+  assert.equal(guard.operatorToken.kind, ts.SyntaxKind.AmpersandAmpersandToken);
+  const expression = actionAttr(selfAssign, 'disabled').expression.getText(actionSyntax);
+  const disabled = state => require('node:vm').runInNewContext(expression, state);
+  for (const [selfAssignSaving, positions, games, selectedGame, expected] of [
+    [false, [], [], null, true], [true, ['position'], ['game'], {}, true],
+    [false, ['position'], [], null, false], [false, [], ['game'], null, false],
+    [false, [], [], {}, false],
+  ]) assert.equal(disabled({selfAssignSaving,selfAssignSelected:positions,linkSelected:games,game:selectedGame}), expected);
+  assert(buttons[2].getText(actionSyntax).includes('filteredGames.map((g) => g.id)'));
+});
+
+test('Games-header actions wrap within narrow widths without changing typography or theme', () => {
+  assert.equal(declaration('.assignmentResultsActions', 'min-width'), '0');
+  assert.equal(declaration('.assignmentResultsActions', 'max-width'), '100%');
+  assert.equal(declaration('.assignmentResultsActions > button', 'min-height'), '44px');
+  assert.equal(declaration('.assignmentResultsActions > button', 'max-width'), '100%');
+  assert.equal(declaration('.assignmentResultsActions > button', 'white-space'), 'normal');
+  assert.equal(declaration('.assignmentResultsActions > button', 'overflow-wrap'), 'anywhere');
+  const style = actionAttr(actionGroup('assignmentResultsActions'), 'style').expression.getText(actionSyntax);
+  assert(style.includes('flexWrap: "wrap"'));
+  for (const rule of rules.filter(rule => rule.selector.includes('assignmentResultsActions'))) {
+    assert.equal(rule.parent.type, 'root', 'Games actions are available at every viewport');
+    assert(!rule.nodes.some(node => /color|background|font/.test(node.prop || '')), 'reuse existing button appearance');
+  }
+});
