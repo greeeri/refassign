@@ -2,15 +2,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { showGameConflictPopup } from "../lib/game-conflict-popup";
 import { createPortal } from "react-dom";
-import { fieldComplexRpcMissing } from "../lib/field-complex-support";
 import {
   assignmentVenueOptions,
-  fieldComplexMap,
-  isComplexVenueFilter,
   resolveVenueLocationIds,
-  type FieldComplexMembership,
   type VenueField,
 } from "../lib/assignments/venueFilter";
+import { assignmentVenueDirectory, loadAssignmentVenueDirectory, validAssignmentVenueSelection, type VenueDirectoryRequest } from "../lib/assignments/venueDirectory";
 import {
   gameAcceptsAssignments,
   inactiveGameStatusLabel,
@@ -396,6 +393,7 @@ export default function AssignmentsManagerV2({
     fullLeagueAccessRef.current = fullLeagueAccess;
   return () => { fullLeagueAccessRef.current = false; };
   }, [fullLeagueAccess]);
+  const venueDirectoryCache = useRef<VenueDirectoryRequest | null>(null);
   const candidateCache = useRef<{ key: string; createdAt: number; promise: Promise<unknown> } | null>(null);
   const [inlineAssignmentHost, setInlineAssignmentHost] =
     useState<HTMLDivElement | null>(null);
@@ -435,6 +433,7 @@ export default function AssignmentsManagerV2({
     [fieldMovePreview, setFieldMovePreview] = useState<{ key: string; loading: boolean; error: string } | null>(null),
     [venueDirectory, setVenueDirectory] = useState<{
       organizationId?: string;
+      scopeKey?: string;
       fields: VenueField[];
       complexes: Record<string, string>;
     }>({ fields: [], complexes: {} }),
@@ -585,14 +584,16 @@ export default function AssignmentsManagerV2({
     bulkCrewWorking || crewTemplateWorking || replacementPublishing || calendarReviewSaving || fieldMoveSaving ||
     quickEditSaving || gameStatusSaving || selfAssignSaving || mentorSlotSaving || movingAssignment || overdueResolving ||
     calendarReleaseSaving || checkInSaving || bulkRetryingGame || deadlineSaving || teamSuggestionSaving || broadcasting || retryingNotifications);
-  const locationComplexes = venueDirectory.organizationId === organizationId ? venueDirectory.complexes : {};
+  const venueDirectoryScopeKey = JSON.stringify([organizationId, leagueFilter, leagueScopeKey]);
+  const currentVenueDirectory = venueDirectory.scopeKey === venueDirectoryScopeKey;
+  const locationComplexes = currentVenueDirectory ? venueDirectory.complexes : {};
   const venueLocationIds = resolveVenueLocationIds(locationFilter, organizationId, locationComplexes);
   const venueFilterOptions = assignmentVenueOptions(
     organizationId,
     locationComplexes,
-    venueDirectory.organizationId === organizationId ? venueDirectory.fields : [],
-    games.flatMap((listedGame) => listedGame.location ? [listedGame.location] : []),
-    locationFilter,
+    currentVenueDirectory ? venueDirectory.fields : [],
+    [],
+    currentVenueDirectory ? locationFilter : [],
   );
   const calendarReleaseLock = useRef(false);
   const calendarReleaseOrganization = useRef(organizationId);
@@ -711,6 +712,7 @@ export default function AssignmentsManagerV2({
     // Only page navigation reuses counts. Filters, mutations, Undo and Retry
     // invalidate both completed and in-flight counts before any async work.
     if (!reuseTotals) { matchingTotalsRequest.current = null; setMatchingTotals(null); setTotalsError(""); setTotalsLoading(false); }
+    if (!reuseCandidates) venueDirectoryCache.current = null;
     const pending = loadPage(reuseCandidates);
     const version = loadVersion.current;
     try { await pending; }
@@ -760,7 +762,8 @@ export default function AssignmentsManagerV2({
     const { data: userData, error: authError } = await supabase.auth.getUser();
     if (version !== loadVersion.current) return;
     if (authError || !userData.user) {
-      matchingTotalsRequest.current = null; candidateCache.current = null;
+      matchingTotalsRequest.current = null; candidateCache.current = null; venueDirectoryCache.current = null;
+      setVenueDirectory({ fields: [], complexes: {} });
       setMatchingTotals(null); setTotalsError(""); setTotalsLoading(false);
       setAllowedLeagueIds([]); setAllowedGameAccess([]);
       setGames([]); setAssignments([]); setOfficials([]); setCandidateOfficialIds(new Set()); setBlocks([]);
@@ -780,7 +783,8 @@ export default function AssignmentsManagerV2({
       if (version !== loadVersion.current) return;
       if (access.error) {
         matchingTotalsRequest.current = null; setMatchingTotals(null); setTotalsError(""); setTotalsLoading(false);
-        candidateCache.current = null;
+        candidateCache.current = null; venueDirectoryCache.current = null;
+        setVenueDirectory({ fields: [], complexes: {} });
         setAllowedLeagueIds([]); setAllowedGameAccess([]);
         setGames([]); setOfficials([]); setCandidateOfficialIds(new Set()); setAssignments([]); setBlocks([]);
         setInitialGamesReady(true); setError(access.error.message); return;
@@ -801,7 +805,8 @@ export default function AssignmentsManagerV2({
     setAllowedLeagueIds(scopedLeagueIds);
     setAllowedGameAccess(scopedGameAccess);
     if (!fullLeagueAccess && !scopedGameAccess.some((grant) => grant.all_locations === true || grant.location_ids?.length)) {
-      matchingTotalsRequest.current = null; setTotalsError(""); setTotalsLoading(false);
+      matchingTotalsRequest.current = null; venueDirectoryCache.current = null; setTotalsError(""); setTotalsLoading(false);
+      setVenueDirectory({ fields: [], complexes: {} });
       setGames([]); setMatchingTotals(emptyGameSummary()); setInitialGamesReady(true);
       return;
     }
@@ -811,40 +816,47 @@ export default function AssignmentsManagerV2({
       ["admin", "assignor"].includes(role),
     );
     let loadedComplexes: Record<string, string> = {};
+    const directoryKey = JSON.stringify([userData.user.id, organizationId, fullLeagueAccess,
+      leagueGameAccessKey(scopedGameAccess), leagueFilter]);
+    // Props may lag freshly verified grants (or a changed signed-in user).
+    // Hide the old catalog before the first page or its directory can resolve.
+    if (venueDirectoryCache.current?.key !== directoryKey) setVenueDirectory({ fields: [], complexes: {} });
+    const needsVenueDirectory = locationFilter.length > 0;
     const loadVenueDirectory = async () => {
-      if (!organizationId || !hasManagerRole) {
-        if (version === loadVersion.current) setVenueDirectory({ organizationId, fields: [], complexes: {} });
+      if (!organizationId) {
+        if (version === loadVersion.current) setVenueDirectory({ organizationId, scopeKey: venueDirectoryScopeKey, fields: [], complexes: {} });
         return true;
       }
-      // Read explicit membership independently of the initial 50 games. A sibling
-      // field must still match even if none of its games are on the current list.
-      const complexes = await readAllPages<FieldComplexMembership>((from, to) =>
-        supabase.rpc("get_organization_field_complexes", { p_organization_id: organizationId })
-          .order("location_id").range(from, to));
-      if (version !== loadVersion.current) return false;
-      // The membership RPC explicitly allows assignors and includes ungrouped
-      // fields. Do not use the owner/admin-only organization settings directory.
-      const fields = await readAllForChunks<VenueField, string>(
-        [...new Set((complexes.data || []).map((row) => row.location_id))],
-        (ids, from, to) => supabase.from("locations").select("id,name")
-          .in("id", ids).order("id").range(from, to),
+      // The server returns only fields used in this league's authorized schedule,
+      // across all dates/pages. Never fetch the organization-wide directory here.
+      const directory = await loadAssignmentVenueDirectory(
+        supabase, venueDirectoryCache, directoryKey, organizationId, leagueFilter,
       );
       if (version !== loadVersion.current) return false;
-      loadedComplexes = fieldComplexMap(complexes.data || []);
-      setVenueDirectory({ organizationId, fields: fields.data || [], complexes: loadedComplexes });
-      const directoryError = fields.error || (fieldComplexRpcMissing(complexes.error) ? null : complexes.error);
-      if (directoryError) setError(directoryError.message);
-      if (complexes.error && !fieldComplexRpcMissing(complexes.error) && locationFilter.some(isComplexVenueFilter)) {
-        setGames([]);
-        setInitialGamesReady(true);
+      if (directory.error) {
+        setVenueDirectory({ fields: [], complexes: {} });
+        // A failed background catalog must not erase an already visible page.
+        // A selected venue, however, must be verified before its page is read.
+        if (needsVenueDirectory) { setGames([]); setInitialGamesReady(true); }
+        setError(directory.error.message);
+        return false;
+      }
+      const catalog = assignmentVenueDirectory(directory.data || []);
+      loadedComplexes = catalog.complexes;
+      setVenueDirectory({ organizationId, scopeKey: venueDirectoryScopeKey, ...catalog });
+      const validSelection = validAssignmentVenueSelection(locationFilter, organizationId, catalog);
+      if (JSON.stringify(validSelection) !== JSON.stringify(locationFilter)) {
+        // Let the new filter snapshot load once, rather than issuing an obsolete
+        // field request followed by another table request after state changes.
+        setLocationFilter(validSelection);
+        setGames([]); setAssignments([]); setLinkSelected([]); setSelected("");
         return false;
       }
       return true;
     };
-    // Only a selected complex needs the full membership directory to resolve
-    // this page. Ordinary first-page reads do not wait for the directory.
-    const needsComplexDirectory = locationFilter.some(isComplexVenueFilter);
-    if (needsComplexDirectory && !await loadVenueDirectory()) return;
+    // Preserve the today-forward first-page fast path: with no selected venue,
+    // neither the catalog nor historical venue discovery can delay the 50 rows.
+    if (needsVenueDirectory && !await loadVenueDirectory()) return;
     const resolvedLocationIds = resolveVenueLocationIds(locationFilter, organizationId, loadedComplexes);
     const selectedLocationIds = resolvedLocationIds === null ? null : [...resolvedLocationIds].sort();
     const pageKey = JSON.stringify([organizationId, fullLeagueAccess, leagueGameAccessKey(scopedGameAccess), selectedLocationIds,
@@ -967,7 +979,7 @@ export default function AssignmentsManagerV2({
       ? cursor.page * 50 < matchingTotalsRequest.current.totals.total
       : (g.data || []).length === 50);
     logLoadMilestone("first page ready");
-    if (!needsComplexDirectory) void loadVenueDirectory().catch((cause) => {
+    if (!needsVenueDirectory) void loadVenueDirectory().catch((cause) => {
       if (version === loadVersion.current) setError(cause instanceof Error ? cause.message : "Venue directory could not be loaded.");
     });
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -1164,7 +1176,7 @@ export default function AssignmentsManagerV2({
     logLoadMilestone("candidate data ready");
   }
   useEffect(() => {
-    candidateCache.current = null;
+    candidateCache.current = null; venueDirectoryCache.current = null;
     reviewedLinkedAssignments.current.clear();
     setCanManage(false); setAllowedLeagueIds([]); setAllowedGameAccess([]);
     setGames([]); setOfficials([]); setCandidateOfficialIds(new Set()); setAssignments([]); setBlocks([]);
@@ -1179,7 +1191,7 @@ export default function AssignmentsManagerV2({
     setSelected("");
     setReplacementOnly(false);
     void load();
-    return () => { loadVersion.current++; candidateCache.current = null; matchingTotalsRequest.current = null; };
+    return () => { loadVersion.current++; candidateCache.current = null; venueDirectoryCache.current = null; matchingTotalsRequest.current = null; };
   }, [organizationId, leagueScopeKey]);
   useEffect(() => {
     const sourceId = fieldMove?.sourceId;
