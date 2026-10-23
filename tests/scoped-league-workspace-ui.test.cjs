@@ -5,12 +5,13 @@ const vm = require('node:vm');
 const ts = require('typescript');
 const compile = source => ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText;
 const copy = value => JSON.parse(JSON.stringify(value));
-function moduleFrom(path) {
+function moduleFrom(path, dependencies = {}) {
   const module = { exports: {} };
-  vm.runInNewContext(compile(fs.readFileSync(path, 'utf8')), { module, exports: module.exports, require });
+  vm.runInNewContext(compile(fs.readFileSync(path, 'utf8')), { module, exports: module.exports, require: name => dependencies[name] || require(name) });
   return module.exports;
 }
 const paging = moduleFrom('lib/supabase/readAll.ts');
+const candidateRoster = moduleFrom('lib/assignments/candidateRoster.ts', { '../supabase/readAll': paging });
 const scope = moduleFrom('components/leagueGameScope.ts');
 function parse(path) {
   const text = fs.readFileSync(path, 'utf8');
@@ -34,7 +35,7 @@ function environment(source, changes = {}) {
   const calls = [], state = {};
   const tables = changes.tables || {};
   const context = {
-    ...paging, ...scope, organizationId: 'org', accessibleLeagueIds: ['league-a'], scopedLeagueIds: ['league-a'],
+    ...paging, ...scope, ...candidateRoster, organizationId: 'org', accessibleLeagueIds: ['league-a'], scopedLeagueIds: ['league-a'],
     leagueGameAccess: [{ league_id: 'league-a', all_locations: true, location_ids: [] }],
     fullLeagueAccess: false, leagueFilter: 'all', showArchived: false,
     gameLoadVersion: { current: 0 }, performance: { now: () => 0 }, console: { info() {} },
@@ -168,12 +169,12 @@ test('Dashboard failed later page never publishes a partial schedule or stale ro
 });
 
 const assignments = parse('components/AssignmentsManagerV2.tsx');
-const assignmentLoad = assignments.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'load');
+const assignmentLoad = assignments.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'loadPage');
 const declared = name => assignmentLoad.body.statements.find(statement => ts.isVariableStatement(statement) && statement.declarationList.declarations.some(declaration => declaration.name.getText(assignments.ast) === name)).getText(assignments.ast);
 const candidateSource = [declared('loadAllLeagueEligibility'), declared('loadAllLevelEligibility'), declared('fetchCandidateData')].join('\n');
 test('assignment candidate rankings, eligibility and availability are bounded to returned scoped roster IDs', async () => {
-  const roster = Array.from({ length: 1005 }, (_, i) => ({ official_id: `official-${i}`, organization_id: 'org', active: true, 'officials.active': true, officials: { id: `official-${i}`, first_name: 'Ref', last_name: String(i) } }));
-  const env = environment(candidateSource, { state: { candidateLeagueIds: ['league-a'], candidateLevelIds: ['level-a'], candidateTeamIds: [] }, tables: {
+  const roster = Array.from({ length: 1005 }, (_, i) => ({ official_id: `official-${i}`, organization_id: 'org', active: true, 'officials.active': true, 'officials.official_league_eligibility.league_id': 'league-a', officials: { id: `official-${i}`, first_name: 'Ref', last_name: String(i) } }));
+  const env = environment(candidateSource, { state: { scopedGames: [{ league_id: 'league-a' }], scopedAssignments: [], candidateLeagueIds: ['league-a'], candidateLevelIds: ['level-a'], candidateTeamIds: [] }, tables: {
     organization_officials: roster,
     my_assignment_rankings: [{ official_id: 'official-0', rank: 10 }, { official_id: 'foreign-official', rank: 99 }],
     official_availability_blocks: [{ official_id: 'official-0' }, { official_id: 'foreign-official' }],
