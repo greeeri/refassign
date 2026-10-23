@@ -21,7 +21,7 @@ import {
 import { applyLeagueGameAccess, canAccessLeagueGameLocation, leagueGameAccessKey, type LeagueGameAccess } from "./leagueGameScope";
 import { createClient } from "../lib/supabase/client";
 import { readAllForChunks, readAllPages } from "../lib/supabase/readAll";
-import { readBoundedGamePage } from "../lib/assignments/boundedGamePage";
+import { emptyMatchingTotals, normalizeMatchingTotals, pageNumbers, type MatchingGameTotals } from "../lib/assignments/matchingGames";
 import { assignmentCandidateLeagueScope, isLeagueCandidate, loadAssignmentOfficialRoster } from "../lib/assignments/candidateRoster";
 import { announceUndoAvailable } from "./UndoCenter";
 import SelfAssignOverrideRequests from "./SelfAssignOverrideRequests";
@@ -191,6 +191,8 @@ type SavedAssignmentView = {
   name: string;
   range: Range;
   customDate: string;
+  fromDate?: string;
+  toDate?: string;
   dayFilter?: string | string[];
   timeFilter?: string | string[];
   locationFilter: string | string[];
@@ -229,7 +231,7 @@ type BulkAssignmentResult = {
   officialName: string;
   items: BulkAssignmentItem[];
 };
-type Range = "all" | "today" | "tomorrow" | "thisWeek" | "nextWeek" | "custom";
+type Range = "all" | "today" | "tomorrow" | "thisWeek" | "nextWeek" | "custom" | "dateRange";
 type Completeness =
   | "all"
   | "unassigned"
@@ -377,7 +379,11 @@ export default function AssignmentsManagerV2({
   const handledListReturnRequest = useRef(returnToListRequest);
   const initialFilterLoad = useRef(true);
   const loadVersion = useRef(0);
-  const gamePaging = useRef<{ key: string; offsets: number[]; previous: number[][]; next: number[] | null; asOf: string }>({ key: "", offsets: [], previous: [], next: null, asOf: new Date().toISOString() });
+  const gamePaging = useRef({ key: "", page: 1, asOf: new Date().toISOString() });
+  const matchingTotalsRequest = useRef<{ key: string; totals: MatchingGameTotals | null; start?: () => void } | null>(null);
+  const [matchingTotals, setMatchingTotals] = useState<MatchingGameTotals | null>(null);
+  const [totalsError, setTotalsError] = useState("");
+  const totalPages = matchingTotals ? Math.max(1, Math.ceil(matchingTotals.total / 50)) : null;
   const [gamePageNumber, setGamePageNumber] = useState(1);
   const [gamePageHasMore, setGamePageHasMore] = useState(false);
   const [gamePageLoading, setGamePageLoading] = useState(false);
@@ -386,7 +392,7 @@ export default function AssignmentsManagerV2({
   fullLeagueAccessRef.current = fullLeagueAccess;
   useEffect(() => {
     fullLeagueAccessRef.current = fullLeagueAccess;
-    return () => { fullLeagueAccessRef.current = false; };
+  return () => { fullLeagueAccessRef.current = false; };
   }, [fullLeagueAccess]);
   const candidateCache = useRef<{ key: string; createdAt: number; promise: Promise<unknown> } | null>(null);
   const [inlineAssignmentHost, setInlineAssignmentHost] =
@@ -432,6 +438,8 @@ export default function AssignmentsManagerV2({
     }>({ fields: [], complexes: {} }),
     [range, setRange] = useState<Range>("all"),
     [customDate, setCustomDate] = useState(""),
+    [fromDate, setFromDate] = useState(""),
+    [toDate, setToDate] = useState(""),
     [showCalendar, setShowCalendar] = useState(false),
     [showMoreFilters, setShowMoreFilters] = useState(false),
     [unpublishedOnly, setUnpublishedOnly] = useState(false),
@@ -695,29 +703,30 @@ export default function AssignmentsManagerV2({
     );
     return null;
   }
-  async function load(reuseCandidates = false) {
+  async function load(reuseCandidates = false, reuseTotals = false) {
     gamePageLoadingRef.current = true;
     setGamePageLoading(true); setGamePageHasMore(false);
+    // Only page navigation reuses counts. Filters, mutations, Undo and Retry
+    // invalidate both completed and in-flight counts before any async work.
+    if (!reuseTotals) { matchingTotalsRequest.current = null; setMatchingTotals(null); setTotalsError(""); }
     const pending = loadPage(reuseCandidates);
     const version = loadVersion.current;
     try { await pending; }
     catch (cause) { if (version === loadVersion.current) setError(cause instanceof Error ? cause.message : "Unable to load games."); }
-    finally { if (version === loadVersion.current) { gamePageLoadingRef.current = false; setGamePageLoading(false); } }
-  }
-  function changeGamePage(direction: -1 | 1) {
-    if (gamePageLoadingRef.current || gamePageActionBusy) return;
-    const cursor = gamePaging.current;
-    if (direction === 1) {
-      if (!cursor.next) return;
-      cursor.previous.push([...cursor.offsets]);
-      cursor.offsets = [...cursor.next];
-    } else {
-      const previous = cursor.previous.pop();
-      if (!previous) return;
-      cursor.offsets = previous;
+    finally {
+      if (version === loadVersion.current) {
+        gamePageLoadingRef.current = false; setGamePageLoading(false);
+        // The page (including its assignment/candidate reads) settles first.
+        // Counts then run independently, never holding the page loading lock.
+        matchingTotalsRequest.current?.start?.();
+      }
     }
-    cursor.next = null;
-    setGamePageNumber(cursor.previous.length + 1);
+  }
+  function changeGamePage(page: number) {
+    if (gamePageLoadingRef.current || gamePageActionBusy || !Number.isInteger(page) || page < 1 || (totalPages !== null && page > totalPages)) return;
+    if (page === gamePaging.current.page) return;
+    gamePaging.current.page = page;
+    setGamePageNumber(page);
     setGamePageHasMore(false);
     setLinkSelected([]); setSelfAssignSelected([]); setExpandedGameIds(new Set());
     setGames([]); setAssignments([]); setLinkGroups([]); setLinkMembers([]);
@@ -727,7 +736,7 @@ export default function AssignmentsManagerV2({
     setShowBulkAssign(false); setShowBulkCrew(false); setShowBulkPublishReview(false);
     setShowCrewTemplates(false); setShowPublishReview(false); setShowSelfAssignDialog(false);
     setBulkAssignmentResult(null); setBulkResult(null); setCheckInGameIds([]);
-    void load(true);
+    void load(true, true);
   }
   async function loadPage(reuseCandidates = false) {
     const version = ++loadVersion.current;
@@ -747,7 +756,16 @@ export default function AssignmentsManagerV2({
     const loadAllLevelEligibility = (officialIds: string[]) => readAllForChunks<EligV,string>(officialIds, (ids,from,to) =>
       supabase.from("official_level_eligibility").select("official_id,level_id,center_eligible,ar_eligible")
         .in("official_id", ids).in("level_id", candidateLevelIds).order("official_id").order("level_id").range(from,to));
-    const { data: userData } = await supabase.auth.getUser();
+    const { data: userData, error: authError } = await supabase.auth.getUser();
+    if (version !== loadVersion.current) return;
+    if (authError || !userData.user) {
+      matchingTotalsRequest.current = null; candidateCache.current = null;
+      setMatchingTotals(null); setTotalsError("");
+      setAllowedLeagueIds([]); setAllowedGameAccess([]);
+      setGames([]); setAssignments([]); setOfficials([]); setCandidateOfficialIds(new Set()); setBlocks([]);
+      setInitialGamesReady(true); setError(authError?.message || "Sign in to load games.");
+      return;
+    }
     const rolePromise = userData.user
       ? supabase.rpc("current_user_roles")
       : Promise.resolve({ data: null });
@@ -760,6 +778,7 @@ export default function AssignmentsManagerV2({
           .eq("user_id", userData.user.id).order("league_id").range(from, to));
       if (version !== loadVersion.current) return;
       if (access.error) {
+        matchingTotalsRequest.current = null; setMatchingTotals(null); setTotalsError("");
         candidateCache.current = null;
         setAllowedLeagueIds([]); setAllowedGameAccess([]);
         setGames([]); setOfficials([]); setCandidateOfficialIds(new Set()); setAssignments([]); setBlocks([]);
@@ -770,6 +789,7 @@ export default function AssignmentsManagerV2({
     }
     if (version !== loadVersion.current) return;
     if (!fullLeagueAccess && leagueGameAccessKey(allowedGameAccess) !== leagueGameAccessKey(scopedGameAccess)) {
+      matchingTotalsRequest.current = null; setMatchingTotals(null); setTotalsError("");
       candidateCache.current = null;
       setGames([]); setOfficials([]); setCandidateOfficialIds(new Set()); setAssignments([]); setBlocks([]);
       setRanks({}); setPositionRanks({}); setPowers({}); setTeamSuggestions([]);
@@ -780,7 +800,8 @@ export default function AssignmentsManagerV2({
     setAllowedLeagueIds(scopedLeagueIds);
     setAllowedGameAccess(scopedGameAccess);
     if (!fullLeagueAccess && !scopedGameAccess.some((grant) => grant.all_locations === true || grant.location_ids?.length)) {
-      setGames([]); setInitialGamesReady(true);
+      matchingTotalsRequest.current = null; setTotalsError("");
+      setGames([]); setMatchingTotals(emptyMatchingTotals()); setInitialGamesReady(true);
       return;
     }
     const { data: userRoles } = await rolePromise;
@@ -817,63 +838,75 @@ export default function AssignmentsManagerV2({
     const resolvedLocationIds = resolveVenueLocationIds(locationFilter, organizationId, loadedComplexes);
     const selectedLocationIds = resolvedLocationIds === null ? null : [...resolvedLocationIds].sort();
     const pageKey = JSON.stringify([organizationId, fullLeagueAccess, leagueGameAccessKey(scopedGameAccess), selectedLocationIds,
-      range, customDate, dayFilter, timeFilter, officialFilter, leagueFilter, levelFilter,
+      range, customDate, fromDate, toDate, dayFilter, timeFilter, officialFilter, leagueFilter, levelFilter,
       unpublishedOnly, selfAssignOnly, replacementOnly, completenessFilter, focusGameId]);
     if (gamePaging.current.key !== pageKey) {
-      gamePaging.current = { key: pageKey, offsets: [], previous: [], next: null, asOf: new Date().toISOString() };
+      gamePaging.current = { key: pageKey, page: 1, asOf: new Date().toISOString() };
+      matchingTotalsRequest.current = null;
+      setMatchingTotals(null); setTotalsError("");
       setLinkSelected([]); setSelfAssignSelected([]); setExpandedGameIds(new Set());
       setGames([]); setAssignments([]); setLinkGroups([]); setLinkMembers([]);
     }
     const cursor = gamePaging.current;
-    setGamePageNumber(cursor.previous.length + 1);
+    setGamePageNumber(cursor.page);
     setGamePageHasMore(false);
-    const readGamePage = (from: number, to: number, locationIds = selectedLocationIds) => {
-      // A removed/foreign saved complex must not become an unfiltered query.
-      if (locationIds?.length === 0) return Promise.resolve({ data: [], error: null });
-      let query = supabase
-        .from("games")
-        .select(
-          "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,time_tbd,field_tbd,venue_conflict_hold,bound_source_status,bound_hold_reasons,bound_hold_resolution_candidate,bound_hold_checked_at,notes,calendar_needs_review,calendar_reviewed_at,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,address,city,state,latitude,longitude,venue_id)",
-        )
-        .is("archived_at", null)
-        .order("starts_at")
-        .order("id");
-      if (organizationId)
-        query = query.eq("organization_id", organizationId);
-      const scopedQuery = applyLeagueGameAccess(query, scopedGameAccess, fullLeagueAccess);
-      if (!scopedQuery) return Promise.resolve({ data: [], error: null });
-      query = scopedQuery;
-      if (leagueFilter) query = query.eq("league_id", leagueFilter);
-      if (levelFilter) query = query.eq("level_id", levelFilter);
-      if (locationIds) query = query.in("location_id", locationIds);
-      // Preserve existing date inclusion rules. Pagination applies in EVERY
-      // filter mode; choosing a filter must never trigger an all-games read.
-      const explicitFilter = range !== "all" || Boolean(
-        locationFilter.length || dayFilter.length || timeFilter.length ||
-        officialFilter || leagueFilter || levelFilter ||
-        unpublishedOnly || selfAssignOnly || replacementOnly || completenessFilter.length,
-      );
-      if (focusGameId && !explicitFilter) query = query.eq("id", focusGameId);
-      if (!explicitFilter && !focusGameId)
-        query = query.gte("starts_at", cursor.asOf);
-      return query.range(from, to) as unknown as PromiseLike<{
-        data: Game[] | null;
-        error: { message: string } | null;
-      }>;
+    if (!organizationId) { setGames([]); setError("Select an organization to load games."); return; }
+    if (range === "dateRange" && fromDate && toDate && fromDate > toDate) {
+      setGames([]); setMatchingTotals(null); setError("From date must be on or before To date."); setInitialGamesReady(true); return;
+    }
+    const matchingFilters = {
+      range, customDate, fromDate, toDate, days: dayFilter, times: timeFilter,
+      officialId: officialFilter, leagueId: leagueFilter, levelId: levelFilter,
+      locationIds: selectedLocationIds, unpublishedOnly, selfAssignOnly, replacementOnly,
+      completeness: completenessFilter, focusGameId: focusGameId || null, asOf: cursor.asOf,
     };
-    const gameSources = selectedLocationIds === null ? [null] : Array.from(
-      { length: Math.ceil(selectedLocationIds.length / 200) },
-      (_, index) => selectedLocationIds.slice(index * 200, (index + 1) * 200),
-    );
-    const gamePromise = readBoundedGamePage<Game>({
-      sourceCount: gameSources.length,
-      offsets: cursor.offsets.length ? cursor.offsets : undefined,
-      readPage: (source, from, to) => readGamePage(from, to, gameSources[source]),
-      // Assignment-derived and venue-local filters remain exactly as before.
-      // They can produce a sparse page, never an unbounded background scan.
-      matches: () => true,
-      pageSize: 50, batchSize: 51, maxScanned: 500, maxRequests: 20,
-    });
+    // Counts belong to the filter/scope snapshot, not a page load generation.
+    // Reuse a pending or completed request while navigating that snapshot.
+    const totalsKey = JSON.stringify([userData.user?.id, pageKey, cursor.asOf]);
+    if (matchingTotalsRequest.current?.key !== totalsKey) {
+      const request = { key: totalsKey, totals: null as MatchingGameTotals | null, start: undefined as (() => void) | undefined };
+      matchingTotalsRequest.current = request;
+      setMatchingTotals(null); setTotalsError("");
+      request.start = () => {
+        if (matchingTotalsRequest.current !== request || !request.start) return;
+        request.start = undefined;
+        void Promise.resolve().then(() => {
+          if (matchingTotalsRequest.current !== request) return null;
+          return supabase.rpc("get_assignment_matching_game_totals", {
+            p_organization_id: organizationId, p_filters: matchingFilters,
+          });
+        }).then((result) => {
+          if (matchingTotalsRequest.current !== request || !result) return;
+          const { data, error: countError } = result;
+          if (countError) { setMatchingTotals(null); setTotalsError(countError.message); return; }
+          const totals = normalizeMatchingTotals(data);
+          if (!totals) { setMatchingTotals(null); setTotalsError("Game totals could not be read."); return; }
+          request.totals = totals;
+          setMatchingTotals(totals); setTotalsError("");
+          setGamePageHasMore(gamePaging.current.page * 50 < totals.total);
+        }).catch(() => {
+          if (matchingTotalsRequest.current === request) { setMatchingTotals(null); setTotalsError("Game totals could not be loaded."); }
+        });
+      };
+    } else if (matchingTotalsRequest.current.totals) {
+      setGamePageHasMore(cursor.page * 50 < matchingTotalsRequest.current.totals.total);
+    }
+    const gamePromise = (async () => {
+      const page = await supabase.rpc("get_assignment_matching_game_page", {
+        p_organization_id: organizationId, p_filters: matchingFilters, p_page: cursor.page, p_page_size: 50,
+      });
+      if (page.error) return { data: [] as Game[], error: page.error };
+      const ids = ((page.data || []) as { game_id: string }[]).map((row) => row.game_id);
+      if (!ids.length) return { data: [] as Game[], error: null };
+      if (ids.length > 50) return { data: [] as Game[], error: { message: "Game page exceeded its safe limit." } };
+      // Hydrate only the selected IDs. RLS and current explicit scope still apply.
+      const query = supabase.from("games").select(
+        "id,game_number,status,sport_id,league_id,level_id,location_id,starts_at,time_tbd,field_tbd,venue_conflict_hold,bound_source_status,bound_hold_reasons,bound_hold_resolution_candidate,bound_hold_checked_at,notes,calendar_needs_review,calendar_reviewed_at,duration_minutes,officials_needed,sports(name),leagues(name,assignment_fill_target_days,assignment_acceptance_hours,assignment_escalation_days,assignment_reminder_hours),levels(id,name),home:teams!games_home_team_id_fkey(id,name),away:teams!games_away_team_id_fkey(id,name),location:locations(id,name,address,city,state,latitude,longitude,venue_id)"
+      ).eq("organization_id", organizationId).is("archived_at", null).in("id", ids).order("starts_at").order("id");
+      const scoped = applyLeagueGameAccess(query, scopedGameAccess, fullLeagueAccess);
+      if (!scoped) return { data: [] as Game[], error: null };
+      return await scoped as unknown as { data: Game[] | null; error: { message: string } | null };
+    })();
     const fetchCandidateData = async () => {
       const roster = await loadAssignmentOfficialRoster<Official>(
         supabase, organizationId, assignmentCandidateLeagueScope(scopedGames),
@@ -910,8 +943,7 @@ export default function AssignmentsManagerV2({
     const g = await gamePromise;
     if (version !== loadVersion.current) return;
     if (g.error) { setError(g.error.message); return; }
-    cursor.next = g.nextOffsets;
-    setGamePageHasMore(g.hasMore);
+
     candidateLeagueIds = Array.from(new Set((g.data || []).map((game) => game.league_id).filter((id): id is string => Boolean(id)))).sort();
     candidateLevelIds = Array.from(new Set((g.data || []).map((game) => game.level_id).filter((id): id is string => Boolean(id)))).sort();
     candidateTeamIds = Array.from(new Set((g.data || []).flatMap((game) => [game.home?.id,game.away?.id]).filter((id): id is string => Boolean(id)))).sort();
@@ -921,7 +953,7 @@ export default function AssignmentsManagerV2({
         supabase
           .from("sport_positions")
           .select("id,sport_id,name,required,sort_order")
-          .order("sort_order"),
+          .order("sort_order").order("id"),
         candidateTeamIds.length ? readAllForChunks<Power,string>(candidateTeamIds,(ids,from, to) =>
           supabase
             .from("assignor_team_power_rankings")
@@ -1118,7 +1150,7 @@ export default function AssignmentsManagerV2({
     setSelected("");
     setReplacementOnly(false);
     void load();
-    return () => { loadVersion.current++; candidateCache.current = null; };
+    return () => { loadVersion.current++; candidateCache.current = null; matchingTotalsRequest.current = null; };
   }, [organizationId, leagueScopeKey]);
   useEffect(() => {
     const sourceId = fieldMove?.sourceId;
@@ -1196,7 +1228,7 @@ export default function AssignmentsManagerV2({
   useEffect(() => {
     if (initialFilterLoad.current) { initialFilterLoad.current = false; return; }
     void load(true);
-  }, [range, customDate, locationFilter, dayFilter, timeFilter, officialFilter,
+  }, [range, customDate, fromDate, toDate, locationFilter, dayFilter, timeFilter, officialFilter,
       leagueFilter, levelFilter, unpublishedOnly, selfAssignOnly,
       replacementOnly, completenessFilter]);
   useEffect(() => {
@@ -1247,6 +1279,7 @@ export default function AssignmentsManagerV2({
     handledReportFocus.current = focusGameId;
     setRange("all");
     setCustomDate("");
+    setFromDate(""); setToDate("");
     setUnpublishedOnly(false);
     setSelfAssignOnly(false);
     setCompletenessFilter([]);
@@ -1353,6 +1386,9 @@ export default function AssignmentsManagerV2({
         ),
       ),
     ]);
+    // Assignment changes can move games into/out of the server-filtered page.
+    // Reload matching IDs and independent totals, not only the old page records.
+    await load(true);
     return true;
   }
   async function archiveCancelledGames(selectedGameIds?: string[]) {
@@ -1552,11 +1588,7 @@ export default function AssignmentsManagerV2({
       (slot) => slot.game_id === gameId && slot.status === "open",
     ).length;
   }
-  const selfAssignGameCount = new Set(
-    selfAssignSlots
-      .filter((slot) => slot.status === "open")
-      .map((slot) => slot.game_id),
-  ).size;
+  const selfAssignGameCount = matchingTotals?.selfAssign ?? "…";
   function gameNeedsReplacement(listedGame: Game) {
     return positions
       .filter((position) => position.sport_id === listedGame.sport_id)
@@ -1571,35 +1603,10 @@ export default function AssignmentsManagerV2({
     leagueFilter ||
     levelFilter,
   );
-  const rangeGames = games.filter((g) => inRange(g, range, customDate));
-  const eligibleFilteredGames = games.filter((g) => {
-    const matchesSelfAssign = !selfAssignOnly || selfAssignOpenCount(g.id) > 0;
-    const matchesReplacement = !replacementOnly || gameNeedsReplacement(g);
-    if (hasDirectGameFilter)
-      return (
-        matchesLocationFilter(g) &&
-        matchesDayFilter(g) &&
-        matchesTimeFilter(g) &&
-        matchesOfficialFilter(g) &&
-        matchesLeagueFilter(g) &&
-        matchesLevelFilter(g) &&
-        matchesSelfAssign &&
-        matchesReplacement &&
-        (completenessFilter.length === 0 ||
-          completenessFilter.includes(assignmentCompleteness(g).key))
-      );
-    return (
-      inRange(g, range, customDate) &&
-      matchesSelfAssign &&
-      matchesReplacement &&
-      (completenessFilter.length === 0 ||
-        completenessFilter.includes(assignmentCompleteness(g).key))
-    );
-  });
-  const baseFilteredGames = unpublishedOnly
-    ? eligibleFilteredGames.filter(isUnpublishedGame)
-    : eligibleFilteredGames;
-  const unpublishedFilteredCount = eligibleFilteredGames.filter(isUnpublishedGame).length;
+  // The database applies every filter before its 50-row limit. Do not filter
+  // this page a second time using incomplete client-side related records.
+  const baseFilteredGames = games;
+  const unpublishedFilteredCount = matchingTotals?.unpublished ?? "…";
   function compareGames(a: Game, b: Game) {
     let n = 0;
     if (gameSort === "game")
@@ -2260,6 +2267,7 @@ export default function AssignmentsManagerV2({
   }
   function chooseRange(r: Range) {
     setRange(r);
+    setFromDate(""); setToDate("");
     setShowCalendar(false);
     setOverrideOfficial("");
     setSelected("");
@@ -2268,6 +2276,7 @@ export default function AssignmentsManagerV2({
   function chooseDate(value: string) {
     setCustomDate(value);
     setRange("custom");
+    setFromDate(""); setToDate("");
     setOverrideOfficial("");
     setSelected("");
     setLinkSelected([]);
@@ -2307,6 +2316,7 @@ export default function AssignmentsManagerV2({
   function clearGameFilters() {
     setRange("all");
     setCustomDate("");
+    setFromDate(""); setToDate("");
     setShowCalendar(false);
     setUnpublishedOnly(false);
     setSelfAssignOnly(false);
@@ -2341,6 +2351,7 @@ export default function AssignmentsManagerV2({
     const filters = {
       range,
       customDate,
+      fromDate, toDate,
       dayFilter,
       timeFilter,
       locationFilter,
@@ -2371,6 +2382,7 @@ export default function AssignmentsManagerV2({
   function applySavedView(view: SavedAssignmentView) {
     setRange(view.range);
     setCustomDate(view.customDate);
+    setFromDate(view.fromDate || ""); setToDate(view.toDate || "");
     setDayFilter(normalizeMultiFilter(view.dayFilter));
     setTimeFilter(normalizeMultiFilter(view.timeFilter));
     setLocationFilter(normalizeMultiFilter(view.locationFilter));
@@ -3153,6 +3165,7 @@ export default function AssignmentsManagerV2({
     setCandidatePositionId("");
     setRange("all");
     setCustomDate("");
+    setFromDate(""); setToDate("");
     setUnpublishedOnly(false);
     setSelfAssignOnly(false);
     setCompletenessFilter([]);
@@ -4224,8 +4237,7 @@ export default function AssignmentsManagerV2({
         `Game status changed to ${gameStatusOptions.find(([value]) => value === status)?.[1] || status}.${notification}`,
       );
     }
-    if (["canceled", "rained_out"].includes(status))
-      await refreshAssignmentState();
+    if (response.ok) await refreshAssignmentState();
     setGameStatusSaving("");
   }
   async function publishAssignments() {
@@ -5072,8 +5084,7 @@ export default function AssignmentsManagerV2({
     ["thisWeek", "This Week"],
     ["nextWeek", "Next Week"],
   ];
-  // Direct game filters intentionally search across all dates (existing behavior).
-  // Only show a date chip when that range is actually applied to the result set.
+  // Date selections combine with all other filters and are shown explicitly.
   const activeGameFilters: { key: string; label: string; remove: () => void }[] = [];
   if (leagueFilter) activeGameFilters.push({
     key: "league", label: `League: ${leagueOptions.find((league) => league.id === leagueFilter)?.name || "Selected league"}`,
@@ -5083,8 +5094,8 @@ export default function AssignmentsManagerV2({
     key: `venue:${value}`, label: `Venue: ${venueFilterOptions.find(([id]) => id === value)?.[1] || "Selected venue"}`,
     remove: () => setLocationFilter((current) => current.filter((item) => item !== value)),
   }));
-  if (range !== "all" && !hasDirectGameFilter) activeGameFilters.push({
-    key: "date", label: `Date: ${range === "custom" ? customDate || "Choose a Date" : filters.find(([key]) => key === range)?.[1] || range}`,
+  if (range !== "all") activeGameFilters.push({
+    key: "date", label: `Date: ${range === "dateRange" ? `${fromDate || "Any"} to ${toDate || "Any"}` : range === "custom" ? customDate || "Choose a Date" : filters.find(([key]) => key === range)?.[1] || range}`,
     remove: () => { chooseRange("all"); setCustomDate(""); },
   });
   if (selfAssignOnly) activeGameFilters.push({ key: "view", label: "View: Open for Self Assign", remove: () => setSelfAssignOnly(false) });
@@ -5115,17 +5126,11 @@ export default function AssignmentsManagerV2({
   if (unpublishedOnly) activeGameFilters.push({ key: "unpublished", label: "Not published", remove: () => setUnpublishedOnly(false) });
   if (replacementOnly) activeGameFilters.push({ key: "replacement", label: "Replacement needed", remove: () => setReplacementOnly(false) });
   const attentionQueue = {
-    replacements: rangeGames.filter(gameNeedsReplacement).length,
-    needsAction: rangeGames.filter(
-      (listedGame) => assignmentCompleteness(listedGame).key === "attention",
-    ).length,
-    unassigned: rangeGames.filter(
-      (listedGame) => assignmentCompleteness(listedGame).key === "unassigned",
-    ).length,
-    awaiting: rangeGames.filter(
-      (listedGame) => assignmentCompleteness(listedGame).key === "awaiting",
-    ).length,
-    unpublished: rangeGames.filter(isUnpublishedGame).length,
+    replacements: matchingTotals?.queue.replacement ?? "…",
+    needsAction: matchingTotals?.queue.attention ?? "…",
+    unassigned: matchingTotals?.queue.unassigned ?? "…",
+    awaiting: matchingTotals?.queue.awaiting ?? "…",
+    unpublished: matchingTotals?.queue.unpublished ?? "…",
   };
   type CoveragePeriod = "morning" | "afternoon" | "evening";
   const coveragePeriodLabels: { key: CoveragePeriod; label: string }[] = [
@@ -5960,6 +5965,27 @@ export default function AssignmentsManagerV2({
     setNotice(`${fieldMove.mode === "switch" ? "Switch" : "Transfer"} completed.${fieldMove.accept ? " Moved assignments accepted." : failures.length ? " Some notifications failed; review the assignment email status." : " Officials notified for acceptance."}`);
     if (failures.length) setError(`${failures.join("; ")}. Filter to the game date if needed, then open each affected game and use Notifications → Retry.`);
   }
+    function renderGamePagination() {
+    return (
+<div className="assignmentResultsNotice" role="status">
+              {matchingTotals ? `${matchingTotals.total} matching games` : "Loading game totals…"} · {filteredGames.length} displayed (maximum 50).
+              {" "}Sorting, selections and exports apply to this page only.
+              {" "}Linked-game assignments still apply to the whole authorized group, including games on other pages.
+              <div className="assignmentNumberedPages" aria-label="Game pages">
+                <button type="button" className="secondary" disabled={gamePageLoading || gamePageNumber === 1 || gamePageActionBusy} onClick={() => changeGamePage(1)}>First</button>
+                <button type="button" className="secondary" disabled={gamePageLoading || gamePageNumber === 1 || gamePageActionBusy} onClick={() => changeGamePage(gamePageNumber - 1)}>Previous</button>
+                {pageNumbers(gamePageNumber, totalPages || gamePageNumber).map((page) => <button type="button" key={page} aria-current={page === gamePageNumber ? "page" : undefined} disabled={gamePageLoading || gamePageActionBusy || page === gamePageNumber} onClick={() => changeGamePage(page)}>{page}</button>)}
+                <span>Page {gamePageNumber} of {totalPages ?? "…"}</span>
+                <button type="button" className="secondary" disabled={gamePageLoading || !gamePageHasMore || gamePageActionBusy} onClick={() => changeGamePage(gamePageNumber + 1)}>Next</button>
+                <button type="button" className="secondary" disabled={gamePageLoading || !totalPages || gamePageNumber >= totalPages || gamePageActionBusy} onClick={() => totalPages && changeGamePage(totalPages)}>Last</button>
+                {(error || totalsError) && <button type="button" className="secondary" disabled={gamePageLoading || gamePageActionBusy} onClick={() => void load(true)}>Retry this page</button>}
+                {totalsError && <span role="status">Totals unavailable. Your loaded games are still shown.</span>}
+                {gamePageLoading && <span>Loading page…</span>}
+              </div>
+            </div>
+    );
+  }
+
   return (
     <>
       <input
@@ -9096,7 +9122,7 @@ export default function AssignmentsManagerV2({
             >
               <div>
                 <h3 id="attentionQueueTitle">Needs Attention</h3>
-                <p>Counts reflect this page only. Open the work that should be handled next.</p>
+                <p>Counts include all matching games. Open the work that should be handled next.</p>
               </div>
               <button
                 type="button"
@@ -9202,17 +9228,12 @@ export default function AssignmentsManagerV2({
                       {filters.map(([key, label]) => (
                         <option key={key} value={key}>
                           {label} (
-                          {
-                            games.filter(
-                              (g) =>
-                                inRange(g, key, customDate) &&
-                                matchesOfficialFilter(g),
-                            ).length
-                          }
+                          {matchingTotals?.ranges[key] ?? "…"}
                           )
                         </option>
                       ))}
                       <option value="custom">Choose a Date</option>
+                      <option value="dateRange">From / To Dates</option>
                     </select>
                   </label>
                   <button
@@ -9250,9 +9271,10 @@ export default function AssignmentsManagerV2({
                     </button>
                   </div>
                 )}
-                {hasDirectGameFilter && (
-                  <small className="assignmentDateScopeNote">Other selected filters search across all dates.</small>
-                )}
+                <div className="assignmentDateRangeControls">
+                  <label className="assignmentToolbarField"><span>From</span><input type="date" aria-label="From date" value={fromDate} onChange={(event) => { setFromDate(event.target.value); setRange("dateRange"); setSelected(""); setLinkSelected([]); }} /></label>
+                  <label className="assignmentToolbarField"><span>To</span><input type="date" aria-label="To date" value={toDate} onChange={(event) => { setToDate(event.target.value); setRange("dateRange"); setSelected(""); setLinkSelected([]); }} /></label>
+                </div>
               </div>
             </div>
             <div className="assignmentSecondaryFilters">
@@ -9417,7 +9439,7 @@ export default function AssignmentsManagerV2({
                     <span>Assignment Status</span>
                     <details>
                       <summary>{completenessFilter.length === 0
-                        ? `All Assignment Statuses (${rangeGames.length})`
+                        ? `All Assignment Statuses (${matchingTotals?.allStatuses ?? "…"})`
                         : `${completenessFilter.length} status${completenessFilter.length === 1 ? "" : "es"} selected`}</summary>
                       <div className="assignmentStatusFilterOptions">
                         <label><input type="checkbox" checked={completenessFilter.length === 0} onChange={() => chooseCompleteness("all")} />All Assignment Statuses</label>
@@ -9445,8 +9467,7 @@ export default function AssignmentsManagerV2({
                   </label>
                   {hasDirectGameFilter && (
                     <span>
-                      Showing matching games across all dates and selected
-                      assignment statuses.
+                      Showing matching games within the selected dates and assignment statuses.
                     </span>
                   )}
                   {savedViews.length > 0 && (
@@ -9685,17 +9706,7 @@ export default function AssignmentsManagerV2({
               {bulkWorking && <span>Working…</span>}
             </div>
           )}
-            <div className="assignmentResultsNotice" role="status">
-              Page {gamePageNumber}: {filteredGames.length} matching games from {games.length} loaded (maximum 50).
-              {" "}Filters may leave fewer matches on a page. Counts, sorting, selections and exports apply to this page only.
-              {" "}Linked-game assignments still apply to the whole authorized group, including games on other pages.
-              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <button type="button" className="secondary" disabled={gamePageLoading || gamePageNumber === 1 || gamePageActionBusy} onClick={() => changeGamePage(-1)}>Previous 50 games</button>
-                <button type="button" className="secondary" disabled={gamePageLoading || !gamePageHasMore || gamePageActionBusy} onClick={() => changeGamePage(1)}>Next 50 games</button>
-                {error && <button type="button" className="secondary" disabled={gamePageLoading || gamePageActionBusy} onClick={() => void load(true)}>Retry this page</button>}
-                {gamePageLoading && <span>Loading page…</span>}
-              </div>
-            </div>
+          {renderGamePagination()}
           <div
             className="assignmentGameTable"
             style={{
@@ -10256,8 +10267,8 @@ export default function AssignmentsManagerV2({
                   </b>
                   <span>
                     {gamePageLoading ? "Loading this page…" : error ? "This page could not be loaded. Retry it or return to the previous page." : gamePageHasMore
-                      ? "Use Next 50 games to continue searching. Later pages may have matches."
-                      : "This is the last page. Use Previous 50 games or change the filters."}
+                      ? "Use Next to continue through matching games."
+                      : "No matching games on this page. Return to First or change the filters."}
                   </span>
                   <button
                     type="button"
@@ -10271,6 +10282,7 @@ export default function AssignmentsManagerV2({
             </div>
             </div>
           </div>
+          {renderGamePagination()}
           <div
             style={{
               margin: "14px 0",
