@@ -7165,21 +7165,7 @@ export default function AssignmentsManagerV2({
                         : "Upload Game Fees"}
                     </button>
                     <button type="button" disabled={!filteredGames.length} onClick={() => void downloadGameFeeTemplate()}>
-                      Download Game Fees Template
-                    </button>
-                    <button
-                      type="button"
-                      disabled={
-                        selfAssignSaving ||
-                        (!selfAssignSelected.length &&
-                          !linkSelected.length &&
-                          !game)
-                      }
-                      onClick={prepareSelfAssignPositions}
-                    >
-                      {selfAssignSaving
-                        ? "Opening…"
-                        : "Open Positions for Self Assign"}
+                      Game fee template
                     </button>
                   </div>
                 </details>
@@ -7239,19 +7225,7 @@ export default function AssignmentsManagerV2({
                   : "Upload Game Fees"}
               </button>
               <button type="button" disabled={!filteredGames.length} onClick={() => void downloadGameFeeTemplate()}>
-                Download Game Fees Template
-              </button>
-              <button
-                type="button"
-                disabled={
-                  selfAssignSaving ||
-                  (!selfAssignSelected.length && !linkSelected.length && !game)
-                }
-                onClick={prepareSelfAssignPositions}
-              >
-                {selfAssignSaving
-                  ? "Opening…"
-                  : "Open Positions for Self Assign"}
+                Game fee template
               </button>
             </nav>
           )}
@@ -9605,6 +9579,7 @@ export default function AssignmentsManagerV2({
                 Games <small>{filteredGames.length} results</small>
               </b>
               <span
+                className="assignmentResultsActions"
                 style={{
                   display: "flex",
                   gap: 7,
@@ -9622,6 +9597,21 @@ export default function AssignmentsManagerV2({
                 >
                   {showSelectedDetails ? "Close Selected Details" : "Open Selected Details"}
                 </button>
+                {canManage && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={
+                      selfAssignSaving ||
+                      (!selfAssignSelected.length && !linkSelected.length && !game)
+                    }
+                    onClick={prepareSelfAssignPositions}
+                  >
+                    {selfAssignSaving
+                      ? "Opening…"
+                      : "Open Positions for Self Assign"}
+                  </button>
+                )}
                 <button
                   type="button"
                   className="secondary"

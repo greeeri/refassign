@@ -114,6 +114,8 @@
 .assignmentCompactHead > div,
 .assignmentSelectionSummary { min-width: 0; overflow-wrap: anywhere; }
 .assignmentCompactActionStrip { overflow: visible; white-space: normal; row-gap: 10px; }
+.assignmentResultsActions { min-width: 0; max-width: 100%; }
+.assignmentResultsActions > button { min-height: 44px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .assignmentSelectionBar > button { max-width: 100%; white-space: normal; }
 .assignmentSelectionBar .assignmentSelectionSummary { flex: 1 1 100%; }
 
