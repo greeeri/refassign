@@ -14,6 +14,7 @@ function loadModule(path) {
   vm.runInNewContext(compile(fs.readFileSync(path, 'utf8')), { module, exports: module.exports, require });
   return module.exports;
 }
+const summaryResult=(total,openGames=total)=>({data:{total,openGames},error:null});
 const copy = value => JSON.parse(JSON.stringify(value));
 const venue = loadModule('lib/assignments/venueFilter.ts');
 const paging = { ...loadModule('lib/supabase/readAll.ts'), ...loadModule('lib/assignments/boundedGamePage.ts') };
@@ -122,7 +123,7 @@ function setup(options = {}) {
     from: name => query('from', name),
     rpc(name, parameters) {
       if (name === 'current_user_roles') return Promise.resolve({ data: options.roles || ['assignor'], error: null });
-      if (name === 'get_assignment_matching_game_page' || name === 'get_assignment_matching_game_totals') {
+      if (name === 'get_assignment_matching_game_page' || name === 'get_assignment_game_summary') {
         const call = { kind: 'rpc', name, parameters: copy(parameters), operations: [] }; calls.push(call); reads.push(call);
         const f = parameters.p_filters;
         // This mock is the documented server contract; actual SQL predicates and RLS
@@ -136,12 +137,12 @@ function setup(options = {}) {
         const explicit = f.range !== 'all' || f.locationIds !== null || f.days.length || f.times.length || f.officialId || f.leagueId || f.levelId || f.unpublishedOnly || f.selfAssignOnly || f.replacementOnly || f.completeness.length;
         if (f.range === 'all' && f.focusGameId) rows = rows.filter(row => row.id === f.focusGameId);
         else if (f.range === 'all' && f.days.length) rows = rows.filter(row => f.days.includes(row.starts_at.slice(0,10)));
-        else if (f.range === 'all' && f.todayForward) rows = rows.filter(row => row.starts_at.slice(0,10) >= f.asOf.slice(0,10));
+        else if (f.range === 'all' && f.todayForward && !f.replacementOnly && !f.completeness.includes('attention')) rows = rows.filter(row => row.starts_at.slice(0,10) >= f.asOf.slice(0,10));
         else if (!explicit) rows = rows.filter(row => row.starts_at >= f.asOf);
         rows.sort((a,b) => a.starts_at.localeCompare(b.starts_at) || a.id.localeCompare(b.id));
         const error = options.fail?.(call); if (error) return Promise.resolve({ data: null, error });
         if (options.rpcOverride) { const result = options.rpcOverride(call, state); if (result) return result; }
-        if (name.endsWith('_totals')) return Promise.resolve({ data: { total: rows.length, ranges: {}, completeness: {}, queue: {}, unpublished: 0, selfAssign: 0, replacement: 0, allStatuses: rows.length }, error: null });
+        if (name.endsWith('_summary')) return Promise.resolve(summaryResult(rows.length,rows.filter(row=>!options.filledGameIds?.includes(row.id)).length));
         const start = (parameters.p_page - 1) * parameters.p_page_size;
         return Promise.resolve({ data: rows.slice(start, start + parameters.p_page_size).map(row => ({ game_id: row.id })), error: null });
       }
@@ -149,7 +150,7 @@ function setup(options = {}) {
     },
   };
   vm.runInNewContext(compile(loadQuerySource), state);
-  return { state, reads, calls, run: async (requestTotals = false) => { const result = await state.runLoadQuery(); if(requestTotals) state.matchingTotalsRequest.current?.start?.(); await new Promise(resolve => setImmediate(resolve)); return result; }, gameReads: () => reads.filter(call => call.name === 'games'), pageReads: () => reads.filter(call => call.name === 'get_assignment_matching_game_page') };
+  return { state, reads, calls, run: async (finishCriticalLoad = false) => { const result = await state.runLoadQuery(); if(finishCriticalLoad) state.matchingTotalsRequest.current?.start?.(); await new Promise(resolve => setImmediate(resolve)); return result; }, gameReads: () => reads.filter(call => call.name === 'games'), pageReads: () => reads.filter(call => call.name === 'get_assignment_matching_game_page') };
 }
 const operation = (call, method, column) => call.operations.find(([m, c]) => m === method && (column === undefined || column === c));
 const resultIds = result => Array.from(result.data, row => row.id);
@@ -552,12 +553,12 @@ test('assignments recheck per-league location grants before pagination and disca
   }
 });
 
-test('only explicit historical dates bypass today-forward while other filters retain the window', async () => {
+test('explicit historical dates replacement or attention bypass today-forward while other filters retain the window', async () => {
   const games = Array.from({ length: 180 }, (_, index) => game(index, 'member', { starts_at: '2000-01-01T00:00:00Z' }));
   for (const filter of [ { leagueFilter: 'allowed-league' }, { levelFilter: 'u16' }, { officialFilter: 'ref' }, { range: 'custom', customDate: '2000-01-01' }, { dayFilter: ['2000-01-01'] }, { timeFilter: ['18:00'] }, { unpublishedOnly: true }, { selfAssignOnly: true }, { replacementOnly: true }, { completenessFilter: ['partial'] } ]) {
     const s = setup({ games, state: filter });
     const first = await s.run();
-    const historical = filter.range === 'custom' || Boolean(filter.dayFilter?.length);
+    const historical = filter.range === 'custom' || Boolean(filter.dayFilter?.length) || filter.replacementOnly || filter.completenessFilter?.includes('attention');
     if (!historical) { assert.equal(first.data.length,0,JSON.stringify(filter)); assert.equal(s.gameReads().length,0); continue; }
     assert.equal(first.data.length, 50, JSON.stringify(filter));
     assert.equal(s.state.gamePageHasMore, true);
@@ -695,11 +696,11 @@ test('matching page hydrates without waiting for slower totals and later totals 
   const totals = new Promise(resolve => { resolveTotals = resolve; });
   const games = Array.from({ length: 80 }, (_, i) => game(i, 'member'));
   const s = setup({explicitDateScope:true, games, state: { leagueFilter: 'allowed-league' }, rpcOverride(call) {
-    if (call.name.endsWith('_totals')) return totals;
+    if (call.name.endsWith('_summary')) return totals;
   } });
   const result = await s.run(true);
   assert.equal(result.data.length, 50); assert.equal(s.state.matchingTotals, null);
-  resolveTotals({ data: { total: 80, ranges: {}, completeness: {}, queue: {}, unpublished: 0, selfAssign: 0, replacement: 0, allStatuses: 80 }, error: null });
+  resolveTotals(summaryResult(80));
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(s.state.matchingTotals.total, 80); assert.equal(s.state.gamePageHasMore, true);
 });
@@ -707,17 +708,17 @@ test('matching page hydrates without waiting for slower totals and later totals 
 test('stale totals response cannot replace current filter totals or next-page state', async () => {
   const pending = [];
   const s = setup({explicitDateScope:true, games: [game(1, 'member')], state: { leagueFilter: 'allowed-league' }, rpcOverride(call) {
-    if (call.name.endsWith('_totals')) return new Promise(resolve => pending.push(resolve));
+    if (call.name.endsWith('_summary')) return new Promise(resolve => pending.push(resolve));
   } });
   await s.run(true); s.state.levelFilter = 'u16'; await s.run(true);
-  const response = total => ({ data: { total, ranges: {}, completeness: {}, queue: {}, unpublished: 0, selfAssign: 0, replacement: 0, allStatuses: total }, error: null });
+  const response = total => summaryResult(total);
   pending[1](response(1)); await new Promise(resolve => setImmediate(resolve));
   pending[0](response(1000)); await new Promise(resolve => setImmediate(resolve));
   assert.equal(s.state.matchingTotals.total, 1); assert.equal(s.state.gamePageHasMore, false);
 });
 
 test('failed totals preserve a successful page and expose retry state instead of false zero', async () => {
-  const s = setup({explicitDateScope:true, games: [game(1, 'member')], fail: call => call.name.endsWith('_totals') ? { message: 'Counts offline' } : null });
+  const s = setup({explicitDateScope:true, games: [game(1, 'member')], fail: call => call.name.endsWith('_summary') ? { message: 'Counts offline' } : null });
   assert.equal((await s.run(true)).data.length, 1);
   assert.equal(s.state.matchingTotals, null); assert.equal(s.state.totalsError, 'Counts offline');
 });
@@ -797,17 +798,17 @@ test('page-only navigation reuses completed totals and updates last-page navigat
  await s.run(true);
  const original=s.state.matchingTotals;
  for(const page of [2,3,1]) {s.state.gamePaging.current.page=page;await s.run(true);assert.deepEqual(s.state.matchingTotals,original);assert.equal(s.state.gamePageHasMore,page<3);}
- assert.equal(s.calls.filter(c=>c.name.endsWith('_totals')).length,1);
+ assert.equal(s.calls.filter(c=>c.name.endsWith('_summary')).length,1);
  assert.equal(s.calls.filter(c=>c.name.endsWith('_page')).length,4);
  assert(functionSource('changeGamePage').includes('load(true, true)'));
 });
 
 test('pending counts survive page generations without duplicate RPC and use current page', async () => {
  let finish;const pending=new Promise(resolve=>{finish=resolve;});
- const s=setup({explicitDateScope:true,games:Array.from({length:120},(_,i)=>game(i,'member')),rpcOverride(call){if(call.name.endsWith('_totals'))return pending;}});
+ const s=setup({explicitDateScope:true,games:Array.from({length:120},(_,i)=>game(i,'member')),rpcOverride(call){if(call.name.endsWith('_summary'))return pending;}});
  await s.run(true);s.state.gamePaging.current.page=3;await s.run(true);
- assert.equal(s.calls.filter(c=>c.name.endsWith('_totals')).length,1);
- finish({data:{total:120,ranges:{},completeness:{},queue:{},unpublished:0,selfAssign:0,replacement:0,allStatuses:120},error:null});
+ assert.equal(s.calls.filter(c=>c.name.endsWith('_summary')).length,1);
+ finish(summaryResult(120));
  await new Promise(resolve=>setImmediate(resolve));
  assert.equal(s.state.matchingTotals.total,120);assert.equal(s.state.gamePageHasMore,false);
 });
@@ -824,41 +825,41 @@ test('non-page load invalidates counts immediately for mutations filters Undo an
 
 test('scope revocation cancels pending counts before their late response', async()=>{
  let finish;const access=[{organization_id:'selected-org',user_id:'current-user',league_id:'allowed-league',all_locations:true,location_ids:[]}];
- const s=setup({explicitDateScope:true,access,games:[game(1,'member')],rpcOverride(call){if(call.name.endsWith('_totals'))return new Promise(resolve=>{finish=resolve;});}});
+ const s=setup({explicitDateScope:true,access,games:[game(1,'member')],rpcOverride(call){if(call.name.endsWith('_summary'))return new Promise(resolve=>{finish=resolve;});}});
  await s.run(true);access.splice(0);await s.run(true);
  assert.equal(s.state.matchingTotalsRequest.current,null);
- finish({data:{total:999,ranges:{},completeness:{},queue:{},unpublished:0,selfAssign:0,replacement:0,allStatuses:999},error:null});
+ finish(summaryResult(999));
  await new Promise(resolve=>setImmediate(resolve));assert.equal(s.state.matchingTotals.total,0);
  assert(functionSource('loadPage').includes('matchingTotalsRequest.current = null; setMatchingTotals(null)'));
 });
 
 
 test('explicit retry invalidates failed count request while a page retry never hides successful counts', async()=>{
- let fail=true;const s=setup({explicitDateScope:true,games:[game(1,'member')],fail:call=>fail&&call.name.endsWith('_totals')?{message:'offline'}:null});
+ let fail=true;const s=setup({explicitDateScope:true,games:[game(1,'member')],fail:call=>fail&&call.name.endsWith('_summary')?{message:'offline'}:null});
  await s.run(true);assert.equal(s.state.totalsError,'offline');
  const code=functionSource('load');s.state.gamePageLoadingRef={current:false};
  for(const name of ['GamePageLoading'])s.state[`set${name}`]=value=>{s.state[name]=value;};
  s.state.loadPage=s.run;vm.runInNewContext(compile(code),s.state);
  fail=false;await s.state.load(true);s.state.matchingTotalsRequest.current.start();await new Promise(resolve=>setImmediate(resolve));
  assert.equal(s.state.matchingTotals.total,1);assert.equal(s.state.totalsError,'');
- assert.equal(s.calls.filter(c=>c.name.endsWith('_totals')).length,2);
+ assert.equal(s.calls.filter(c=>c.name.endsWith('_summary')).length,2);
  await s.state.load(true,true);assert.equal(s.state.matchingTotals.total,1);
- assert.equal(s.calls.filter(c=>c.name.endsWith('_totals')).length,2);
+ assert.equal(s.calls.filter(c=>c.name.endsWith('_summary')).length,2);
 });
 
 
 test('lost login or auth error on navigation cancels pending counts even for owner-wide access', async()=>{
  for(const authError of [null,{message:'Auth unavailable'}]) {
-  let finish;const s=setup({explicitDateScope:true,state:{fullLeagueAccess:true},games:[game(1,'member')],rpcOverride(call){if(call.name.endsWith('_totals'))return new Promise(resolve=>{finish=resolve;});}});
+  let finish;const s=setup({explicitDateScope:true,state:{fullLeagueAccess:true},games:[game(1,'member')],rpcOverride(call){if(call.name.endsWith('_summary'))return new Promise(resolve=>{finish=resolve;});}});
   await s.run(true);s.state.supabase.auth.getUser=async()=>({data:{user:null},error:authError});await s.run(true);
   assert.equal(s.state.matchingTotalsRequest.current,null);assert.equal(s.state.matchingTotals,null);assert.deepEqual(s.state.games,[]);
-  finish({data:{total:999,ranges:{},completeness:{},queue:{},unpublished:0,selfAssign:0,replacement:0,allStatuses:999},error:null});
+  finish(summaryResult(999));
   await new Promise(resolve=>setImmediate(resolve));assert.equal(s.state.matchingTotals,null);
  }
 });
 
 
-test('page loading settles and unlocks without starting opt-in totals',async()=>{
+test('page loading unlocks before automatic nonblocking two-field summary',async()=>{
  const events=[];let finish;
  const state={matchingTotalsRequest:{current:{start:()=>events.push('counts started')}},loadVersion:{current:0},gamePageLoadingRef:{current:false}};
  for(const name of new Set(functionSource('load').match(/\bset[A-Z]\w+/g)))state[name]=value=>{if(name==='setGamePageLoading'&&!value)events.push('page unlocked');};
@@ -866,16 +867,16 @@ test('page loading settles and unlocks without starting opt-in totals',async()=>
  vm.runInNewContext(compile(functionSource('load')),state);
  const loading=state.load(true,true);assert.deepEqual(events,['hydration started']);
  events.push('hydration finished');finish();await loading;
- assert.deepEqual(events,['hydration started','hydration finished','page unlocked']);
+ assert.deepEqual(events,['hydration started','hydration finished','page unlocked','counts started']);
 });
 
 test('totals are not issued during page hydration and empty pages still start them afterward',async()=>{
  for(const games of [[],[game(1,'member')]]){
   const s=setup({explicitDateScope:true,games});await s.state.runLoadQuery();
-  assert.equal(s.calls.filter(c=>c.name.endsWith('_totals')).length,0);
+  assert.equal(s.calls.filter(c=>c.name.endsWith('_summary')).length,0);
   assert.equal(typeof s.state.matchingTotalsRequest.current.start,'function');
   s.state.matchingTotalsRequest.current.start();await new Promise(resolve=>setImmediate(resolve));
-  assert.equal(s.calls.filter(c=>c.name.endsWith('_totals')).length,1);
+  assert.equal(s.calls.filter(c=>c.name.endsWith('_summary')).length,1);
   assert.equal(s.state.matchingTotals.total,games.length);
  }
 });
@@ -884,9 +885,9 @@ test('stale deferred count starter never issues an RPC after filter identity cha
  const s=setup({explicitDateScope:true,games:[game(1,'member')]});await s.state.runLoadQuery();
  const oldStart=s.state.matchingTotalsRequest.current.start;
  s.state.levelFilter='u16';await s.state.runLoadQuery();oldStart();
- await new Promise(resolve=>setImmediate(resolve));assert.equal(s.calls.filter(c=>c.name.endsWith('_totals')).length,0);
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(s.calls.filter(c=>c.name.endsWith('_summary')).length,0);
  s.state.matchingTotalsRequest.current.start();await new Promise(resolve=>setImmediate(resolve));
- assert.equal(s.calls.filter(c=>c.name.endsWith('_totals')).length,1);
+ assert.equal(s.calls.filter(c=>c.name.endsWith('_summary')).length,1);
 });
 
 
@@ -895,21 +896,21 @@ test('same-key page load reuses a not-yet-started count callback exactly once',a
  const start=s.state.matchingTotalsRequest.current.start;
  s.state.gamePaging.current.page=2;await s.state.runLoadQuery();assert.equal(s.state.matchingTotalsRequest.current.start,start);
  start();start();await new Promise(resolve=>setImmediate(resolve));
- assert.equal(s.calls.filter(c=>c.name.endsWith('_totals')).length,1);assert.equal(s.state.gamePageHasMore,false);
+ assert.equal(s.calls.filter(c=>c.name.endsWith('_summary')).length,1);assert.equal(s.state.gamePageHasMore,false);
 });
 
 test('scope invalidation between scheduled start and RPC suppresses even the request',async()=>{
  const s=setup({explicitDateScope:true,games:[game(1,'member')]});await s.state.runLoadQuery();
  s.state.matchingTotalsRequest.current.start();s.state.matchingTotalsRequest.current=null;
- await new Promise(resolve=>setImmediate(resolve));assert.equal(s.calls.filter(c=>c.name.endsWith('_totals')).length,0);
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(s.calls.filter(c=>c.name.endsWith('_summary')).length,0);
 });
 
-test('hydration rejection preserves page error and never starts opt-in counts',async()=>{
+test('hydration rejection preserves page error while starting independent summary',async()=>{
  const events=[];const state={matchingTotalsRequest:{current:{start:()=>events.push('counts')}},loadVersion:{current:0},gamePageLoadingRef:{current:false}};
  for(const name of new Set(functionSource('load').match(/\bset[A-Z]\w+/g)))state[name]=value=>{state[name.slice(3)]=value;};
  state.loadPage=async()=>{state.loadVersion.current++;throw new Error('hydrate failed');};
  vm.runInNewContext(compile(functionSource('load')),state);await state.load(true,true);
- assert.equal(state.Error,'Unable to load games.');assert.equal(state.gamePageLoadingRef.current,false);assert.deepEqual(events,[]);
+ assert.equal(state.Error,'Unable to load games.');assert.equal(state.gamePageLoadingRef.current,false);assert.deepEqual(events,['counts']);
 });
 
 
@@ -920,10 +921,10 @@ test('default page publishes at most 50 today-and-future games without totals or
  assert.equal(first.data.length,50);assert.equal(first.data[0].id,'game-00001');assert(!resultIds(first).includes('game-00999'));
  assert.deepEqual(s.state.games.map(g=>g.id),resultIds(first));assert.equal(s.state.initialGamesReady,true);assert.equal(s.state.canManage,false);
  assert.equal(s.state.gamePageHasMore,true);assert.equal(s.state.matchingTotals,null);
- assert(!s.calls.some(c=>c.name.endsWith('_totals')||c.name==='get_organization_field_complexes'||c.name==='audit_history'||c.name==='assignments'));
+ assert(!s.calls.some(c=>c.name.endsWith('_summary')||c.name==='get_organization_field_complexes'||c.name==='audit_history'||c.name==='assignments'));
  const f=s.pageReads()[0].parameters.p_filters;assert.equal(f.todayForward,true);assert(Date.parse(f.asOf)>=before&&Date.parse(f.asOf)<=Date.now(),'asOf stays actual now, not day boundary');
  s.state.gamePaging.current.page=2;const second=await s.run();assert.equal(second.data.length,21);assert.equal(s.state.gamePageHasMore,false);
- assert.equal(s.calls.filter(c=>c.name.endsWith('_totals')).length,0);
+ assert.equal(s.calls.filter(c=>c.name.endsWith('_summary')).length,0);
 });
 
 test('historical concrete-day and exact-focus intent survives todayForward and league filters',async()=>{
@@ -934,11 +935,11 @@ test('historical concrete-day and exact-focus intent survives todayForward and l
  }
 });
 
-test('unknown totals never invent total pages and remain explicit bottom-only',()=>{
- const pager=functionSource('renderGamePagination');assert(pager.includes('Load totals'));assert(pager.includes('totalPages !== null'));
+test('unknown automatic summary never invents total pages and remains bottom-only',()=>{
+ const pager=functionSource('renderGamePagination');assert(!pager.includes('Load totals'));assert(pager.includes('totalPages !== null'));
  assert.equal((source.match(/\{renderGamePagination\(\)\}/g)||[]).length,1);
  assert(pager.includes('!totalPages'),'Last requires known totals');
- assert(!functionSource('load').includes('current?.start?.()'),'load never starts totals automatically');
+ assert(functionSource('load').includes('current?.start?.()'),'load starts automatic summary after critical readiness');
 });
 
 test('early visible game cannot assign while management or hydration readiness is false',async()=>{
@@ -954,15 +955,15 @@ test('early visible game cannot assign while management or hydration readiness i
 
 function fullLoadSetup(options={}) {
  const s=setup(options);const st=s.state;
- Object.assign(st,{setTimeout,leagueScopeKey:'allowed-league',sortMode:'date',linkSelected:[],selfAssignSelected:[],selected:'',
+ Object.assign(st,{gamePageLoadingRef:{current:false},setTimeout,leagueScopeKey:'allowed-league',sortMode:'date',linkSelected:[],selfAssignSelected:[],selected:'',
   gamePower:()=>1,assignmentCandidateLeagueScope:()=>['allowed-league'],
   loadAssignmentOfficialRoster:options.roster || (async()=>({data:[],candidateIds:[],error:null})),loadCandidateScheduleConflicts:async()=>null});
- for(const name of new Set(functionSource('loadPage').match(/\bset[A-Z]\w+/g))){
+ for(const name of new Set((functionSource('loadPage')+functionSource('load')).match(/\bset[A-Z]\w+/g))){
   if(name==='setTimeout')continue;const key=name[3].toLowerCase()+name.slice(4);
   st[name]=value=>{st[key]=typeof value==='function'?value(st[key]??[]):value;};
  }
- vm.runInNewContext(compile(functionSource('loadPage')),st);
- return {...s,full:()=>st.loadPage()};
+ vm.runInNewContext(compile(functionSource('loadPage')+'\n'+functionSource('load')),st);
+ return {...s,full:(...args)=>st.load(...args)};
 }
 
 test('full loader exposes bounded page before slow roster and never enables mutation until readiness',async()=>{
@@ -970,7 +971,7 @@ test('full loader exposes bounded page before slow roster and never enables muta
  const s=fullLoadSetup({games:[game(1,'member')],roster:()=>{started();return new Promise(resolve=>{release=resolve;});}});
  const pending=s.full();await atRoster;
  assert.equal(s.state.games.length,1);assert.equal(s.state.initialGamesReady,true);assert.equal(s.state.canManage,false);
- assert.equal(s.calls.filter(c=>c.name.endsWith('_totals')).length,0);
+ assert.equal(s.calls.filter(c=>c.name.endsWith('_summary')).length,0);
  release({data:[],candidateIds:[],error:null});await pending;assert.equal(s.state.canManage,true);
 });
 
@@ -984,14 +985,14 @@ test('stale delayed roster success or error cannot mutate a replacement page or 
  }
 });
 
-test('manual default totals use the same today-forward snapshot and can be retried without reloading games',async()=>{
- let fail=true;const s=setup({games:[game(999,'member',{starts_at:'2000-01-01T00:00:00Z'}),...Array.from({length:51},(_,i)=>game(i,'member'))],fail:call=>fail&&call.name.endsWith('_totals')?{message:'counts offline'}:null});
+test('automatic summary uses the same today-forward snapshot and retries after invalidation',async()=>{
+ let fail=true;const s=setup({games:[game(999,'member',{starts_at:'2000-01-01T00:00:00Z'}),...Array.from({length:51},(_,i)=>game(i,'member'))],fail:call=>fail&&call.name.endsWith('_summary')?{message:'counts offline'}:null});
  await s.run();assert.equal(s.state.matchingTotals,null);assert.equal(s.state.gamePageHasMore,true);
  const pageFilter=s.pageReads()[0].parameters.p_filters;s.state.matchingTotalsRequest.current.start();await new Promise(resolve=>setImmediate(resolve));
  assert.equal(s.state.totalsError,'counts offline');assert.equal(s.state.games.length,50);assert.equal(s.state.totalsLoading,false);
- fail=false;s.state.matchingTotalsRequest.current.start();await new Promise(resolve=>setImmediate(resolve));
- assert.equal(s.state.matchingTotals.total,51);assert.equal(s.state.totalsLoading,false);assert.equal(s.pageReads().length,1);
- assert.deepEqual(s.calls.find(c=>c.name.endsWith('_totals')).parameters.p_filters,pageFilter);
+ fail=false;s.state.matchingTotalsRequest.current=null;await s.run(true);
+ assert.equal(s.state.matchingTotals.total,51);assert.equal(s.state.totalsLoading,false);assert.equal(s.pageReads().length,2);
+ assert.deepEqual(s.calls.find(c=>c.name.endsWith('_summary')).parameters.p_filters,pageFilter);
  s.state.gamePaging.current.page=2;await s.run();assert.equal(s.state.games.length,1);assert.equal(s.state.gamePageHasMore,false);
 });
 
@@ -1006,6 +1007,64 @@ test('supporting-read errors retain the first page but leave details and mutatio
  for(const failed of ['assignments','audit_history','sport_positions']){
   const s=fullLoadSetup({games:[game(1,'member')],fail:call=>call.name===failed?{message:`${failed} unavailable`}:null});await s.full();
   assert.equal(s.state.games.length,1);assert.equal(s.state.initialGamesReady,true);assert.equal(s.state.pageDetailsReady,false);assert.equal(s.state.canManage,false);assert.match(s.state.error,/unavailable/);
-  assert.equal(s.calls.filter(c=>c.name.endsWith('_totals')).length,0);
+  assert.equal(s.calls.filter(c=>c.name.endsWith('_summary')).length,1);
+ }
+});
+
+const flush=()=>new Promise(resolve=>setImmediate(resolve));
+
+test('one automatic two-field summary stays pending while assignments are actionable and pagination reuses it',async()=>{
+ let finish;const s=fullLoadSetup({games:Array.from({length:151},(_,i)=>game(i,'member')),rpcOverride(call){if(call.name==='get_assignment_game_summary')return new Promise(resolve=>{finish=resolve;});}});
+ await s.full();assert.equal(s.state.canManage,true);assert.equal(s.state.pageDetailsReady,true);assert.equal(s.state.gamePageLoading,false);assert.equal(s.state.totalsLoading,true);assert.equal(s.state.matchingTotals,null);
+ const initial=s.calls.find(c=>c.name==='get_assignment_game_summary');assert(initial);assert.deepEqual(Object.keys(initial.parameters).sort(),['p_filters','p_organization_id']);
+ s.state.gamePaging.current.page=2;await s.full(true,true);
+ assert.equal(s.calls.filter(c=>c.name==='get_assignment_game_summary').length,1);assert.equal(s.state.canManage,true);
+ finish(summaryResult(151,37));await flush();assert.deepEqual(copy(s.state.matchingTotals),{total:151,openGames:37});assert.equal(s.state.totalsLoading,false);assert.equal(s.state.gamePageHasMore,true);
+ s.state.gamePaging.current.page=4;await s.full(true,true);assert.equal(s.state.games.length,1);assert.equal(s.state.gamePageHasMore,false);
+ assert.equal(s.calls.filter(c=>c.name==='get_assignment_game_summary').length,1);
+ assert(!s.calls.some(c=>c.name==='get_assignment_matching_game_totals'||c.name==='get_assignment_matching_game_totals_batch'));
+});
+
+test('summary identity invalidates on filter mutation auth grant and unmount changes',async()=>{
+ for(const reason of ['filter','mutation','auth','grants','unmount']){
+  const access=[{organization_id:'selected-org',user_id:'current-user',league_id:'allowed-league',all_locations:true,location_ids:[]}];const pending=[];
+  const s=fullLoadSetup({access,games:[game(1,'member')],rpcOverride(call){if(call.name==='get_assignment_game_summary')return new Promise(resolve=>pending.push(resolve));}});
+  await s.full();assert.equal(pending.length,1);
+  if(reason==='filter'){s.state.levelFilter='changed';await s.full();}
+  if(reason==='mutation')await s.full(true);
+  if(reason==='auth'){s.state.supabase.auth.getUser=async()=>({data:{user:null},error:null});await s.full(true,true);}
+  if(reason==='grants'){access.splice(0);await s.full(true,true);}
+  if(reason==='unmount'){
+   const cleanup=findNode(node=>ts.isArrowFunction(node)&&node.body.getText(ast).startsWith('{ loadVersion.current++; candidateCache.current = null; matchingTotalsRequest.current = null;'));
+   vm.runInNewContext(compile(`(${cleanup.getText(ast)})();`),s.state);
+  }
+  pending[0](summaryResult(999,998));await flush();assert.notEqual(s.state.matchingTotals?.total,999,reason);
+  if(reason==='filter'||reason==='mutation'){pending[1](summaryResult(2,1));await flush();assert.deepEqual(copy(s.state.matchingTotals),{total:2,openGames:1});}
+ }
+});
+
+test('failed or invalid summary leaves the page actionable without false zero or page-triggered refetch',async()=>{
+ for(const result of [{data:null,error:{message:'timeout'}},summaryResult(10,11),{data:{total:10},error:null}]){
+  const s=fullLoadSetup({games:Array.from({length:101},(_,i)=>game(i,'member')),rpcOverride(call){if(call.name==='get_assignment_game_summary')return Promise.resolve(result);}});
+  await s.full();await flush();assert.equal(s.state.matchingTotals,null);assert.equal(s.state.totalsLoading,false);assert.equal(s.state.canManage,true);assert.equal(s.state.pageDetailsReady,true);assert.equal(s.state.games.length,50);assert(s.state.totalsError);
+  s.state.gamePaging.current.page=2;await s.full(true,true);assert.equal(s.calls.filter(c=>c.name==='get_assignment_game_summary').length,1);assert.equal(s.state.canManage,true);
+ }
+});
+
+test('only total games and games with open positions are rendered as aggregate counters',()=>{
+ const pager=functionSource('renderGamePagination');assert(pager.includes('matchingTotals.total'));assert(pager.includes('matchingTotals.openGames'));assert(!pager.includes('Load totals'));
+ for(const field of ['ranges','completeness','queue','unpublished','selfAssign','replacement','allStatuses'])assert(!new RegExp(`matchingTotals\\??\\.${field}`).test(source),field);
+ for(const label of ['Replacement needed','Unassigned games','Awaiting response','Not published','Open for Self Assign','All Assignment Statuses'])assert(source.includes(label),label);
+ assert(!source.includes('get_assignment_matching_game_totals_batch'));assert(!source.includes('get_assignment_matching_game_totals"'));
+});
+
+test('default summary excludes history while explicitly selected Replacement or Attention retains historical intent',async()=>{
+ const old=game(1,'member',{starts_at:'2000-01-01T12:00:00Z'}),future=game(2,'member');
+ for(const filters of [{},{leagueFilter:'allowed-league'},{replacementOnly:true},{completenessFilter:['attention']}]){
+  const s=fullLoadSetup({games:[old,future],state:filters});await s.full();await flush();
+  const expected=filters.replacementOnly||filters.completenessFilter?.includes('attention')?2:1;
+  assert.equal(s.state.matchingTotals.total,expected);assert.equal(s.state.games.length,expected);
+  const page=s.pageReads()[0].parameters.p_filters,summary=s.calls.find(c=>c.name==='get_assignment_game_summary').parameters.p_filters;
+  assert.deepEqual(summary,page);assert.equal(page.todayForward,true);
  }
 });

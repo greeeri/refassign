@@ -8,6 +8,7 @@ const sql = fs.readFileSync('supabase/migrations/20261023093720_assignment_match
  '20261023124553_optimize_assignment_matching_fact_joins.sql',
  '20261023125012_inline_assignment_matching_totals_predicates.sql',
  '20261023155245_assignment_today_forward_page.sql',
+ '20261023163700_simple_assignment_game_summary.sql',
  ].map(name => fs.readFileSync(`supabase/migrations/${name}`, 'utf8')).join('\n'));
 const asOf = '2026-10-23T12:00:00Z';
 async function setup() {
@@ -30,6 +31,7 @@ async function setup() {
  await db.exec(sql);
  return db;
 }
+async function summary(db,filters={}) {return (await db.query('select public.get_assignment_game_summary($1,$2) value',[I.org,JSON.stringify({asOf,...filters})])).rows[0].value;}
 async function page(db, filters={}, p=1, size=50,org=I.org) {
  return (await db.query('select * from public.get_assignment_matching_game_page($1,$2,$3,$4)',[org,JSON.stringify({asOf,...filters}),p,size])).rows.map(r=>r.game_id);
 }
@@ -220,6 +222,20 @@ test('matching RPC security, counts, pagination, date and assignment semantics',
   await asUser(db,I.admin,async()=>assert((await page(db,{todayForward:true,leagueId:I.a})).length>0));
   await db.exec('grant select on public.audit_history to authenticated');
  });
+ await t.test('simple summary counts only matching games and current unfilled required positions',async()=>{
+  await asUser(db,I.admin,async()=>{
+   for(const [n,open] of [[400,1],[401,1],[403,0],[404,0],[405,0],[406,1]])assert.deepEqual(await summary(db,{focusGameId:id(n)}),{total:1,openGames:open});
+   for(const f of [{todayForward:true},{todayForward:true,leagueId:I.a},{range:'custom',customDate:'2026-10-22'},{officialId:I.officialA},{unpublishedOnly:true},{selfAssignOnly:true},{completeness:['unassigned']},{replacementOnly:true},{locationIds:[]}])
+    assert.equal((await summary(db,f)).total,(await total(db,f)).total);
+  });
+  await seed(db,790,{officials_needed:0});await seed(db,791,{sport_id:id(99991)});
+  await asUser(db,I.admin,async()=>{for(const n of [790,791])assert.deepEqual(await summary(db,{focusGameId:id(n)}),{total:1,openGames:0});});
+  await db.exec('revoke select on public.audit_history from authenticated');
+  await asUser(db,I.admin,async()=>assert((await summary(db,{todayForward:true})).total>0));
+  await db.exec('grant select on public.audit_history to authenticated');
+  const meta=(await db.query("select prosecdef,proconfig,has_function_privilege('anon',oid,'execute') anonymous from pg_proc where proname='get_assignment_game_summary'")).rows[0];
+  assert(!meta.prosecdef&&!meta.anonymous);assert(meta.proconfig.includes('search_path=""'));
+ });
  await t.test('1,395-game production-cardinality isolated benchmark',async()=>{
   await db.exec(`create index on public.assignments(game_id,position_id); create index on public.audit_history(game_id,action); create index on public.assignment_self_assign_slots(game_id);
    drop policy legacy_permissive on public.locations;
@@ -262,6 +278,7 @@ test('matching RPC security, counts, pagination, date and assignment semantics',
    console.log(`1395-game default first page benchmark: ${Math.round(performance.now()-pstart)} ms`);
    const todayStart=performance.now(); assert.equal((await page(db,{todayForward:true})).length,50);
    console.log(`1395-game today-forward first page benchmark: ${Math.round(performance.now()-todayStart)} ms`);
+   const simpleStart=performance.now();assert.deepEqual(await summary(db,{todayForward:true}),{total:345,openGames:345});console.log('1395-game two-count summary',Math.round(performance.now()-simpleStart),'ms');
   });
  });
  } finally {await db.close();}

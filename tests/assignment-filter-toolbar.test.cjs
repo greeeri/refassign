@@ -17,7 +17,7 @@ visit(ast);
 const attr = (node, name) => node.openingElement.attributes.properties.find(p => p.name?.text === name)?.initializer;
 const toolbar = elements.find(node => attr(node, 'className')?.getText(ast).includes('`assignmentFilterPanel assignmentCompactToolbar'));
 const chipsStart = source.indexOf('  const activeGameFilters:');
-const chipsEnd = source.indexOf('  const attentionQueue =', chipsStart);
+const chipsEnd = source.indexOf('  type CoveragePeriod =', chipsStart);
 function setup(overrides = {}) {
   const state = {
     require, exports: {}, canManage: true, showMoreFilters: false, showCalendar: false,
@@ -264,7 +264,7 @@ test('actual numeric pager renders bounded numbers and wires First Previous Next
   const module = { exports: {} };
   vm.runInNewContext(ts.transpileModule(fs.readFileSync('lib/assignments/matchingGames.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { module, exports: module.exports });
   const destinations = [];
-  const state = { require, exports: {}, matchingTotals: { total: 387 }, filteredGames: Array(50), totalPages: 8, gamePageNumber: 4,
+  const state = { require, exports: {}, matchingTotals: { total: 387, openGames: 42 }, filteredGames: Array(50), totalPages: 8, gamePageNumber: 4,
     gamePageLoading: false, gamePageActionBusy: false, gamePageHasMore: true, games: Array(50), totalsLoading: false, range: 'all', dayFilter: [], focusGameId: '', matchingTotalsRequest: { current: null }, error: '', totalsError: '',
     pageNumbers: module.exports.pageNumbers, changeGamePage: page => destinations.push(page), load: () => {} };
   vm.runInNewContext(ts.transpileModule(functions.get('renderGamePagination').getText(ast), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText, state);
@@ -279,18 +279,28 @@ test('actual numeric pager renders bounded numbers and wires First Previous Next
   state.gamePageLoading = false; state.gamePageActionBusy = true;
   assert(nodes(state.renderGamePagination()).filter(node => node.type === 'button').every(node => node.props.disabled));
   state.gamePageActionBusy = false; state.matchingTotals = null; state.totalPages = null;
-  let requested = 0; state.matchingTotalsRequest.current = { start: () => requested++ };
   const unknown = nodes(state.renderGamePagination());
   const next = unknown.find(node => node.type === 'button' && node.props.children === 'Next');
   assert.equal(next.props.disabled, false, 'a full page allows Next without scanning totals');
   assert.equal(unknown.find(node => node.type === 'button' && node.props.children === 'Last').props.disabled, true);
   assert(!JSON.stringify(unknown).includes(' of '), 'unknown counts never invent a page denominator');
-  unknown.find(node => node.type === 'button' && node.props.children === 'Load totals').props.onClick();
-  assert.equal(requested, 1, 'totals start only from explicit user action');
+  assert(!unknown.some(node => node.type === 'button' && /totals/i.test(String(node.props.children))), 'no extra click for counts');
   state.totalsLoading = true;
-  assert.equal(nodes(state.renderGamePagination()).find(node => node.type === 'button' && node.props.children === 'Loading totals…').props.disabled, true);
+  const pending = nodes(state.renderGamePagination());
+  assert(pending.some(node => node.type === 'span' && node.props.children === 'Loading totals…'));
+  assert.equal(pending.find(node => node.type === 'button' && node.props.children === 'Next').props.disabled, false);
   state.totalsLoading = false; state.totalsError = 'timeout';
-  assert(nodes(state.renderGamePagination()).some(node => node.type === 'button' && node.props.children === 'Retry totals'));
+  assert(nodes(state.renderGamePagination()).some(node => node.type === 'button' && node.props.children === 'Retry this page'));
   state.gamePageHasMore = false;
   assert.equal(nodes(state.renderGamePagination()).find(node => node.type === 'button' && node.props.children === 'Next').props.disabled, true);
+});
+
+test('filter choices retain labels without unsupported facet counts',()=>{
+ const s=setup();const rendered=nodes(s.renderToolbar());
+ const labels=rendered.filter(node=>node.type==='option').map(node=>JSON.stringify(node.props.children));
+ assert(!labels.some(label=>label.includes('—')||label.includes('(')), 'no uncomputed facet counters');
+ assert(rendered.some(node=>node.type==='summary'&&node.props.children==='All Assignment Statuses'));
+ assert(!source.includes('attentionQueue.'));
+ assert(source.includes('<span>Replacement needed</span>'));
+ assert(source.includes('<span>Unassigned games</span>'));
 });
