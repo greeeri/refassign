@@ -1,6 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { readAllForChunks, readAllPages, type PageResult } from "../supabase/readAll";
 
+import { readPersonalRosterScope } from "./personalRoster";
+
 type LeagueGame = { league_id: string | null };
 type OfficialIdentity = { id: string; first_name: string; last_name: string };
 type LeagueEligibility = { official_id: string; league_id: string };
@@ -29,24 +31,38 @@ export function isLeagueCandidate(
  * Assigned profiles are display-only and do not become searchable candidates.
  */
 export async function loadAssignmentOfficialRoster<T extends OfficialIdentity>(
-  supabase: Pick<SupabaseClient, "from">,
+  supabase: Pick<SupabaseClient, "from" | "rpc">,
   organizationId: string | undefined,
   leagueIds: string[] | null,
   assignedOfficialIds: string[],
 ): Promise<PageResult<T> & { candidateIds: string[] }> {
+  const personal = organizationId ? await readPersonalRosterScope(supabase, organizationId) : { ids: null, error: null };
+  if (personal.error) return { data: null, error: personal.error, candidateIds: [] };
+  const rosterIds = personal.ids;
   const leagueJoin = leagueIds === null ? "" : ",official_league_eligibility!inner(league_id)";
-  const roster: PageResult<T> = leagueIds?.length === 0
+  const roster: PageResult<T> = leagueIds?.length === 0 || rosterIds?.length === 0
     ? { data: [], error: null }
     : organizationId
-      ? await readAllPages<{ official_id: string; officials: T }>((from, to) => {
+      ? await (async () => {
+        const chunks: (string[] | null)[] = rosterIds === null ? [null] : [];
+        for (let offset = 0; rosterIds && offset < rosterIds.length; offset += 200) chunks.push(rosterIds.slice(offset, offset + 200));
+        const rows: T[] = [];
+        for (const chunk of chunks) {
+          const result = await readAllPages<{ official_id: string; officials: T }>((from, to) => {
           // data-access: query-builder; every request is ordered and ranged below.
           let query = supabase.from("organization_officials")
             .select(`official_id,officials!inner(${officialColumns}${leagueJoin})`)
             .eq("organization_id", organizationId).eq("active", true).eq("officials.active", true);
+          if (chunk) query = query.in("official_id", chunk);
           if (leagueIds !== null)
             query = query.in("officials.official_league_eligibility.league_id", leagueIds);
           return query.order("official_id").range(from, to) as unknown as PromiseLike<PageResult<{ official_id: string; officials: T }>>;
-        }, 1000, 2).then(({ data, error }) => ({ data: (data || []).map((row) => row.officials), error }))
+          }, 1000, 2);
+          if (result.error) return { data: null, error: result.error };
+          rows.push(...(result.data || []).map(row => row.officials));
+        }
+        return { data: rows, error: null };
+      })()
       : await readAllPages<T>((from, to) => {
           // data-access: query-builder; every request is ordered and ranged below.
           let query = supabase.from("officials").select(`${officialColumns}${leagueJoin}`).eq("active", true);

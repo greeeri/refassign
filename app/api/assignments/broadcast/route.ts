@@ -1,3 +1,4 @@
+import { readPersonalRosterScope } from "../../../../lib/assignments/personalRoster";
 import { createHash, randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { sendOfficialNotification } from "../../../../lib/communications/officialCc";
@@ -32,11 +33,14 @@ function esc(value: unknown) {
   );
 }
 
-type BroadcastContext = Pick<Awaited<ReturnType<typeof requireManagedOrganization>>, "service" | "organizationId" | "fullOrganizationAccess" | "leagueAccess">;
+type BroadcastContext = Pick<Awaited<ReturnType<typeof requireManagedOrganization>>, "service" | "session" | "organizationId" | "fullOrganizationAccess" | "leagueAccess">;
 
 async function readBroadcastRecipients(context: BroadcastContext, games: { league_id: string | null }[]) {
   // A scoped manager may not use broadcasts as organization-wide outreach.
   const { service, organizationId, fullOrganizationAccess } = context;
+  if (!context.session || !organizationId) return { data: null, error: { message: "Could not verify personal roster." } };
+  const personal = await readPersonalRosterScope(context.session, organizationId);
+  if (personal.error) return { data: null, error: personal.error };
   let scopedRecipientIds: string[] | null = null;
   if (!fullOrganizationAccess) {
     const selectedLeagues = [...new Set(games.map((game) => game.league_id).filter(Boolean))];
@@ -53,6 +57,10 @@ async function readBroadcastRecipients(context: BroadcastContext, games: { leagu
     if (eligible.error || assigned.error)
       return { data: null, error: { message: "Could not verify broadcast recipients." } };
     scopedRecipientIds = [...new Set([...(eligible.data || []), ...(assigned.data || [])].map((row) => row.official_id))];
+  }
+  if (personal.ids !== null) {
+    const personalIds = new Set(personal.ids);
+    scopedRecipientIds = scopedRecipientIds === null ? personal.ids : scopedRecipientIds.filter(id => personalIds.has(id));
   }
   const { data: recipients, error: recipientError } = scopedRecipientIds === null
     ? await readAllPages<RecipientRow>((from, to) => service
@@ -183,6 +191,8 @@ export async function POST(request: NextRequest) {
   const { data: recipients, error: recipientError } = await readBroadcastRecipients(context, games || []);
   if (recipientError)
     return NextResponse.json({ error: recipientError.message }, { status: 400 });
+  if (!recipients?.length)
+    return NextResponse.json({ error: "No officials in your current roster can receive this broadcast." }, { status: 400 });
   if (body.recipientVersion && body.recipientVersion !== broadcastRecipientVersion(recipients || []))
     return NextResponse.json({ error: "Broadcast recipients changed. Close and reopen the review before sending." }, { status: 409 });
   const { error: openError } = await session.rpc("set_self_assign_positions", {

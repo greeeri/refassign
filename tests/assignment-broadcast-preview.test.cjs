@@ -16,7 +16,7 @@ function allowed(row, filter) {
   const remaining = filter.replace(/and\(league_id\.eq\.([^,]+),location_id\.in\.\(([^)]+)\)\)/g, '');
   return [...remaining.matchAll(/league_id\.eq\.([^,]+)/g)].some(match => row.league_id === match[1]);
 }
-function setup({ owner = false, restricted = false, authError = false, fail } = {}) {
+function setup({ owner = false, restricted = false, authError = false, fail, personalIds = null, personalError = null } = {}) {
   const calls = [], sent = [], mutations = [];
   const games = [{ id: 'game-a', organization_id: 'org', league_id: 'a', location_id: 'venue', game_number: 'A', sport_id: 'soccer', officials_needed: 1, starts_at: '2026-10-23T18:00:00Z' }, { id: 'game-b', organization_id: 'org', league_id: 'b', location_id: 'venue', sport_id: 'soccer' }];
   const roster = ['eligible-a', 'eligible-b', 'assigned-a', 'assigned-away', 'no-eligibility'].map(id => ({ organization_id: 'org', official_id: id, active: true, officials: { first_name: id, last_name: 'Official', email: `${id}@example.test`, active: true } }));
@@ -47,6 +47,7 @@ function setup({ owner = false, restricted = false, authError = false, fail } = 
   const module = { exports: {} };
   const localRequire = name => name === 'next/server' ? { NextResponse: { json: response } }
     : name.endsWith('/organizationScope') ? { ...scope, requireManagedOrganization: async () => authError ? { error: response({ error: 'Unauthorized' }, { status: 401 }) } : context }
+    : name.endsWith('/assignments/personalRoster') ? { readPersonalRosterScope: async () => ({ ids: personalIds, error: personalError }) }
     : name.endsWith('/supabase/readAll') ? pagingModule.exports
     : name.endsWith('/communications/officialCc') ? { sendOfficialNotification: async (_client, id, _url, args) => { sent.push({ id, args }); return { ok: true, json: async () => ({}) }; } }
     : require(name);
@@ -113,4 +114,12 @@ test('on-demand preview aborts stale reads and never borrows candidate roster as
   assert.equal(states.at(-1).key, 'b'); assert.equal(states.filter(Boolean).length, 1);
   assert(component.includes('broadcasting || !canManage || !broadcastPreviewReady ||'));
   assert(component.includes('recipientVersion: currentBroadcastPreview!.recipientVersion'));
+});
+
+test('personal roster restricts preview and POST before profile fetch; empty roster opens no slots', async () => {
+  const t = setup({personalIds: ['eligible-a', 'eligible-b']});
+  const preview = await t.get(); assert.deepEqual(copy(preview.body.recipients.map(row=>row.id)), ['eligible-a']);
+  const result = await t.post(['game-a'], {recipientVersion: preview.body.recipientVersion}); assert.equal(result.status, 200); assert.deepEqual(t.sent.map(row=>row.id), ['eligible-a']);
+  const empty=setup({personalIds: []}); const emptyPreview=await empty.get(); assert.equal(emptyPreview.body.recipients.length,0); const rejected=await empty.post(); assert.equal(rejected.status,400);assert.equal(empty.mutations.length,0);assert.equal(empty.sent.length,0);
+  const failed=setup({personalError:{message:'Could not verify roster'}});assert.equal((await failed.get()).status,400);assert.equal((await failed.post()).status,400);assert.equal(failed.sent.length,0);assert.equal(failed.mutations.length,0);
 });

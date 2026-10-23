@@ -32,7 +32,7 @@ function text(node) {
   if (node == null || typeof node === 'boolean') return '';
   return typeof node === 'object' ? text(node.props?.children) : String(node);
 }
-function setup({ props = scoped, officials = fixtures, eligibility = memberships, failMembership = false, delayLeague } = {}) {
+function setup({ props = scoped, officials = fixtures, eligibility = memberships, failMembership = false, delayLeague, personalIds = null, personalError = null } = {}) {
   const cells = [], effects = [], calls = [], deferred = [];
   const fakeWindow = { location: { href: '' }, setTimeout() {} };
   let cursor = 0, tree;
@@ -78,6 +78,7 @@ function setup({ props = scoped, officials = fixtures, eligibility = memberships
     : name === 'react/jsx-runtime' ? require(name)
     : name === 'react-dom' ? { createPortal: content => content }
     : name.endsWith('/supabase/client') ? { createClient: () => client }
+    : name.endsWith('/assignments/personalRoster') ? { readPersonalRosterScope: async () => ({state: {prepared: true, enabled: personalIds !== null, owner_wide: Boolean(props.fullOrganizationAccess), can_manage: true}, ids: personalIds, error: personalError}) }
     : name.startsWith('.') ? { default: function Child() {}, __esModule: true }
     : require(name);
   vm.runInNewContext(ts.transpileModule(fs.readFileSync('components/OfficialsDirectory.tsx', 'utf8'), {
@@ -93,11 +94,11 @@ function setup({ props = scoped, officials = fixtures, eligibility = memberships
   return { render, settle, change, calls, deferred, window: fakeWindow, control, button, nodes: allNodes, text: () => text(tree), names: () => allNodes().filter(n => n.type === 'input' && n.props['aria-label']?.startsWith('Select ') && n.props['aria-label'] !== 'Select visible officials').map(n => n.props['aria-label']) };
 }
 
-test('league selector contains only active coverage within usable league grants', async () => {
+test('league selector includes explicit zero-location grants without expanding game scope', async () => {
   const t = setup(); await t.settle();
-  assert.deepEqual(nodes(t.control('Filter officials by league')).filter(n => n.type === 'option').map(n => n.props.value), ['', 'a', 'b']);
+  assert.deepEqual(nodes(t.control('Filter officials by league')).filter(n => n.type === 'option').map(n => n.props.value), ['', 'a', 'b', 'empty-grant']);
   const query = t.calls.find(c => c.table === 'leagues');
-  assert.equal(JSON.stringify(query.methods.find(([m]) => m === 'in')), JSON.stringify(['in', 'id', ['a', 'b']]));
+  assert.equal(JSON.stringify(query.methods.find(([m]) => m === 'in')), JSON.stringify(['in', 'id', ['a', 'b', 'empty-grant']]));
 });
 
 test('owners retain all covered league choices', async () => {
@@ -224,4 +225,15 @@ test('captured stale refresh cannot invalidate a newer directory load or set loa
   await state.load();
   assert.equal(state.loadGeneration.current, 10);
   assert.deepEqual(writes, []);
+});
+
+test('active personal roster filters rich profiles before downloading and fails closed', async () => {
+  const t = setup({personalIds: ['alice']}); await t.settle();
+  assert.deepEqual(t.names(), ['Select Alice Able']);
+  const reads = t.calls.filter(c => c.rpc === 'get_organization_official_directory');
+  assert(reads.every(c => c.methods.some(([method, column, ids]) => method === 'in' && column === 'id' && ids.length === 1 && ids[0] === 'alice')));
+  for (const options of [{personalIds: []}, {personalError: {message: 'Roster unavailable'}}]) {
+    const empty = setup(options); await empty.settle(); assert.deepEqual(empty.names(), []);
+    assert.equal(empty.calls.filter(c => c.rpc === 'get_organization_official_directory').length, 0);
+  }
 });

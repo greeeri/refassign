@@ -63,6 +63,7 @@ function setup(props = scoped, component = 'OfficialsDirectory') {
     : name === 'react/jsx-runtime' ? localRequire(name)
     : name === 'react-dom' ? { createPortal: content => content }
     : name.endsWith('/supabase/client') ? { createClient: () => client }
+    : name.endsWith('/assignments/personalRoster') ? { readPersonalRosterScope: async () => ({state: null, ids: null, error: null}) }
     : name.startsWith('.') ? { default: function Child() {}, __esModule: true }
     : localRequire(name);
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(`components/${component}.tsx`, 'utf8'), {

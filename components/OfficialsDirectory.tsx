@@ -4,6 +4,8 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { createClient } from "../lib/supabase/client";
+import PersonalOfficialRoster from "./PersonalOfficialRoster";
+import { readPersonalRosterScope, type PersonalRosterState } from "../lib/assignments/personalRoster";
 import OfficialCcContact from "./OfficialCcContact";
 import OfficialsRosterManager from "./OfficialsRosterManager";
 import CommunicationCenter from "./CommunicationCenter";
@@ -216,6 +218,7 @@ export default function OfficialsDirectory({
   const supabase = useMemo(() => createClient(), []);
   const handledReportFocus = useRef("");
   const bulkFileInputRef = useRef<HTMLInputElement>(null);
+  const [personalRosterState, setPersonalRosterState] = useState<PersonalRosterState | null>(null);
   const [officials, setOfficials] = useState<Official[]>([]);
   const [positionRanks, setPositionRanks] = useState<
     Record<string, PositionRank>
@@ -607,6 +610,10 @@ export default function OfficialsDirectory({
     setError("");
     setSelectedIds([]);
     setShowTextComposer(false);
+    const personal = organizationId ? await readPersonalRosterScope(supabase, organizationId) : { state: null, ids: null, error: null };
+    if (!isCurrent()) return;
+    if (personal.error) { setError(personal.error.message); setOfficials([]); setPersonalRosterState(null); setLoading(false); return; }
+    setPersonalRosterState(personal.state);
     const loadAllOfficials = async () => {
       const data: Official[] = [];
       const pageSize = 1000;
@@ -627,6 +634,10 @@ export default function OfficialsDirectory({
           if (rows.length < pageSize) break;
         }
         eligibleIds = [...new Set(eligibleIds)];
+      }
+      if (personal.ids !== null) {
+        const personalSet = new Set(personal.ids);
+        eligibleIds = eligibleIds === null ? personal.ids : eligibleIds.filter(id => personalSet.has(id));
       }
       // An explicit league requires membership. An empty roster never falls
       // back to the full directory, and every profile read is filtered server-side.
@@ -686,9 +697,9 @@ export default function OfficialsDirectory({
         : Promise.resolve({ data: null, error: null }),
     ]);
     if (!isCurrent()) return;
-    const allowedLeagueIds = new Set(leagueGameAccess
-      .filter((grant) => grant.all_locations === true || (grant.location_ids || []).length > 0)
-      .map((grant) => grant.league_id));
+    // Directory scope follows explicit league grants even when no locations are selected.
+    // Game setup/assignment permissions retain their separate location restriction.
+    const allowedLeagueIds = new Set(leagueGameAccess.map((grant) => grant.league_id));
     const leagueIds = (leagueLinks.data || [])
       .map((row) => row.league_id)
       .filter((id) => fullOrganizationAccess || allowedLeagueIds.has(id));
@@ -1484,6 +1495,7 @@ export default function OfficialsDirectory({
 
   return (
     <>
+      {organizationId && personalRosterState && <PersonalOfficialRoster organizationId={organizationId} state={personalRosterState} onChanged={() => void load()} />}
       {scheduleOfficial && (
         <DirectoryOfficialSchedule
           official={scheduleOfficial}
