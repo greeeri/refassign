@@ -623,7 +623,7 @@ test('linked membership metadata is fetched by full page-discovered group IDs, w
   assert.match(body, /const completeMembers = await readAllForChunks[\s\S]*?\.in\("group_id", ids\)/);
   assert.match(body, /setLinkMembers\(completeMembers\.data \|\| \[\]\)/);
   assert.match(source, /shown of \{linkMembers\.filter/);
-  assert.match(source, /Linked-game assignments still apply to the whole authorized group/);
+  assert.match(functionSource('assignLinkedOfficial'), /window\.confirm\(`Assign to all[\s\S]*including[\s\S]*not shown on this page/);
   const migration = fs.readFileSync('supabase/migrations/20261022195617_scope_administrators_to_selected_leagues.sql', 'utf8');
   assert.match(migration, /perform private\.require_linked_game_scope\(p_game_id\)/);
 });

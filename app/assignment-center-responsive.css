@@ -85,7 +85,7 @@
 .assignmentFilterChip > span:first-child { min-width: 0; }
 .assignmentFilterChip > span:last-child { flex: none; font-size: 18px; }
 .assignmentActiveFilters .assignmentClearFilters { border-color: transparent; background: transparent; }
-.assignmentResultsNotice { margin: 14px 0 6px; font-size: 13px; }
+.assignmentResultsNotice { margin: 8px 0 4px; font-size: 12px; }
 @media (max-width: 1200px) {
   .assignmentPrimaryFilters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .assignmentCalendarGroup { grid-column: 1 / -1; }
@@ -228,6 +228,10 @@
 /* Inclusive From/To controls and bounded numeric paging reuse existing styles. */
 .assignmentDateRangeControls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
 .assignmentDateRangeControls input { min-width: 0; width: 100%; box-sizing: border-box; }
-.assignmentNumberedPages { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
-.assignmentNumberedPages button { min-height: 44px; min-width: 44px; }
+.assignmentNumberedPages { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px; }
+.assignmentNumberedPages button { min-height: 28px; min-width: 28px; padding: 4px 8px; font-size: 12px; line-height: 1.2; border-radius: 6px; }
+.assignmentNumberedPages > span { white-space: nowrap; }
 .assignmentNumberedPages [aria-current="page"] { font-weight: 700; }
+@media (max-width: 600px), (pointer: coarse) {
+  .assignmentNumberedPages button { min-height: 44px; min-width: 44px; }
+}
