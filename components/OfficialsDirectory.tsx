@@ -241,6 +241,20 @@ export default function OfficialsDirectory({
   const [scheduleOfficial, setScheduleOfficial] = useState<Official | null>(null);
   const [query, setQuery] = useState("");
   const [sportFilter, setSportFilter] = useState("All");
+  const [leagueFilter, setLeagueFilter] = useState("");
+  const [loadedDirectoryKey, setLoadedDirectoryKey] = useState("");
+  const [loadedLeagueScopeKey, setLoadedLeagueScopeKey] = useState("");
+  const loadGeneration = useRef(0);
+  const leagueScopeKey = JSON.stringify(leagueGameAccess.map((grant) => [
+    grant.league_id, grant.all_locations === true,
+    [...new Set(grant.location_ids || [])].sort(),
+  ]).sort(([a], [b]) => String(a).localeCompare(String(b))));
+  const directoryScopeKey = JSON.stringify([organizationId, fullOrganizationAccess, leagueScopeKey]);
+  const directoryRequestKey = JSON.stringify([directoryScopeKey, leagueFilter]);
+  const filterLeagues = loadedLeagueScopeKey === directoryScopeKey ? leagues : [];
+  const latestDirectoryKey = useRef(directoryRequestKey);
+  latestDirectoryKey.current = directoryRequestKey;
+  const directoryReady = !loading && loadedDirectoryKey === directoryRequestKey;
   const [form, setForm] = useState<OfficialForm>(newForm());
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [officialEmail, setOfficialEmail] = useState("");
@@ -582,41 +596,80 @@ export default function OfficialsDirectory({
   }
 
   async function load() {
+    // An async action may finish after its league/organization was replaced.
+    // Reject that captured refresh before it can invalidate the newer load.
+    const requestKey = directoryRequestKey;
+    if (latestDirectoryKey.current !== requestKey) return;
+    const generation = ++loadGeneration.current;
+    const isCurrent = () => generation === loadGeneration.current && latestDirectoryKey.current === requestKey;
     setLoading(true);
+    setLoadedDirectoryKey("");
     setError("");
+    setSelectedIds([]);
+    setShowTextComposer(false);
     const loadAllOfficials = async () => {
       const data: Official[] = [];
       const pageSize = 1000;
-      for (let from = 0; ; from += pageSize) {
-        const request = organizationId
-          ? supabase
-              .rpc("get_organization_official_directory", {
-                p_organization_id: organizationId,
-              })
-              .range(from, from + pageSize - 1)
-          : supabase
-              .from("officials")
-              .select(
-                "id,first_name,last_name,email,phone,home_area,home_address,home_city,home_state,home_zip,sports,certification_level,active,date_of_birth,is_minor,gender,ethnicity,secondary_email,address_unit,country,mobile_phone,license,license_status,license_issue_date,license_expiration_date,license_issuer,curriculum,background_screening,background_screening_expiration_date,safesport,safesport_expiration_date,intro_player_safety,intro_player_safety_expiration_date,safe_soccer,safe_soccer_expiration_date,provisional_status,referee_years_experience",
-              )
-              .order("last_name")
-              .order("first_name")
-              .range(from, from + pageSize - 1);
-        const page = await request;
-        if (page.error) return { data: null, error: page.error };
-        const rows = organizationId
-          ? ((page.data || []) as OrganizationOfficialRow[]).map((row) => ({
-              ...row,
-              active: Boolean(row.organization_active),
-            }))
-          : ((page.data || []) as Official[]);
-        data.push(...rows);
-        if (rows.length < pageSize) break;
+      let eligibleIds: string[] | null = null;
+      if (leagueFilter) {
+        eligibleIds = [];
+        for (let from = 0; ; from += pageSize) {
+          const page = await supabase
+            .from("official_league_eligibility")
+            .select("official_id")
+            .eq("league_id", leagueFilter)
+            .order("official_id")
+            .range(from, from + pageSize - 1);
+          if (!isCurrent()) return { data: [], error: null };
+          if (page.error) return { data: null, error: page.error };
+          const rows = page.data || [];
+          eligibleIds.push(...rows.map((row) => row.official_id));
+          if (rows.length < pageSize) break;
+        }
+        eligibleIds = [...new Set(eligibleIds)];
       }
+      // An explicit league requires membership. An empty roster never falls
+      // back to the full directory, and every profile read is filtered server-side.
+      const idChunks: (string[] | null)[] = eligibleIds === null ? [null] : [];
+      for (let offset = 0; eligibleIds && offset < eligibleIds.length; offset += 200) {
+        idChunks.push(eligibleIds.slice(offset, offset + 200));
+      }
+      for (const idChunk of idChunks) {
+        for (let from = 0; ; from += pageSize) {
+          // data-access: query-builder; membership filters precede the bounded range below.
+          let request = organizationId
+            ? supabase
+                .rpc("get_organization_official_directory", {
+                  p_organization_id: organizationId,
+                })
+            : supabase
+                .from("officials")
+                .select(
+                  "id,first_name,last_name,email,phone,home_area,home_address,home_city,home_state,home_zip,sports,certification_level,active,date_of_birth,is_minor,gender,ethnicity,secondary_email,address_unit,country,mobile_phone,license,license_status,license_issue_date,license_expiration_date,license_issuer,curriculum,background_screening,background_screening_expiration_date,safesport,safesport_expiration_date,intro_player_safety,intro_player_safety_expiration_date,safe_soccer,safe_soccer_expiration_date,provisional_status,referee_years_experience",
+                );
+          if (idChunk) request = request.in("id", idChunk);
+          const page = await request
+            .order("last_name")
+            .order("first_name")
+            .order("id")
+            .range(from, from + pageSize - 1);
+          if (!isCurrent()) return { data: [], error: null };
+          if (page.error) return { data: null, error: page.error };
+          const rows = organizationId
+            ? ((page.data || []) as OrganizationOfficialRow[]).map((row) => ({
+                ...row,
+                active: Boolean(row.organization_active),
+              }))
+            : ((page.data || []) as Official[]);
+          data.push(...rows);
+          if (rows.length < pageSize) break;
+        }
+      }
+      data.sort((a, b) => (a.last_name || "").localeCompare(b.last_name || "") ||
+        (a.first_name || "").localeCompare(b.first_name || "") || a.id.localeCompare(b.id));
       return { data, error: null };
     };
-    const [o, leagueLinks, levelLinks] = await Promise.all([
-      loadAllOfficials(),
+    const [leagueLinks, levelLinks] = await Promise.all([
       organizationId
         ? supabase
             .from("organization_league_coverage")
@@ -632,12 +685,13 @@ export default function OfficialsDirectory({
             .eq("active", true)
         : Promise.resolve({ data: null, error: null }),
     ]);
-    if (o.error) {
-      setError(o.error.message);
-      setLoading(false);
-      return;
-    }
-    const leagueIds = (leagueLinks.data || []).map((row) => row.league_id);
+    if (!isCurrent()) return;
+    const allowedLeagueIds = new Set(leagueGameAccess
+      .filter((grant) => grant.all_locations === true || (grant.location_ids || []).length > 0)
+      .map((grant) => grant.league_id));
+    const leagueIds = (leagueLinks.data || [])
+      .map((row) => row.league_id)
+      .filter((id) => fullOrganizationAccess || allowedLeagueIds.has(id));
     const levelIds = (levelLinks.data || []).map((row) => row.level_id);
     const [lg, lv] = await Promise.all([
       organizationId
@@ -669,10 +723,28 @@ export default function OfficialsDirectory({
             .eq("active", true)
             .order("name"),
     ]);
+    if (!isCurrent()) return;
     const eligibilityChoiceError =
       leagueLinks.error || levelLinks.error || lg.error || lv.error;
     if (eligibilityChoiceError) {
       setError(eligibilityChoiceError.message);
+      setLoading(false);
+      return;
+    }
+    setLeagues((lg.data || []) as Choice[]);
+    setLoadedLeagueScopeKey(directoryScopeKey);
+    setLevels((lv.data || []) as Choice[]);
+    if (leagueFilter && !(lg.data || []).some((league) => league.id === leagueFilter)) {
+      setOfficials([]);
+      setOfficialLeagueIds({});
+      setError("This league is no longer available. Choose an accessible league or All leagues.");
+      setLoading(false);
+      return;
+    }
+    const o = await loadAllOfficials();
+    if (!isCurrent()) return;
+    if (o.error) {
+      setError(o.error.message);
       setLoading(false);
       return;
     }
@@ -702,6 +774,7 @@ export default function OfficialsDirectory({
           request = request.in("league_id", leagueIds);
         }
         const page = await request;
+        if (!isCurrent()) return;
         if (page.error) {
           eligibilityError = page.error;
           break;
@@ -714,6 +787,7 @@ export default function OfficialsDirectory({
         if (rows.length < pageSize) break;
       }
     }
+    if (!isCurrent()) return;
     if (eligibilityError) {
       setError(eligibilityError.message);
       setLoading(false);
@@ -733,6 +807,7 @@ export default function OfficialsDirectory({
         .select("email")
         .eq("organization_id", organizationId)
         .eq("status", "pending");
+      if (!isCurrent()) return;
       if (invitationError) setError(invitationError.message);
       else
         setPendingInvitationEmails(
@@ -741,12 +816,14 @@ export default function OfficialsDirectory({
     } else setPendingInvitationEmails([]);
 
     const { data: userData } = await supabase.auth.getUser();
+    if (!isCurrent()) return;
     if (userData.user) {
       const { data: profile } = await supabase
         .from("profiles")
         .select("role")
         .eq("id", userData.user.id)
         .maybeSingle();
+      if (!isCurrent()) return;
       const allowed =
         Boolean(organizationId) ||
         ["admin", "assignor"].includes(profile?.role || "");
@@ -757,6 +834,7 @@ export default function OfficialsDirectory({
           .select(
             "official_id,rank,ref_rank,ar1_rank,ar2_rank,fourth_rank,mentor_certified",
           );
+        if (!isCurrent()) return;
         if (rankError) setError(rankError.message);
         const map: Record<string, PositionRank> = {};
         for (const row of (pr || []) as PositionRank[]) {
@@ -773,12 +851,14 @@ export default function OfficialsDirectory({
         setPositionRanks(map);
       }
     }
+    setLoadedDirectoryKey(requestKey);
     setLoading(false);
   }
 
   useEffect(() => {
     void load();
-  }, [organizationId]);
+    return () => { loadGeneration.current += 1; };
+  }, [directoryRequestKey]);
   useEffect(() => {
     if (!focusOfficialId || handledReportFocus.current === focusOfficialId)
       return;
@@ -1242,7 +1322,7 @@ export default function OfficialsDirectory({
     [leagues],
   );
 
-  const visible = officials.filter((o) => {
+  const visible = (directoryReady ? officials : []).filter((o) => {
     const q = query.toLowerCase().trim();
     const connectedLeagueNames = (officialLeagueIds[o.id] || [])
       .map((leagueId) => leagueById.get(leagueId)?.name || "")
@@ -1257,26 +1337,42 @@ export default function OfficialsDirectory({
     );
   });
 
+  const visibleSelectedOfficials = visible.filter((official) => selectedIds.includes(official.id));
+  const selectedRecipientsRef = useRef<Official[]>([]);
+  selectedRecipientsRef.current = visibleSelectedOfficials;
+  const visibleOfficialsRef = useRef<Official[]>([]);
+  visibleOfficialsRef.current = visible;
+  const selectedVisibleIds = visibleSelectedOfficials.map((official) => official.id);
+  const selectedVisibleKey = JSON.stringify(selectedVisibleIds);
+  useEffect(() => {
+    // Filter changes and refreshed results must not retain invisible recipients.
+    setSelectedIds((current) => current.filter((id) => selectedVisibleIds.includes(id)));
+  }, [selectedVisibleKey]);
+
+  function clearDirectorySelection() {
+    selectedRecipientsRef.current = [];
+    setSelectedIds([]);
+    setShowTextComposer(false);
+    setTextMessage("");
+  }
+
   function toggleSelected(id: string) {
+    if (!visibleOfficialsRef.current.some((official) => official.id === id)) return;
     setSelectedIds((current) =>
       current.includes(id) ? current.filter((x) => x !== id) : [...current, id],
     );
   }
 
   function toggleAllVisible() {
-    const ids = visible.filter((o) => !!o.email || !!o.phone).map((o) => o.id);
+    const ids = visibleOfficialsRef.current.filter((o) => !!o.email || !!o.phone || !!o.mobile_phone).map((o) => o.id);
     const allSelected =
       ids.length > 0 && ids.every((id) => selectedIds.includes(id));
-    setSelectedIds((current) =>
-      allSelected
-        ? current.filter((id) => !ids.includes(id))
-        : Array.from(new Set([...current, ...ids])),
-    );
+    setSelectedIds(allSelected ? [] : ids);
   }
 
   function emailSelected() {
-    const emails = officials
-      .filter((o) => selectedIds.includes(o.id) && o.email)
+    const emails = selectedRecipientsRef.current
+      .filter((o) => o.email)
       .map((o) => o.email as string);
     if (!emails.length) {
       setError("Select at least one official with an email address.");
@@ -1286,8 +1382,8 @@ export default function OfficialsDirectory({
   }
 
   function textSelected() {
-    const recipients = officials.filter(
-      (o) => selectedIds.includes(o.id) && (o.mobile_phone || o.phone),
+    const recipients = selectedRecipientsRef.current.filter(
+      (o) => o.mobile_phone || o.phone,
     );
     if (!recipients.length) {
       setError("Select at least one official with a phone number.");
@@ -1300,10 +1396,8 @@ export default function OfficialsDirectory({
   }
 
   async function sendSelectedTexts() {
-    const recipientIds = officials
-      .filter(
-        (o) => selectedIds.includes(o.id) && (o.mobile_phone || o.phone),
-      )
+    const recipientIds = selectedRecipientsRef.current
+      .filter((o) => o.mobile_phone || o.phone)
       .map((o) => o.id);
     if (!organizationId || !recipientIds.length || !textMessage.trim()) return;
     setTextSending(true);
@@ -1702,7 +1796,7 @@ export default function OfficialsDirectory({
               <div>
                 <h2 id="directory-text-title">Send Text Message</h2>
                 <p>
-                  Sending through Ref Pro Group to {officials.filter((o) => selectedIds.includes(o.id) && (o.mobile_phone || o.phone)).length} selected official{officials.filter((o) => selectedIds.includes(o.id) && (o.mobile_phone || o.phone)).length === 1 ? "" : "s"}.
+                  Sending through Ref Pro Group to {visibleSelectedOfficials.filter((o) => o.mobile_phone || o.phone).length} selected official{visibleSelectedOfficials.filter((o) => o.mobile_phone || o.phone).length === 1 ? "" : "s"}.
                 </p>
               </div>
               <button
@@ -1749,26 +1843,26 @@ export default function OfficialsDirectory({
           <div className="cardHead">
             <div>
               <h2>Officials Directory</h2>
-              <p>{officials.length} officials</p>
+              <p>{directoryReady ? visible.length : 0} officials{leagueFilter && leagueById.has(leagueFilter) ? ` in ${leagueById.get(leagueFilter)?.name}` : ""}</p>
             </div>
             <div className="headerActions">
               {canManage && (
                 <>
                   <button
                     className="secondary"
-                    disabled={!selectedIds.length}
+                    disabled={!visibleSelectedOfficials.length}
                     onClick={emailSelected}
                   >
                     Email Selected
-                    {selectedIds.length ? ` (${selectedIds.length})` : ""}
+                    {visibleSelectedOfficials.length ? ` (${visibleSelectedOfficials.length})` : ""}
                   </button>
                   <button
                     className="secondary"
-                    disabled={!selectedIds.length}
+                    disabled={!visibleSelectedOfficials.length}
                     onClick={textSelected}
                   >
                     Text Selected
-                    {selectedIds.length ? ` (${selectedIds.length})` : ""}
+                    {visibleSelectedOfficials.length ? ` (${visibleSelectedOfficials.length})` : ""}
                   </button>
                 </>
               )}
@@ -1780,15 +1874,30 @@ export default function OfficialsDirectory({
               </button>}
             </div>
           </div>
-          <div className="toolbar">
+          <div className="toolbar officialsDirectoryToolbar">
             <input
+              aria-label="Search officials"
               placeholder="Search roster by name, email, or phone…"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => { clearDirectorySelection(); setQuery(e.target.value); }}
             />
             <select
+              aria-label="Filter officials by league"
+              value={leagueFilter}
+              onChange={(e) => { clearDirectorySelection(); setLeagueFilter(e.target.value); }}
+            >
+              <option value="">All leagues</option>
+              {leagueFilter && !filterLeagues.some((league) => league.id === leagueFilter) && (
+                <option value={leagueFilter} disabled>Unavailable league</option>
+              )}
+              {filterLeagues.map((league) => (
+                <option key={league.id} value={league.id}>{league.name}</option>
+              ))}
+            </select>
+            <select
+              aria-label="Filter officials by sport"
               value={sportFilter}
-              onChange={(e) => setSportFilter(e.target.value)}
+              onChange={(e) => { clearDirectorySelection(); setSportFilter(e.target.value); }}
             >
               <option>All</option>
               {SPORTS.map((s) => (
@@ -2374,10 +2483,10 @@ export default function OfficialsDirectory({
                           type="checkbox"
                           aria-label="Select visible officials"
                           checked={
-                            visible.filter((o) => o.email || o.phone).length >
+                            visible.filter((o) => o.email || o.phone || o.mobile_phone).length >
                               0 &&
                             visible
-                              .filter((o) => o.email || o.phone)
+                              .filter((o) => o.email || o.phone || o.mobile_phone)
                               .every((o) => selectedIds.includes(o.id))
                           }
                           onChange={toggleAllVisible}
@@ -2402,6 +2511,9 @@ export default function OfficialsDirectory({
                   </tr>
                 </thead>
                 <tbody>
+                  {visible.length === 0 && (
+                    <tr><td colSpan={canManage ? 12 : 5}>{directoryReady ? "No officials match these filters." : loading ? "Loading officials…" : "The officials directory could not be loaded."}</td></tr>
+                  )}
                   {visible.map((o) => {
                     const pr = positionRanks[o.id];
                     const connectedLeagues = (officialLeagueIds[o.id] || [])
@@ -2417,7 +2529,7 @@ export default function OfficialsDirectory({
                               type="checkbox"
                               aria-label={`Select ${o.first_name} ${o.last_name}`}
                               checked={selectedIds.includes(o.id)}
-                              disabled={!o.email && !o.phone}
+                              disabled={!o.email && !o.phone && !o.mobile_phone}
                               onChange={() => toggleSelected(o.id)}
                             />
                           </td>

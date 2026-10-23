@@ -191,13 +191,18 @@ test('non-managers retain their View, Venue, Day, Time and Calendar controls wit
   assert(!byLabel(s, 'Show games in league'));
 });
 
-test('next-50 guidance stays adjacent to results, never presented as a total count inside the toolbar', () => {
-  assert(!toolbar.getText(ast).includes('Showing the next 50'));
-  const notice = source.indexOf('<p className="assignmentResultsNotice">Showing the next 50');
+test('bounded-page guidance stays adjacent to results and explicitly limits counts and selection', () => {
+  assert(!toolbar.getText(ast).includes('matching games from'));
+  const notice = source.indexOf('<div className="assignmentResultsNotice" role="status">');
   const resultTable = source.indexOf('className="assignmentGameTable"', notice);
   assert(notice > toolbar.end && resultTable > notice);
-  assert(resultTable - notice < 300);
-  assert(source.includes('Select a filter to search beyond this list.'));
+  const guidance = source.slice(notice, resultTable);
+  assert(guidance.includes('maximum 50'));
+  assert(guidance.includes('Filters may leave fewer matches on a page'));
+  assert(guidance.includes('Counts, sorting, selections and exports apply to this page only'));
+  assert(guidance.includes('Previous 50 games') && guidance.includes('Next 50 games'));
+  assert(source.includes('Select All on This Page'));
+  assert(!source.includes('Select a filter to search beyond this list.'));
 });
 
 test('responsive groups use basic grids/flex, 44px controls, visible focus and phone disclosure without new fonts or palette', () => {

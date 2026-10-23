@@ -7,12 +7,23 @@ export async function GET(request: NextRequest) {
   if (context.error) return context.error;
   const { service, organizationId, leagueIds } = context;
   if (leagueIds?.length === 0) return NextResponse.json({ positions: [], rates: [] });
+  const selectedGameIds = request.nextUrl.searchParams.get("gameIds");
+  let requestedGameIds: string[] | null = null;
+  if (selectedGameIds !== null) {
+    const values = selectedGameIds.split(",");
+    requestedGameIds = [...new Set(values)];
+    if (!selectedGameIds || selectedGameIds.length > 1850 || requestedGameIds.length > 50 ||
+      requestedGameIds.some((id) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))) {
+      return NextResponse.json({ error: "Provide between 1 and 50 valid game IDs." }, { status: 400 });
+    }
+  }
   const selectedLeague = request.nextUrl.searchParams.get("leagueId");
   if (selectedLeague && leagueIds && !leagueIds.includes(selectedLeague)) return NextResponse.json({error: "League is not available."}, {status:403});
   const games = await readAllPages<{ id: string; league_id: string | null }>((from, to) => {
     let query = service.from("games").select("id,league_id").eq("organization_id", organizationId).order("id");
     query = scopeGameQuery(query, context);
     if (selectedLeague) query = query.eq("league_id", selectedLeague);
+    if (requestedGameIds) query = query.in("id", requestedGameIds);
     return query.range(from, to);
   });
   if (games.error) return NextResponse.json({ error: games.error.message }, { status: 400 });

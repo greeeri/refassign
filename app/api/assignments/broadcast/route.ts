@@ -32,6 +32,70 @@ function esc(value: unknown) {
   );
 }
 
+type BroadcastContext = Pick<Awaited<ReturnType<typeof requireManagedOrganization>>, "service" | "organizationId" | "fullOrganizationAccess" | "leagueAccess">;
+
+async function readBroadcastRecipients(context: BroadcastContext, games: { league_id: string | null }[]) {
+  // A scoped manager may not use broadcasts as organization-wide outreach.
+  const { service, organizationId, fullOrganizationAccess } = context;
+  let scopedRecipientIds: string[] | null = null;
+  if (!fullOrganizationAccess) {
+    const selectedLeagues = [...new Set(games.map((game) => game.league_id).filter(Boolean))];
+    const fullLeagues = selectedLeagues.filter((id) => context.leagueAccess?.some((access) => access.league_id === id && access.all_locations));
+    const [eligible, assigned] = await Promise.all([
+      readAllForChunks<{ official_id: string }, string>(fullLeagues, (ids, from, to) => service
+        .from("official_league_eligibility").select("official_id").in("league_id", ids)
+        .order("official_id").order("league_id").range(from, to)),
+      readAllForChunks<{ official_id: string }, string>(selectedLeagues, (ids, from, to) => scopeGameQuery(service
+        .from("assignments").select("official_id,games!inner(organization_id,league_id)")
+        .eq("games.organization_id", organizationId).in("games.league_id", ids)
+        .not("official_id", "is", null).order("id").range(from, to), context, "games")),
+    ]);
+    if (eligible.error || assigned.error)
+      return { data: null, error: { message: "Could not verify broadcast recipients." } };
+    scopedRecipientIds = [...new Set([...(eligible.data || []), ...(assigned.data || [])].map((row) => row.official_id))];
+  }
+  const { data: recipients, error: recipientError } = scopedRecipientIds === null
+    ? await readAllPages<RecipientRow>((from, to) => service
+        .from("organization_officials").select("official_id,officials(first_name,last_name,email,active)")
+        .eq("organization_id", organizationId).eq("active", true).order("official_id").range(from, to))
+    : await readAllForChunks<RecipientRow, string>(scopedRecipientIds, (ids, from, to) => service
+        .from("organization_officials").select("official_id,officials(first_name,last_name,email,active)")
+        .eq("organization_id", organizationId).eq("active", true).in("official_id", ids).order("official_id").range(from, to));
+  return { data: recipients, error: recipientError };
+}
+
+function broadcastRecipientVersion(recipients: RecipientRow[]) {
+  return createHash("sha256").update(JSON.stringify(recipients.map((row) => {
+    const official = Array.isArray(row.officials) ? row.officials[0] : row.officials;
+    return [row.official_id, official?.first_name, official?.last_name, official?.email, official?.active];
+  }).sort((a, b) => String(a[0]).localeCompare(String(b[0]))))).digest("hex");
+}
+
+// Recipient previews are read-only and use the same authorization and recipient
+// resolution as POST. Opening review never opens slots or sends notifications.
+export async function GET(request: NextRequest) {
+  const context = await requireManagedOrganization(request);
+  if (context.error) return context.error;
+  const gameIds = [...new Set((request.nextUrl.searchParams.get("gameIds") || "").split(",").filter(Boolean))];
+  if (!gameIds.length || gameIds.length > 250)
+    return NextResponse.json({ error: "Select between 1 and 250 games to broadcast." }, { status: 400 });
+  const { data: games, error } = await scopeGameQuery(context.service.from("games")
+    .select("id,league_id").eq("organization_id", context.organizationId).in("id", gameIds)
+    .order("id").range(0, 249), context);
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  if ((games || []).length !== gameIds.length)
+    return NextResponse.json({ error: "One or more selected games are outside your league access." }, { status: 403 });
+  const recipients = await readBroadcastRecipients(context, games || []);
+  if (recipients.error) return NextResponse.json({ error: recipients.error.message }, { status: 400 });
+  return NextResponse.json({
+    recipients: (recipients.data || []).flatMap((row) => {
+      const official = Array.isArray(row.officials) ? row.officials[0] : row.officials;
+      return official ? [{ id: row.official_id, ...official }] : [];
+    }),
+    recipientVersion: broadcastRecipientVersion(recipients.data || []),
+  }, { headers: { "Cache-Control": "no-store" } });
+}
+
 export async function POST(request: NextRequest) {
   const context = await requireManagedOrganization(request);
   if (context.error) return context.error;
@@ -39,12 +103,11 @@ export async function POST(request: NextRequest) {
     session,
     service,
     organizationId,
-    fullOrganizationAccess,
-    leagueIds,
   } = context;
   const body = (await request.json().catch(() => ({}))) as {
     gameIds?: string[];
     requestId?: string;
+    recipientVersion?: string;
   };
   const gameIds = [...new Set((body.gameIds || []).filter(Boolean))];
   if (!gameIds.length || gameIds.length > 250)
@@ -117,42 +180,17 @@ export async function POST(request: NextRequest) {
       { error: "The selected games have no open positions to broadcast." },
       { status: 400 },
     );
+  const { data: recipients, error: recipientError } = await readBroadcastRecipients(context, games || []);
+  if (recipientError)
+    return NextResponse.json({ error: recipientError.message }, { status: 400 });
+  if (body.recipientVersion && body.recipientVersion !== broadcastRecipientVersion(recipients || []))
+    return NextResponse.json({ error: "Broadcast recipients changed. Close and reopen the review before sending." }, { status: 409 });
   const { error: openError } = await session.rpc("set_self_assign_positions", {
     p_slots: slots,
   });
   if (openError)
     return NextResponse.json({ error: openError.message }, { status: 400 });
 
-  // A scoped manager may not use broadcasts as organization-wide outreach.
-  let scopedRecipientIds: string[] | null = null;
-  if (!fullOrganizationAccess) {
-    const selectedLeagues = [...new Set((games || []).map((game) => game.league_id).filter(Boolean))];
-    const fullLeagues = selectedLeagues.filter((id) => context.leagueAccess?.some((access) => access.league_id === id && access.all_locations));
-    const [eligible, assigned] = await Promise.all([
-      readAllForChunks<{ official_id: string }, string>(fullLeagues, (ids, from, to) => service
-        .from("official_league_eligibility").select("official_id").in("league_id", ids)
-        .order("official_id").order("league_id").range(from, to)),
-      readAllForChunks<{ official_id: string }, string>(selectedLeagues, (ids, from, to) => scopeGameQuery(service
-        .from("assignments").select("official_id,games!inner(organization_id,league_id)")
-        .eq("games.organization_id", organizationId).in("games.league_id", ids)
-        .not("official_id", "is", null).order("id").range(from, to), context, "games")),
-    ]);
-    if (eligible.error || assigned.error)
-      return NextResponse.json({ error: "Could not verify broadcast recipients." }, { status: 500 });
-    scopedRecipientIds = [...new Set([...(eligible.data || []), ...(assigned.data || [])].map((row) => row.official_id))];
-  }
-  const { data: recipients, error: recipientError } = scopedRecipientIds === null
-    ? await readAllPages<RecipientRow>((from, to) => service
-        .from("organization_officials").select("official_id,officials(first_name,last_name,email,active)")
-        .eq("organization_id", organizationId).eq("active", true).order("official_id").range(from, to))
-    : await readAllForChunks<RecipientRow, string>(scopedRecipientIds, (ids, from, to) => service
-        .from("organization_officials").select("official_id,officials(first_name,last_name,email,active)")
-        .eq("organization_id", organizationId).eq("active", true).in("official_id", ids).order("official_id").range(from, to));
-  if (recipientError)
-    return NextResponse.json(
-      { error: recipientError.message },
-      { status: 400 },
-    );
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey)
     return NextResponse.json(
