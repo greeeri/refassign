@@ -380,13 +380,15 @@ export default function AssignmentsManagerV2({
   const initialFilterLoad = useRef(true);
   const loadVersion = useRef(0);
   const gamePaging = useRef({ key: "", page: 1, asOf: new Date().toISOString() });
-  const matchingTotalsRequest = useRef<{ key: string; totals: MatchingGameTotals | null; start?: () => void } | null>(null);
+  const matchingTotalsRequest = useRef<{ key: string; totals: MatchingGameTotals | null; pending?: boolean; start?: () => void } | null>(null);
   const [matchingTotals, setMatchingTotals] = useState<MatchingGameTotals | null>(null);
   const [totalsError, setTotalsError] = useState("");
+  const [totalsLoading, setTotalsLoading] = useState(false);
   const totalPages = matchingTotals ? Math.max(1, Math.ceil(matchingTotals.total / 50)) : null;
   const [gamePageNumber, setGamePageNumber] = useState(1);
   const [gamePageHasMore, setGamePageHasMore] = useState(false);
   const [gamePageLoading, setGamePageLoading] = useState(false);
+  const [pageDetailsReady, setPageDetailsReady] = useState(false);
   const gamePageLoadingRef = useRef(false);
   const fullLeagueAccessRef = useRef(fullLeagueAccess);
   fullLeagueAccessRef.current = fullLeagueAccess;
@@ -708,7 +710,7 @@ export default function AssignmentsManagerV2({
     setGamePageLoading(true); setGamePageHasMore(false);
     // Only page navigation reuses counts. Filters, mutations, Undo and Retry
     // invalidate both completed and in-flight counts before any async work.
-    if (!reuseTotals) { matchingTotalsRequest.current = null; setMatchingTotals(null); setTotalsError(""); }
+    if (!reuseTotals) { matchingTotalsRequest.current = null; setMatchingTotals(null); setTotalsError(""); setTotalsLoading(false); }
     const pending = loadPage(reuseCandidates);
     const version = loadVersion.current;
     try { await pending; }
@@ -716,9 +718,7 @@ export default function AssignmentsManagerV2({
     finally {
       if (version === loadVersion.current) {
         gamePageLoadingRef.current = false; setGamePageLoading(false);
-        // The page (including its assignment/candidate reads) settles first.
-        // Counts then run independently, never holding the page loading lock.
-        matchingTotalsRequest.current?.start?.();
+        // Totals are opt-in; loading a page never scans the matching history.
       }
     }
   }
@@ -748,7 +748,7 @@ export default function AssignmentsManagerV2({
     setError("");
     // Management actions depend on the full candidate data set. Keep them
     // unavailable while the game list is being populated in stages.
-    setCanManage(false);
+    setCanManage(false); setPageDetailsReady(false);
     let candidateLeagueIds: string[] = [], candidateLevelIds: string[] = [], candidateTeamIds: string[] = [];
     const loadAllLeagueEligibility = (officialIds: string[]) => readAllForChunks<EligL,string>(officialIds, (ids,from,to) =>
       supabase.from("official_league_eligibility").select("official_id,league_id")
@@ -760,7 +760,7 @@ export default function AssignmentsManagerV2({
     if (version !== loadVersion.current) return;
     if (authError || !userData.user) {
       matchingTotalsRequest.current = null; candidateCache.current = null;
-      setMatchingTotals(null); setTotalsError("");
+      setMatchingTotals(null); setTotalsError(""); setTotalsLoading(false);
       setAllowedLeagueIds([]); setAllowedGameAccess([]);
       setGames([]); setAssignments([]); setOfficials([]); setCandidateOfficialIds(new Set()); setBlocks([]);
       setInitialGamesReady(true); setError(authError?.message || "Sign in to load games.");
@@ -778,7 +778,7 @@ export default function AssignmentsManagerV2({
           .eq("user_id", userData.user.id).order("league_id").range(from, to));
       if (version !== loadVersion.current) return;
       if (access.error) {
-        matchingTotalsRequest.current = null; setMatchingTotals(null); setTotalsError("");
+        matchingTotalsRequest.current = null; setMatchingTotals(null); setTotalsError(""); setTotalsLoading(false);
         candidateCache.current = null;
         setAllowedLeagueIds([]); setAllowedGameAccess([]);
         setGames([]); setOfficials([]); setCandidateOfficialIds(new Set()); setAssignments([]); setBlocks([]);
@@ -789,7 +789,7 @@ export default function AssignmentsManagerV2({
     }
     if (version !== loadVersion.current) return;
     if (!fullLeagueAccess && leagueGameAccessKey(allowedGameAccess) !== leagueGameAccessKey(scopedGameAccess)) {
-      matchingTotalsRequest.current = null; setMatchingTotals(null); setTotalsError("");
+      matchingTotalsRequest.current = null; setMatchingTotals(null); setTotalsError(""); setTotalsLoading(false);
       candidateCache.current = null;
       setGames([]); setOfficials([]); setCandidateOfficialIds(new Set()); setAssignments([]); setBlocks([]);
       setRanks({}); setPositionRanks({}); setPowers({}); setTeamSuggestions([]);
@@ -800,7 +800,7 @@ export default function AssignmentsManagerV2({
     setAllowedLeagueIds(scopedLeagueIds);
     setAllowedGameAccess(scopedGameAccess);
     if (!fullLeagueAccess && !scopedGameAccess.some((grant) => grant.all_locations === true || grant.location_ids?.length)) {
-      matchingTotalsRequest.current = null; setTotalsError("");
+      matchingTotalsRequest.current = null; setTotalsError(""); setTotalsLoading(false);
       setGames([]); setMatchingTotals(emptyMatchingTotals()); setInitialGamesReady(true);
       return;
     }
@@ -810,13 +810,17 @@ export default function AssignmentsManagerV2({
       ["admin", "assignor"].includes(role),
     );
     let loadedComplexes: Record<string, string> = {};
-    if (organizationId && hasManagerRole) {
+    const loadVenueDirectory = async () => {
+      if (!organizationId || !hasManagerRole) {
+        if (version === loadVersion.current) setVenueDirectory({ organizationId, fields: [], complexes: {} });
+        return true;
+      }
       // Read explicit membership independently of the initial 50 games. A sibling
       // field must still match even if none of its games are on the current list.
       const complexes = await readAllPages<FieldComplexMembership>((from, to) =>
         supabase.rpc("get_organization_field_complexes", { p_organization_id: organizationId })
           .order("location_id").range(from, to));
-      if (version !== loadVersion.current) return;
+      if (version !== loadVersion.current) return false;
       // The membership RPC explicitly allows assignors and includes ungrouped
       // fields. Do not use the owner/admin-only organization settings directory.
       const fields = await readAllForChunks<VenueField, string>(
@@ -824,7 +828,7 @@ export default function AssignmentsManagerV2({
         (ids, from, to) => supabase.from("locations").select("id,name")
           .in("id", ids).order("id").range(from, to),
       );
-      if (version !== loadVersion.current) return;
+      if (version !== loadVersion.current) return false;
       loadedComplexes = fieldComplexMap(complexes.data || []);
       setVenueDirectory({ organizationId, fields: fields.data || [], complexes: loadedComplexes });
       const directoryError = fields.error || (fieldComplexRpcMissing(complexes.error) ? null : complexes.error);
@@ -832,9 +836,14 @@ export default function AssignmentsManagerV2({
       if (complexes.error && !fieldComplexRpcMissing(complexes.error) && locationFilter.some(isComplexVenueFilter)) {
         setGames([]);
         setInitialGamesReady(true);
-        return;
+        return false;
       }
-    } else setVenueDirectory({ organizationId, fields: [], complexes: {} });
+      return true;
+    };
+    // Only a selected complex needs the full membership directory to resolve
+    // this page. Ordinary first-page reads do not wait for the directory.
+    const needsComplexDirectory = locationFilter.some(isComplexVenueFilter);
+    if (needsComplexDirectory && !await loadVenueDirectory()) return;
     const resolvedLocationIds = resolveVenueLocationIds(locationFilter, organizationId, loadedComplexes);
     const selectedLocationIds = resolvedLocationIds === null ? null : [...resolvedLocationIds].sort();
     const pageKey = JSON.stringify([organizationId, fullLeagueAccess, leagueGameAccessKey(scopedGameAccess), selectedLocationIds,
@@ -843,7 +852,7 @@ export default function AssignmentsManagerV2({
     if (gamePaging.current.key !== pageKey) {
       gamePaging.current = { key: pageKey, page: 1, asOf: new Date().toISOString() };
       matchingTotalsRequest.current = null;
-      setMatchingTotals(null); setTotalsError("");
+      setMatchingTotals(null); setTotalsError(""); setTotalsLoading(false);
       setLinkSelected([]); setSelfAssignSelected([]); setExpandedGameIds(new Set());
       setGames([]); setAssignments([]); setLinkGroups([]); setLinkMembers([]);
     }
@@ -855,7 +864,7 @@ export default function AssignmentsManagerV2({
       setGames([]); setMatchingTotals(null); setError("From date must be on or before To date."); setInitialGamesReady(true); return;
     }
     const matchingFilters = {
-      range, customDate, fromDate, toDate, days: dayFilter, times: timeFilter,
+      range, customDate, fromDate, toDate, todayForward: range === "all", days: dayFilter, times: timeFilter,
       officialId: officialFilter, leagueId: leagueFilter, levelId: levelFilter,
       locationIds: selectedLocationIds, unpublishedOnly, selfAssignOnly, replacementOnly,
       completeness: completenessFilter, focusGameId: focusGameId || null, asOf: cursor.asOf,
@@ -864,12 +873,13 @@ export default function AssignmentsManagerV2({
     // Reuse a pending or completed request while navigating that snapshot.
     const totalsKey = JSON.stringify([userData.user?.id, pageKey, cursor.asOf]);
     if (matchingTotalsRequest.current?.key !== totalsKey) {
-      const request = { key: totalsKey, totals: null as MatchingGameTotals | null, start: undefined as (() => void) | undefined };
+      const request = { key: totalsKey, totals: null as MatchingGameTotals | null, pending: false, start: undefined as (() => void) | undefined };
       matchingTotalsRequest.current = request;
-      setMatchingTotals(null); setTotalsError("");
+      setMatchingTotals(null); setTotalsError(""); setTotalsLoading(false);
       request.start = () => {
-        if (matchingTotalsRequest.current !== request || !request.start) return;
-        request.start = undefined;
+        if (matchingTotalsRequest.current !== request || request.pending || request.totals) return;
+        request.pending = true;
+        setTotalsError(""); setTotalsLoading(true);
         void Promise.resolve().then(() => {
           if (matchingTotalsRequest.current !== request) return null;
           return supabase.rpc("get_assignment_matching_game_totals", {
@@ -877,15 +887,16 @@ export default function AssignmentsManagerV2({
           });
         }).then((result) => {
           if (matchingTotalsRequest.current !== request || !result) return;
+          request.pending = false; setTotalsLoading(false);
           const { data, error: countError } = result;
           if (countError) { setMatchingTotals(null); setTotalsError(countError.message); return; }
           const totals = normalizeMatchingTotals(data);
           if (!totals) { setMatchingTotals(null); setTotalsError("Game totals could not be read."); return; }
           request.totals = totals;
-          setMatchingTotals(totals); setTotalsError("");
+          setMatchingTotals(totals); setTotalsError(""); setTotalsLoading(false);
           setGamePageHasMore(gamePaging.current.page * 50 < totals.total);
         }).catch(() => {
-          if (matchingTotalsRequest.current === request) { setMatchingTotals(null); setTotalsError("Game totals could not be loaded."); }
+          if (matchingTotalsRequest.current === request) { request.pending = false; setTotalsLoading(false); setMatchingTotals(null); setTotalsError("Game totals could not be loaded."); }
         });
       };
     } else if (matchingTotalsRequest.current.totals) {
@@ -942,7 +953,24 @@ export default function AssignmentsManagerV2({
     };
     const g = await gamePromise;
     if (version !== loadVersion.current) return;
-    if (g.error) { setError(g.error.message); return; }
+    if (g.error) { setGames([]); setInitialGamesReady(true); setError(g.error.message); return; }
+    // Publish the bounded page before directory, audit, templates or candidates.
+    // Management stays disabled until all supporting page data is ready.
+    setOfficials([]); setCandidateOfficialIds(new Set()); setCandidatePositionId("");
+    setAssignments([]); setLinkGroups([]); setLinkMembers([]);
+    setSelfAssignSlots([]); setMentorSlots([]); setUnassignedSlotKeys([]);
+    setCheckedInAssignmentIds(new Set());
+    setGames((g.data || []) as Game[]);
+    setInitialGamesReady(true);
+    setGamePageHasMore(matchingTotalsRequest.current?.totals
+      ? cursor.page * 50 < matchingTotalsRequest.current.totals.total
+      : (g.data || []).length === 50);
+    logLoadMilestone("first page ready");
+    if (!needsComplexDirectory) void loadVenueDirectory().catch((cause) => {
+      if (version === loadVersion.current) setError(cause instanceof Error ? cause.message : "Venue directory could not be loaded.");
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    if (version !== loadVersion.current) return;
 
     candidateLeagueIds = Array.from(new Set((g.data || []).map((game) => game.league_id).filter((id): id is string => Boolean(id)))).sort();
     candidateLevelIds = Array.from(new Set((g.data || []).map((game) => game.level_id).filter((id): id is string => Boolean(id)))).sort();
@@ -996,9 +1024,9 @@ export default function AssignmentsManagerV2({
             .in("game_id", gameIds).eq("action", "unassigned").order("id").range(from, to)),
       ])
       : Array.from({ length: 5 }, () => ({ data: [], error: null }));
+    if (version !== loadVersion.current) return;
     const scopedError = assignmentResult.error || linkResult.error || slotResult.error || mentorResult.error || auditResult.error;
     if (scopedError) { setError(scopedError.message); return; }
-    if (version !== loadVersion.current) return;
     const [p, pw, at] = await corePromise;
     const lg = await readAllForChunks<LinkGroup, string>(
       [...new Set((linkResult.data || []).map((member) => member.group_id))],
@@ -1025,11 +1053,11 @@ export default function AssignmentsManagerV2({
               .range(from, to),
         )
       : { data: [], error: null };
+    if (version !== loadVersion.current) return;
     if (checkInResult.error) {
       setError(checkInResult.error.message);
       return;
     }
-    if (version !== loadVersion.current) return;
     setCheckedInAssignmentIds(
       new Set((checkInResult.data || []).map((row) => row.assignment_id)),
     );
@@ -1071,8 +1099,7 @@ export default function AssignmentsManagerV2({
     ]);
     const sorted = scopedGames.sort(
       (x, y) =>
-        gamePower(y, pm) - gamePower(x, pm) ||
-        new Date(x.starts_at).getTime() - new Date(y.starts_at).getTime(),
+        new Date(x.starts_at).getTime() - new Date(y.starts_at).getTime() || x.id.localeCompare(y.id),
     );
     setGames(sorted);
     setInitialGamesReady(true);
@@ -1131,6 +1158,7 @@ export default function AssignmentsManagerV2({
     setLeagueElig((le.data || []) as EligL[]);
     setLevelElig((ve.data || []) as EligV[]);
     setBlocks((bl.data || []) as Block[]);
+    setPageDetailsReady(true);
     setCanManage(hasManagerRole);
     logLoadMilestone("candidate data ready");
   }
@@ -1454,6 +1482,7 @@ export default function AssignmentsManagerV2({
     return ga.length > 0 && ga.some((a) => !a.published_at);
   }
   function assignmentCompleteness(g: Game) {
+    if (!pageDetailsReady) return { key: "loading" as const, label: gamePageLoading ? "Loading details…" : "Details unavailable", color: "#64748b", detail: "Assignment details have not finished loading." };
     const slots = positions
         .filter((position) => position.sport_id === g.sport_id)
         .sort((a, b) => a.sort_order - b.sort_order)
@@ -1588,7 +1617,7 @@ export default function AssignmentsManagerV2({
       (slot) => slot.game_id === gameId && slot.status === "open",
     ).length;
   }
-  const selfAssignGameCount = matchingTotals?.selfAssign ?? "…";
+  const selfAssignGameCount = matchingTotals?.selfAssign ?? "—";
   function gameNeedsReplacement(listedGame: Game) {
     return positions
       .filter((position) => position.sport_id === listedGame.sport_id)
@@ -1606,7 +1635,7 @@ export default function AssignmentsManagerV2({
   // The database applies every filter before its 50-row limit. Do not filter
   // this page a second time using incomplete client-side related records.
   const baseFilteredGames = games;
-  const unpublishedFilteredCount = matchingTotals?.unpublished ?? "…";
+  const unpublishedFilteredCount = matchingTotals?.unpublished ?? "—";
   function compareGames(a: Game, b: Game) {
     let n = 0;
     if (gameSort === "game")
@@ -1628,8 +1657,7 @@ export default function AssignmentsManagerV2({
       );
     else
       n =
-        gamePower(b) - gamePower(a) ||
-        new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime();
+        new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime() || a.id.localeCompare(b.id);
     if (n === 0)
       n = new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime();
     return gameSortDir === "desc" ? -n : n;
@@ -2968,6 +2996,7 @@ export default function AssignmentsManagerV2({
     officialId: string,
     assignmentReviewed = false,
   ) {
+    if (!canManage || gamePageLoadingRef.current) return;
     const official = officials.find((o) => o.id === officialId);
     const conflictReasons = official
       ? [
@@ -5078,7 +5107,7 @@ export default function AssignmentsManagerV2({
     }
   }
   const filters: [Range, string][] = [
-    ["all", "All Games"],
+    ["all", "Today & Future"],
     ["today", "Today's Games"],
     ["tomorrow", "Tomorrow's Games"],
     ["thisWeek", "This Week"],
@@ -5126,11 +5155,11 @@ export default function AssignmentsManagerV2({
   if (unpublishedOnly) activeGameFilters.push({ key: "unpublished", label: "Not published", remove: () => setUnpublishedOnly(false) });
   if (replacementOnly) activeGameFilters.push({ key: "replacement", label: "Replacement needed", remove: () => setReplacementOnly(false) });
   const attentionQueue = {
-    replacements: matchingTotals?.queue.replacement ?? "…",
-    needsAction: matchingTotals?.queue.attention ?? "…",
-    unassigned: matchingTotals?.queue.unassigned ?? "…",
-    awaiting: matchingTotals?.queue.awaiting ?? "…",
-    unpublished: matchingTotals?.queue.unpublished ?? "…",
+    replacements: matchingTotals?.queue.replacement ?? "—",
+    needsAction: matchingTotals?.queue.attention ?? "—",
+    unassigned: matchingTotals?.queue.unassigned ?? "—",
+    awaiting: matchingTotals?.queue.awaiting ?? "—",
+    unpublished: matchingTotals?.queue.unpublished ?? "—",
   };
   type CoveragePeriod = "morning" | "afternoon" | "evening";
   const coveragePeriodLabels: { key: CoveragePeriod; label: string }[] = [
@@ -5753,7 +5782,8 @@ export default function AssignmentsManagerV2({
           <details className="assignmentCrewPreview">
             <summary aria-label={`Preview crew for game ${g.game_number}`}>Crew</summary>
             <div className="assignmentCrewPreviewBody">
-              {positions.filter((position) => position.sport_id === g.sport_id)
+              {!pageDetailsReady && <span>{gamePageLoading ? "Loading details…" : "Details unavailable"}</span>}
+              {pageDetailsReady && positions.filter((position) => position.sport_id === g.sport_id)
                 .sort((a, b) => a.sort_order - b.sort_order)
                 .slice(0, g.officials_needed)
                 .map((position) => {
@@ -5774,7 +5804,7 @@ export default function AssignmentsManagerV2({
           >
             {completeness.label}
           </span>
-          <span className="assignmentStaffingCount">
+          {pageDetailsReady && <><span className="assignmentStaffingCount">
             <b>
               {staffing.filled} of {staffing.total}
             </b>{" "}
@@ -5796,6 +5826,7 @@ export default function AssignmentsManagerV2({
               }}
             />
           </span>
+          </>}
           {canManage && g.bound_source_status && (normalizedStatus === "suspended" || (normalizedStatus === "canceled" && g.bound_source_status === "CANCELLED")) && (
             <button type="button" className="secondary" style={{ padding: "3px 7px", fontSize: 10 }}
               disabled={Boolean(calendarReleaseSaving) || calendarReviewSaving || !g.bound_hold_checked_at || (normalizedStatus === "suspended" && (!g.bound_hold_resolution_candidate || !g.venue_conflict_hold))}
@@ -5972,12 +6003,13 @@ export default function AssignmentsManagerV2({
                 <button type="button" className="secondary" disabled={gamePageLoading || gamePageNumber === 1 || gamePageActionBusy} onClick={() => changeGamePage(1)}>First</button>
                 <button type="button" className="secondary" disabled={gamePageLoading || gamePageNumber === 1 || gamePageActionBusy} onClick={() => changeGamePage(gamePageNumber - 1)}>Previous</button>
                 {pageNumbers(gamePageNumber, totalPages || gamePageNumber).map((page) => <button type="button" key={page} aria-current={page === gamePageNumber ? "page" : undefined} disabled={gamePageLoading || gamePageActionBusy || page === gamePageNumber} onClick={() => changeGamePage(page)}>{page}</button>)}
-                <span>Page {gamePageNumber} of {totalPages ?? "…"}</span>
+                <span>Page {gamePageNumber}{totalPages !== null ? ` of ${totalPages}` : ""}</span>
                 <button type="button" className="secondary" disabled={gamePageLoading || !gamePageHasMore || gamePageActionBusy} onClick={() => changeGamePage(gamePageNumber + 1)}>Next</button>
                 <button type="button" className="secondary" disabled={gamePageLoading || !totalPages || gamePageNumber >= totalPages || gamePageActionBusy} onClick={() => totalPages && changeGamePage(totalPages)}>Last</button>
+                {!matchingTotals && <button type="button" className="secondary" disabled={gamePageLoading || gamePageActionBusy || totalsLoading} onClick={() => matchingTotalsRequest.current?.start?.()}>{totalsLoading ? "Loading totals…" : totalsError ? "Retry totals" : "Load totals"}</button>}
                 {(error || totalsError) && <button type="button" className="secondary" disabled={gamePageLoading || gamePageActionBusy} onClick={() => void load(true)}>Retry this page</button>}
                 {totalsError && <span role="status">Totals unavailable. Your loaded games are still shown.</span>}
-                {gamePageLoading && <span>Loading page…</span>}
+                {gamePageLoading && <span>{games.length ? "Loading assignment details…" : "Loading page…"}</span>}
               </div>
             </div>
     );
@@ -9225,7 +9257,7 @@ export default function AssignmentsManagerV2({
                       {filters.map(([key, label]) => (
                         <option key={key} value={key}>
                           {label} (
-                          {matchingTotals?.ranges[key] ?? "…"}
+                          {matchingTotals?.ranges[key] ?? "—"}
                           )
                         </option>
                       ))}
@@ -9436,7 +9468,7 @@ export default function AssignmentsManagerV2({
                     <span>Assignment Status</span>
                     <details>
                       <summary>{completenessFilter.length === 0
-                        ? `All Assignment Statuses (${matchingTotals?.allStatuses ?? "…"})`
+                        ? `All Assignment Statuses (${matchingTotals?.allStatuses ?? "—"})`
                         : `${completenessFilter.length} status${completenessFilter.length === 1 ? "" : "es"} selected`}</summary>
                       <div className="assignmentStatusFilterOptions">
                         <label><input type="checkbox" checked={completenessFilter.length === 0} onChange={() => chooseCompleteness("all")} />All Assignment Statuses</label>
@@ -10206,7 +10238,8 @@ export default function AssignmentsManagerV2({
                               id={`assignment-game-details-${listedGame.id}`}
                               hidden={!expandedGameIds.has(listedGame.id)}
                             >
-                              {expandedGameIds.has(listedGame.id) && selected !== listedGame.id && (
+                              {expandedGameIds.has(listedGame.id) && !pageDetailsReady && <p role="status">{gamePageLoading ? "Loading assignment details…" : "Assignment details unavailable. Retry this page."}</p>}
+                              {pageDetailsReady && expandedGameIds.has(listedGame.id) && selected !== listedGame.id && (
                                 <section className="assignmentExpandedDetails" aria-label={`Details for game ${listedGame.game_number}`}>
                                   <div className="assignmentExpandedHeader">
                                     <div>
@@ -10238,7 +10271,7 @@ export default function AssignmentsManagerV2({
                                   </div>
                                 </section>
                               )}
-                              {expandedGameIds.has(listedGame.id) && selected === listedGame.id && (
+                              {pageDetailsReady && expandedGameIds.has(listedGame.id) && selected === listedGame.id && (
                                 <>
                                   <div
                                     className="desktopInlineAssignmentHost"
@@ -10491,7 +10524,7 @@ export default function AssignmentsManagerV2({
             </select>
           </label>
         </section>
-        {game &&
+        {pageDetailsReady && game &&
           filteredGames.some((g) => g.id === game.id) &&
           expandedGameIds.has(game.id) &&
           inlineAssignmentHost &&
@@ -11016,7 +11049,7 @@ export default function AssignmentsManagerV2({
                                     <button
                                       type="button"
                                       className="primary candidatePanelButton"
-                                      disabled={saving === pos.id}
+                                      disabled={!canManage || gamePageLoading || saving === pos.id}
                                       onClick={() =>
                                         setCandidatePositionId(pos.id)
                                       }

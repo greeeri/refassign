@@ -27,6 +27,7 @@ function setup() {
     boundCalendarReview: () => null,
     assignmentCompleteness: () => ({ detail: 'Open', color: '#000', label: 'Open' }),
     staffingCounts: () => ({ filled: 0, total: 3, open: 3 }),
+    pageDetailsReady: true, gamePageLoading: false,
     normalizeGameStatus: value => value,
     selfAssignOpenCount: () => 0, gameHoldReason: () => '',
     gamePower: () => 1, deadlineState: () => ({ label: 'On time', color: '#000' }),
@@ -183,4 +184,17 @@ test('responsive production game row keeps selection, status, edit and hold safe
   }
   assert.equal(s.selected, 'game-a');
   assert.equal(s.expandedGameIds.size, 0, 'bulk selection and status controls do not change expansion');
+});
+
+
+test('early game row suppresses crew and staffing claims until related details are ready', () => {
+  const s = setup(); s.pageDetailsReady = false; s.gamePageLoading = true;
+  const pending = nodes(s.renderGameRow(game('game-a'), false, false));
+  assert(!pending.some(node => node.props?.className === 'assignmentStaffingCount'));
+  assert(!pending.some(node => node.props?.className === 'assignmentStaffingBar'));
+  assert(pending.some(node => node.props?.children === 'Loading details…'));
+  s.gamePageLoading = false;
+  assert(nodes(s.renderGameRow(game('game-a'), false, false)).some(node => node.props?.children === 'Details unavailable'));
+  s.pageDetailsReady = true;
+  assert(nodes(s.renderGameRow(game('game-a'), false, false)).some(node => node.props?.className === 'assignmentStaffingCount'));
 });
