@@ -95,3 +95,28 @@ test('late prepare responses cannot refresh a newer organization or revoked owne
   assert.equal(t.changes(),0);assert(!t.text().includes('Roster tools prepared.'));
  }
 });
+
+test('activation is owner-manager prepared inactive only, and cancel never calls RPC',async()=>{
+ for(const config of [{owner:false},{owner:true,canManage:false},{owner:true,prepared:false}]) {
+  const t=setup(config);await t.settle();assert(!t.button('Activate personal rosters'));
+ }
+ const t=setup({owner:true});await t.settle();t.props.state.enabled=true;t.render();assert(!t.button('Activate personal rosters'));
+ t.props.state.enabled=false;t.render();await t.settle();t.button('Activate personal rosters').props.onClick();t.render();
+ assert(t.text().includes('empty personal rosters unless officials have already been added'));assert(t.text().includes('manual assignments, AutoAssign'));assert(t.text().includes('new or retried broadcast recipients'));assert(t.text().includes('A broadcast request already sending retains its captured audience.'));assert(t.text().includes('Existing assignments and history will remain unchanged'));
+ t.button('Cancel activation').props.onClick();t.render();assert(t.button('Activate personal rosters'));assert(!t.calls.some(c=>c.name==='activate_personal_rosters'));
+});
+test('confirmed activation double click calls protected RPC once and refreshes on success',async()=>{
+ let resolve;const t=setup({owner:true,rpcOverride:name=>name==='activate_personal_rosters'?new Promise(r=>resolve=r):null});await t.settle();
+ t.button('Activate personal rosters').props.onClick();t.render();const click=t.button('Confirm activation').props.onClick;click();click();t.render();assert(t.button('Activating…').props.disabled);assert(t.button('Cancel activation').props.disabled);
+ assert.equal(t.calls.filter(c=>c.name==='activate_personal_rosters').length,1);assert.deepEqual(copy(t.calls.find(c=>c.name==='activate_personal_rosters').args),{p_organization_id:'org'});
+ resolve({error:null});await t.settle();assert.equal(t.changes(),1);assert(t.text().includes('Personal rosters activated. Your owner-wide pool is unchanged.'));
+ t.props.state.enabled=true;t.render();await t.settle();assert(!t.button('Activate personal rosters'));assert(!t.button('Confirm activation'));
+});
+test('activation errors retain explicit confirmation for retry and stale scopes ignore completion',async()=>{
+ let attempt=0;const t=setup({owner:true,rpcOverride:name=>name==='activate_personal_rosters'?(++attempt===1?Promise.resolve({error:{message:'Undo authority changed'}}):Promise.reject(new Error('Network'))):null});await t.settle();
+ t.button('Activate personal rosters').props.onClick();t.render();t.button('Confirm activation').props.onClick();await t.settle();assert(t.text().includes('Undo authority changed'));assert.equal(t.changes(),0);
+ t.button('Confirm activation').props.onClick();await t.settle();assert(t.text().includes('Could not activate personal rosters'));assert(t.button('Cancel activation'));assert.equal(t.changes(),0);
+ for(const change of [t=>t.props.organizationId='other',t=>t.props.state.owner_wide=false,t=>t.props.state.can_manage=false,t=>t.props.state.enabled=true]) {
+  let resolve;const s=setup({owner:true,rpcOverride:name=>name==='activate_personal_rosters'?new Promise(r=>resolve=r):null});await s.settle();s.button('Activate personal rosters').props.onClick();s.render();s.button('Confirm activation').props.onClick();s.render();change(s);s.render();await s.settle();resolve({error:null});await s.settle();assert.equal(s.changes(),0);assert(!s.text().includes('Personal rosters activated.'));assert(!s.button('Confirm activation'));
+ }
+});

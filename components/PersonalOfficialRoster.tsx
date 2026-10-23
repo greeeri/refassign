@@ -23,13 +23,15 @@ export default function PersonalOfficialRoster({ organizationId, state, onChange
   const [preview, setPreview] = useState<RosterImportRow[]>([]);
   const generation = useRef(0);
   const preparing = useRef(false);
+  const activating = useRef(false);
+  const [confirmActivation, setConfirmActivation] = useState(false);
   useEffect(() => {
     setTarget(""); setRows([]); setPreview([]); setOpen(false);
   }, [organizationId, state.owner_wide]);
   useEffect(() => {
-    generation.current += 1; preparing.current = false; setMatches([]); setPreview([]); setMessage(""); setBusy(false);
+    generation.current += 1; preparing.current = false; activating.current = false; setConfirmActivation(false); setMatches([]); setPreview([]); setMessage(""); setBusy(false);
     return () => { generation.current += 1; };
-  }, [organizationId, target, state.owner_wide, state.can_manage, state.prepared]);
+  }, [organizationId, target, state.owner_wide, state.can_manage, state.prepared, state.enabled]);
   useEffect(() => {
     let current = true;
     if (!state.owner_wide || !state.prepared) { setAssignors([]); return; }
@@ -41,6 +43,20 @@ export default function PersonalOfficialRoster({ organizationId, state, onChange
   }, [client, organizationId, state.owner_wide, state.prepared]);
   const targetRequired = state.owner_wide && !target;
   const args = { p_organization_id: organizationId, ...(target ? { p_assignor_id: target } : {}) };
+  async function activate() {
+    if (!state.owner_wide || !state.can_manage || !state.prepared || state.enabled || !confirmActivation || busy || activating.current) return;
+    const token = ++generation.current; activating.current = true; setBusy(true); setMessage("");
+    try {
+      const { error } = await client.rpc("activate_personal_rosters", { p_organization_id: organizationId });
+      if (token !== generation.current) return;
+      if (error) setMessage(error.message);
+      else { setConfirmActivation(false); setMessage("Personal rosters activated. Your owner-wide pool is unchanged. Existing assignments and history were not changed."); onChanged(); }
+    } catch (error) {
+      if (token === generation.current) setMessage(error instanceof Error ? error.message : "Could not activate personal rosters. Please retry.");
+    } finally {
+      if (token === generation.current) { activating.current = false; setBusy(false); }
+    }
+  }
   async function prepare() {
     if (!state.owner_wide || !state.can_manage || state.prepared || busy || preparing.current) return;
     const token = ++generation.current; preparing.current = true; setBusy(true); setMessage("");
@@ -139,6 +155,14 @@ export default function PersonalOfficialRoster({ organizationId, state, onChange
   return <section className="card" aria-label="Personal official roster" style={{ marginBottom: 16 }}>
     <div className="cardHead"><h3>{state.owner_wide ? "Assignor rosters" : "My officials"}</h3><button type="button" className="secondary" onClick={() => setOpen(!open)}>{open ? "Close roster tools" : "Add / remove officials"}</button></div>
     <p>{state.owner_wide ? "Your owner-wide pool stays unchanged. Manage a selected assignor’s personal roster below." : "Your personal roster is separate from other assignors. Adding or removing names does not change existing assignments or league eligibility."}{!state.enabled && " Personal-roster enforcement has not been activated yet."}</p>
+    {state.owner_wide && !state.enabled && <div>
+      {!confirmActivation ? <button type="button" disabled={busy} onClick={() => setConfirmActivation(true)}>Activate personal rosters</button> : <section aria-label="Confirm personal roster activation">
+        <h4>Activate personal rosters for this organization?</h4>
+        <p>Other assignors will have empty personal rosters unless officials have already been added for them. Their future manual assignments, AutoAssign candidates, and new or retried broadcast recipients will be limited to their personal rosters. A broadcast request already sending retains its captured audience. Existing assignments and history will remain unchanged. Your owner-wide pool and protected accounts’ wide access stay unchanged. Activate only after verifying the roster tools.</p>
+        <button type="button" disabled={busy} onClick={() => void activate()}>{busy ? "Activating…" : "Confirm activation"}</button>
+        <button type="button" className="secondary" disabled={busy} onClick={() => setConfirmActivation(false)}>Cancel activation</button>
+      </section>}
+    </div>}
     {open && <>
       {state.owner_wide && <label>Assignor<select value={target} disabled={busy} onChange={event => { setTarget(event.target.value); setMatches([]); setPreview([]); }}><option value="">Choose an assignor</option>{assignors.map(item => <option key={item.user_id} value={item.user_id}>{item.display_name}</option>)}</select></label>}
       <form onSubmit={event => { event.preventDefault(); void search(); }} className="inlineForm"><label>Name or email<input value={query} disabled={busy} onChange={event => { setQuery(event.target.value); setMatches([]); }} placeholder="Search existing officials" /></label><button disabled={busy || targetRequired || query.trim().length < 2}>Search</button></form>
