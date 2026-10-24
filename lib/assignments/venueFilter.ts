@@ -1,7 +1,12 @@
-export type VenueField = { id: string; name: string };
+export type VenueField = { id: string; name: string; venue_id?: string | null; venue_name?: string | null };
 export type FieldComplexMembership = { location_id: string; field_complex: string | null };
 
 const complexPrefix = "complex:";
+const venuePrefix = "venue:";
+
+/** Venue identity is its persisted UUID, never its current label. */
+export function venueFilterValue(venueId: string) { return `${venuePrefix}${venueId}`; }
+export function isParentVenueFilter(value: string) { return value.startsWith(venuePrefix); }
 
 export function isComplexVenueFilter(value: string) {
   return value.startsWith(complexPrefix);
@@ -18,20 +23,26 @@ export function fieldComplexMap(rows: FieldComplexMembership[]) {
     .map((row) => [row.location_id, row.field_complex!.trim()]));
 }
 
-/** null means unrestricted; [] means a selected complex has no current members. */
+/** null means unrestricted; [] means selected groups have no authorized members. */
 export function resolveVenueLocationIds(
   values: string[],
   organizationId: string | undefined,
   complexes: Record<string, string>,
+  fields: VenueField[] = [],
 ): string[] | null {
   if (!values.length) return null;
   const selected = new Set(values);
   // Raw location IDs remain compatible with existing field-only saved views.
-  const ids = new Set(values.filter((value) => !isComplexVenueFilter(value)));
+  const ids = new Set(values.filter((value) => !isComplexVenueFilter(value) && !isParentVenueFilter(value)));
   if (organizationId) {
     for (const [locationId, name] of Object.entries(complexes)) {
       if (selected.has(complexVenueFilterValue(organizationId, name))) ids.add(locationId);
     }
+  }
+  // Only the already authorized league directory may expand parent membership.
+  // An unavailable parent resolves to [] (never an unrestricted query).
+  for (const field of fields) {
+    if (field.venue_id && selected.has(venueFilterValue(field.venue_id))) ids.add(field.id);
   }
   return [...ids];
 }
@@ -52,11 +63,18 @@ export function assignmentVenueOptions(
   const fieldNames = new Map([...visibleFields, ...fields].map((field) => [field.id, field.name]));
   const fieldOptions: [string, string][] = [...fieldNames].sort((a, b) => a[1].localeCompare(b[1]))
     .map(([id, name]) => [id, `Field: ${name}`]);
-  const options = [...complexOptions, ...fieldOptions];
+  const parentNames = new Map<string, string>();
+  for (const field of fields) {
+    if (field.venue_id && field.venue_name) parentNames.set(field.venue_id, field.venue_name);
+  }
+  const parentOptions: [string, string][] = [...parentNames]
+    .sort((a, b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]))
+    .map(([id, name]) => [venueFilterValue(id), `Venue: ${name} (authorized fields)`]);
+  const options = [...parentOptions, ...complexOptions, ...fieldOptions];
   const known = new Set(options.map(([value]) => value));
   for (const value of selected) {
     if (!known.has(value)) {
-      options.push([value, isComplexVenueFilter(value) ? "Unavailable complex (clear to choose another)" : "Unavailable field (clear to choose another)"]);
+      options.push([value, isParentVenueFilter(value) ? "Unavailable venue (clear to choose another)" : isComplexVenueFilter(value) ? "Unavailable complex (clear to choose another)" : "Unavailable field (clear to choose another)"]);
       known.add(value);
     }
   }

@@ -1,24 +1,98 @@
 'use client'
-import {ChangeEvent,useEffect,useMemo,useState} from 'react'
+import {ChangeEvent,useEffect,useMemo,useRef,useState} from 'react'
 import {createClient} from '../lib/supabase/client'
-
-type Location={id:string;name:string;address:string|null;city:string|null;state:string|null;field_complex:string|null;active:boolean}
-type Row={row:number;id:string;name:string;address:string;city:string;state:string;field_complex:string;active:string;action:'Add'|'Update';valid:boolean;issue:string}
-const REQUIRED=['name','address','city','state','active']
-function esc(v:string){return /[",\n]/.test(v)?`"${v.replace(/"/g,'""')}"`:v}
-function parseCSV(text:string){const rows:string[][]=[];let row:string[]=[];let cell='',quoted=false;for(let i=0;i<text.length;i++){const ch=text[i];if(ch==='"'){if(quoted&&text[i+1]==='"'){cell+='"';i++}else quoted=!quoted}else if(ch===','&&!quoted){row.push(cell);cell=''}else if((ch==='\n'||ch==='\r')&&!quoted){if(ch==='\r'&&text[i+1]==='\n')i++;row.push(cell);cell='';if(row.some(v=>v.trim()))rows.push(row);row=[]}else cell+=ch}row.push(cell);if(row.some(v=>v.trim()))rows.push(row);return rows}
+import {readAllPages} from '../lib/supabase/readAll'
+import {applyLocationImport,exportLocationsCSV,exportVenueCatalogCSV,parseLocationCSV,validateLocationImport,type ImportLocation,type ImportVenue,type LocationImportRow} from '../lib/locations/importExport'
 
 export default function LocationsRosterManager(){
  const supabase=useMemo(()=>createClient(),[])
- const [allowed,setAllowed]=useState(false),[locations,setLocations]=useState<Location[]>([]),[rows,setRows]=useState<Row[]>([]),[error,setError]=useState(''),[message,setMessage]=useState(''),[importing,setImporting]=useState(false)
- async function load(){setError('');const {data:u}=await supabase.auth.getUser();if(!u.user)return;const {data:p}=await supabase.from('profiles').select('role').eq('id',u.user.id).maybeSingle();const ok=['admin','assignor'].includes(p?.role||'');setAllowed(ok);if(!ok)return;const {data,error}=await supabase.from('locations').select('id,name,address,city,state,field_complex,active').order('name');if(error)setError(error.message);else setLocations((data||[]) as Location[])}
- useEffect(()=>{load()},[])
- function downloadCurrent(){const head=['id',...REQUIRED,'field_complex'].join(',');const lines=locations.map(v=>[v.id,v.name,v.address||'',v.city||'',v.state||'',v.active?'true':'false',v.field_complex||''].map(x=>esc(String(x))).join(','));const blob=new Blob([[head,...lines].join('\n')],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='refassign-locations.csv';a.click();URL.revokeObjectURL(url)}
- function resolveExistingId(suppliedId:string,name:string){if(suppliedId&&locations.some(v=>v.id===suppliedId))return suppliedId;const match=locations.find(v=>v.name.trim().toLowerCase()===name.trim().toLowerCase());return match?.id||''}
- function validate(raw:string[][]):Row[]{if(!raw.length)throw new Error('Import file is empty.');const h=raw[0].map(x=>String(x).trim().toLowerCase().replace(/\s+/g,'_'));const missing=REQUIRED.filter(x=>!h.includes(x));if(missing.length)throw new Error(`Missing column(s): ${missing.join(', ')}`);return raw.slice(1).map((r,i)=>{const get=(x:string)=>String(r[h.indexOf(x)]??'').trim();const name=get('name'),active=get('active').toLowerCase(),id=resolveExistingId(get('id'),name);const issues:string[]=[];if(!name)issues.push('Column name: missing value');if(!['true','false','yes','no','1','0'].includes(active))issues.push(`Column active: must be true/false (received "${get('active')}")`);return{row:i+2,id,name,address:get('address'),city:get('city'),state:get('state'),field_complex:get('field_complex'),active:get('active'),action:id?'Update':'Add',valid:!issues.length,issue:issues.join('; ')}})}
- async function handleFile(e:ChangeEvent<HTMLInputElement>){setRows([]);setMessage('');setError('');const f=e.target.files?.[0];if(!f)return;try{const buffer=await f.arrayBuffer();let raw:string[][]|null=null;try{const XLSX=await import('xlsx');const wb=XLSX.read(buffer,{type:'array'});if(wb.SheetNames.length){const ws=wb.Sheets[wb.SheetNames[0]];raw=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:false}) as string[][]}}catch{}if(!raw||!raw.length){raw=parseCSV(new TextDecoder('utf-8').decode(buffer))}setRows(validate(raw))}catch(err){setError(err instanceof Error?`${err.message} Selected file: ${f.name}`:`Unable to read locations file: ${f.name}`)}finally{e.target.value=''}}
- async function applyImport(){if(!rows.length||rows.some(r=>!r.valid))return;setImporting(true);setError('');let added=0,updated=0;try{for(const r of rows){try{const payload={name:r.name,address:r.address||null,city:r.city||null,state:r.state||null,...(r.field_complex?{field_complex:r.field_complex}:{}),level_id:null,active:['true','yes','1'].includes(r.active.toLowerCase())};if(r.id){const x=await supabase.from('locations').update(payload).eq('id',r.id);if(x.error)throw x.error;updated++}else{const x=await supabase.from('locations').insert(payload);if(x.error)throw x.error;added++}}catch(rowErr){const msg=rowErr instanceof Error?rowErr.message:String(rowErr);throw new Error(`Location row ${r.row} (${r.name}) failed: ${msg}`)}}setMessage(`Locations import complete: ${updated} updated, ${added} added.`);setRows([]);await load()}catch(err){setError(err instanceof Error?err.message:'Locations import failed')}finally{setImporting(false)}}
- if(!allowed)return <section className="card"><h3>Locations Import / Export</h3><p>Only Administrators and Assignors can use the locations uploader.</p></section>
- const invalid=rows.filter(r=>!r.valid).length
- return <section className="card"><div className="cardHead"><div><h3>Locations Import / Export</h3><p>Download current locations, edit or add rows in Excel/Sheets, then upload the updated file. Give fields in the same venue the same Field Complex value to enable transfers.</p></div><button className="secondary" onClick={downloadCurrent}>Download Current Locations</button></div><input type="file" onChange={handleFile}/><p><small>Ref Pro Group accepts spreadsheet or CSV content. Existing locations match by exported ID first, then by Location Name. Leave ID blank for new locations.</small></p>{error&&<div className="errorBox">{error}</div>}{message&&<div className="loginMessage">{message}</div>}{rows.length>0&&<><p>{rows.length} rows • {rows.filter(r=>r.action==='Update').length} updates • {rows.filter(r=>r.action==='Add').length} additions • {invalid} errors</p><div className="tableWrap"><table><thead><tr><th>Row</th><th>Action</th><th>Location</th><th>Address</th><th>City</th><th>State</th><th>Field Complex</th><th>Active</th><th>Validation</th></tr></thead><tbody>{rows.map(r=><tr key={r.row}><td>{r.row}</td><td><span className={`badge ${r.action==='Add'?'blue':'amber'}`}>{r.action}</span></td><td><b>{r.name}</b></td><td>{r.address}</td><td>{r.city}</td><td>{r.state}</td><td>{r.field_complex}</td><td>{r.active}</td><td><span className={`badge ${r.valid?'green':'red'}`}>{r.valid?'Ready':r.issue}</span></td></tr>)}</tbody></table></div><button className="primary" disabled={importing||invalid>0} onClick={applyImport}>{importing?'Updating Locations…':'Apply Location Changes'}</button></>}</section>
+ const mounted=useRef(false),generation=useRef(0),busy=useRef(false),currentUser=useRef<string|null>(null)
+ const [allowed,setAllowed]=useState(false),[locations,setLocations]=useState<ImportLocation[]>([]),[venues,setVenues]=useState<ImportVenue[]>([]),[rows,setRows]=useState<LocationImportRow[]>([]),[error,setError]=useState(''),[message,setMessage]=useState(''),[importing,setImporting]=useState(false),[loading,setLoading]=useState(false),[reading,setReading]=useState(false)
+ async function authorizedUser(expected?:string){
+  const auth=await supabase.auth.getUser()
+  if(auth.error||!auth.data.user)throw new Error('Sign in again before importing locations.')
+  if(expected&&auth.data.user.id!==expected)throw new Error('The signed-in user changed. Refresh and review this import again.')
+  const profile=await supabase.from('profiles').select('role').eq('id',auth.data.user.id).maybeSingle()
+  if(profile.error||!['admin','assignor'].includes(profile.data?.role||''))throw new Error('Only authorized Administrators and Assignors can import locations.')
+  return auth.data.user.id
+ }
+ async function load(keepMessage=false){
+  if(busy.current)return
+  const version=++generation.current
+  const valid=()=>mounted.current&&generation.current===version
+  setAllowed(false);setLoading(true);setRows([]);setReading(false);setError('');if(!keepMessage)setMessage('')
+  try{
+   const userId=await authorizedUser();if(!valid())return
+   currentUser.current=userId
+   const [fields,parents]=await Promise.all([
+    readAllPages<ImportLocation>((from,to)=>supabase.from('locations').select('id,name,address,city,state,field_complex,active,venue_id').order('id').range(from,to)),
+    readAllPages<ImportVenue>((from,to)=>supabase.rpc('get_location_venue_options').order('id').range(from,to)),
+   ])
+   if(!valid())return
+   if(fields.error||parents.error)throw new Error((fields.error||parents.error)!.message)
+   setLocations(fields.data||[]);setVenues(parents.data||[]);setAllowed(true)
+  }catch(cause){if(valid())setError(cause instanceof Error?cause.message:'Could not load locations and venues.')}
+  finally{if(valid())setLoading(false)}
+ }
+ useEffect(()=>{
+  mounted.current=true;void load()
+  const {data}=supabase.auth.onAuthStateChange((_event,session)=>{
+   if(currentUser.current&&session?.user?.id!==currentUser.current){
+    generation.current++;currentUser.current=null;setAllowed(false);setRows([]);setLocations([]);setVenues([]);setReading(false);setImporting(false);setLoading(false);setMessage('');setError('Sign-in changed. Refresh and review the import again.')
+   }
+  })
+  return()=>{mounted.current=false;generation.current++;data.subscription.unsubscribe()}
+ },[])
+ function downloadCSV(content:string,filename:string){
+  if(!allowed||busy.current||loading)return
+  const blob=new Blob([content],{type:'text/csv;charset=utf-8'})
+  const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=filename;a.click();URL.revokeObjectURL(url)
+ }
+ function downloadCurrent(){downloadCSV(exportLocationsCSV(locations,venues),'refassign-locations.csv')}
+ function downloadVenueIds(){downloadCSV(exportVenueCatalogCSV(venues),'refassign-venue-ids.csv')}
+ async function handleFile(event:ChangeEvent<HTMLInputElement>){
+  const input=event.target,file=input.files?.[0];input.value=''
+  if(!file||!allowed||busy.current||loading)return
+  const version=++generation.current,valid=()=>mounted.current&&generation.current===version
+  setRows([]);setMessage('');setError('');setReading(true)
+  try{
+   const buffer=await file.arrayBuffer();let raw:string[][]|null=null
+   try{const XLSX=await import('xlsx');const workbook=XLSX.read(buffer,{type:'array'});if(workbook.SheetNames.length)raw=XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]],{header:1,defval:'',raw:false}) as string[][]}catch{}
+   if(!raw?.length)raw=parseLocationCSV(new TextDecoder('utf-8').decode(buffer))
+   if(valid())setRows(validateLocationImport(raw,locations,venues))
+  }catch(cause){if(valid())setError(cause instanceof Error?`${cause.message} Selected file: ${file.name}`:'Unable to read locations file.')}
+  finally{if(valid())setReading(false)}
+ }
+ async function applyImport(){
+  if(!allowed||busy.current||reading||loading||!rows.length||rows.some(row=>!row.valid)||!currentUser.current)return
+  const version=++generation.current,userId=currentUser.current
+  const valid=()=>mounted.current&&generation.current===version
+  busy.current=true;setImporting(true);setError('');setMessage('')
+  try{
+   const result=await applyLocationImport(supabase,rows,async()=>{await authorizedUser(userId)},valid)
+   if(!valid())return
+   // Clear the consumed preview even on partial failure: repeating inserts is unsafe.
+   setRows([])
+   const progress=`Confirmed: ${result.updated} field metadata updates, ${result.added} new fields, ${result.associations} venue associations.`
+   setMessage(progress)
+   if(result.error||result.stopped){setError(`${result.error||'Import stopped.'} Earlier confirmed changes were not rolled back. Refresh, export and review before retrying.`);setAllowed(false)}
+   else{
+    busy.current=false
+    const reloadVersion=generation.current+1
+    await load(true)
+    if(mounted.current&&generation.current===reloadVersion)setMessage(`Locations import complete. ${progress}`)
+   }
+  }catch(cause){if(valid()){setRows([]);setAllowed(false);setError(`${cause instanceof Error?cause.message:'Import failed.'} Refresh and export before retrying; completed writes are not rolled back.`)}}
+  finally{busy.current=false;if(mounted.current)setImporting(false)}
+ }
+ const invalid=rows.filter(row=>!row.valid).length
+ return <section className="card"><div className="cardHead"><div><h3>Locations Import / Export</h3><p>Export stable field IDs and venue IDs, edit in Excel/Sheets, then preview changes. Venue names are informational; they never create, match or merge venues.</p></div><button className="secondary" disabled={!allowed||loading||importing} onClick={downloadCurrent}>Download Current Locations</button><button className="secondary" disabled={!allowed||loading||importing} onClick={downloadVenueIds}>Download Venue IDs</button></div>
+ <p>Keep <code>venue_action=preserve</code> to retain the parent. To associate an existing field, keep its exported <code>id</code>, enter an available <code>venue_id</code>, and choose <code>set</code>. To unassign, choose <code>clear</code> and blank <code>venue_id</code>. Blank parent columns alone never clear a mapping.</p>
+ <p><small>Older files without venue columns still work. Without a field ID, only an unambiguous name may update metadata. Add new fields first, then export their IDs before assigning venues. Field Complex remains a separate legacy setting.</small></p>
+ <button type="button" className="secondary" disabled={loading||importing} onClick={()=>void load()}>{loading?'Loading locations…':'Refresh locations and venues'}</button>
+ {!allowed&&!loading&&<p>Only authorized Administrators and Assignors can use the uploader. Refresh to recheck access and current IDs.</p>}
+ <input aria-label="Locations import file" type="file" disabled={!allowed||loading||importing} onChange={handleFile}/>
+ {reading&&<p>Reading import preview…</p>}{error&&<div role="alert" className="errorBox">{error}</div>}{message&&<div role="status" className="loginMessage">{message}</div>}
+ {rows.length>0&&<><p>{rows.length} rows • {rows.filter(row=>row.action==='Update').length} updates • {rows.filter(row=>row.action==='Add').length} additions • {invalid} errors</p><div className="tableWrap"><table><thead><tr><th>Row</th><th>Action</th><th>Field / ID</th><th>Address</th><th>City</th><th>State</th><th>Field Complex</th><th>Active</th><th>Parent venue action</th><th>Validation</th></tr></thead><tbody>{rows.map(row=><tr key={row.row}><td>{row.row}</td><td>{row.action}</td><td><b>{row.name}</b><small>{row.id||'New field'}</small></td><td>{row.address}</td><td>{row.city}</td><td>{row.state}</td><td>{row.field_complex}</td><td>{row.active}</td><td>{row.venue_action}{row.venue_action==='set'&&<><br/>{row.venue_name}<br/><code>{row.venue_id}</code></>}</td><td>{row.valid?'Ready':row.issue}</td></tr>)}</tbody></table></div><p>Imports are sequential, not all-or-nothing. A failed row stops later rows; confirmed earlier writes remain saved.</p><button className="primary" disabled={!allowed||importing||reading||invalid>0} onClick={applyImport}>{importing?'Updating Locations…':'Apply Location Changes'}</button></>}
+ </section>
 }

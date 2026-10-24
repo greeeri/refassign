@@ -5,6 +5,7 @@ import { fieldComplexRpcMissing } from "../lib/field-complex-support";
 import { coordinatesForVenue } from "../lib/client-geocode";
 import TeamsRosterManager from "./TeamsRosterManager";
 import LocationsRosterManager from "./LocationsRosterManager";
+import LocationVenueStructure from "./LocationVenueStructure";
 import LeagueDocumentsManager from "./LeagueDocumentsManager";
 import SharedDirectorySearch from "./SharedDirectorySearch";
 import TeamOfficialLinks from "./TeamOfficialLinks";
@@ -1253,7 +1254,7 @@ export default function GameSetup({
         </section>
       )}
       {view === "Locations" && (
-        <>
+        <LocationVenueStructure key={accessScopeKey} fields={locations} scopeKey={accessScopeKey} canEdit={canEditDirectory()}>
           {organizationId && (
             <section className="card directorySearchCard">
               <div>
@@ -1586,7 +1587,7 @@ export default function GameSetup({
               </table>
             </div>
           </section>
-        </>
+        </LocationVenueStructure>
       )}
     </>
   );

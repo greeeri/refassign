@@ -92,13 +92,14 @@ function setup(options = {}) {
         reads.push(call);
         const error = options.fail?.(call);
         if (error) return Promise.resolve({ data: null, error }).then(resolve, reject);
-        let rows = name === 'get_assignment_venue_directory' ? (() => {
+        let rows = name === 'get_assignment_venue_directory_v2' ? (() => {
           const games = tables.games.filter(row => row.organization_id === parameters.p_organization_id && row.archived_at === null && row.location_id &&
             (!parameters.p_league_id || row.league_id === parameters.p_league_id) &&
             (state.fullLeagueAccess || tables.organization_member_league_access.some(a => a.organization_id === state.organizationId && a.user_id === 'current-user' && a.league_id === row.league_id && (a.all_locations || a.location_ids.includes(row.location_id)))));
           return [...new Set(games.map(g => g.location_id))].map(location_id => ({ location_id,
             name: tables.locations.find(f => f.id === location_id)?.name || games.find(g => g.location_id === location_id).location.name,
-            field_complex: tables.get_organization_field_complexes.find(c => c.location_id === location_id)?.field_complex || null }));
+            field_complex: tables.get_organization_field_complexes.find(c => c.location_id === location_id)?.field_complex || null,
+            ...(options.parentVenues?.[location_id] || {}) }));
         })() : (tables[name] || []).slice();
         for (const [method, column, value] of call.operations) {
           if (method === 'eq' || method === 'is') rows = rows.filter(row => row[column] === value);
@@ -245,7 +246,7 @@ test('scoped directory pages past 1,000 rows with names and discovers fields bey
  const s=setup({games,complexes,state:{locationFilter:[token('Late Complex')]}});
  assert.deepEqual(resultIds(await s.run()),[game(1004,id(1004)).id]);
  assert.equal(s.state.venueDirectory.fields.length,1005);
- const reads=s.reads.filter(c=>c.name==='get_assignment_venue_directory');
+ const reads=s.reads.filter(c=>c.name==='get_assignment_venue_directory_v2');
  assert.deepEqual(reads.map(c=>operation(c,'range').slice(1)),[[0,999],[1000,1999]]);
  assert(reads.every(c=>c.parameters.p_organization_id==='selected-org'&&c.parameters.p_league_id===null));
  assert(!s.calls.some(c=>c.name==='locations'||c.name==='get_organization_field_complexes'||c.name==='get_organization_locations'));
@@ -258,7 +259,7 @@ test('ordinary assignors fetch only schedule-used grouped and ungrouped field na
  assert.deepEqual(resultIds(await s.run()),['game-00001']);
  assert.deepEqual(s.state.venueDirectory.fields,[{id:'member',name:'North Field'},{id:'ungrouped',name:'Solo Field'}]);
  assert.deepEqual(s.state.venueDirectory.complexes,{member:'North'});
- assert.equal(s.reads.filter(c=>c.name==='get_assignment_venue_directory').length,1);
+ assert.equal(s.reads.filter(c=>c.name==='get_assignment_venue_directory_v2').length,1);
  assert(!s.calls.some(c=>c.name==='locations'||c.name==='get_organization_field_complexes'));
 });
 
@@ -367,7 +368,7 @@ test('league authorization errors stop before catalog and game reads', async () 
 
 test('a later complex-catalog page failure clears filtered games instead of using partial membership', async () => {
   const complexes = Array.from({ length: 1005 }, (_, index) => ({ location_id: id(index), field_complex: 'North' }));
-  const s = setup({ complexes, games: complexes.map((c,i)=>game(i,c.location_id)), state: { locationFilter: [token('North')] }, fail: call => call.name === 'get_assignment_venue_directory' && operation(call, 'range')?.[1] === 1000 && { message: 'Later membership page failed' } });
+  const s = setup({ complexes, games: complexes.map((c,i)=>game(i,c.location_id)), state: { locationFilter: [token('North')] }, fail: call => call.name === 'get_assignment_venue_directory_v2' && operation(call, 'range')?.[1] === 1000 && { message: 'Later membership page failed' } });
   assert.equal(await s.run(), undefined);
   assert.equal(s.state.error, 'Later membership page failed');
   assert.deepEqual(s.state.games, []);
@@ -376,7 +377,7 @@ test('a later complex-catalog page failure clears filtered games instead of usin
 });
 
 test('a missing or failed scoped directory fails closed rather than fetching the old broad catalog', async () => {
- const s=setup({games:[game(1,'historic')],state:{locationFilter:['historic']},fail:c=>c.name==='get_assignment_venue_directory'?{message:'Missing scoped directory'}:null});
+ const s=setup({games:[game(1,'historic')],state:{locationFilter:['historic']},fail:c=>c.name==='get_assignment_venue_directory_v2'?{message:'Missing scoped directory'}:null});
  assert.equal(await s.run(),undefined);assert.equal(s.state.error,'Missing scoped directory');assert.equal(s.pageReads().length,0);
  assert(!s.calls.some(c=>c.name==='get_organization_field_complexes'||c.name==='locations'));
  assert.equal(s.state.venueDirectoryCache.current,null);
@@ -387,13 +388,13 @@ test('read-only schedule users use the same scoped directory without management 
   assert.deepEqual(resultIds(await s.run()), ['game-00001']);
   assert(!s.reads.some(call => call.name === 'get_organization_field_complexes'));
   assert.deepEqual(s.state.venueDirectory.fields.map(f=>f.id), ['historic','other']);
-  assert(s.reads.some(call => call.name === 'get_assignment_venue_directory'));
+  assert(s.reads.some(call => call.name === 'get_assignment_venue_directory_v2'));
 });
 
 test('stale directory loads do not replace a newer organization catalog or launch game reads', async () => {
   let changed = false;
   const s = setup({ state: { locationFilter: [token('North')] }, onRead(call, state) {
-    if (!changed && call.name === 'get_assignment_venue_directory') { changed = true; state.loadVersion.current++; }
+    if (!changed && call.name === 'get_assignment_venue_directory_v2') { changed = true; state.loadVersion.current++; }
   } });
   assert.equal(await s.run(), undefined);
   assert.deepEqual(s.state.venueDirectory, { fields: [], complexes: {} });
@@ -906,7 +907,7 @@ test('default page publishes at most 50 today-and-future games without totals or
  assert.equal(first.data.length,50);assert.equal(first.data[0].id,'game-00001');assert(!resultIds(first).includes('game-00999'));
  assert.deepEqual(s.state.games.map(g=>g.id),resultIds(first));assert.equal(s.state.initialGamesReady,true);assert.equal(s.state.canManage,false);
  assert.equal(s.state.gamePageHasMore,true);assert.equal(s.state.matchingTotals,null);
- assert(!s.calls.some(c=>c.name.endsWith('_summary')||c.name==='get_organization_field_complexes'||c.name==='get_assignment_venue_directory'||c.name==='audit_history'||c.name==='assignments'));
+ assert(!s.calls.some(c=>c.name.endsWith('_summary')||c.name==='get_organization_field_complexes'||c.name==='get_assignment_venue_directory_v2'||c.name==='audit_history'||c.name==='assignments'));
  const f=s.pageReads()[0].parameters.p_filters;assert.equal(f.todayForward,true);assert(Date.parse(f.asOf)>=before&&Date.parse(f.asOf)<=Date.now(),'asOf stays actual now, not day boundary');
  s.state.gamePaging.current.page=2;const second=await s.run();assert.equal(second.data.length,21);assert.equal(s.state.gamePageHasMore,false);
  assert.equal(s.calls.filter(c=>c.name.endsWith('_summary')).length,0);
@@ -1086,9 +1087,9 @@ test('page and unrelated filter changes reuse directory; auth/scope changes do n
  const access=[{organization_id:'selected-org',user_id:'current-user',league_id:'allowed-league',all_locations:true,location_ids:[]}];
  const s=setup({games:[game(1,'a'),game(2,'b')],access});await s.runDirectory();
  s.state.gamePaging.current.page=2;await s.runDirectory();s.state.levelFilter='u16';await s.runDirectory();
- assert.equal(s.reads.filter(c=>c.name==='get_assignment_venue_directory').length,1);
+ assert.equal(s.reads.filter(c=>c.name==='get_assignment_venue_directory_v2').length,1);
  access[0].all_locations=false;access[0].location_ids=['a'];await s.runDirectory();
- assert.equal(s.reads.filter(c=>c.name==='get_assignment_venue_directory').length,2);
+ assert.equal(s.reads.filter(c=>c.name==='get_assignment_venue_directory_v2').length,2);
  assert.deepEqual(s.state.venueDirectory.fields.map(f=>f.id),['a']);
  s.state.supabase.auth.getUser=async()=>({data:{user:null}});await s.runDirectory();
  assert.equal(s.state.venueDirectoryCache.current,null);assert.deepEqual(s.state.venueDirectory.fields,[]);
@@ -1112,7 +1113,7 @@ test('late league A directory response cannot replace league B or start an obsol
  let finishOld, oldRead;
  const reached=new Promise(resolve=>{oldRead=resolve;});
  const s=setup({state:{fullLeagueAccess:true,leagueFilter:'allowed-league',locationFilter:['a']},games:[game(1,'a'),game(2,'b',{league_id:'league-b'})],
- queryOverride(call,state,result){if(call.name==='get_assignment_venue_directory'&&call.parameters.p_league_id==='allowed-league'){oldRead();return new Promise(resolve=>{finishOld=()=>resolve(result);});}}});
+ queryOverride(call,state,result){if(call.name==='get_assignment_venue_directory_v2'&&call.parameters.p_league_id==='allowed-league'){oldRead();return new Promise(resolve=>{finishOld=()=>resolve(result);});}}});
  const old=s.runDirectory();await reached;
  s.state.leagueFilter='league-b';s.state.locationFilter=['b'];await s.runDirectory();
  assert.deepEqual(s.state.venueDirectory.fields.map(f=>f.id),['b']);
@@ -1137,7 +1138,7 @@ test('freshly revoked location grants hide old directory while replacement is pe
  let defer=false,finish,reached;
  const pending=new Promise(resolve=>{reached=resolve;});
  const access=[{organization_id:'selected-org',user_id:'current-user',league_id:'allowed-league',all_locations:true,location_ids:[]}];
- const s=setup({access,games:[game(1,'a'),game(2,'b')],queryOverride(call,state,result){if(defer&&call.name==='get_assignment_venue_directory'){reached();return new Promise(resolve=>{finish=()=>resolve(result);});}}});
+ const s=setup({access,games:[game(1,'a'),game(2,'b')],queryOverride(call,state,result){if(defer&&call.name==='get_assignment_venue_directory_v2'){reached();return new Promise(resolve=>{finish=()=>resolve(result);});}}});
  await s.runDirectory();assert.deepEqual(s.state.venueDirectory.fields.map(f=>f.id),['a','b']);
  const oldProps=s.state.leagueScopeKey;access[0].all_locations=false;access[0].location_ids=['a'];defer=true;
  const loading=s.runDirectory();await pending;
@@ -1148,7 +1149,7 @@ test('freshly revoked location grants hide old directory while replacement is pe
 
 test('changed authenticated user hides prior directory during replacement even with full-access props',async()=>{
  let defer=false,finish,reached;const pending=new Promise(resolve=>{reached=resolve;});
- const s=setup({state:{fullLeagueAccess:true},games:[game(1,'a')],queryOverride(call,state,result){if(defer&&call.name==='get_assignment_venue_directory'){reached();return new Promise(resolve=>{finish=()=>resolve(result);});}}});
+ const s=setup({state:{fullLeagueAccess:true},games:[game(1,'a')],queryOverride(call,state,result){if(defer&&call.name==='get_assignment_venue_directory_v2'){reached();return new Promise(resolve=>{finish=()=>resolve(result);});}}});
  await s.runDirectory();s.state.supabase.auth.getUser=async()=>({data:{user:{id:'another-user'}}});defer=true;
  const loading=s.runDirectory();await pending;assert.deepEqual(s.state.venueDirectory.fields,[]);
  finish();await loading;assert.match(s.state.venueDirectoryCache.current.key,/another-user/);
@@ -1157,7 +1158,7 @@ test('changed authenticated user hides prior directory during replacement even w
 
 test('thrown directory failure clears old presentation even when the same-key cache expires',async()=>{
  let reject=false;
- const s=setup({games:[game(1,'a')],queryOverride(call){if(reject&&call.name==='get_assignment_venue_directory')return Promise.reject(new Error('offline'));}});
+ const s=setup({games:[game(1,'a')],queryOverride(call){if(reject&&call.name==='get_assignment_venue_directory_v2')return Promise.reject(new Error('offline'));}});
  await s.runDirectory();assert.equal(s.state.venueDirectory.fields.length,1);
  s.state.venueDirectoryCache.current.expiresAt=0;s.state.locationFilter=['a'];reject=true;
  assert.equal(await s.runDirectory(),undefined);assert.deepEqual(s.state.venueDirectory.fields,[]);
@@ -1181,19 +1182,19 @@ test('production filter effect automatically reloads the pruned venue snapshot w
 
 test('slow scoped directory never delays the first 50 rows, assignment readiness or automatic summary',async()=>{
  let finish;const s=fullLoadSetup({games:Array.from({length:55},(_,i)=>game(i,'member')),queryOverride(call,state,result){
-  if(call.name==='get_assignment_venue_directory')return new Promise(resolve=>{finish=()=>resolve(result);});
+  if(call.name==='get_assignment_venue_directory_v2')return new Promise(resolve=>{finish=()=>resolve(result);});
  }});
  await s.full();await flush();
  assert.equal(s.state.games.length,50);assert.equal(s.state.initialGamesReady,true);assert.equal(s.state.canManage,true);
  assert.equal(s.state.pageDetailsReady,true);assert.equal(s.calls.filter(c=>c.name==='get_assignment_game_summary').length,1);
- assert(s.calls.findIndex(c=>c.name==='get_assignment_matching_game_page')<s.calls.findIndex(c=>c.name==='get_assignment_venue_directory'));
+ assert(s.calls.findIndex(c=>c.name==='get_assignment_matching_game_page')<s.calls.findIndex(c=>c.name==='get_assignment_venue_directory_v2'));
  assert.deepEqual(copy(s.state.venueDirectory.fields),[]);
  finish();await flush();assert.deepEqual(copy(s.state.venueDirectory.fields.map(f=>f.id)),['member']);
 });
 
 test('failed background directory preserves actionable page and summary without a broad fallback',async()=>{
  let finish;const s=fullLoadSetup({games:[game(1,'member')],queryOverride(call){
-  if(call.name==='get_assignment_venue_directory')return new Promise(resolve=>{finish=()=>resolve({data:null,error:{message:'directory unavailable'}});});
+  if(call.name==='get_assignment_venue_directory_v2')return new Promise(resolve=>{finish=()=>resolve({data:null,error:{message:'directory unavailable'}});});
  }});
  await s.full();await flush();finish();await flush();
  assert.equal(s.state.games.length,1);assert.equal(s.state.canManage,true);assert.equal(s.state.pageDetailsReady,true);
@@ -1203,7 +1204,7 @@ test('failed background directory preserves actionable page and summary without 
 
 test('late background catalog cannot replace the new league after both fast pages load',async()=>{
  let finishOld;const s=fullLoadSetup({state:{fullLeagueAccess:true,leagueFilter:'allowed-league'},games:[game(1,'a'),game(2,'b',{league_id:'league-b'})],queryOverride(call,state,result){
-  if(call.name==='get_assignment_venue_directory'&&call.parameters.p_league_id==='allowed-league')return new Promise(resolve=>{finishOld=()=>resolve(result);});
+  if(call.name==='get_assignment_venue_directory_v2'&&call.parameters.p_league_id==='allowed-league')return new Promise(resolve=>{finishOld=()=>resolve(result);});
  }});
  await s.full();assert.equal(s.state.games[0].location_id,'a');
  s.state.leagueFilter='league-b';await s.full(true);await flush();
@@ -1214,9 +1215,55 @@ test('late background catalog cannot replace the new league after both fast page
 
 test('same-scope page navigation coalesces pending background directory and keeps the newest generation',async()=>{
  let finish;const s=fullLoadSetup({games:Array.from({length:55},(_,i)=>game(i,'member')),queryOverride(call,state,result){
-  if(call.name==='get_assignment_venue_directory')return new Promise(resolve=>{finish=()=>resolve(result);});
+  if(call.name==='get_assignment_venue_directory_v2')return new Promise(resolve=>{finish=()=>resolve(result);});
  }});
  await s.full();s.state.gamePaging.current.page=2;await s.full(true,true);
- assert.equal(s.state.games.length,5);assert.equal(s.calls.filter(c=>c.name==='get_assignment_venue_directory').length,1);
+ assert.equal(s.state.games.length,5);assert.equal(s.calls.filter(c=>c.name==='get_assignment_venue_directory_v2').length,1);
  finish();await flush();assert.deepEqual(copy(s.state.venueDirectory.fields.map(f=>f.id)),['member']);assert.equal(s.state.games.length,5);
+});
+
+test('explicit parents use IDs, keep same-named venues distinct, and never infer sibling membership', () => {
+  const fields = [
+    { id: 'a', name: 'Park - Field 1', venue_id: 'venue-a', venue_name: 'Park' },
+    { id: 'b', name: 'Park - Field 2', venue_id: 'venue-b', venue_name: 'Park' },
+    { id: 'c', name: 'Park - Field 3', venue_id: null, venue_name: null },
+  ];
+  const selected = [venue.venueFilterValue('venue-a')];
+  assert.deepEqual(copy(venue.resolveVenueLocationIds(selected, 'org', {}, fields)), ['a']);
+  const options = venue.assignmentVenueOptions('org', {}, fields, fields, selected);
+  assert.equal(options.filter(([value]) => value === 'venue:venue-a').length, 1);
+  assert.equal(options.filter(([value]) => value === 'venue:venue-b').length, 1);
+  assert.equal(options.length, 5);
+  fields[0].venue_name = 'Completely different name';
+  assert.deepEqual(copy(venue.resolveVenueLocationIds(selected, 'org', {}, fields)), ['a']);
+  assert(venue.assignmentVenueOptions('org', {}, fields, [], selected).some(([value, label]) => value === 'venue:venue-a' && label.includes('Completely different name')));
+  assert.deepEqual(copy(venue.resolveVenueLocationIds(selected, 'org', {}, [])), []);
+  assert.match(venue.assignmentVenueOptions('org', {}, [], [], selected)[0][1], /Unavailable venue/);
+});
+
+test('production loader expands a parent only to the authorized selected league fields', async () => {
+  const s = setup({
+    games: [game(1, 'a'), game(2, 'b'), game(3, 'foreign', { league_id: 'other' })],
+    parentVenues: { a: { venue_id: 'v', venue_name: 'Park' }, b: { venue_id: 'other', venue_name: 'Park' }, foreign: { venue_id: 'v', venue_name: 'Park' } },
+    state: { locationFilter: ['venue:v'], leagueFilter: 'allowed-league' },
+  });
+  await s.run();
+  assert.deepEqual(s.state.games.map(g => g.location_id), ['a']);
+  assert.deepEqual(s.state.locationFilter, ['venue:v']);
+  assert(!s.state.venueDirectory.fields.some(f => f.id === 'foreign'));
+});
+
+test('saved parent absent from a new scope does not silently become unrestricted', async () => {
+  const s = setup({ games: [game(1, 'a')], state: { locationFilter: ['venue:foreign'], leagueFilter: 'allowed-league' } });
+  await s.run();
+  assert.deepEqual(s.state.locationFilter, ['venue:foreign']);
+  assert.deepEqual(s.state.games, []);
+});
+
+test('explicit venue selection on an empty league stays selected and returns no games', async () => {
+  const s = setup({ games: [], state: { locationFilter: ['venue:v'], leagueFilter: 'allowed-league' } });
+  await s.run();
+  assert.deepEqual(s.state.venueDirectory.fields, []);
+  assert.deepEqual(s.state.games, []);
+  assert.deepEqual(s.state.locationFilter, ['venue:v']);
 });

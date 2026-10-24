@@ -587,7 +587,7 @@ export default function AssignmentsManagerV2({
   const venueDirectoryScopeKey = JSON.stringify([organizationId, leagueFilter, leagueScopeKey]);
   const currentVenueDirectory = venueDirectory.scopeKey === venueDirectoryScopeKey;
   const locationComplexes = currentVenueDirectory ? venueDirectory.complexes : {};
-  const venueLocationIds = resolveVenueLocationIds(locationFilter, organizationId, locationComplexes);
+  const venueLocationIds = resolveVenueLocationIds(locationFilter, organizationId, locationComplexes, currentVenueDirectory ? venueDirectory.fields : []);
   const venueFilterOptions = assignmentVenueOptions(
     organizationId,
     locationComplexes,
@@ -816,6 +816,7 @@ export default function AssignmentsManagerV2({
       ["admin", "assignor"].includes(role),
     );
     let loadedComplexes: Record<string, string> = {};
+    let loadedVenueFields: VenueField[] = [];
     const directoryKey = JSON.stringify([userData.user.id, organizationId, fullLeagueAccess,
       leagueGameAccessKey(scopedGameAccess), leagueFilter]);
     // Props may lag freshly verified grants (or a changed signed-in user).
@@ -843,6 +844,7 @@ export default function AssignmentsManagerV2({
       }
       const catalog = assignmentVenueDirectory(directory.data || []);
       loadedComplexes = catalog.complexes;
+      loadedVenueFields = catalog.fields;
       setVenueDirectory({ organizationId, scopeKey: venueDirectoryScopeKey, ...catalog });
       const validSelection = validAssignmentVenueSelection(locationFilter, organizationId, catalog);
       if (JSON.stringify(validSelection) !== JSON.stringify(locationFilter)) {
@@ -857,7 +859,7 @@ export default function AssignmentsManagerV2({
     // Preserve the today-forward first-page fast path: with no selected venue,
     // neither the catalog nor historical venue discovery can delay the 50 rows.
     if (needsVenueDirectory && !await loadVenueDirectory()) return;
-    const resolvedLocationIds = resolveVenueLocationIds(locationFilter, organizationId, loadedComplexes);
+    const resolvedLocationIds = resolveVenueLocationIds(locationFilter, organizationId, loadedComplexes, loadedVenueFields);
     const selectedLocationIds = resolvedLocationIds === null ? null : [...resolvedLocationIds].sort();
     const pageKey = JSON.stringify([organizationId, fullLeagueAccess, leagueGameAccessKey(scopedGameAccess), selectedLocationIds,
       range, customDate, fromDate, toDate, dayFilter, timeFilter, officialFilter, leagueFilter, levelFilter,

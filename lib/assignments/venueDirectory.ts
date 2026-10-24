@@ -1,8 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { readAllPages, type PageResult } from "../supabase/readAll";
-import { fieldComplexMap, complexVenueFilterValue, type VenueField } from "./venueFilter";
+import { fieldComplexMap, complexVenueFilterValue, isParentVenueFilter, type VenueField } from "./venueFilter";
 
-export type AssignmentVenueRow = { location_id: string; name: string; field_complex: string | null };
+export type AssignmentVenueRow = { location_id: string; name: string; field_complex: string | null; venue_id?: string | null; venue_name?: string | null };
 export type AssignmentVenueDirectory = { fields: VenueField[]; complexes: Record<string, string> };
 export type VenueDirectoryRequest = {
   key: string;
@@ -26,10 +26,21 @@ export function loadAssignmentVenueDirectory(
   if (cache.current?.key === key && cache.current.expiresAt > now) return cache.current.promise;
   const request: VenueDirectoryRequest = {
     key, expiresAt: now + venueDirectoryMaxAgeMs,
-    promise: readAllPages<AssignmentVenueRow>((from, to) =>
-      supabase.rpc("get_assignment_venue_directory", {
-        p_organization_id: organizationId, p_league_id: leagueId || null,
-      }).order("location_id").range(from, to)),
+    promise: (async () => {
+      const read = (rpc: string) => readAllPages<AssignmentVenueRow>((from, to) =>
+        supabase.rpc(rpc, {
+          p_organization_id: organizationId, p_league_id: leagueId || null,
+        }).order("location_id").range(from, to));
+      const result = await read("get_assignment_venue_directory_v2");
+      const error = result.error as { code?: string; message: string } | null;
+      // Compatibility only for an unapplied v2 migration, not permission or
+      // network failures. The legacy RPC has exactly the same league boundary.
+      if (error && (error.code === "PGRST202" || error.code === "42883") &&
+          error.message.includes("get_assignment_venue_directory_v2")) {
+        return read("get_assignment_venue_directory");
+      }
+      return result;
+    })(),
   };
   cache.current = request;
   request.promise = request.promise.then(result => {
@@ -44,12 +55,12 @@ export function loadAssignmentVenueDirectory(
 
 export function assignmentVenueDirectory(rows: AssignmentVenueRow[]): AssignmentVenueDirectory {
   return {
-    fields: rows.map(row => ({ id: row.location_id, name: row.name })),
+    fields: rows.map(row => ({ id: row.location_id, name: row.name, venue_id: row.venue_id, venue_name: row.venue_name })),
     complexes: fieldComplexMap(rows),
   };
 }
 
-/** Keep shared fields/complexes on league changes, remove only invalid choices. */
+/** Prune legacy field/complex choices; unavailable parent selections fail closed. */
 export function validAssignmentVenueSelection(
   selected: string[], organizationId: string, directory: AssignmentVenueDirectory,
 ): string[] {
@@ -57,5 +68,8 @@ export function validAssignmentVenueSelection(
     ...directory.fields.map(field => field.id),
     ...Object.values(directory.complexes).map(name => complexVenueFilterValue(organizationId, name)),
   ]);
-  return selected.filter(value => allowed.has(value));
+  // Keep an unavailable saved parent visible and fail closed. This also
+  // prevents a rolling deployment to a legacy server clearing a venue filter
+  // into an unrestricted schedule. Users may explicitly clear the selection.
+  return selected.filter(value => allowed.has(value) || isParentVenueFilter(value));
 }
