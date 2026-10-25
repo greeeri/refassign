@@ -115,7 +115,7 @@ test('superadmin venue edits preserve the venue ID and cancel makes no mutation'
 test('GameSetup embeds the pathway directly inside existing Locations management',()=>{
  const source=fs.readFileSync('components/GameSetup.tsx','utf8');
  assert(source.includes('<LocationVenueStructure key={accessScopeKey} fields={locations} scopeKey={accessScopeKey} canEdit={canEditDirectory()}>'));
- assert(source.includes('set_organization_field_complex'));assert(source.includes('<LocationsRosterManager />'));
+ assert(source.includes('set_organization_field_complex'));assert(source.includes('<LocationsRosterManager organizationId={organizationId} accessScopeKey={accessScopeKey} canEdit={canEditDirectory()} fieldIds={locations.map(location => location.id)} />'));
 });
 test('late catalog reads and read failures never enable stale association controls',async()=>{
  const pending=deferred();let first=true;

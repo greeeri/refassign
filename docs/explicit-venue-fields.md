@@ -30,6 +30,16 @@ There are no mapping UPDATE/DELETE statements in the migration. Apply only after
 
 ## Mapping review — no automatic backfill
 
+### Workspace-scoped import/export
+
+The Locations field export and import preview use the **current organization's loaded field IDs**, intersected with its freshly authorized active directory. They do not use the user's entire shared/global catalog. IDs outside this workspace are rejected even when the user can access them in another workspace. Missing workspace/permission context fails closed; an empty workspace never falls back to all locations. Scope, permission and sign-in changes invalidate old previews and downloads. Before the first import write the whole batch is checked, and current organization authority and target membership are checked again before each write. This adds application-context safeguards without changing existing RLS or database permissions.
+
+**Download Venue IDs** remains a separately labeled catalog of all parent venues readable under existing permissions. It supplies IDs for explicit association but does not expand the workspace's field list.
+
+Workspace imports update existing fields only. New or unconnected fields must first be added or connected through the existing Locations workflow, followed by refresh/export. They are not silently inserted into the global catalog by the uploader. A row combining deactivation with a parent change is rejected during preview; make the association change while the field is active, then deactivate it separately. Older metadata-only files still work for unambiguous existing workspace fields; explicit parent changes still require the exported field ID.
+
+This corrects a legacy scope discrepancy: the old standalone uploader queried all RLS-visible locations while the surrounding Locations screen showed only organization-connected fields. No records are moved, linked or removed by this correction.
+
 Production catalog exports belong outside source control. The separately prepared review packet contains a read-only snapshot, a venue catalog, and a field mapping worksheet. Existing links are marked preserve, unlinked fields are marked for review, and approved venue IDs start blank. Similar names, shared complex text, and shared addresses are evidence for a human review, not proof of parentage.
 
 1. Confirm the field and physical parent with an authoritative source.

@@ -39,7 +39,7 @@ export function exportLocationsCSV(locations: ImportLocation[], venues: ImportVe
     names.get(location.venue_id || '') || '', 'preserve',
   ].map(csv).join(','))].join('\n');
 }
-export function validateLocationImport(raw: string[][], locations: ImportLocation[], venues: ImportVenue[]): LocationImportRow[] {
+export function validateLocationImport(raw: string[][], locations: ImportLocation[], venues: ImportVenue[], options: { workspaceOnly?: boolean } = {}): LocationImportRow[] {
   if (!raw.length) throw new Error('Import file is empty.');
   const header = raw[0].map(value => String(value).trim().toLowerCase().replace(/\s+/g, '_'));
   if (new Set(header).size !== header.length) throw new Error('Duplicate column headers are not allowed.');
@@ -52,17 +52,19 @@ export function validateLocationImport(raw: string[][], locations: ImportLocatio
     const suppliedId = get('id'), name = get('name'), active = get('active').toLowerCase();
     const issues: string[] = [];
     let existing = suppliedId ? byId.get(suppliedId) : undefined;
-    if (suppliedId && !existing) issues.push('Unknown or inaccessible field ID. Export current locations; do not guess IDs.');
+    if (suppliedId && !existing) issues.push('Unknown, inaccessible or outside-workspace field ID. Export current workspace locations; do not guess IDs.');
     if (!suppliedId) {
       const matches = locations.filter(location => normalized(location.name) === normalized(name));
       if (matches.length > 1) issues.push('Ambiguous field name. Supply its exported ID.');
       else existing = matches[0];
     }
+    if (options.workspaceOnly && !existing) issues.push('Add or connect new fields in Locations first, then refresh and export this workspace. Imports cannot create global fields.');
     if (!name) issues.push('Column name: missing value');
     if (!['true', 'false', 'yes', 'no', '1', '0'].includes(active)) issues.push('Column active: must be true/false');
     const venueId = get('venue_id');
     const action = get('venue_action').toLowerCase() || (venueId ? 'set' : 'preserve');
     if (!['preserve', 'set', 'clear'].includes(action)) issues.push('venue_action must be preserve, set or clear.');
+    if (options.workspaceOnly && ['false','no','0'].includes(active) && (action === 'set' || action === 'clear')) issues.push('Associate the venue while the field is active, then deactivate it in a separate import.');
     if (action === 'set' || action === 'clear') {
       if (!suppliedId || !existing) issues.push('Venue changes require an existing exported field ID. Add new fields first, then export and associate them.');
       if (action === 'set' && (!venueId || !venueById.has(venueId))) issues.push('Set requires an available venue_id. Venue names never create or match a venue.');
@@ -85,7 +87,7 @@ export type LocationImportResult = { added: number; updated: number; association
 export async function applyLocationImport(
   client: Pick<SupabaseClient, 'from' | 'rpc'>,
   rows: LocationImportRow[],
-  authorize: () => Promise<void>,
+  authorize: (row: LocationImportRow) => Promise<void>,
   isCurrent: () => boolean = () => true,
 ): Promise<LocationImportResult> {
   const result: LocationImportResult = { added: 0, updated: 0, associations: 0, error: null, stopped: false };
@@ -93,7 +95,7 @@ export async function applyLocationImport(
   for (const row of rows) {
     try {
       if (!isCurrent()) return { ...result, stopped: true };
-      await authorize();
+      await authorize(row);
       if (!isCurrent()) return { ...result, stopped: true };
       const payload = { name: row.name, address: row.address || null, city: row.city || null, state: row.state || null,
         ...(row.field_complex ? { field_complex: row.field_complex } : {}), level_id: null,
@@ -106,7 +108,7 @@ export async function applyLocationImport(
       if (row.action === 'Update') result.updated++; else result.added++;
       if (!isCurrent()) return { ...result, stopped: true };
       if (row.venue_action !== 'preserve') {
-        await authorize();
+        await authorize(row);
         if (!isCurrent()) return { ...result, stopped: true };
         const parent = row.venue_action === 'clear' ? null : row.venue_id;
         const changed = await client.rpc('set_location_venue', { p_location_id: row.id, p_venue_id: parent, p_expected_venue_id: row.expected_venue_id });

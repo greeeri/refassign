@@ -1371,7 +1371,7 @@ export default function GameSetup({
                   : "Location Import / Export"}
               </button>
             </div>
-            {showLocationImport && <LocationsRosterManager />}
+            {showLocationImport && <LocationsRosterManager organizationId={organizationId} accessScopeKey={accessScopeKey} canEdit={canEditDirectory()} fieldIds={locations.map(location => location.id)} />}
             {locationSaveMessage && (
               <div className="successBox">{locationSaveMessage}</div>
             )}

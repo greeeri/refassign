@@ -81,3 +81,10 @@ test('venue catalog export includes authorized IDs and escapes names without cre
  const csv=api.exportVenueCatalogCSV([{id:'unlinked-venue',name:'Park, "North"'}]);
  assert.deepEqual(plain(api.parseLocationCSV(csv)),[['venue_id','venue_name'],['unlinked-venue','Park, "North"']]);
 });
+test('workspace-only validation preserves legacy matching but prohibits global inserts and combined deactivation/association',()=>{
+ const validateScoped=changes=>api.validateLocationImport([header,row(changes)],fields,venues,{workspaceOnly:true})[0];
+ assert(validateScoped({id:'',name:'Field, One'}).valid);
+ assert.equal(validateScoped({id:'',name:'Unknown'}).valid,false);
+ assert.match(validateScoped({active:'false',venue_action:'set',venue_id:'v2'}).issue,/while the field is active/);
+ assert(validateScoped({active:'false',venue_action:'preserve'}).valid);
+});
