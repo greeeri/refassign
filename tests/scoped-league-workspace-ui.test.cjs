@@ -49,13 +49,16 @@ function environment(source, changes = {}) {
     const call = { kind, name, parameters: copy(parameters || {}), operations: [] };
     calls.push(call);
     const builder = {
-      then(resolve, reject) {
+      async then(resolve, reject) {
+        if (changes.waitFor) await changes.waitFor(call);
         if (changes.fail?.(call)) return Promise.resolve({ data: null, error: { message: 'Access changed' } }).then(resolve, reject);
         if (kind === 'rpc' && name === 'get_game_directory') return Promise.resolve({ data: {
           teams: [{ id: `${parameters.p_league_id}-team` }], levels: [{ id: `${parameters.p_league_id}-level` }],
           team_settings: [{ league_id: parameters.p_league_id, team_ids: [] }], level_settings: [],
         }, error: null }).then(resolve, reject);
         let rows = (tables[name] || []).slice();
+        const ordering = call.operations.filter(([method]) => method === 'order');
+        rows.sort((a, b) => { for (const [, column, options] of ordering) { const direction = options?.ascending === false ? -1 : 1; if (a[column] < b[column]) return -direction; if (a[column] > b[column]) return direction; } return 0; });
         for (const [method, column, value] of call.operations) {
           if (method === 'eq') rows = rows.filter(row => row[column] === value);
           if (method === 'in') rows = rows.filter(row => value.includes(row[column]));
@@ -151,9 +154,12 @@ test('Dashboard bounds games first and then assignments, declines and audit to t
   assert(!env.calls.some(call => call.name === 'import_error_log'));
   for (const call of env.calls.filter(call => ['assignments', 'assignment_declines', 'audit_history'].includes(call.name))) {
     assert(operation(call, 'in', 'game_id'));
-    assert(call.operations.findIndex(([op]) => op === 'in') < call.operations.findIndex(([op]) => op === 'range'));
+    assert(call.operations.findIndex(([op]) => op === 'in') < call.operations.findIndex(([op]) => op === (call.name === 'audit_history' ? 'limit' : 'range')));
   }
-  assert(env.calls.findIndex(call => call.name === 'assignments') > env.calls.findLastIndex(call => call.name === 'games'));
+  const baseReads = env.calls.filter(call => call.name === 'games' && operation(call, 'gte'));
+  assert.equal(baseReads.length, 3);
+  assert(env.calls.findIndex(call => call.name === 'assignments') > env.calls.indexOf(baseReads.at(-1)));
+  for (const call of env.calls.filter(call => call.name === 'audit_history')) assert.equal(operation(call, 'limit')[1], 8);
 });
 test('Dashboard unknown/empty scope makes no reads; owner still gets organization overview', async () => {
   const empty = await dashboardRun({ state: { accessibleLeagueIds: [], leagueGameAccess: [] } });
@@ -240,7 +246,7 @@ test('per-league location grants are independent and filter Games and Dashboard 
     const options = { state: { leagueGameAccess: grants, scopedLeagueIds: grants.map(grant => grant.league_id), accessibleLeagueIds: grants.map(grant => grant.league_id) }, tables: { games: rows } };
     const env = dashboard ? await dashboardRun(options) : environment(gamesLoad, options);
     if (!dashboard) await env.run(`${gamesLoad}\nload()`);
-    assert.deepEqual(env.state.games.map(row => row.id), ['a-north', 'b-south', 'b-null']);
+    assert.deepEqual(env.state.games.map(row => row.id).sort(), ['a-north', 'b-null', 'b-south']);
     for (const call of env.calls.filter(call => call.name === 'games')) {
       assert(operation(call, 'or'));
       assert(call.operations.findIndex(([op]) => op === 'or') < call.operations.findIndex(([op]) => op === 'range'));
@@ -334,4 +340,135 @@ test('scoped overdue review cannot create shared availability blocks', async () 
     assert.equal(env.calls.length, 0);
   }
   assert.match(assignments.text, /fullLeagueAccess && <button[\s\S]{0,250}resolveOverdue\("remove_and_block"\)/);
+});
+
+
+test('Dashboard reads whole local today and future scalars, not historical joins', async () => {
+  class FixedDate extends Date { constructor(...args) { super(...(args.length ? args : ['2026-10-27T18:00:00Z'])); } static now() { return Date.parse('2026-10-27T18:00:00Z'); } }
+  const midnight = new FixedDate(); midnight.setHours(0, 0, 0, 0);
+  const row = (id, starts_at) => ({ id, starts_at, organization_id: 'org', league_id: 'league-a', archived_at: null,
+    home_team_id: 'team', away_team_id: 'team', location_id: 'field', level_id: 'level' });
+  const env = await dashboardRun({ state: { Date: FixedDate }, tables: {
+    games: [row('past', new Date(+midnight - 1).toISOString()), row('today', midnight.toISOString()), row('future', '2099-01-01')],
+    teams: [{ id: 'team', name: 'Scoped team' }], locations: [{ id: 'field', name: 'Field', latitude: 42, longitude: -93 }],
+    leagues: [{ id: 'league-a', name: 'League' }], levels: [{ id: 'level', name: 'Level' }],
+    assignments: [{ id: 'a', game_id: 'today' }, { id: 'past-a', game_id: 'past' }],
+    audit_history: [{ id: 99, game_id: 'past', organization_id: 'org', occurred_at: '2026-10-27T17:00:00Z' }],
+  } });
+  assert.deepEqual(env.state.games.map(g => g.id), ['today', 'future']);
+  assert.equal(env.state.games[0].home.name, 'Scoped team'); assert.equal(env.state.games[0].location.latitude, 42);
+  assert.deepEqual(env.state.assignments.map(a => a.id), ['a']);
+  assert.deepEqual(env.state.audit.map(a => a.id), [99], 'historical activity remains visible independently');
+  for (const call of env.calls.filter(c => ['games', 'assignments'].includes(c.name))) assert(!operation(call, 'select')[1].includes('('), 'no per-game resource hydration');
+  for (const table of ['teams', 'locations', 'leagues', 'levels']) {
+    const reads = env.calls.filter(c => c.name === table); assert.equal(reads.length, 1);
+    assert.equal(operation(reads[0], 'in', 'id')[2].length, 1, 'deduplicated resources');
+    assert.deepEqual(operation(reads[0], 'range').slice(1), [0, 200]);
+  }
+});
+
+test('Dashboard ancillary failure does not discard successful games', async () => {
+  for (const table of ['audit_history', 'organization_officials', 'import_error_log']) {
+    const env = await dashboardRun({ state: { fullLeagueAccess: true }, tables: { games: games.slice(0, 1) }, fail: call => call.name === table });
+    assert.equal(env.state.games.length, 1, table); assert.equal(env.state.loading, false);
+    assert.equal(env.state.error, ''); assert.match(env.state.overviewError, /could not load/);
+  }
+});
+
+test('Dashboard games publish before deferred ancillary activity finishes', async () => {
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const env = environment(dashboardEffect, { state: { fullLeagueAccess: true }, tables: { games: games.slice(0, 1) }, waitFor: call => call.name === 'audit_history' ? gate : undefined });
+  const cancel = env.run(`(${dashboardEffect})()`);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(env.state.games.length, 1); assert.equal(env.state.loading, false);
+  assert.equal(env.state.overviewLoading, true);
+  cancel(); release(); await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(env.state.audit, [], 'unmounted activity cannot update state');
+  assert.equal(env.state.overviewLoading, true);
+});
+
+test('Dashboard failed core data uses unavailable states rather than false zero/empty claims', () => {
+  assert.match(dashboard.text, /error \? "Upcoming games unavailable\."/);
+  assert.match(dashboard.text, /error \? "Action details unavailable\."/);
+  assert.match(dashboard.text, /loading \? "…" : error \? "—" : todayGames.length/);
+  assert.match(dashboard.text, /overviewLoading \? "…" : overviewError \? "—" : totalOfficials/);
+});
+
+
+test('Dashboard recent activity merges exact newest8 across historical ID partitions', async () => {
+  const history = Array.from({ length: 450 }, (_, i) => ({ id: `history-${String(i).padStart(3, '0')}`, organization_id: 'org', league_id: 'league-a', archived_at: null, starts_at: '2000-01-01' }));
+  const audits = history.flatMap((g, i) => Array.from({ length: 2 }, (_, j) => ({ id: i * 2 + j, game_id: g.id, organization_id: 'org', occurred_at: `2026-10-${String(1 + i % 27).padStart(2, '0')}T12:00:00Z` })));
+  const env = await dashboardRun({ tables: { games: history, audit_history: audits } });
+  const expected = audits.slice().sort((a,b) => b.occurred_at.localeCompare(a.occurred_at) || b.id - a.id).slice(0, 8).map(a => a.id);
+  assert.deepEqual(env.state.audit.map(a => a.id), expected);
+  assert.deepEqual(env.state.games, [], 'history is not hydrated into games');
+  const reads = env.calls.filter(c => c.name === 'audit_history'); assert.equal(reads.length, 3);
+  for (const call of reads) { assert.equal(operation(call, 'limit')[1], 8); assert(operation(call, 'in', 'game_id')[2].length <= 200); }
+});
+
+test('Dashboard superseded core resource requests cannot publish old games', async () => {
+  let release; const gate = new Promise(resolve => { release = resolve; });
+  const env = environment(dashboardEffect, { state: { fullLeagueAccess: true }, tables: { games: games.slice(0, 1) }, waitFor: call => call.name === 'assignments' ? gate : undefined });
+  const cancel = env.run(`(${dashboardEffect})()`);
+  await new Promise(resolve => setImmediate(resolve));
+  assert(env.calls.some(c => c.name === 'assignments')); cancel(); release();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(env.state.games, []); assert.deepEqual(env.state.assignments, []);
+});
+
+function renderedDashboard(states) {
+  let index = 0;
+  const react = require('react');
+  const Dashboard = moduleFrom('components/DashboardGames.tsx', {
+    react: { ...react, useMemo: fn => fn(), useEffect() {}, useState: initial => [states[index++] ?? initial, () => {}] },
+    './leagueGameScope': scope,
+    '../lib/supabase/client': { createClient: () => ({}) },
+    '../lib/supabase/readAll': paging,
+  }).default;
+  return Dashboard({ organizationId: 'org', fullLeagueAccess: true });
+}
+function elements(node) {
+  if (node == null || typeof node === 'boolean') return [];
+  if (Array.isArray(node)) return node.flatMap(elements);
+  return typeof node === 'object' ? [node, ...elements(node.props?.children)] : [];
+}
+function textOf(node) {
+  if (node == null || typeof node === 'boolean') return '';
+  if (Array.isArray(node)) return node.map(textOf).join(' ');
+  return typeof node === 'object' ? textOf(node.props?.children) : String(node);
+}
+test('Dashboard actual component renders unavailable states on core failure, not zeros', () => {
+  const view = renderedDashboard([[], [], [], [], [], [], 'needs', 'timeout', '', false, false]);
+  const values = elements(view).filter(n => n.props?.className === 'dashboardMetricValue').map(textOf);
+  assert.deepEqual(values, ['—', '—', '—', '—']);
+  assert.match(textOf(view), /Upcoming games unavailable/); assert.doesNotMatch(textOf(view), /No upcoming games\./);
+  assert.match(textOf(view), /Action details unavailable/);
+  const donut = elements(view).find(n => n.props?.className === 'statusDonut');
+  assert.equal(donut.props.style.background, '#e7edf2');
+  assert.doesNotMatch(textOf(view), /—%/);
+});
+test('Dashboard actual component retains all-future card calculations and null relationships', () => {
+  const now = Date.now();
+  const game = (id, offset, status = 'scheduled', needed = 2) => ({ id, starts_at: new Date(now + offset).toISOString(), duration_minutes: 60, officials_needed: needed, status,
+    home: null, away: null, location: null, leagues: null, levels: null, location_id: null });
+  const rows = [game('past', -60000), game('full', 60000), game('partial', 120000), game('empty', 180000), game('hold', 240000, 'suspended'), game('canceled', 300000, 'canceled')];
+  const assignments = [{id:'1',game_id:'full',official_id:'one',status:'confirmed'}, {id:'2',game_id:'full',official_id:'two',status:'accepted'},
+    {id:'3',game_id:'partial',official_id:'three',status:'proposed',published_at:'2026-01-01'}, {id:'4',game_id:'empty',official_id:'four',status:'declined'}];
+  const view = renderedDashboard([rows, assignments, [], [], [], [], 'needs', '', '', false, false]);
+  const values = elements(view).filter(n => n.props?.className === 'dashboardMetricValue').map(textOf);
+  assert.equal(values[0], String(rows.filter(g => new Date(g.starts_at).toDateString() === new Date().toDateString()).length));
+  assert.equal(values[2], '2'); assert.equal(values[3], '1');
+  const donut = elements(view).find(n => n.props?.className === 'statusDonut'); assert.match(textOf(donut), /3 Total Games/);
+  assert.match(textOf(view), /TBD\s+vs\s+TBD/);
+});
+
+
+test('Dashboard unique resource chunks do not repeat authorization for an empty extra page', async () => {
+  const rows = Array.from({length: 200}, (_, index) => ({ id: `game-${index}`, organization_id: 'org', league_id: 'league-a', archived_at: null, starts_at: '2099-01-01', home_team_id: `team-${index}`, away_team_id: `team-${index}` }));
+  const env = await dashboardRun({ tables: { games: rows, teams: rows.map(g => ({id: g.home_team_id, name: 'Team'})) } });
+  const teamReads = env.calls.filter(c => c.name === 'teams');
+  assert.equal(env.state.games.length, 200); assert.equal(teamReads.length, 1);
+  assert.equal(operation(teamReads[0], 'in', 'id')[2].length, 200);
+  assert.deepEqual(operation(teamReads[0], 'range').slice(1), [0, 200]);
 });

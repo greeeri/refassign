@@ -22,6 +22,12 @@ type Game = {
   leagues: { name: string } | null;
   levels: { name: string } | null;
 };
+type BaseGame = Omit<Game, "home" | "away" | "location" | "leagues" | "levels"> & {
+  home_team_id: string | null; away_team_id: string | null;
+  league_id: string | null; level_id: string | null;
+};
+type NamedResource = { id: string; name: string };
+type GameLocation = NamedResource & { latitude: number | null; longitude: number | null };
 type Assignment = {
   id: string;
   game_id: string;
@@ -113,89 +119,154 @@ export default function DashboardGames({
     [audit, setAudit] = useState<Audit[]>([]),
     [focus, setFocus] = useState<Focus>("needs"),
     [error, setError] = useState(""),
+    [overviewError, setOverviewError] = useState(""),
+    [overviewLoading, setOverviewLoading] = useState(true),
     [loading, setLoading] = useState(true);
   const leagueScopeKey = fullLeagueAccess ? "full" : leagueGameAccessKey(leagueGameAccess);
   useEffect(() => {
     let active = true;
     async function load() {
-      setLoading(true); setError("");
+      setLoading(true); setError(""); setOverviewError(""); setOverviewLoading(true);
       setGames([]); setAssignments([]); setDeclineRows([]);
       setImportErrors([]); setOfficials([]); setAudit([]);
       // An omitted or empty scope is not permission to read an organization.
       if (!fullLeagueAccess && (!organizationId || !leagueGameAccess.some((grant) => grant.all_locations === true || grant.location_ids?.length))) {
-        setLoading(false);
+        setLoading(false); setOverviewLoading(false);
         return;
       }
-      const g = await readAllPages<Game>((from, to) => {
+      try {
+      // Only today's games and the future contribute to dashboard cards.
+      // Keep midnight in the browser's local zone, matching Games Today below.
+      const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+      const g = await readAllPages<BaseGame>((from, to) => {
         let query = supabase.from("games").select(
-          "id,game_number,location_id,starts_at,duration_minutes,officials_needed,status,home:teams!games_home_team_id_fkey(name),away:teams!games_away_team_id_fkey(name),location:locations(name,latitude,longitude),leagues(name),levels(name)",
-        ).is("archived_at", null).order("starts_at").order("id");
+          "id,game_number,location_id,home_team_id,away_team_id,league_id,level_id,starts_at,duration_minutes,officials_needed,status",
+        ).is("archived_at", null).gte("starts_at", midnight.toISOString()).order("starts_at").order("id");
         if (organizationId) query = query.eq("organization_id", organizationId);
         const scopedQuery = applyLeagueGameAccess(query, leagueGameAccess, fullLeagueAccess);
         if (!scopedQuery) return Promise.resolve({ data: [], error: null });
-        query = scopedQuery;
-        return query.range(from, to) as unknown as PromiseLike<{
-          data: Game[] | null; error: { message: string } | null;
+        return scopedQuery.range(from, to) as unknown as PromiseLike<{
+          data: BaseGame[] | null; error: { message: string } | null;
         }>;
-      });
+      }, 500);
       if (!active) return;
-      if (g.error) { setError(g.error.message); setLoading(false); return; }
-      const gameIds = (g.data || []).map((game) => game.id);
-      const [a, d, i, oo, h] = await Promise.all([
-        readAllForChunks<Assignment, string>(gameIds, (ids, from, to) =>
-          supabase.from("assignments").select(
-            "id,game_id,official_id,status,published_at,officials(first_name,last_name),sport_positions(name)",
-          ).in("game_id", ids).order("id").range(from, to) as unknown as PromiseLike<{
-            data: Assignment[] | null; error: { message: string } | null;
-          }>),
-        readAllForChunks<Decline, string>(gameIds, (ids, from, to) =>
-          supabase.from("assignment_declines").select("id,game_id")
-            .in("game_id", ids).order("id").range(from, to)),
-        // Import errors have no reliable league attribution. Only owners may
-        // request the organization-wide log.
-        fullLeagueAccess ? (() => {
-          let query = supabase.from("import_error_log")
-            .select("id,error_message,row_number,created_at").is("resolved_at", null)
-            .order("created_at", { ascending: false });
-          if (organizationId) query = query.eq("organization_id", organizationId);
-          return query.limit(100);
-        })() : Promise.resolve({ data: [], error: null }),
-        readAllPages<OrganizationOfficial>((from, to) => {
-          let query = supabase.from("organization_officials")
-            .select("organization_id,official_id,officials(id,active)")
-            .eq("active", true).order("organization_id").order("official_id");
-          if (organizationId) query = query.eq("organization_id", organizationId);
-          return query.range(from, to) as unknown as PromiseLike<{
-            data: OrganizationOfficial[] | null; error: { message: string } | null;
-          }>;
-        }),
-        fullLeagueAccess ? (() => {
-          // data-access: query-builder; the owner-only query is capped below after its organization filter.
-          let query = supabase.from("audit_history")
-            .select("id,action,summary,occurred_at,actor_name,organization_id")
-            .order("occurred_at", { ascending: false });
-          if (organizationId) query = query.eq("organization_id", organizationId);
-          return query.limit(8);
-        })() : readAllForChunks<Audit, string>(gameIds, (ids, from, to) =>
-          supabase.from("audit_history").select("id,action,summary,occurred_at,actor_name,organization_id")
-            .eq("organization_id", organizationId!).in("game_id", ids)
-            .order("occurred_at", { ascending: false }).order("id").range(from, to)),
-      ]);
-      if (!active) return;
-      const firstError = a.error || d.error || i.error || oo.error || h.error;
-      if (firstError) setError(firstError.message);
-      else {
-        setGames(g.data || []);
-        setAssignments(a.data || []);
-        setDeclineRows(d.data || []);
+      if (g.error) { setError(g.error.message); setOverviewError("Overview details unavailable because games could not load."); setLoading(false); setOverviewLoading(false); return; }
+      const baseGames = g.data || [];
+      const gameIds = baseGames.map((game) => game.id);
+      const unique = (values: Array<string | null>) => Array.from(new Set(values.filter((id): id is string => Boolean(id))));
+      const resources = <T,>(table: string, fields: string, ids: string[]) =>
+        readAllForChunks<T, string>(ids, (chunk, from, to) =>
+          supabase.from(table).select(fields).in("id", chunk).order("id").range(from, to) as unknown as PromiseLike<{
+            data: T[] | null; error: { message: string } | null;
+          }>, 200, 201);
+      // Overview/activity are independent. A slow or failed log/roster read
+      // must not erase a successfully loaded games dashboard.
+      const overview = (async () => {
+        const [i, oo, h] = await Promise.all([
+          fullLeagueAccess ? (() => {
+            let query = supabase.from("import_error_log")
+              .select("id,error_message,row_number,created_at").is("resolved_at", null)
+              .order("created_at", { ascending: false });
+            if (organizationId) query = query.eq("organization_id", organizationId);
+            return query.limit(100);
+          })() : Promise.resolve({ data: [], error: null }),
+          readAllPages<OrganizationOfficial>((from, to) => {
+            let query = supabase.from("organization_officials")
+              .select("organization_id,official_id,officials(id,active)")
+              .eq("active", true).order("organization_id").order("official_id");
+            if (organizationId) query = query.eq("organization_id", organizationId);
+            return query.range(from, to) as unknown as PromiseLike<{
+              data: OrganizationOfficial[] | null; error: { message: string } | null;
+            }>;
+          }),
+          (async () => {
+            if (fullLeagueAccess) {
+              // data-access: query-builder; owner-only activity is capped after its organization filter.
+              let query = supabase.from("audit_history")
+                .select("id,action,summary,occurred_at,actor_name,organization_id")
+                .order("occurred_at", { ascending: false }).order("id", { ascending: false });
+              if (organizationId) query = query.eq("organization_id", organizationId);
+              return query.limit(8);
+            }
+            // Recent activity includes historical games. Read only their IDs,
+            // never hydrate them, then take top8 per disjoint ID partition.
+            const history = await readAllPages<{ id: string }>((from, to) => {
+              const query = supabase.from("games").select("id").is("archived_at", null)
+                .eq("organization_id", organizationId!).order("id");
+              const scoped = applyLeagueGameAccess(query, leagueGameAccess, false);
+              return scoped ? scoped.range(from, to) : Promise.resolve({ data: [], error: null });
+            });
+            if (!active || history.error) return { data: [], error: history.error };
+            const recent: Audit[] = [];
+            const ids = (history.data || []).map((game) => game.id);
+            for (let index = 0; index < ids.length; index += 200) {
+              if (!active) return { data: [], error: null };
+              const page = await supabase.from("audit_history")
+                .select("id,action,summary,occurred_at,actor_name,organization_id")
+                .eq("organization_id", organizationId!).in("game_id", ids.slice(index, index + 200))
+                .order("occurred_at", { ascending: false }).order("id", { ascending: false }).limit(8);
+              if (page.error) return { data: [], error: page.error };
+              recent.push(...(page.data || []) as Audit[]);
+            }
+            return { data: recent, error: null };
+          })(),
+        ]);
+        if (!active) return;
+        const ancillaryError = i.error || oo.error || h.error;
+        if (ancillaryError) setOverviewError(`Some overview details could not load: ${ancillaryError.message}`);
         setImportErrors((i.data || []) as ImportError[]);
         setOfficials((oo.data || []).flatMap((row) => {
           const value = row.officials;
           return Array.isArray(value) ? value : value ? [value] : [];
         }));
-        setAudit(((h.data || []) as Audit[]).sort((a, b) => b.occurred_at.localeCompare(a.occurred_at)).slice(0, 8));
+        setAudit(((h.data || []) as Audit[]).sort((a, b) => b.occurred_at.localeCompare(a.occurred_at) || b.id - a.id).slice(0, 8));
+        setOverviewLoading(false);
+      })().catch((caught: unknown) => {
+        if (!active) return;
+        setOverviewError(`Some overview details could not load: ${caught instanceof Error ? caught.message : String(caught)}`);
+        setOverviewLoading(false);
+      });
+      // Hydrate each distinct resource once, not once per historical game.
+      const [a, d, teams, locations, leagues, levels] = await Promise.all([
+        readAllForChunks<Assignment, string>(gameIds, (ids, from, to) =>
+          supabase.from("assignments").select("id,game_id,official_id,status,published_at")
+            .in("game_id", ids).order("id").range(from, to) as unknown as PromiseLike<{
+              data: Assignment[] | null; error: { message: string } | null;
+            }>),
+        readAllForChunks<Decline, string>(gameIds, (ids, from, to) =>
+          supabase.from("assignment_declines").select("id,game_id")
+            .in("game_id", ids).order("id").range(from, to)),
+        resources<NamedResource>("teams", "id,name", unique(baseGames.flatMap((game) => [game.home_team_id, game.away_team_id]))),
+        resources<GameLocation>("locations", "id,name,latitude,longitude", unique(baseGames.map((game) => game.location_id))),
+        resources<NamedResource>("leagues", "id,name", unique(baseGames.map((game) => game.league_id))),
+        resources<NamedResource>("levels", "id,name", unique(baseGames.map((game) => game.level_id))),
+      ]);
+      if (!active) return;
+      const firstError = a.error || d.error || teams.error || locations.error || leagues.error || levels.error;
+      if (firstError) setError(firstError.message);
+      else {
+        const teamMap = new Map((teams.data || []).map((row) => [row.id, row]));
+        const locationMap = new Map((locations.data || []).map((row) => [row.id, row]));
+        const leagueMap = new Map((leagues.data || []).map((row) => [row.id, row]));
+        const levelMap = new Map((levels.data || []).map((row) => [row.id, row]));
+        setGames(baseGames.map((game) => ({ ...game,
+          home: teamMap.get(game.home_team_id || "") || null,
+          away: teamMap.get(game.away_team_id || "") || null,
+          location: locationMap.get(game.location_id || "") || null,
+          leagues: leagueMap.get(game.league_id || "") || null,
+          levels: levelMap.get(game.level_id || "") || null,
+        })));
+        setAssignments(a.data || []);
+        setDeclineRows(d.data || []);
       }
       setLoading(false);
+      await overview;
+      } catch (caught: unknown) {
+        if (!active) return;
+        setError(caught instanceof Error ? caught.message : String(caught));
+        setOverviewError("Overview details unavailable because dashboard loading failed.");
+        setLoading(false); setOverviewLoading(false);
+      }
     }
     void load();
     return () => { active = false; };
@@ -399,33 +470,34 @@ export default function DashboardGames({
           </strong>
         </div>
       </div>
-      {error && <div className="errorBox">{error}</div>}
+      {error && <div className="errorBox">Dashboard games could not load: {error}</div>}
+      {overviewError && <div className="errorBox">{overviewError}</div>}
       <div className="dashboardMetrics">
         <div className="dashboardMetric">
           <div className="dashboardMetricIcon">▣</div>
           <div>
-            <div className="dashboardMetricValue">{todayGames.length}</div>
+            <div className="dashboardMetricValue">{loading ? "…" : error ? "—" : todayGames.length}</div>
             <div className="dashboardMetricLabel">Games Today</div>
           </div>
         </div>
         <div className="dashboardMetric green">
           <div className="dashboardMetricIcon">♟</div>
           <div>
-            <div className="dashboardMetricValue">{todayAssigned}</div>
+            <div className="dashboardMetricValue">{loading ? "…" : error ? "—" : todayAssigned}</div>
             <div className="dashboardMetricLabel">Officials Assigned Today</div>
           </div>
         </div>
         <div className="dashboardMetric">
           <div className="dashboardMetricIcon">◷</div>
           <div>
-            <div className="dashboardMetricValue">{needs.length}</div>
+            <div className="dashboardMetricValue">{loading ? "…" : error ? "—" : needs.length}</div>
             <div className="dashboardMetricLabel">Games Needing Officials</div>
           </div>
         </div>
         <div className="dashboardMetric green">
           <div className="dashboardMetricIcon">✓</div>
           <div>
-            <div className="dashboardMetricValue">{unconfirmed.length}</div>
+            <div className="dashboardMetricValue">{loading ? "…" : error ? "—" : unconfirmed.length}</div>
             <div className="dashboardMetricLabel">Awaiting Confirmation</div>
           </div>
         </div>
@@ -490,7 +562,7 @@ export default function DashboardGames({
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={5}>No upcoming games.</td>
+                    <td colSpan={5}>{error ? "Upcoming games unavailable." : "No upcoming games."}</td>
                   </tr>
                 )}
               </tbody>
@@ -529,11 +601,11 @@ export default function DashboardGames({
             <div
               className="statusDonut"
               style={{
-                background: `conic-gradient(#34c759 0 ${pct(fullyAssigned)}%,#ffbf18 ${pct(fullyAssigned)}% ${pct(fullyAssigned) + pct(partial)}%,#ff3b30 ${pct(fullyAssigned) + pct(partial)}% 100%)`,
+                background: loading || error ? "#e7edf2" : `conic-gradient(#34c759 0 ${pct(fullyAssigned)}%,#ffbf18 ${pct(fullyAssigned)}% ${pct(fullyAssigned) + pct(partial)}%,#ff3b30 ${pct(fullyAssigned) + pct(partial)}% 100%)`,
               }}
             >
               <div>
-                <strong>{totalActiveGames}</strong>
+                <strong>{loading ? "…" : error ? "—" : totalActiveGames}</strong>
                 <span>Total Games</span>
               </div>
             </div>
@@ -541,20 +613,20 @@ export default function DashboardGames({
               <div>
                 <i className="dot green"></i>
                 <span>Assigned</span>
-                <b>{fullyAssigned}</b>
-                <em>{pct(fullyAssigned)}%</em>
+                <b>{loading ? "…" : error ? "—" : fullyAssigned}</b>
+                <em>{loading || error ? "—" : `${pct(fullyAssigned)}%`}</em>
               </div>
               <div>
                 <i className="dot yellow"></i>
                 <span>Partial</span>
-                <b>{partial}</b>
-                <em>{pct(partial)}%</em>
+                <b>{loading ? "…" : error ? "—" : partial}</b>
+                <em>{loading || error ? "—" : `${pct(partial)}%`}</em>
               </div>
               <div>
                 <i className="dot red"></i>
                 <span>Unassigned</span>
-                <b>{unassigned}</b>
-                <em>{pct(unassigned)}%</em>
+                <b>{loading ? "…" : error ? "—" : unassigned}</b>
+                <em>{loading || error ? "—" : `${pct(unassigned)}%`}</em>
               </div>
             </div>
           </div>
@@ -565,15 +637,15 @@ export default function DashboardGames({
           </div>
           <div className="officialsOverview">
             <div>
-              <strong>{totalOfficials}</strong>
+              <strong>{overviewLoading ? "…" : overviewError ? "—" : totalOfficials}</strong>
               <span>Total Officials</span>
             </div>
             <div>
-              <strong>{activeOfficials}</strong>
+              <strong>{overviewLoading ? "…" : overviewError ? "—" : activeOfficials}</strong>
               <span>Active</span>
             </div>
             <div>
-              <strong>{inactiveOfficials}</strong>
+              <strong>{overviewLoading ? "…" : overviewError ? "—" : inactiveOfficials}</strong>
               <span>Inactive</span>
             </div>
           </div>
@@ -614,7 +686,7 @@ export default function DashboardGames({
                 </div>
               ))
             ) : (
-              <div className="activityEmpty">No recent activity yet.</div>
+              <div className="activityEmpty">{overviewLoading ? "Loading recent activity…" : overviewError ? "Recent activity unavailable." : "No recent activity yet."}</div>
             )}
           </div>
         </section>
@@ -638,7 +710,7 @@ export default function DashboardGames({
                   : undefined
               }
             >
-              <strong>{totals[key]}</strong>
+              <strong>{(key === "imports" ? overviewLoading : loading) ? "…" : (key === "imports" ? overviewError : error) ? "—" : totals[key]}</strong>
               <span>{label}</span>
             </button>
           ))}
@@ -664,7 +736,7 @@ export default function DashboardGames({
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={3}>No unresolved import errors.</td>
+                    <td colSpan={3}>{overviewLoading ? "Loading import errors…" : overviewError ? "Import errors unavailable." : "No unresolved import errors."}</td>
                   </tr>
                 )}
               </tbody>
@@ -710,7 +782,7 @@ export default function DashboardGames({
           </div>
         ) : (
           <p style={{ padding: "0 18px 18px", color: "#617a90" }}>
-            Nothing currently needs action in this category.
+            {loading ? "Loading dashboard…" : error ? "Action details unavailable." : "Nothing currently needs action in this category."}
           </p>
         )}
       </section>
