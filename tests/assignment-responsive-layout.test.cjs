@@ -32,13 +32,16 @@ test('filter and action options stay bounded and keyboard-scrollable in document
   assert.equal(declaration('.assignmentCompactOverflow > div', 'transform'), 'none');
 });
 
-test('game cards respond to content width while desktop position rows remain a table', () => {
+test('only mobile game cards stack while desktop retains its approved columns', () => {
   const containers = [];
   ast.walkAtRules('container', rule => containers.push(rule.params));
   assert(containers.includes('assignment-results (max-width: 1100px)'));
   assert(containers.includes('assignment-results (max-width: 560px)'));
   assert(!containers.some(params => params.startsWith('assignment-positions')));
-  assert.equal(declaration('.assignmentGameTableHeader', 'display'), 'flex');
+  const header = rules.find(rule => rule.selectors.includes('.assignmentGameTableHeader') && rule.nodes.some(n => n.prop === 'display' && n.value === 'flex'));
+  assert.equal(header.parent.name, 'container');
+  assert.equal(header.parent.parent.name, 'media');
+  assert.equal(header.parent.parent.params, '(max-width: 760px)');
   assert.equal(declaration('.assignmentGameRow > .assignmentGameCollapse', 'right'), '12px');
   assert.equal(declaration('.assignmentMain .assignmentPositionsTable td::before', 'content'), 'attr(data-label)');
   for (const label of ['Self Assign', 'Position', 'Assigned Official', 'Status', 'Assign']) assert(source.includes(`<td data-label="${label}">`));
@@ -184,5 +187,34 @@ test('Games-header actions wrap within narrow widths without changing typography
   for (const rule of rules.filter(rule => rule.selector.includes('assignmentResultsActions'))) {
     assert.equal(rule.parent.type, 'root', 'Games actions are available at every viewport');
     assert(!rule.nodes.some(node => /color|background|font/.test(node.prop || '')), 'reuse existing button appearance');
+  }
+});
+
+
+test('desktop summary geometry and Officials sidebar retain exact pre-reflow source rules', () => {
+  // Approved baseline ee380f8ebdca8791f747d8a8411158563eb32b9c.
+  const legacy = postcss.parse(fs.readFileSync('app/assignor-mobile.css', 'utf8'));
+  let columns;
+  legacy.walkRules(rule => {
+    if (rule.parent.type === 'root' && rule.selectors.includes('.assignmentGameTableHeader') && rule.selectors.includes('.assignmentGameRow')) {
+      columns = rule.nodes.find(n => n.prop === 'grid-template-columns')?.value;
+      assert(rule.nodes.some(n => n.prop === 'min-width' && n.value === '1080px'));
+    }
+  });
+  assert.equal(columns, '44px minmax(220px, 2.1fr) minmax(150px, 1.25fr) minmax(135px, 1fr) 68px minmax(125px, .9fr) minmax(150px, 1fr)');
+  const upgrade = postcss.parse(fs.readFileSync('app/assignment-center-upgrades.css', 'utf8'));
+  let sidebar;
+  upgrade.walkRules('.assignmentCenterSplit.hasSelectedGame .assignmentLayout', rule => {
+    if (rule.parent.params === '(min-width:1051px)') sidebar = rule;
+  });
+  assert(sidebar.nodes.some(n => n.prop === 'grid-template-columns' && n.value === 'minmax(0,1fr) 320px'));
+  for (const rule of rules.filter(r => r.selectors.some(s => ['.assignmentGameRow', '.assignmentGameTableHeader', '.assignmentGameTable', '.assignmentStatusCell', '.assignmentCenterSplit.hasSelectedGame .assignmentLayout', '.assignmentCenterSplit.hasSelectedGame .availableOfficialsPanel'].includes(s)))) {
+    let gate = rule.parent;
+    while (gate && !(gate.type === 'atrule' && gate.name === 'media')) gate = gate.parent;
+    assert.equal(gate?.params, '(max-width: 760px)', `${rule.selector} may not override desktop baseline`);
+  }
+  for (const [viewport, stacked, sidebarRight] of [[390,true,false],[760,true,false],[761,false,false],[1024,false,false],[1051,false,true],[1280,false,true],[1920,false,true]]) {
+    assert.equal(viewport <= 760, stacked);
+    assert.equal(viewport >= 1051, sidebarRight);
   }
 });

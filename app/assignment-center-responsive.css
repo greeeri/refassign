@@ -142,6 +142,10 @@
 /* Only the results are a query container. Keep viewport-fixed dialogs outside
    it so opening a menu or editor never changes their positioning context. */
 .assignmentGameResults { container: assignment-results / inline-size; min-width: 0; }
+/* Desktop retains the approved pre-reflow layout (ee380f8): the original
+   seven-column rows and shared horizontal scroll in assignor-mobile.css.
+   Keep the existing stacked rules exclusively on mobile, unchanged. */
+@media (max-width: 760px) {
 .assignmentGameTable { overflow: visible !important; }
 .assignmentGameTableHeader,
 .assignmentGameRows,
@@ -153,6 +157,7 @@
 .assignmentStatusBadge { white-space: normal; }
 .assignmentCrewPreviewBody { min-width: 0; width: min(280px, 100%); max-width: 100%; }
 .assignmentCrewPreview[open] .assignmentCrewPreviewBody { position: static; width: 100%; }
+}
 .assignmentPositionControls { flex-wrap: wrap; max-width: 100%; }
 .assignmentCenterSplit .availableOfficialsPanel { min-width: 0; }
 .assignmentMain { container: assignment-positions / inline-size; }
@@ -162,6 +167,7 @@
 .assignmentMain .assignmentPositionSummary small,
 .assignmentMain .assignmentPositionSummary button { white-space: normal; overflow-wrap: anywhere; }
 
+@media (max-width: 760px) {
 @container assignment-results (max-width: 1100px) {
   .assignmentGameTableHeader {
     display: flex !important;
@@ -200,6 +206,8 @@
   .assignmentGamePower { grid-row: 4; }
   .assignmentGameStatusSelect { grid-row: 5; }
   .assignmentStatusCell { grid-row: 6; grid-template-columns: minmax(0, 1fr); }
+}
+
 }
 
 /* Only mobile-width viewports use labelled position rows. A desktop editor can
