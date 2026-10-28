@@ -142,6 +142,26 @@ test('both responsive layouts share stable game-ID visibility and keep full edit
   assert.match(css, /\.assignmentGameCollapse:focus-visible/);
 });
 
+test('desktop chevron uses a sticky overlay with the seven original cells explicitly placed', () => {
+  const postcss = require('postcss');
+  const desktop = postcss.parse(css).nodes.find(node => node.type === 'atrule' && node.params === '(min-width: 761px)');
+  assert(desktop, 'desktop-only override leaves mobile absolute positioning intact');
+  const values = selector => Object.fromEntries(desktop.nodes.find(node => node.selector === selector).nodes.map(node => [node.prop, node.value]));
+  const toggle = values('.assignmentGameRow > .assignmentGameCollapse');
+  assert.deepEqual(toggle, {
+    position: 'sticky', 'z-index': '4', top: 'auto', right: '10px', 'grid-column': '1 / -1', 'grid-row': '1',
+    'align-self': 'start', 'justify-self': 'end', margin: '-2px -58px 0 0',
+  });
+  const selectors = ['label', '.assignmentGameOpen', '.assignmentGameLocation', '.assignmentGameDate', '.assignmentGamePower', '.assignmentGameStatusSelect', '.assignmentStatusCell'];
+  selectors.forEach((selector, index) => assert.deepEqual(values(`.assignmentGameRow > ${selector}`), { 'grid-column': String(index + 1), 'grid-row': '1' }));
+  const row = setup().renderGameRow(game('game-a'), false, false);
+  const children = row.props.children.filter(Boolean);
+  assert.equal(children.length, 8, 'one overlay plus the original seven cells');
+  assert.deepEqual(Array.from(children.slice(1), node => node.props.className || node.type), selectors.map(s => s.replace(/^\./, '')));
+  assert(!desktop.toString().includes('grid-template-columns'), 'existing header/row track geometry is untouched');
+  desktop.walkDecls('min-width', () => assert.fail('existing horizontal scrolling is untouched'));
+});
+
 
 test('expanded crew includes extra mentor slots without duplicating regular positions', () => {
   const s = setup();

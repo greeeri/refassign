@@ -426,6 +426,28 @@ body.officialDragActive{cursor:grabbing}
 .assignmentGameCollapse:focus-visible { outline: 3px solid #2563eb; outline-offset: 2px; }
 .assignmentGameChevrons { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .assignmentGameCollapse[aria-expanded="true"] .assignmentGameChevrons { transform: rotate(180deg); }
+/* Keep the existing toggle inside the visible horizontal scrollport without
+   changing the seven summary columns or the mobile card layout. */
+@media (min-width: 761px) {
+  .assignmentGameRow > label { grid-column: 1; grid-row: 1; }
+  .assignmentGameRow > .assignmentGameOpen { grid-column: 2; grid-row: 1; }
+  .assignmentGameRow > .assignmentGameLocation { grid-column: 3; grid-row: 1; }
+  .assignmentGameRow > .assignmentGameDate { grid-column: 4; grid-row: 1; }
+  .assignmentGameRow > .assignmentGamePower { grid-column: 5; grid-row: 1; }
+  .assignmentGameRow > .assignmentGameStatusSelect { grid-column: 6; grid-row: 1; }
+  .assignmentGameRow > .assignmentStatusCell { grid-column: 7; grid-row: 1; }
+  .assignmentGameRow > .assignmentGameCollapse {
+    position: sticky;
+    z-index: 4;
+    top: auto;
+    right: 10px;
+    grid-column: 1 / -1;
+    grid-row: 1;
+    align-self: start;
+    justify-self: end;
+    margin: -2px -58px 0 0;
+  }
+}
 .assignmentExpandedDetails { padding: 16px; border-bottom: 1px solid #cbd5e1; background: #f8fafc; color: #173b62; }
 .assignmentExpandedHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .assignmentExpandedHeader h3 { margin: 0; font-size: 17px; }
